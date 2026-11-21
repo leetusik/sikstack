@@ -32,9 +32,8 @@ from wf_store import (  # noqa: E402
     archived_phase_ids, cmd_next, HOST_ROOT, id_sort_key, PHASE_ID_PATTERN,
     PHASE_ID_RE, read_json, require_phase, require_slice, resume_card, ROOT, SLICE_SUFFIX_PATTERN,
 )
-from wf_design import (  # noqa: E402
-    DESIGN_ROOT_REL,
-)
+# The retired canvas flow's record root (2.0.0 retired it): only the meter reads it, to attribute old design spans.
+OLD_DESIGN_ROOT_REL = "docs/reference/design"
 
 ADAPTER_CMD = "sikstack-adapter"  # the plugin's bin/ command for this file
 CONFIG_NAME = "config.toml"  # .sikstack/config.toml: the [claude.<row>] tables are this adapter's
@@ -53,11 +52,10 @@ RETIRED_ROUTES = ("cheap",)
 # `explore` is the read-only lookup agent (.claude/agents/Explore.md), not a slice route.
 # `design` is the design subagent's own row (.claude/agents/design-drafter.md, workspace v60): never
 # a slice's route -- only `route --drafter` dispatches on it.
-# `critic` and `judge` (workspace v60) are the design critic's two modes: `critic` owns
-# .claude/agents/design-critic.md and judges each drafted round; `judge` runs that same file in judge
-# mode, with its model passed per call, and rules only on the items the critic escalated. Neither is a
-# slice route; `route --critic` / `--judge` dispatch them. Either may run on the drafter's model:
-# the operator dropped the different-model rule for the judge in workspace v66 and for the critic in v75.
+# `critic` owns .claude/agents/design-critic.md and judges one design build when the operator asks for a critic.
+# Not a slice route; `route --critic` dispatches it, and it may run on the drafter's model (v75). The `judge` row
+# (the critic's judge mode, v60) retired in 2.0.0: a [claude.judge] table left in config.toml is a warning, never
+# an error (RETIRED_WARN_ROUTES); the meter still labels old judge spans.
 # `reader` (P51) owns .claude/agents/pr-reader.md, the fresh-eyes PR reader: it reads a PR as a
 # teammate would (the product diff, the body and details files, the team-rule files, the size count)
 # and writes one findings file. Not a slice route; `route --reader` dispatches it.
@@ -76,18 +74,19 @@ RETIRED_ROUTES = ("cheap",)
 # v29-v52 (a top-level `mode` key) are retired; read_config_routes refuses one.
 # The defaults are the operator's own routes (workspace v80, v83): every opus row at high, mid on opus at
 # medium, haiku at xhigh for explore only.
-EXECUTOR_ROUTES = ("high", "research", "design", "critic", "judge", "reader", "code", "mid", "explore")  # print order
+EXECUTOR_ROUTES = ("high", "research", "design", "critic", "reader", "code", "mid", "explore")  # print order
+RETIRED_WARN_ROUTES = ("judge",)  # 2.0.0: skipped with a warning= line, so an older config.toml still reads
+CONFIG_WARNINGS: list = []  # read_config_routes' warning= lines, printed by route
 # v88 (P47-p5.S4): a per-page design round's spans carry `pass: frame | page <slug> | join` (drafter) or
 # `scope: page | cross` (critic) in their prompt; the meter labels them apart so the means estimate a round.
 # They run the design / critic rows: no route row of their own.
 METER_PASS_ROUTES = ("design-frame", "design-page", "design-join", "critic-page", "critic-cross")
-METER_ROUTES = EXECUTOR_ROUTES + METER_PASS_ROUTES + RETIRED_ROUTES  # the meter's order: history still holds cheap spans
+METER_ROUTES = EXECUTOR_ROUTES + METER_PASS_ROUTES + RETIRED_WARN_ROUTES + RETIRED_ROUTES  # the meter's order: history still holds judge and cheap spans
 ROUTE_DEFAULTS = {
     "high": {"model": "opus", "effort": "high"},
     "research": {"model": "opus", "effort": "high"},
     "design": {"model": "fable", "effort": "high"},
     "critic": {"model": "opus", "effort": "high"},
-    "judge": {"model": "opus", "effort": "high"},
     "reader": {"model": "opus", "effort": "high"},
     "code": {"model": "opus", "effort": "high"},
     "mid": {"model": "opus", "effort": "medium"},
@@ -95,11 +94,11 @@ ROUTE_DEFAULTS = {
 }
 # The plugin agent each row dispatches to (`plugin_agent` adds the namespace). The design row owns design-drafter and follows no other row, so one [claude.design]
 # override governs it alone (before v60 it followed the high row). The critic row owns
-# design-critic; the judge row runs that same file in judge mode. The reader row owns pr-reader, the
+# design-critic. The reader row owns pr-reader, the
 # code row code-reader.
 SLICE_AGENT = "slice-executor"
 ROUTE_AGENT = {"high": SLICE_AGENT, "research": SLICE_AGENT, "design": "design-drafter", "critic": "design-critic",
-               "judge": "design-critic", "reader": "pr-reader", "code": "code-reader", "mid": SLICE_AGENT,
+               "reader": "pr-reader", "code": "code-reader", "mid": SLICE_AGENT,
                "explore": "Explore"}
 # The executor pair v66 retired (last shipped in v65): old transcripts still name them, so the meter
 # keeps reading them (`_meter_route`, `_meter_collect`'s canon map).
@@ -114,13 +113,7 @@ MODEL_ATTRIBUTION = {"opus": "Claude Opus 5.5", "sonnet": "Claude Sonnet 5.5",
 # `fallback=` line by route.
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 EXPLORE_PROXY_MODEL = "sonnet"
-# The same proxy serves no Fable either. The judge row (Opus @ high by default, so this never fires
-# at the default) does NOT fall back: a judge is the stronger second opinion, so a substitute would be
-# a weaker one. Only when an operator overrides the judge row to Fable and runs behind a loopback proxy
-# does `route --judge` print a `skip=yes` line instead: the orchestrator dispatches no judge
-# and the escalated items reach the operator marked low confidence.
-JUDGE_PROXY_SKIP_FAMILY = "fable"
-# The drafter must run, so a Fable design dispatch behind that proxy falls back to DESIGN_PROXY_MODEL
+# The same proxy serves no Fable either. The drafter must run, so a Fable design dispatch behind it falls back to DESIGN_PROXY_MODEL
 # (a `fallback=` line), whether Fable came from [claude.design] or from the phase's `Drafter:` line.
 DESIGN_PROXY_MODEL = "opus"
 # The phase's drafter (v96): a `Drafter: <alias>` line under intent.md's `## Design Style`, recorded at
@@ -147,6 +140,7 @@ def read_config_routes() -> dict:
     its migration."""
     path = ROOT / CONFIG_NAME
     values: dict = {}
+    CONFIG_WARNINGS.clear()
     if not path.exists():
         return values
     section = None
@@ -176,6 +170,11 @@ def read_config_routes() -> dict:
         m = re.match(r"^\[\s*claude\s*\.\s*([^\]\s]*)\s*\]\s*(?:#.*)?$", line)
         if m:
             name = m.group(1)
+            if name in RETIRED_WARN_ROUTES:
+                CONFIG_WARNINGS.append(f"warning=config.toml line {n}: the [claude.{name}] row retired in sikstack 2.0.0 "
+                                       "(the design critic's judge mode); its table is skipped -- drop it")
+                foreign, section = True, None
+                continue
             if name in RETIRED_ROUTES:
                 raise SystemExit(
                     f"config.toml line {n}: the {name} row was retired in workspace v83 — docs and qa slices "
@@ -293,7 +292,7 @@ def _route_fallback(row: str, routes: dict, proxy) -> tuple:
 
 
 def model_family(model: str):
-    """The model family a row's model names, for the judge's proxy skip and the meter's routes: an
+    """The model family a row's model names, for the drafter's proxy fallback and the meter's routes: an
     alias is its own family; a full id names one (`claude-opus-5-5`, a provider id such as `us.anthropic.claude-opus-…`, a
     `[1m]` suffix -> opus). `inherit` and an id naming no family are None: unknown here."""
     m = (model or "").strip().lower()
@@ -327,14 +326,6 @@ def phase_drafter(pdir: Path):
     if len(set(found)) > 1:
         raise SystemExit(f"route: {pdir.name}'s intent.md names two drafters ({', '.join(found)}){hint}")
     return found[0] if found else None
-
-
-def _judge_proxy_skip(routes: dict, proxy):
-    """The `skip=` line for a judge dispatch behind a loopback proxy that serves no Fable, else None."""
-    if proxy is None or model_family(routes["judge"]["model"]) != JUDGE_PROXY_SKIP_FAMILY:
-        return None
-    return (f"skip=yes reason=loopback ANTHROPIC_BASE_URL {proxy} serves no Fable: dispatch no judge; "
-            "the escalated items reach the operator marked low confidence")
 
 
 def _route_env_warnings() -> list:
@@ -386,20 +377,17 @@ def _dispatch_lines(row: str, routes: dict, proxy) -> tuple:
 def cmd_executor_route(args: argparse.Namespace) -> None:
     """Print the deterministic routing decision the orchestrator dispatches from, one key=value per
     line: bare, the resolved route table and the agent files' sync state; with a slice id, that
-    slice's route (--retry: its second attempt); --drafter / --critic / --judge / --reader / --code /
-    --explore, the design subagent's (the design row), the design critic's two modes (the critic and
-    judge rows, both running design-critic), the fresh-eyes PR reader's (the reader row, running
+    slice's route (--retry: its second attempt); --drafter / --critic / --reader / --code /
+    --explore, the design subagent's (the design row), the design critic's (the critic row), the fresh-eyes PR
+    reader's (the reader row, running
     pr-reader), the blind code reader's (the code row, running code-reader) and
     the lookup agent's (the explore row). Every form names the
     agent file it dispatches to as `subagent_type=`; the three slice rows all run slice-executor.
 
-    The critic and the judge may share the drafter's model (v75). Behind a loopback proxy (no Fable)
-    --judge on a Fable override prints
-    `skip=yes reason=…` and exits 0: unlike a `fallback=` line, which names a substitute model to
-    dispatch, `skip=` means dispatch nothing.
+    The critic may share the drafter's model (v75).
     Reads config.toml (a malformed one errors here) and writes nothing."""
     forms = [f for f, on in (("<slice_id>", args.slice is not None), ("--drafter", args.drafter), ("--critic", args.critic),
-                             ("--judge", args.judge), ("--reader", args.reader), ("--code", args.code),
+                             ("--reader", args.reader), ("--code", args.code),
                              ("--explore", args.explore)) if on]
     if len(forms) > 1:
         raise SystemExit(f"route: {' and '.join(forms)} are mutually exclusive; give at most one")
@@ -429,11 +417,10 @@ def cmd_executor_route(args: argparse.Namespace) -> None:
         print(f"subagent_type={plugin_agent(ROUTE_AGENT[row])}")
         print("\n".join(lines))
         extra = [fallback] if fallback else []
-    elif args.drafter or args.critic or args.judge or args.reader or args.code or args.explore:
-        row = ("design" if args.drafter else "critic" if args.critic else "judge" if args.judge
+    elif args.drafter or args.critic or args.reader or args.code or args.explore:
+        row = ("design" if args.drafter else "critic" if args.critic
                else "reader" if args.reader else "code" if args.code else "explore")
         agent = ROUTE_AGENT[row]
-        skip = _judge_proxy_skip(routes, proxy) if row == "judge" else None
         lines, fallback = _dispatch_lines(row, routes, proxy)
         print(f"agent={agent}")
         print(f"route={row}")
@@ -442,8 +429,6 @@ def cmd_executor_route(args: argparse.Namespace) -> None:
         print(f"subagent_type={plugin_agent(agent)}")
         print("\n".join(lines))
         extra = [fallback] if fallback else []
-        if skip:
-            extra.append(skip)
     else:
         table = [("route", "agent", "model", "effort", "source")] + [
             (row, plugin_agent(ROUTE_AGENT[row]), routes[row]["model"], routes[row]["effort"] or "(no effort line)", route_source(routes[row]))
@@ -453,14 +438,11 @@ def cmd_executor_route(args: argparse.Namespace) -> None:
         for r in table:
             print("  ".join(c.ljust(w) for c, w in zip(r, widths)) + "  " + r[4])
         extra = route_overrides(routes) + [f for f in (_route_fallback(row, routes, proxy)[2] for row in EXECUTOR_ROUTES) if f]
-        judge_skip = _judge_proxy_skip(routes, proxy)
-        if judge_skip:
-            extra.append(judge_skip.replace("skip=yes ", "skip=judge ", 1))
         if proxy is None:
             extra.insert(0, "proxy=none")
         else:
             extra.insert(0, f"proxy={proxy} (loopback)")
-    for line in extra + _route_env_warnings():
+    for line in extra + CONFIG_WARNINGS + _route_env_warnings():
         print(line)
 
 
@@ -821,7 +803,7 @@ class _MeterWindows:
 
 def _meter_round_slice(job: str, rnd: str) -> "str | None":
     """The slice a design round belongs to: its round.json `slice`, else its job.json `slice`."""
-    jobs = ROOT / DESIGN_ROOT_REL / "jobs" / job
+    jobs = ROOT / OLD_DESIGN_ROOT_REL / "jobs" / job
     for path in (jobs / "rounds" / rnd / "round.json", jobs / "job.json"):
         try:
             sid = read_json(path).get("slice")
@@ -1395,13 +1377,12 @@ def build_parser() -> argparse.ArgumentParser:
     """The adapter's three commands."""
     parser = argparse.ArgumentParser(prog="sikstack-adapter", description="The Claude Code adapter of the sikstack engine.")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("route", help="Print the executor routing decision, one key=value per line, writing nothing: bare, the resolved route table (high, research, design, critic, judge, reader, code, mid, explore) and an override= line per row .sikstack/config.toml sets (its value against the default); with a slice id, the route, subagent_type (sikstack:slice-executor for every slice row), model, effort and attribution its dispatch uses (kind first, then risk, then attempt); --drafter / --critic / --judge / --reader / --code / --explore, a non-slice agent's dispatch; plus fallback=, skip= and warning= lines for the environment. The critic and the judge may share the design row's model (v75)")
+    p = sub.add_parser("route", help="Print the executor routing decision, one key=value per line, writing nothing: bare, the resolved route table (high, research, design, critic, reader, code, mid, explore) and an override= line per row .sikstack/config.toml sets (its value against the default); with a slice id, the route, subagent_type (sikstack:slice-executor for every slice row), model, effort and attribution its dispatch uses (kind first, then risk, then attempt); --drafter / --critic / --judge / --reader / --code / --explore, a non-slice agent's dispatch; plus fallback=, skip= and warning= lines for the environment. The critic and the judge may share the design row's model (v75)")
     p.add_argument("slice", nargs="?", help="the slice to route; omit for the table")
     p.add_argument("--retry", action="store_true", help="the slice's second attempt (an escalation, a failed or empty return, a fix of mid-row work): always the high row")
     p.add_argument("--drafter", action="store_true", help="the design-drafter's dispatch (its own design row, [claude.design]; not a slice route)")
     p.add_argument("--phase", help="with --drafter: the phase whose intent.md `## Design Style` may name the drafter's model (`Drafter: fable`); its effort stays the design row's, and an absent line is the design row. Behind a loopback proxy (no Fable) a Fable drafter falls back to opus")
     p.add_argument("--critic", action="store_true", help="the design-critic's dispatch in critic mode (the critic row, [claude.critic]); it may share the drafter's model")
-    p.add_argument("--judge", action="store_true", help="the design-critic's dispatch in judge mode (the judge row, [claude.judge], alias only); never refused for sharing the drafter's model; skip=yes only when the judge row is overridden to Fable behind a loopback proxy that serves no Fable")
     p.add_argument("--reader", action="store_true", help="the pr-reader's dispatch (the reader row, [claude.reader]): the fresh-eyes PR reader, which reads the product diff, the body and details files, the team-rule files and the pr check output only, and writes topics/pr-read.md")
     p.add_argument("--code", action="store_true", help="the code-reader's dispatch (the code row, [claude.code]): the blind code reader, which reads one code change cold (the diff over the product pathspec and the files at head, never the workspace's records), reproduces each suspicion and writes topics/code-read.md")
     p.add_argument("--explore", action="store_true", help="the read-only Explore lookup agent's dispatch (the explore row)")

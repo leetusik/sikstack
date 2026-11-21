@@ -6,7 +6,7 @@ The engine is flat modules beside this file, each importing only the ones listed
 - wf_store.py: where the state is (the finder), paths, ids, events, phases, slices, the notebook, next, review,
   the acceptance gate, check and archive;
 - wf_git.py: pull requests, the parallel worktrees, the repo registry and phase scope;
-- wf_design.py, wf_agenda.py (agenda and deferred jobs), wf_cloud.py: the named parts, each its own file.
+- wf_design.py (design-sign), wf_agenda.py (agenda and deferred jobs), wf_cloud.py: the named parts, each its own file.
 wf_store imports none of the others: it calls them through its SEAMS, bound at the end of this file. The Claude
 Code side (executor routes, the meter, the compaction hook) is not here: it is the adapter folder,
 adapters/claude_code/ (`sikstack-adapter`), which imports this file and calls run(); nothing here imports it."""
@@ -27,7 +27,7 @@ if sys.path[:1] != [_HERE]:
 
 # The friction offer: a refused or failed command (exit 1 or 2: a refusal, a usage error, a crash) ends with this one
 # line on stderr, so the session can relay it (the contract and sik-mode say: once, and send only on a yes). Never on
-# a success, an advice or status exit (0, or sign-in's 3), a dry run, a check's verdict (pr check, design-check),
+# a success, an advice or status exit (0, or sign-in's 3), a dry run, a check's verdict (pr check),
 # `feedback` itself, the finder's no-workspace and old-install lines (it exits while importing, before any command),
 # or a run under OFFER_ENV: each run sets it, so an engine run inside another (migrate's next and check, init's check)
 # stays silent, and the plugin's hooks set it too. The line carries nothing: the report it invites is drafted by
@@ -35,7 +35,7 @@ if sys.path[:1] != [_HERE]:
 OFFER_ENV = "SIKSTACK_NO_OFFER"
 OFFER_LINE = "If this looks like sikstack's fault, `/sikstack:feedback` drafts a short report and sends it only on a yes."
 OFFER_EXITS = (1, 2)
-NO_OFFER_COMMANDS = ("feedback", "pr check", "design-check")
+NO_OFFER_COMMANDS = ("feedback", "pr check")
 
 
 def _offers(tokens: list) -> bool:
@@ -388,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--page", type=int, metavar="N", help=f"with a section or topic block name: print page N of it ({PAGE_BYTES // 1024} KB pages that break only between entries, each opening with a `<!-- page i of n ... -->` header); a plain read over {PAGE_BYTES // 1024} KB prints page 1; refused with any write flag, --list or --entry")
     p.set_defaults(func=phase_section)
 
-    add_design_parsers(sub)  # design-init ... design-migrate
+    add_design_parsers(sub)  # design-sign
 
     add_agenda_parsers(sub)  # defer-job, promote-deferred, drop-deferred, agenda, agenda-*
 

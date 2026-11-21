@@ -1,6 +1,6 @@
 # Dispatch: resolve, pin, dispatch, limits, Explore
 
-The route is the Claude Code adapter's, never yours: kind first (decomposition, `research` and review always go high, whatever their `risk`; a co-work mockup span too), then `risk` (`low` → the mid row, the default, real code included; anything else → high), then attempt (a second attempt → high).
+The route is the Claude Code adapter's, never yours: kind first (decomposition, `research` and review always go high, whatever their `risk`), then `risk` (`low` → the mid row, the default, real code included; anything else → high), then attempt (a second attempt → high).
 
 1. **Resolve.** After `slice start`, run `sikstack-adapter route <slice_id>` (`--retry` on a second attempt) and `sikstack-adapter route --explore`. **Bump up, never down:** a plan that hits a named trigger (open design, a core invariant, an unlocated root cause, a wide blast radius) on a `low` slice sets `risk` to `high` in its `slice.json`, says why in `plan.md`, and resolves again.
 2. **Pin.** Append `## Dispatch` to `plan.md`: the slice form's lines verbatim (`route=` … `attribution=`) plus the `--explore` form's `model=` / `effort=` as `explore_model=` / `explore_effort=`. A retry's lines go under `## Escalation: mid → high`.
