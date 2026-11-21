@@ -35,6 +35,18 @@ Every page lists only its own states in the design-only state widget (platform: 
 file and line), never invented. A state opens as `?state=<key>`, so it can be linked and checked. A state the API
 answers is recorded; one no API answers is made, and says so.
 
+## Changing a production component
+
+A design that changes what a production component draws writes the component's **next version** in the design
+folder, under the same file and export names (platform: `web/design/next/<path under src/sikstack>/`, e.g.
+`next/workspace/agenda/parts.tsx`), its imports pointing at production's modules. The design build draws it in
+place of the original: a page that imports the component imports the next version; one drawn inside another
+production component is swapped by the folder's build alias (platform: one `turbopack.resolveAlias` entry in
+`web/design/next.config.ts` per swapped file, keyed by the import as production writes it, e.g. `"./parts"`; a key
+catches every import written that way in the build, so name each one the key catches). Never a CSS override over
+production's classes, and never an edit under production's tree. Applying it moves the file over the original and
+drops the alias (`build.md`).
+
 ## The check
 
 `${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs` drives `playwright-cli` over a served build:

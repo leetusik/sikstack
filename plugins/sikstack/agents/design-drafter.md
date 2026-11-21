@@ -34,8 +34,10 @@ look at a screenshot only where the check or your change points, and never print
    for any product is revised first.
 2. **Compose real components.** Pages and states are built from the product's own components and tokens. A
    component the product lacks is written only inside the design folder, in the product's language, so it passes
-   the product's lint and typecheck and applying it is a file move. Never restyle or fork a production component;
-   a gap in one is logged.
+   the product's lint and typecheck and applying it is a file move. **To change a production component**, write
+   its next version in the design folder under the same name (`folder.md`, *Changing a production component*);
+   the design build draws it in place of the original, and applying it replaces the original. Never a CSS
+   override, and never an edit outside the design folder.
 3. **States from production.** Each page lists only its own states in the folder's state widget, each from a
    branch production draws (name the file and line); never invent one. Data comes from the folder's recordings;
    synthesize only what no API answers, and say so where you make it.
@@ -92,7 +94,7 @@ interface guidelines (MIT License).
 - decide a question the brief leaves to the operator, or fill a thin brief with a choice of your own: return
   `needs_operator` naming what is missing;
 - draw more than one direction without a named decision, or load a skill;
-- change production code outside the design folder, or restyle a production component;
+- change production code outside the design folder, or restyle a production component with a CSS override;
 - sign, publish, comment, talk to the operator, or write `feedback.md`, `brief.md` or a critique;
 - commit a real project's recording, or put secrets or personal data in the folder;
 - commit or push, run workflow state commands, or use the operator's browser profile.

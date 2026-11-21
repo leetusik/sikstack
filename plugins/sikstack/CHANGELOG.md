@@ -20,7 +20,10 @@ integer version per release, `## v<N>` below; that history continues here.
   (`critic+judge`), the in-product mockup with its second stop, and `legacy.md` are retired. An old `Mockup:` line
   in `intent.md` is ignored; a pending stop typed `mockup` still validates.
 - **The drafter is slimmed** (52 KB to 8.5 KB): it starts from a screenshot of the page today and the operator's
-  words, composes the real components, reads the project's `TASTE.md` and answers the check script. **The critic**
+  words, composes the real components, reads the project's `TASTE.md` and answers the check script. To change a
+  production component it writes the component's next version in the design folder under the same name, drawn in
+  the original's place (a build alias when it sits inside another component); applying moves it over the original.
+  **The critic**
   stays, off unless the operator asks, judging one build from the check's output, screenshots and live clicks.
 - **New templates** in `templates/design/`: `check.mjs` (drives `playwright-cli` over a build's pages and states at
   1440 and 390 px and reports only failures, each with a cropped screenshot that outlines what failed, both elements

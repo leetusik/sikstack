@@ -4,7 +4,10 @@
 
 An apply slice moves the signed design's files from the design folder into production: the components it wrote
 under the folder move to production's component tree, and production's page imports them in place of what it drew
-before. The design used production's own components and passed the product's checks, so nothing is redrawn.
+before. A component's next version (`folder.md`, *Changing a production component*) moves over the original it
+replaces, its imports turned back to production's own, and its build alias is dropped; production's tests that
+pin what the original drew change with it. The design used
+production's own components and passed the product's checks, so nothing is redrawn.
 **RESPECT THE DESIGN:** ship every element and state as signed; never drop, simplify or "improve" one to save
 effort. What the design needs and production lacks (an API field, a write) is built as backing and named, never
 quietly dropped. The plan names the signed slice's `design-signoff.json` (its words and the product repo's commit)
