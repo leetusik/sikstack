@@ -53,7 +53,17 @@ const itemIds = existsSync(itemDir) ? readdirSync(itemDir).filter((d) => existsS
 const recorded = recording.workspace.agenda.map((a) => a.id);
 const recordedSet = new Set(recorded);
 const num = (id) => Number(/^A(\d+)-/.exec(id)?.[1] ?? 0);
-const minted = itemIds.filter((id) => !recordedSet.has(id)).sort((a, b) => num(a) - num(b));
+// The answers the pages' state presets read (`lib/answers.ts`), and the item pages their data sets hold.
+const STATES = path.join(DESIGN, "data", "sample", "states");
+const stateFiles = existsSync(STATES) ? readdirSync(STATES).filter((f) => f.endsWith(".json")).sort() : [];
+const stateIds = new Set();
+for (const f of stateFiles)
+  for (const a of JSON.parse(readFileSync(path.join(STATES, f), "utf8")).workspace.agenda ?? [])
+    if (!recordedSet.has(a.id)) stateIds.add(a.id);
+const presetItems = itemIds.filter((id) => stateIds.has(id)).sort((a, b) => num(a) - num(b));
+const minted = itemIds
+  .filter((id) => !recordedSet.has(id) && !stateIds.has(id))
+  .sort((a, b) => num(a) - num(b));
 const recordingRef = `design/${recordingRel}`;
 
 const manifest = {
@@ -66,6 +76,8 @@ const manifest = {
     dirty: (git("status", "--porcelain", "--", ".") ?? "") !== "",
   },
   recording: { file: recordingRef, name: recording.name, now: recording.now, project },
+  // Each page lists its states on the state widget (`lib/states.tsx`); `?state=<key>` opens one.
+  states: stateFiles.map((f) => `design/data/sample/states/${f}`),
   pages: [
     {
       name: "Workspace · Agenda",
@@ -81,6 +93,7 @@ const manifest = {
       production: "src/app/(app)/projects/[projectId]/workspace/agenda/[item]/page.tsx",
       entry: `${ws}agenda/${recorded[0]}/`,
       entries: recorded.map((id) => `${ws}agenda/${id}/`),
+      presetItems: presetItems.map((id) => `${ws}agenda/${id}/`),
       browserAdded: minted.map((id) => `${ws}agenda/${id}/`),
       recording: recordingRef,
       reads: ["workspace", "items"],
@@ -118,5 +131,5 @@ if (missing.size > 0) {
 }
 
 console.log(
-  `design:build: out/ (${manifest.pages.length} pages, ${recorded.length} recorded and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
+  `design:build: out/ (${manifest.pages.length} pages, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
 );

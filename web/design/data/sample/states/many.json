@@ -1,0 +1,1671 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "many",
+  "now": "2026-11-20T09:00:00Z",
+  "timeZone": "Asia/Seoul",
+  "source": {
+    "routes": [
+      "GET /app/projects/{project}/workspace",
+      "GET /app/projects/{project}/workspace/agenda/{item}"
+    ],
+    "note": "project id and dates normalized; the Shell's names are fixed"
+  },
+  "shell": {
+    "org": {
+      "id": "00000000-0000-4000-8000-0000000000a1",
+      "name": "Sample org"
+    },
+    "project": {
+      "name": "sample-product",
+      "visibility": "private",
+      "created_at": "2026-11-20T09:00:00Z"
+    },
+    "email": "design@example.invalid"
+  },
+  "workspace": {
+    "project": "00000000-0000-4000-8000-000000000001",
+    "linked": true,
+    "version": "v1.0.0",
+    "sync": {
+      "state": "fresh",
+      "at": "2026-11-20T08:59:20Z"
+    },
+    "streams": [
+      {
+        "id": "default",
+        "label": null,
+        "branch": null,
+        "phase": null,
+        "slice": null,
+        "sliceRef": null
+      }
+    ],
+    "pointer": {
+      "phase": null,
+      "slice": null,
+      "next": null,
+      "sliceRef": null,
+      "nextRef": null,
+      "waiting": []
+    },
+    "phases": [],
+    "deferred": [],
+    "docs": [],
+    "retired": [],
+    "agenda": [
+      {
+        "id": "A46-mr",
+        "title": "Write tests for the reorder keys",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A45-3h",
+        "title": "Test a 200-character title",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A44-cz",
+        "title": "Let the CLI print the agenda",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A43-jd",
+        "title": "Decide what Drop means for a phase",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A42-h4",
+        "title": "Clean up the old landing assets",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A41-z4",
+        "title": "Record a demo of the Agenda",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A40-1v",
+        "title": "Send a weekly summary email",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A39-1b",
+        "title": "Make the grip larger on touch",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A38-n2",
+        "title": "Check the Korean line breaks",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A37-p4",
+        "title": "Shorten the sign-up form",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A36-fv",
+        "title": "Ask three users about the sync line",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A35-1y",
+        "title": "Plan the next design review",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A34-b0",
+        "title": "Archive phases older than a year",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A32-dp",
+        "title": "Name the default stream",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A30-e7",
+        "title": "Try a two-column layout at 1440",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A29-qk",
+        "title": "Write the self-hosting guide",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A28-dt",
+        "title": "Warn before leaving an unsaved edit",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A25-yt",
+        "title": "Export the agenda as Markdown",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A23-yq",
+        "title": "Let an item carry a due date",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A22-gb",
+        "title": "Audit the color contrast of badges",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A5-td",
+        "title": "Draft the release note",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A4-tz",
+        "title": "Pick a name for the export button",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A1-xx",
+        "title": "Write the onboarding checklist",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A17-ph",
+        "title": "Write the pricing page FAQ",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A18-tw",
+        "title": "Measure the first paint of the Agenda",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A19-dp",
+        "title": "Add a filter for solved items",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A20-4w",
+        "title": "Link the changelog from the footer",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A21-fk",
+        "title": "Fix the focus ring on dark buttons",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A10-tt",
+        "title": "Move billing under settings",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A11-ke",
+        "title": "Show who changed an item",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A12-8a",
+        "title": "Group deferred items by month",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A13-g8",
+        "title": "Explain the waiting badge in help",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A14-f3",
+        "title": "Rename Review to Inbox",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A15-md",
+        "title": "Cache the agenda between tabs",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A16-js",
+        "title": "Test the add form on a phone",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A8-ph",
+        "title": "Add a keyboard shortcut for search",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A9-hk",
+        "title": "Trim the welcome email",
+        "lang": "en",
+        "note": "",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A31-ty",
+        "title": "Add an undo after Delete",
+        "lang": "en",
+        "note": "",
+        "state": "dropped",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "Undo is enough",
+        "sync": null
+      },
+      {
+        "id": "A2-a7",
+        "title": "Show the sync time in the header",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "The header shows Synced 4m ago",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A3-6x",
+        "title": "Check the empty state copy",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A7-h8",
+        "title": "Try a darker sidebar",
+        "lang": "en",
+        "note": "",
+        "state": "dropped",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "The light sidebar tested better",
+        "sync": null
+      },
+      {
+        "id": "A24-h9",
+        "title": "Import items from a CSV file",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A26-j2",
+        "title": "Show a count on each part head",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "Shipped with the CLI",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A27-vk",
+        "title": "Collapse long notes after five lines",
+        "lang": "en",
+        "note": "",
+        "state": "dropped",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A33-e7",
+        "title": "Show the engine version in settings",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A6-zp",
+        "title": "Decide the retry policy for sync",
+        "lang": "en",
+        "note": "",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "Retry three times, then show Try again",
+        "reason": "",
+        "sync": null
+      }
+    ],
+    "unplaced": []
+  },
+  "items": {
+    "A46-mr": {
+      "id": "A46-mr",
+      "title": "Write tests for the reorder keys",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A45-3h": {
+      "id": "A45-3h",
+      "title": "Test a 200-character title",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A44-cz": {
+      "id": "A44-cz",
+      "title": "Let the CLI print the agenda",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A43-jd": {
+      "id": "A43-jd",
+      "title": "Decide what Drop means for a phase",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A42-h4": {
+      "id": "A42-h4",
+      "title": "Clean up the old landing assets",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A41-z4": {
+      "id": "A41-z4",
+      "title": "Record a demo of the Agenda",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A40-1v": {
+      "id": "A40-1v",
+      "title": "Send a weekly summary email",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A39-1b": {
+      "id": "A39-1b",
+      "title": "Make the grip larger on touch",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A38-n2": {
+      "id": "A38-n2",
+      "title": "Check the Korean line breaks",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A37-p4": {
+      "id": "A37-p4",
+      "title": "Shorten the sign-up form",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A36-fv": {
+      "id": "A36-fv",
+      "title": "Ask three users about the sync line",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A35-1y": {
+      "id": "A35-1y",
+      "title": "Plan the next design review",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A34-b0": {
+      "id": "A34-b0",
+      "title": "Archive phases older than a year",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A32-dp": {
+      "id": "A32-dp",
+      "title": "Name the default stream",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A30-e7": {
+      "id": "A30-e7",
+      "title": "Try a two-column layout at 1440",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A29-qk": {
+      "id": "A29-qk",
+      "title": "Write the self-hosting guide",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A28-dt": {
+      "id": "A28-dt",
+      "title": "Warn before leaving an unsaved edit",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A25-yt": {
+      "id": "A25-yt",
+      "title": "Export the agenda as Markdown",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A23-yq": {
+      "id": "A23-yq",
+      "title": "Let an item carry a due date",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A22-gb": {
+      "id": "A22-gb",
+      "title": "Audit the color contrast of badges",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A5-td": {
+      "id": "A5-td",
+      "title": "Draft the release note",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A4-tz": {
+      "id": "A4-tz",
+      "title": "Pick a name for the export button",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A1-xx": {
+      "id": "A1-xx",
+      "title": "Write the onboarding checklist",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A17-ph": {
+      "id": "A17-ph",
+      "title": "Write the pricing page FAQ",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A18-tw": {
+      "id": "A18-tw",
+      "title": "Measure the first paint of the Agenda",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A19-dp": {
+      "id": "A19-dp",
+      "title": "Add a filter for solved items",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A20-4w": {
+      "id": "A20-4w",
+      "title": "Link the changelog from the footer",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A21-fk": {
+      "id": "A21-fk",
+      "title": "Fix the focus ring on dark buttons",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A10-tt": {
+      "id": "A10-tt",
+      "title": "Move billing under settings",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A11-ke": {
+      "id": "A11-ke",
+      "title": "Show who changed an item",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A12-8a": {
+      "id": "A12-8a",
+      "title": "Group deferred items by month",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A13-g8": {
+      "id": "A13-g8",
+      "title": "Explain the waiting badge in help",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A14-f3": {
+      "id": "A14-f3",
+      "title": "Rename Review to Inbox",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A15-md": {
+      "id": "A15-md",
+      "title": "Cache the agenda between tabs",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A16-js": {
+      "id": "A16-js",
+      "title": "Test the add form on a phone",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A8-ph": {
+      "id": "A8-ph",
+      "title": "Add a keyboard shortcut for search",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A9-hk": {
+      "id": "A9-hk",
+      "title": "Trim the welcome email",
+      "lang": "en",
+      "note": "",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A31-ty": {
+      "id": "A31-ty",
+      "title": "Add an undo after Delete",
+      "lang": "en",
+      "note": "",
+      "state": "dropped",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "Undo is enough",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A2-a7": {
+      "id": "A2-a7",
+      "title": "Show the sync time in the header",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "The header shows Synced 4m ago",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A3-6x": {
+      "id": "A3-6x",
+      "title": "Check the empty state copy",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A7-h8": {
+      "id": "A7-h8",
+      "title": "Try a darker sidebar",
+      "lang": "en",
+      "note": "",
+      "state": "dropped",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "The light sidebar tested better",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A24-h9": {
+      "id": "A24-h9",
+      "title": "Import items from a CSV file",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A26-j2": {
+      "id": "A26-j2",
+      "title": "Show a count on each part head",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "Shipped with the CLI",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A27-vk": {
+      "id": "A27-vk",
+      "title": "Collapse long notes after five lines",
+      "lang": "en",
+      "note": "",
+      "state": "dropped",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A33-e7": {
+      "id": "A33-e7",
+      "title": "Show the engine version in settings",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    },
+    "A6-zp": {
+      "id": "A6-zp",
+      "title": "Decide the retry policy for sync",
+      "lang": "en",
+      "note": "",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "Retry three times, then show Try again",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:20Z"
+        }
+      }
+    }
+  }
+}

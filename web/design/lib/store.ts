@@ -1,6 +1,7 @@
 import { todayIn } from "@/lib/workspace/model";
-import type { InboxEntry, Workspace } from "@/lib/workspace/types";
+import type { AgendaItem, InboxEntry, Workspace } from "@/lib/workspace/types";
 
+import { DATA_SETS, type DataName, type DataSet } from "./answers";
 import { applyChange, type AgendaChange } from "./apply";
 import { mintedId, topNumber } from "./ids";
 import { storeKey } from "./mark";
@@ -10,32 +11,38 @@ import { RECORDING, TIME_ZONE } from "./recording";
  * The design build's browser store: the workspace the pages draw, seeded from the recording and kept
  * in `localStorage`, so every change shows at once and survives a reload; Reset puts the recording
  * back. Read through `useSyncExternalStore`: the build (and hydration) draws the recording, the
- * browser then draws what it kept.
+ * browser then draws what it kept. A state preset puts another data set in it (`load`) or sets one
+ * item's state (`setItem`); `data` names the set it holds, so the state widget can read it back.
  */
 export interface Snap {
   workspace: Workspace;
   /** How many items this browser added: the next add takes `mintedId(top, minted)`. */
   minted: number;
+  /** The data set's highest id number (minted ids count on from it); the recording's when absent. */
+  top?: number;
+  /** The data set it holds (`answers.ts`); the recording's when absent. */
+  data?: DataName;
 }
 
 const KEY = storeKey(RECORDING.name);
 
-/** The recording as the store starts: each agenda row as its own item route answered it. */
-function seed(): Snap {
-  const ws = RECORDING.workspace;
+/** A data set as the store holds it: each agenda row as its own item route answered it. */
+function seed(set: DataSet = RECORDING, data: DataName = "recorded"): Snap {
+  const ws = set.workspace;
   const agenda = ws.agenda.map((row) => {
-    const own = RECORDING.items[row.id];
+    const own = set.items[row.id];
     if (!own) return row;
     const item: Partial<typeof own> = { ...own };
     delete item.workspace;
     return { ...row, ...item };
   });
-  return { workspace: { ...ws, agenda }, minted: 0 };
+  const top = topNumber(agenda.map((a) => a.id));
+  return { workspace: { ...ws, agenda }, minted: 0, top, data };
 }
 
 const SEED: Snap = seed();
 /** The recorded ids' highest number: minted ids count on from it, as the pool of static pages does. */
-const TOP = topNumber(SEED.workspace.agenda.map((a) => a.id));
+const TOP = SEED.top ?? 0;
 
 let snap: Snap | null = null;
 /** A change applied and kept, not yet shown (`apply`). */
@@ -90,6 +97,28 @@ export function reset(): void {
   publish(SEED);
 }
 
+/** The data set the store holds now. */
+export const dataOf = (s: Snap): DataName => s.data ?? "recorded";
+
+function keep(next: Snap) {
+  pending = null;
+  window.localStorage.setItem(KEY, JSON.stringify(next));
+  publish(next);
+}
+
+/** A preset: hold another data set (`answers.ts`), as recorded, with nothing added yet. */
+export function load(data: DataName): void {
+  keep(seed(DATA_SETS[data], data));
+}
+
+/** A preset: set one item's own fields (its state, its mark), as the read would answer them. */
+export function setItem(id: string, fields: Partial<AgendaItem>): void {
+  const cur = pending ?? read();
+  if (!cur.workspace.agenda.some((a) => a.id === id)) return;
+  const agenda = cur.workspace.agenda.map((a) => (a.id === id ? { ...a, ...fields } : a));
+  keep({ ...cur, workspace: { ...cur.workspace, agenda } });
+}
+
 /** Apply one change and keep it; the inbox entry it would have been, or the engine's refusal. */
 export function apply(
   change: AgendaChange,
@@ -98,10 +127,10 @@ export function apply(
   let minted = cur.minted;
   const out = applyChange(cur.workspace, change, {
     day: todayIn(TIME_ZONE),
-    mint: () => mintedId(TOP, minted++),
+    mint: () => mintedId(cur.top ?? TOP, minted++),
   });
   if (!out.ok) return out;
-  const next: Snap = { workspace: out.workspace, minted };
+  const next: Snap = { ...cur, workspace: out.workspace, minted };
   window.localStorage.setItem(KEY, JSON.stringify(next));
   // The pages see it on the next task, after the action has answered: production's components lay the
   // answered change over the read until a read shows it taken, so the read must come after the answer.

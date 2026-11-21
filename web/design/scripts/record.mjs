@@ -2,7 +2,7 @@
 // Record a project's Workspace from the real API for the design build:
 //
 //   printf '%s' "$TOKEN" | node design/scripts/record.mjs --project <id> [--api http://127.0.0.1:8766]
-//       [--to sample | --to local/<name>] [--project-name <name>] [--time-zone <zone>]
+//       [--to sample | --to local/<name>] [--state <name>] [--project-name <name>] [--time-zone <zone>]
 //
 // It reads `GET /app/projects/{id}/workspace` and each `GET …/workspace/agenda/{item}`, with a session
 // token (a signed-in bearer) from `$DESIGN_RECORD_TOKEN` or stdin; the token is never written anywhere.
@@ -12,6 +12,11 @@
 // `--to sample` writes `design/data/sample/recording.json`, which is committed: record it only from a
 // sample project on the local stack (`run.sh up`). Anything else goes to `--to local/<name>`
 // (`design/data/local/<name>.json`, gitignored); build it with `pnpm design:build --data local/<name>`.
+//
+// `--state <name>` records one answer a page's state preset reads (`lib/states.tsx`, `lib/answers.ts`) to
+// `design/data/sample/states/<name>.json`: the same shape, but the Workspace may be unlinked or never
+// synced (its agenda then absent or empty), and an item its own route does not hold yet (an add that
+// waits for the sync) is kept as its row alone.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,12 +41,15 @@ function args(argv) {
     else if (k === "--to") out.to = v;
     else if (k === "--project-name") out.projectName = v;
     else if (k === "--time-zone") out.timeZone = v;
+    else if (k === "--state") out.state = v;
     else throw new Error(`unknown argument ${k}`);
     i++;
   }
   if (!out.project) throw new Error("--project <id> is required");
   if (out.to !== "sample" && !/^local\/[a-z0-9][a-z0-9-]*$/.test(out.to))
     throw new Error("--to takes sample or local/<name> (lowercase letters, digits, dashes)");
+  if (out.state !== undefined && (out.to !== "sample" || !/^[a-z0-9][a-z0-9-]*$/.test(out.state)))
+    throw new Error("--state takes a name (lowercase letters, digits, dashes) and records only to sample");
   return out;
 }
 
@@ -60,6 +68,16 @@ async function get(api, route, bearer) {
   });
   if (!res.ok) throw new Error(`GET ${route} answered ${res.status}`);
   return res.json();
+}
+
+/** The same, or null on a 404 (an item its own route does not hold yet). */
+async function getOrNull(api, route, bearer) {
+  try {
+    return await get(api, route, bearer);
+  } catch (e) {
+    if (/ answered 404$/.test(e.message)) return null;
+    throw e;
+  }
 }
 
 /** Calendar days in a zone, as `YYYY-MM-DD`. */
@@ -101,11 +119,14 @@ async function main() {
   const base = `/app/projects/${encodeURIComponent(o.project)}`;
   const takenAt = Date.now();
   const workspace = await get(o.api, `${base}/workspace`, bearer);
-  if (!workspace.linked || !Array.isArray(workspace.agenda))
+  if (o.state === undefined && (!workspace.linked || !Array.isArray(workspace.agenda)))
     throw new Error("the project has no synced workspace: link one (`sikstack link`) first");
   const items = {};
-  for (const row of workspace.agenda)
-    items[row.id] = await get(o.api, `${base}/workspace/agenda/${encodeURIComponent(row.id)}`, bearer);
+  for (const row of workspace.agenda ?? []) {
+    const route = `${base}/workspace/agenda/${encodeURIComponent(row.id)}`;
+    const own = o.state === undefined ? await get(o.api, route, bearer) : await getOrNull(o.api, route, bearer);
+    if (own) items[row.id] = own;
+  }
   let project = { name: o.projectName ?? null, visibility: "private", created_at: new Date(takenAt).toISOString() };
   if (!o.projectName) {
     const p = await get(o.api, base, bearer);
@@ -115,7 +136,7 @@ async function main() {
   const norm = normalizer(o.project, takenAt, o.timeZone);
   const recording = {
     $design: MARK,
-    name: o.to === "sample" ? "sample" : o.to.slice("local/".length),
+    name: o.state ?? (o.to === "sample" ? "sample" : o.to.slice("local/".length)),
     now: new Date(ANCHOR).toISOString().replace(/\.\d+Z$/, "Z"),
     timeZone: o.timeZone,
     source: {
@@ -134,13 +155,15 @@ async function main() {
   if (text.includes(o.project)) throw new Error("the real project id survived normalization: nothing written");
   if (text.includes(bearer)) throw new Error("the token appears in the recording: nothing written");
   const file =
-    o.to === "sample"
-      ? path.join(DESIGN, "data", "sample", "recording.json")
-      : path.join(DESIGN, "data", "local", `${recording.name}.json`);
+    o.state !== undefined
+      ? path.join(DESIGN, "data", "sample", "states", `${o.state}.json`)
+      : o.to === "sample"
+        ? path.join(DESIGN, "data", "sample", "recording.json")
+        : path.join(DESIGN, "data", "local", `${recording.name}.json`);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, text);
   console.log(
-    `recorded ${workspace.agenda.length} agenda item(s) of project ${SAMPLE_PROJECT} (normalized) to ${path.relative(process.cwd(), file)}`,
+    `recorded ${(workspace.agenda ?? []).length} agenda item(s) (sync ${workspace.sync?.state}) of project ${SAMPLE_PROJECT} (normalized) to ${path.relative(process.cwd(), file)}`,
   );
 }
 
