@@ -98,6 +98,13 @@ const manifest = {
       recording: recordingRef,
       reads: ["workspace", "items"],
     },
+    {
+      name: "System",
+      route: "/system",
+      production: null,
+      entry: "/system/",
+      reads: ["src/sikstack/styles/tokens.css", "@/sikstack/ui", "@/sikstack/frame", "@/sikstack/states", "@/sikstack/shell"],
+    },
   ],
 };
 writeFileSync(path.join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -130,6 +137,41 @@ if (missing.size > 0) {
   die(`${missing.size} link(s) without a page in out/: add them to lib/away.ts`);
 }
 
+// -- the system page holds the file's tokens and every shared export -------------------------------
+
+const systemHtml = readFileSync(path.join(OUT, "system", "index.html"), "utf8");
+const attrs = (name) => new Set([...systemHtml.matchAll(new RegExp(`\\s${name}="([^"]*)"`, "g"))].map((m) => m[1]));
+const tokensCss = readFileSync(path.join(WEB, "src", "sikstack", "styles", "tokens.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const fileTokens = new Set([...tokensCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+const pageTokens = attrs("data-token");
+const tokenGaps = [
+  ...[...fileTokens].filter((t) => !pageTokens.has(t)).map((t) => `  ${t}: in tokens.css, not on /system/`),
+  ...[...pageTokens].filter((t) => !fileTokens.has(t)).map((t) => `  ${t}: on /system/, not in tokens.css`),
+];
+if (tokenGaps.length > 0) {
+  for (const g of tokenGaps) console.error(g);
+  die(`/system/'s tokens differ from src/sikstack/styles/tokens.css`);
+}
+const drawn = new Set([...attrs("data-component")].flatMap((c) => c.split(" ")));
+const listed = attrs("data-export");
+const exportGaps = [];
+for (const part of ["ui", "frame", "states", "shell"]) {
+  const index = readFileSync(path.join(WEB, "src", "sikstack", part, "index.ts"), "utf8").replace(/\/\/.*$/gm, "");
+  for (const m of index.matchAll(/export\s*\{([^}]*)\}\s*from/g))
+    for (const raw of m[1].split(",")) {
+      const name = raw.trim();
+      if (!name || name.startsWith("type ")) continue;
+      if (!drawn.has(name) && !listed.has(name)) exportGaps.push(`  ${name} (@/sikstack/${part})`);
+    }
+}
+if (exportGaps.length > 0) {
+  for (const g of exportGaps) console.error(g);
+  die(`${exportGaps.length} shared export(s) neither drawn nor listed on /system/ (lib/system-board.tsx)`);
+}
+
+console.log(
+  `design:build: /system/ holds ${fileTokens.size} tokens and ${drawn.size + listed.size} shared exports`,
+);
 console.log(
   `design:build: out/ (${manifest.pages.length} pages, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
 );

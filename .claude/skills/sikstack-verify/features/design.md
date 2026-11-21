@@ -229,7 +229,29 @@ done
 pw resize 1440 900
 logs
 
-# 12. Nothing left the browser: every request went to $WEB and found a file; no console error (no hydration error).
+# 12. The system page (/system/, linked from the index): every token of tokens.css (design:build already held the
+#     page's list equal to the file's and every shared export drawn or listed), the light accent painted by the
+#     token itself, both dialogs open in place (not modal), the toast on its board, no sideways scroll; one
+#     screenshot a section at 1440 and 390.
+pw goto "$WEB/"
+pw click 'role=link[name="System · tokens and components"]'
+see '[...new Set([...document.querySelectorAll("[data-token]")].map(e => e.dataset.token))].length >= 30' \
+  'document.querySelectorAll("[data-component]").length > 40' \
+  '(() => { const s = document.querySelector("[data-scheme=light] [data-token=\"--accent\"]"); return getComputedStyle(s.firstElementChild).backgroundColor !== "rgba(0, 0, 0, 0)"; })()' \
+  '[...document.querySelectorAll("dialog")].length === 2 && [...document.querySelectorAll("dialog")].every(d => d.open && !d.matches(":modal"))' \
+  '!!document.querySelector(".toast")'
+for size in "1440 900" "390 844"; do
+  pw resize $size
+  see 'document.documentElement.scrollWidth <= innerWidth'
+  for part in tokens ui frame states shell exports; do
+    js "() => { document.getElementById('$part').scrollIntoView(); return true; }" >/dev/null
+    shot "12-system-${size%% *}-$part"
+  done
+done
+pw resize 1440 900
+logs
+
+# 13. Nothing left the browser: every request went to $WEB and found a file; no console error (no hydration error).
 pw close
 other=$(grep -E '^[0-9]+\. \[' "$EV/network.log" | grep -vF " $WEB/" || true)
 [ -z "$other" ] || { echo "requests outside $WEB:"; echo "$other"; exit 1; }
@@ -239,4 +261,4 @@ grep -E 'Errors: [1-9]' "$EV/console.log" && { echo "console errors: see $EV/con
 echo "design: PASS ($(grep -cE '^[0-9]+\. \[' "$EV/network.log") requests, all static files from $WEB; no console error)"
 ```
 
-**Proof:** the screenshots `design-01-agenda.png` to `design-08-reset.png`, `design-09-<page>-<state>.png` (one per state), `design-10-keyboard.png` and `design-11-<width>-<top|middle|bottom>.png` in `$EV`; the block ends `design: PASS`. `network.log` holds only `$WEB` requests answered 200 (HTML, `_next/static` chunks, the `__next.*.txt` route payloads); `console.log` reads `Errors: 0` for every page; `design:serve --log` shows the same requests from the server's side. Stop the server and check `playwright-cli list` shows no `$SESSION`.
+**Proof:** the screenshots `design-01-agenda.png` to `design-08-reset.png`, `design-09-<page>-<state>.png` (one per state), `design-10-keyboard.png` and `design-11-<width>-<top|middle|bottom>.png`, `design-12-system-<width>-<section>.png` in `$EV`; the block ends `design: PASS`. `network.log` holds only `$WEB` requests answered 200 (HTML, `_next/static` chunks, the `__next.*.txt` route payloads); `console.log` reads `Errors: 0` for every page; `design:serve --log` shows the same requests from the server's side. Stop the server and check `playwright-cli list` shows no `$SESSION`.

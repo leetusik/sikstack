@@ -1,0 +1,208 @@
+/* The system page's board (`system-board.tsx`): design chrome around the product's own components, never the
+   product's. It reads the product's tokens for its ground and type so it sits in the scheme it shows, and keeps
+   its own labels small and dashed-edged, so a cell's frame never reads as part of the component in it. */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 32px 24px 96px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.toc a {
+  color: var(--accent);
+}
+
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-margin-top: 16px;
+}
+
+.partTitle {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.groupTitle {
+  margin: 8px 0 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px dashed var(--edge);
+  border-radius: 6px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.label strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.stage {
+  min-width: 0;
+}
+
+/* A Shell, a toast or an old page drawn in a box of its own: a fixed height, nothing escaping it. */
+.frame {
+  position: relative;
+  height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  transform: translateZ(0);
+}
+
+.frame.tall {
+  height: 380px;
+}
+
+/* -- tokens ------------------------------------------------------------------------------------- */
+
+.scheme {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+  gap: 12px;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.chip {
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.shadowChip {
+  height: 48px;
+  margin: 8px 8px 16px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(9em, 12em) minmax(7em, 14em) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.bar {
+  height: 12px;
+  background: var(--accent);
+}
+
+.radiusChip {
+  width: 64px;
+  height: 40px;
+  border: 1px solid var(--edge);
+  background: var(--accent-tint);
+}
+
+.specimen {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 40em) {
+  .board {
+    padding-inline: 12px;
+  }
+  .row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .row > :last-child {
+    grid-column: 1 / -1;
+  }
+}

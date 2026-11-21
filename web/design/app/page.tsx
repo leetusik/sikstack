@@ -22,6 +22,9 @@ export default function DesignIndex() {
             <Link href={agendaItemHref(PROJECT, first.id, null)}>Agenda item · {first.id}</Link>
           </li>
         ) : null}
+        <li>
+          <Link href="/system/">System · tokens and components</Link>
+        </li>
       </ul>
     </main>
   );
