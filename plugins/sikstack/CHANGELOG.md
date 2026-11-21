@@ -23,7 +23,8 @@ integer version per release, `## v<N>` below; that history continues here.
   words, composes the real components, reads the project's `TASTE.md` and answers the check script. **The critic**
   stays, off unless the operator asks, judging one build from the check's output, screenshots and live clicks.
 - **New templates** in `templates/design/`: `check.mjs` (drives `playwright-cli` over a build's pages and states at
-  1440 and 390 px and reports only failures, each with a cropped screenshot), `options.html` (two or three labelled
+  1440 and 390 px and reports only failures, each with a cropped screenshot that outlines what failed, both elements
+  of an overlap, with 48 px of context; a control scrolled out of its box is not counted), `options.html` (two or three labelled
   directions behind one switcher, for a named decision, thrown away after the pick) and `TASTE.md`.
 - **The engine keeps one design command.** `design-sign --slice S --words "…" --folder <path> [--repo <name>]`
   writes `design-signoff.json` in the slice folder (the words, the time, the product repo's HEAD, the folder's last

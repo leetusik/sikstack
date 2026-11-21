@@ -11,6 +11,9 @@
 //   overlap    two controls that overlap, or a control another element covers
 //   target     a control under 24 x 24 px with less than 24 px of room around it (WCAG 2.5.8; inline text links
 //              in a sentence are exempt)
+// A control is measured where it shows: cut by every scroll or clip box around it, so a row scrolled out of a
+// capped table is neither overlapping nor a target. Each crop outlines what failed (both elements of an overlap,
+// red then blue) and keeps context around it: 48 px each side, at least 360 x 220, clamped to the page.
 // The design-only state widget ([data-design-states]) is never checked.
 //
 // Pages: the build's out/manifest.json (each pages[].entry; --all-entries adds pages[].entries and presetItems),
@@ -123,8 +126,8 @@ const RUN = String.raw`async page => {
         const clipsX = (el) => { for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o !== "visible") return true; } return false; };
         const wide = all.filter((el) => { const r = el.getBoundingClientRect(); return visible(el) && (r.right > W + 1 || r.left < -1) && !clipsX(el); });
         const leaves = wide.filter((el) => !wide.some((o) => o !== el && el.contains(o))).slice(0, 3);
-        for (const el of leaves) out.push({ kind: "overflow", detail: label(el) + " reaches " + Math.round(el.getBoundingClientRect().right) + "px of " + W, box: box(el.getBoundingClientRect()) });
-        if (!leaves.length) out.push({ kind: "overflow", detail: "the page is " + document.documentElement.scrollWidth + "px wide at " + W, box: null });
+        for (const el of leaves) out.push({ kind: "overflow", detail: label(el) + " reaches " + Math.round(el.getBoundingClientRect().right) + "px of " + W, marks: [box(el.getBoundingClientRect())] });
+        if (!leaves.length) out.push({ kind: "overflow", detail: "the page is " + document.documentElement.scrollWidth + "px wide at " + W, marks: null });
       }
       // clipped: an element's own text cut off by its own overflow
       for (const el of all) {
@@ -135,35 +138,54 @@ const RUN = String.raw`async page => {
         if (s.clip !== "auto" && s.clip !== "" || s.clipPath !== "none") continue;
         const cutX = /hidden|clip/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1 && s.textOverflow !== "ellipsis";
         const cutY = /hidden|clip/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 1 && s.webkitLineClamp === "none" && s.textOverflow !== "ellipsis";
-        if (cutX || cutY) out.push({ kind: "clipped", detail: label(el) + " shows " + el.clientWidth + "x" + el.clientHeight + " of " + el.scrollWidth + "x" + el.scrollHeight, box: box(el.getBoundingClientRect()) });
+        if (cutX || cutY) out.push({ kind: "clipped", detail: label(el) + " shows " + el.clientWidth + "x" + el.clientHeight + " of " + el.scrollWidth + "x" + el.scrollHeight, marks: [box(el.getBoundingClientRect())] });
       }
       // controls: overlap, cover, and target size
       const CTRL = "a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[tabindex]:not([tabindex^='-'])";
-      const ctrls = [...document.body.querySelectorAll(CTRL)].filter((el) => !skip(el) && visible(el) && !el.disabled);
-      const rects = ctrls.map((el) => el.getBoundingClientRect());
+      // the part of an element that shows: its box cut by each ancestor that scrolls or clips (a fixed element by none)
+      const shown = (el) => {
+        const r = el.getBoundingClientRect();
+        let l = r.left, t = r.top, rt = r.right, b = r.bottom;
+        if (getComputedStyle(el).position !== "fixed") for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+          const s = getComputedStyle(a);
+          if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+          const ar = a.getBoundingClientRect(), x0 = ar.left + a.clientLeft, y0 = ar.top + a.clientTop;
+          if (s.overflowX !== "visible") { l = Math.max(l, x0); rt = Math.min(rt, x0 + a.clientWidth); }
+          if (s.overflowY !== "visible") { t = Math.max(t, y0); b = Math.min(b, y0 + a.clientHeight); }
+          if (s.position === "fixed") break;
+        }
+        return { left: l, top: t, right: rt, bottom: b, width: rt - l, height: b - t };
+      };
+      const cands = [...document.body.querySelectorAll(CTRL)].filter((el) => !skip(el) && visible(el) && !el.disabled);
+      const cut = cands.map(shown);
+      // a control scrolled out of its box (or under 2 px of it showing) is not on screen: skip it
+      const ctrls = cands.filter((_, i) => cut[i].width > 2 && cut[i].height > 2);
+      const rects = cut.filter((r) => r.width > 2 && r.height > 2);
+      const whole = ctrls.map((el) => el.getBoundingClientRect());
       const hit = (a, b, pad = 0) => a.left - pad < b.right && b.left < a.right + pad && a.top - pad < b.bottom && b.top < a.bottom + pad;
       for (let i = 0; i < ctrls.length; i++) for (let j = i + 1; j < ctrls.length; j++) {
         const a = rects[i], b = rects[j];
         if (ctrls[i].contains(ctrls[j]) || ctrls[j].contains(ctrls[i])) continue;
         const w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         if (w > 2 && h > 2) out.push({ kind: "overlap", detail: label(ctrls[i]) + " overlaps " + label(ctrls[j]) + " by " + Math.round(w) + "x" + Math.round(h) + "px",
-          box: box({ left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), width: Math.max(a.right, b.right) - Math.min(a.left, b.left), height: Math.max(a.bottom, b.bottom) - Math.min(a.top, b.top) }) });
+          marks: [box(a), box(b)] });
       }
       ctrls.forEach((el, i) => {
         const r = rects[i], cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return;
         const top = document.elementFromPoint(cx, cy);
         if (!top || el.contains(top) || top.contains(el) || skip(top) || (top.tagName === "LABEL" && top.control === el)) return;
-        out.push({ kind: "overlap", detail: label(el) + " is covered by " + label(top), box: box(r) });
+        out.push({ kind: "overlap", detail: label(el) + " is covered by " + label(top), marks: [box(r), box(top.getBoundingClientRect())] });
       });
       ctrls.forEach((el, i) => {
-        const r = rects[i];
+        const r = whole[i];
         if (r.width >= 24 && r.height >= 24) return;
         if (el.tagName === "A" && getComputedStyle(el).display === "inline" && (el.parentElement.textContent || "").trim().length > (el.textContent || "").trim().length) return;
         const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         const room = { left: cx - 12, right: cx + 12, top: cy - 12, bottom: cy + 12 };
-        if (!rects.some((o, j) => j !== i && !ctrls[j].contains(el) && !el.contains(ctrls[j]) && hit(room, o))) return;
-        out.push({ kind: "target", detail: label(el) + " is " + Math.round(r.width) + "x" + Math.round(r.height) + "px with a neighbour within 24px", box: box(r) });
+        const near = rects.findIndex((o, j) => j !== i && !ctrls[j].contains(el) && !el.contains(ctrls[j]) && hit(room, o));
+        if (near < 0) return;
+        out.push({ kind: "target", detail: label(el) + " is " + Math.round(r.width) + "x" + Math.round(r.height) + "px with " + label(ctrls[near]) + " within 24px", marks: [box(r), box(rects[near])] });
       });
       return out;
     });
@@ -173,14 +195,32 @@ const RUN = String.raw`async page => {
       n += 1;
       f.png = C.shot + "-" + f.kind + "-" + n + ".png";
       const page_w = await page.evaluate(() => document.documentElement.scrollWidth), page_h = await page.evaluate(() => document.documentElement.scrollHeight);
-      if (f.box) {
-        const m = 16, x = Math.max(0, f.box.x - m), y = Math.max(0, f.box.y - m);
-        const width = Math.max(8, Math.min(page_w - x, f.box.w + 2 * m, 1600)), height = Math.max(8, Math.min(page_h - y, f.box.h + 2 * m, 1200));
+      if (f.marks && f.marks.length) {
+        // the crop: the marks' union, 48 px of context each side, grown to 360 x 220 about its centre, kept on the page
+        const x0 = Math.min(...f.marks.map((b) => b.x)), y0 = Math.min(...f.marks.map((b) => b.y));
+        const x1 = Math.max(...f.marks.map((b) => b.x + b.w)), y1 = Math.max(...f.marks.map((b) => b.y + b.h));
+        const span = (lo, hi, min, max, limit) => {
+          let a = lo - 48, b = hi + 48;
+          if (b - a < min) { const c = (lo + hi) / 2; a = c - min / 2; b = c + min / 2; }
+          if (b - a > max) b = a + max;
+          if (a < 0) { b -= a; a = 0; }
+          if (b > limit) { a = Math.max(0, a - (b - limit)); b = limit; }
+          return [a, Math.max(8, b - a)];
+        };
+        const [x, width] = span(x0, x1, 360, 1600, page_w), [y, height] = span(y0, y1, 220, 1200, page_h);
+        // outline each mark (red, then blue) above the page, without moving anything
+        await page.evaluate((marks) => marks.forEach((b, k) => {
+          const d = document.createElement("div");
+          d.setAttribute("data-design-check-mark", "");
+          d.style.cssText = "position:absolute;pointer-events:none;z-index:2147483647;box-sizing:border-box;left:" + (b.x - 2) + "px;top:" + (b.y - 2) + "px;width:" + (b.w + 4) + "px;height:" + (b.h + 4) + "px;border:2px " + (k ? "dashed #2563eb" : "solid #dc2626");
+          document.documentElement.appendChild(d);
+        }), f.marks);
         await page.screenshot({ path: f.png, fullPage: true, clip: { x, y, width, height } });
+        await page.evaluate(() => document.querySelectorAll("[data-design-check-mark]").forEach((d) => d.remove()));
       } else {
         await page.screenshot({ path: f.png });
       }
-      delete f.box;
+      delete f.marks;
     }
   } finally {
     page.off("console", onConsole); page.off("pageerror", onError); page.off("requestfailed", onFailed); page.off("response", onResponse);
