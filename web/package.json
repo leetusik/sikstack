@@ -14,7 +14,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "design:record": "node design/scripts/record.mjs",
+    "design:build": "node design/scripts/build.mjs",
+    "design:serve": "node design/scripts/serve.mjs",
+    "design:check": "node design/scripts/check-production.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
