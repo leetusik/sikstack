@@ -2,7 +2,7 @@
  * Knowledge Base design tokens (P12.S2R) — the "calm editorial library" system.
  * --------------------------------------------------------------------------
  * Consolidated from the staged design handback under
- * `web/design/canvas/tokens/{colors,type,shape,app}.css`. Only the `--kb-*`
+ * its token sheets for colors, type, shape and app. Only the `--kb-*`
  * source-of-truth tokens are kept; the mkdocs-material `--md-*` mappings (and
  * `--md-hue`) are dropped — this is a Next.js app, not the docs site.
  *

@@ -20,20 +20,25 @@ integer version per release, `## v<N>` below; that history continues here.
   (`critic+judge`), the in-product mockup with its second stop, and `legacy.md` are retired. An old `Mockup:` line
   in `intent.md` is ignored; a pending stop typed `mockup` still validates.
 - **The drafter is slimmed** (52 KB to 8.5 KB): it starts from a screenshot of the page today and the operator's
-  words, composes the real components, reads the project's `TASTE.md` and answers the check script. To change a
+  words, composes the real components, reads the project's `TASTE.md` and answers the layout check. To change a
   production component it writes the component's next version in the design folder under the same name, drawn in
   the original's place (a build alias when it sits inside another component); applying moves it over the original.
   **The critic**
-  stays, off unless the operator asks, judging one build from the check's output, screenshots and live clicks.
-- **New templates** in `templates/design/`: `check.mjs` (drives `playwright-cli` over a build's pages and states at
-  1440 and 390 px and reports only failures, each with a cropped screenshot that outlines what failed, both elements
-  of an overlap, with 48 px of context; a control scrolled out of its box is not counted), `options.html` (two or three labelled
-  directions behind one switcher, for a named decision, thrown away after the pick) and `TASTE.md`.
+  stays, off unless the operator asks, judging one build from the layout check's output, screenshots and live clicks.
+- **New templates** in `templates/design/`: `check.mjs`, **the layout check** (drives `playwright-cli` over a
+  build's pages and states at 1440 and 390 px and reports only failures, each with a cropped screenshot that outlines
+  what failed, both elements of an overlap, with 48 px of context; a control scrolled out of its box is not counted;
+  every run, one page at one width in one state, opens in a fresh browser context with empty storage, and a page
+  with a state widget must show the state its run names, else `FAIL state`; exit 1 is layout failures, exit 2 a
+  usage or `driver error` such as no server; its run plan is tested in smoke without a browser; never a product's
+  production-exclusion check such as platform's `design:check`), `options.html` (two or three labelled directions
+  behind one switcher, for a named decision, thrown away after the pick) and `TASTE.md`.
 - **The engine keeps one design command.** `design-sign --slice S --words "…" --folder <path> [--repo <name>]`
   writes `design-signoff.json` in the slice folder (the words, the time, the product repo's HEAD, the folder's last
-  commit and its uncommitted paths) and still refuses empty words. `design-init`, `design-system`, `design-open`,
-  `design-check`, `design-canvas`, `design-publish-plan`, `design-preview`, `design-readback`, `design-close` and
-  `design-migrate` are removed (`wf_design.py`: 4,586 lines to 90), which is why this is a major version. The old
+  commit and its uncommitted paths, as they are on disk, a rename's old path under `renamed`) and still refuses
+  empty words. `design-init`, `design-system`, `design-open`, `design-check`, `design-canvas`,
+  `design-publish-plan`, `design-preview`, `design-readback`, `design-close` and `design-migrate` are removed
+  (`wf_design.py`: 4,586 lines to 115), which is why this is a major version. The old
   records under `.sikstack/docs/reference/design/` stay on disk as plain files nothing reads.
 - **The judge row is retired.** `sikstack-adapter route --judge` is gone; a `[claude.judge]` table left in
   `config.toml` prints a `warning=` line and is skipped, never an error.

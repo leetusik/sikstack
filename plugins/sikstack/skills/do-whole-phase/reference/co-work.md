@@ -8,7 +8,7 @@ keeps only what the phase loop adds.
   to `sikstack:design-critic`** only when the operator asked for a critic. The slice is a barrier that never
   shares a slice wave.
 - **The stop.** One per draft shown: `sikstack slice status <slice_id> pending --stop-kind wave --on-words
-  "<what their words will do>"`, after the build is served and the check script ran, with the URL and the
+  "<what their words will do>"`, after the build is served and the layout check ran, with the URL and the
   screenshots in your report.
 - **The words.** A sign-off: `sikstack design-sign --slice <slice_id> --words "<their literal words>" --folder
   <design folder> [--repo <name>]`, then `slice finish`, commit. Feedback: recorded verbatim in the slice's

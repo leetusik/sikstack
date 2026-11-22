@@ -6,7 +6,7 @@
    tables, status encoding, forms, show-once reveal), reusing the locked
    reading-room tokens; only status/trend/delta inks are new (kb-tokens.css).
 
-   Copied verbatim from `web/design/canvas/components/console/console.css` (the
+   Copied verbatim from the design handback's console component sheet (the
    skin's source of truth) with one adaptation: the icon selectors target `svg`
    (icons render via `lucide-react`, NOT the specimens' icon-font custom element).
    Consumed by the fixed CVA components per APP_BRIEF.md's apply-map. `@import`ed

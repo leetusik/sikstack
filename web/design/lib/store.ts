@@ -4,7 +4,7 @@ import type { AgendaItem, InboxEntry, Workspace } from "@/lib/workspace/types";
 import { DATA_SETS, type DataName, type DataSet } from "./answers";
 import { applyChange, type AgendaChange } from "./apply";
 import { mintedId, topNumber } from "./ids";
-import { storeKey } from "./mark";
+import { DESIGN_STAMP, storeKey } from "./mark";
 import { RECORDING, TIME_ZONE } from "./recording";
 
 /**
@@ -12,7 +12,8 @@ import { RECORDING, TIME_ZONE } from "./recording";
  * in `localStorage`, so every change shows at once and survives a reload; Reset puts the recording
  * back. Read through `useSyncExternalStore`: the build (and hydration) draws the recording, the
  * browser then draws what it kept. A state preset puts another data set in it (`load`) or sets one
- * item's state (`setItem`); `data` names the set it holds, so the state widget can read it back.
+ * item's state (`setItem`); `data` names the set it holds, so the state widget can read it back. Every snapshot
+ * carries the build's stamp (`mark.ts`); one kept by another build or recording is dropped on load.
  */
 export interface Snap {
   workspace: Workspace;
@@ -22,6 +23,8 @@ export interface Snap {
   top?: number;
   /** The data set it holds (`answers.ts`); the recording's when absent. */
   data?: DataName;
+  /** The build that kept it (`DESIGN_STAMP`); a snapshot from another build is dropped. */
+  stamp?: string;
 }
 
 const KEY = storeKey(RECORDING.name);
@@ -37,7 +40,7 @@ function seed(set: DataSet = RECORDING, data: DataName = "recorded"): Snap {
     return { ...row, ...item };
   });
   const top = topNumber(agenda.map((a) => a.id));
-  return { workspace: { ...ws, agenda }, minted: 0, top, data };
+  return { workspace: { ...ws, agenda }, minted: 0, top, data, stamp: DESIGN_STAMP };
 }
 
 const SEED: Snap = seed();
@@ -53,7 +56,9 @@ function read(): Snap {
   if (snap) return snap;
   try {
     const raw = window.localStorage.getItem(KEY);
-    snap = raw ? (JSON.parse(raw) as Snap) : SEED;
+    const kept = raw ? (JSON.parse(raw) as Snap) : null;
+    if (kept && kept.stamp !== DESIGN_STAMP) window.localStorage.removeItem(KEY);
+    snap = kept && kept.stamp === DESIGN_STAMP ? kept : SEED;
   } catch {
     snap = SEED;
   }
@@ -100,8 +105,9 @@ export function reset(): void {
 /** The data set the store holds now. */
 export const dataOf = (s: Snap): DataName => s.data ?? "recorded";
 
-function keep(next: Snap) {
+function keep(snapshot: Snap) {
   pending = null;
+  const next = { ...snapshot, stamp: DESIGN_STAMP };
   window.localStorage.setItem(KEY, JSON.stringify(next));
   publish(next);
 }
@@ -130,7 +136,7 @@ export function apply(
     mint: () => mintedId(cur.top ?? TOP, minted++),
   });
   if (!out.ok) return out;
-  const next: Snap = { ...cur, workspace: out.workspace, minted };
+  const next: Snap = { ...cur, workspace: out.workspace, minted, stamp: DESIGN_STAMP };
   window.localStorage.setItem(KEY, JSON.stringify(next));
   // The pages see it on the next task, after the action has answered: production's components lay the
   // answered change over the read until a read shows it taken, so the read must come after the answer.

@@ -1198,6 +1198,19 @@ assert first["commit"] == sys.argv[2] and first["folder_commit"] == sys.argv[3],
 assert first["uncommitted"] == ["web/design/app/new.tsx"] and first["signed_at"], first
 assert second["words"] == "second look: yes", second
 PY
+# The uncommitted paths are the paths on disk (porcelain v1 -z, never C-quoted): a name with a space, a Korean name,
+# and a staged rename recorded as its new path, with the path it came from under `renamed`.
+printf 'edit\n' > "$DS/prod/web/design/app/page.tsx" && git -C "$DS/prod" mv web/design/app/page.tsx "web/design/app/pa ge.tsx" \
+  && printf 'ko\n' > "$DS/prod/web/design/app/한글 이름.tsx" && printf 'sp\n' > "$DS/prod/web/design/app/c d.tsx"
+p_out=$(dw design-sign --slice P1.S1 --words "paths: ok" --folder web/design 2>&1); p_rc=$?
+[ "$p_rc" = 0 ] && python3 - "$SO" "$DS/prod" <<'PY' && ok "design-sign records real paths: a space name, a Korean name and a rename's new path as on disk (unquoted), the rename's old path under renamed" || bad "design-sign recorded quoted or arrowed paths (rc=$p_rc) -- $p_out / $(cat "$SO" 2>&1)"
+import json, os, sys
+last = json.load(open(sys.argv[1], encoding="utf-8"))["signoffs"][-1]
+want = ["web/design/app/c d.tsx", "web/design/app/new.tsx", "web/design/app/pa ge.tsx", "web/design/app/한글 이름.tsx"]
+assert last["uncommitted"] == want, last["uncommitted"]
+assert last["renamed"] == [{"path": "web/design/app/pa ge.tsx", "from": "web/design/app/page.tsx"}], last.get("renamed")
+assert all(os.path.exists(os.path.join(sys.argv[2], p)) for p in last["uncommitted"]), last["uncommitted"]
+PY
 mkdir -p "$DS/prod/.sikstack/docs/reference/design/jobs/01-x" && printf '{broken' > "$DS/prod/.sikstack/docs/reference/design/design.json" \
   && printf '{' > "$DS/prod/.sikstack/docs/reference/design/jobs/01-x/job.json"
 c_out=$(dw check 2>&1); c_rc=$?
@@ -3782,9 +3795,43 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
     && [ -f "$PLUGIN/templates/design/check.mjs" ] && [ -f "$PLUGIN/templates/design/options.html" ] && [ -f "$PLUGIN/templates/design/TASTE.md" ]; then
   if command -v node >/dev/null 2>&1; then
     ck_out=$(node --check "$PLUGIN/templates/design/check.mjs" 2>&1) && ck_help=$(node "$PLUGIN/templates/design/check.mjs" --help 2>&1) \
-      && printf '%s\n' "$ck_help" | grep -q 'usage: node check.mjs' \
+      && printf '%s\n' "$ck_help" | grep -q 'usage: node check.mjs' && printf '%s\n' "$ck_help" | grep -q 'exit 2: a usage error, or a driver error' \
       && ok "the design agents bind no engine harness; templates/design/ ships check.mjs (it parses and prints its usage), options.html and TASTE.md" \
       || bad "templates/design/check.mjs does not parse or print its usage -- $ck_out $ck_help"
+    # The layout check's run plan, without a browser: every page at every width, the default first and expecting the
+    # first listed state, then each other state; every step opens in a fresh browser context (empty storage), so a
+    # state one run stores never reaches the next run's label. Importing the script runs nothing.
+    ck_plan=$(CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const m = await import(pathToFileURL(process.env.CK_FILE).href);
+      const assert = (c, msg) => { if (!c) { console.log("plan: " + msg); process.exit(1); } };
+      const base = "http://127.0.0.1:9";
+      const pages = m.pagesFromManifest({ pages: [
+        { name: "Agenda", entry: "/ws/", states: ["recorded", { key: "behind" }, "loading"] },
+        { name: "Item", entry: "/ws/a/1/", entries: ["/ws/a/1/", "/ws/a/2/"], states: ["open", "deferred"] },
+        { name: "System", entry: "/system/" } ] }, false);
+      assert(pages.length === 3 && pages[0].states.join() === "recorded,behind,loading" && pages[2].states === null, "pagesFromManifest " + JSON.stringify(pages));
+      assert(m.pagesFromManifest({ pages: [{ entry: "/ws/a/1/", entries: ["/ws/a/1/", "/ws/a/2/"] }] }, true).length === 2, "all entries");
+      pages[2].states = [];
+      const steps = m.plan(pages, [1440, 390], base);
+      const at = (s) => s.page + "@" + s.width + ":" + (s.state ?? "default") + ">" + (s.expect ?? "-");
+      assert(steps.map(at).join(" ") === "/ws/@1440:default>recorded /ws/@1440:behind>behind /ws/@1440:loading>loading /ws/@390:default>recorded /ws/@390:behind>behind /ws/@390:loading>loading /ws/a/1/@1440:default>open /ws/a/1/@1440:deferred>deferred /ws/a/1/@390:default>open /ws/a/1/@390:deferred>deferred /system/@1440:default>- /system/@390:default>-", "order " + steps.map(at).join(" "));
+      assert(steps.every((s) => s.fresh === true), "a step reuses a browser context");
+      assert(steps[1].url === base + "/ws/?state=behind" && steps[3].url === base + "/ws/" && steps[3].state === null, "urls " + steps[1].url + " " + steps[3].url);
+      const d = m.discoverStep({ name: "x", url: "/x/" }, 1440, base);
+      assert(d.fresh === true && d.discover === true && d.expect === null, "discover step");
+      console.log("plan ok");
+    ' 2>&1)
+    [ "$ck_plan" = "plan ok" ] \
+      && ok "the layout check's run plan (no browser): pages x widths x states in order, the default first expecting the first listed state at every width, every step in a fresh browser context" \
+      || bad "the layout check's run plan is wrong -- $ck_plan"
+    # Nothing served: a driver error, exit 2, never a layout FAIL (playwright-cli absent is a driver error too).
+    ck_port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+    newtmp CKT
+    ck_drv=$(cd "$CKT" && node "$PLUGIN/templates/design/check.mjs" --base "http://127.0.0.1:$ck_port" --widths 390 --out "$CKT/out" / 2>&1); ck_drv_rc=$?
+    [ "$ck_drv_rc" = 2 ] && printf '%s\n' "$ck_drv" | grep -q '^driver error: ' && ! printf '%s\n' "$ck_drv" | grep -q '^FAIL ' \
+      && ok "the layout check with no server prints a driver error and exits 2, with no FAIL line" \
+      || bad "the layout check with no server (rc=$ck_drv_rc) -- $ck_drv"
   else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
 else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 

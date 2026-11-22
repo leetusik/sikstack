@@ -1,7 +1,7 @@
 /*
  * kb-record-fixes.css — OPERATOR-AUTHORISED CORRECTIONS TO A SIGNED DESIGN RECORD.
  *
- * Created by P28.S5. Every round stylesheet in `web/design/rounds/*` is a VERBATIM
+ * Created by P28.S5. Every round stylesheet of the signed design record is a VERBATIM
  * record and must never be edited, so a gap the operator has authorised closing
  * lands here instead — imported LAST, after every round sheet, so it wins at equal
  * specificity without touching a single recorded line.

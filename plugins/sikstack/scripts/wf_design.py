@@ -29,6 +29,29 @@ def _design_git(repo: Path, *args: str) -> str:
     return proc.stdout
 
 
+def _uncommitted(repo: Path, rel: PurePosixPath) -> tuple[list[str], list[dict]]:
+    """The folder's uncommitted paths as they are on disk, from `git status --porcelain=v1 -z`: NUL-separated and
+    never quoted, so a name with spaces or non-ASCII letters is kept as it is. A rename or copy is its new path, and
+    is also listed in `renamed` with the path it came `from`."""
+    proc = subprocess.run(["git", "-C", str(repo), "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", str(rel)],
+                          capture_output=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"design-sign: git status failed in {repo}: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    fields = proc.stdout.decode("utf-8", "replace").split("\0")
+    paths, renames, i = set(), [], 0
+    while i < len(fields):
+        rec = fields[i]
+        i += 1
+        if len(rec) < 4:
+            continue
+        xy, path = rec[:2], rec[3:]
+        paths.add(path)
+        if "R" in xy or "C" in xy:  # -z writes the new path, then the old one as its own field
+            renames.append({"path": path, "from": fields[i] if i < len(fields) else ""})
+            i += 1
+    return sorted(paths), sorted(renames, key=lambda r: r["path"])
+
+
 def _product_repo(name):
     """(name, path) of the product repo the design folder lives in: a registry entry on a multi-repo host (its
     worktree in a parallel set when it has one there), else the one product repo around the workspace."""
@@ -65,9 +88,11 @@ def design_sign(args: argparse.Namespace) -> None:
         raise SystemExit(f"design-sign: refused -- no design folder {rel} in {name} ({repo})")
     head = _design_git(repo, "rev-parse", "HEAD").strip()
     folder_commit = _design_git(repo, "log", "-1", "--format=%H", "--", str(rel)).strip() or None
-    uncommitted = sorted({line[3:].strip() for line in _design_git(repo, "status", "--porcelain", "--untracked-files=all", "--", str(rel)).splitlines() if line.strip()})
+    uncommitted, renames = _uncommitted(repo, rel)
     entry = {"words": args.words, "signed_at": now_iso(), "repo": name, "folder": str(rel), "commit": head,
              "folder_commit": folder_commit, "uncommitted": uncommitted}
+    if renames:
+        entry["renamed"] = renames
     path = sdir / SIGNOFF_FILE
     record = read_json(path) if path.is_file() else {"schema": SIGNOFF_SCHEMA, "slice": args.slice, "signoffs": []}
     record.setdefault("signoffs", []).append(entry)

@@ -11,14 +11,15 @@ The repo's rules file declares it on one `Design:` line: the folder, its command
 
 - `web/design/` (its own Next config, static export to `web/design/out/` with `out/manifest.json`);
 - `pnpm --dir web design:record` (token on stdin; `--state <name>` for a state's answer; `--to local/<name>` for a
-  real project), `design:build`, `design:serve -- --port N --log`, `design:check` (production holds none of it);
+  real project), `design:build`, `design:serve -- --port N --log`, `design:check` (the production-exclusion check:
+  production holds none of the design; it measures no page);
 - `web/design/TASTE.md`, the one-page taste file; `/system/` in the build, the tokens and every shared
   component's states;
 - the click-through: `.claude/skills/sikstack-verify/features/design.md`.
 
 **A product without one** gets it in its first design slice, modelled on platform's: the same shape (a second build
-config beside production's, its pages importing production's components, a recording, a manifest, a check that
-production holds none of it), in the product's own toolchain, and a `Design:` line in its rules file. A product
+config beside production's, its pages importing production's components, a recording, a manifest, a
+production-exclusion check), in the product's own toolchain, and a `Design:` line in its rules file. A product
 starting from zero, with no components yet, starts from an options page (below).
 
 ## Data
@@ -33,7 +34,9 @@ starting from zero, with no components yet, starts from an options page (below).
 Every page lists only its own states in the design-only state widget (platform: `web/design/lib/states.tsx`,
 `pageStates` and `StatePage`; the operator's bar rule), each read from a branch production draws (`from` names the
 file and line), never invented. A state opens as `?state=<key>`, so it can be linked and checked. A state the API
-answers is recorded; one no API answers is made, and says so.
+answers is recorded; one no API answers is made, and says so. The widget carries `data-design-states` (the layout
+check never measures it), each listed state `data-design-state="<key>"` with `aria-pressed`, and the state on screen
+`data-design-current="<key>"`; the page with no `state` shows the first listed state.
 
 ## Changing a production component
 
@@ -45,11 +48,13 @@ production component is swapped by the folder's build alias (platform: one `turb
 `web/design/next.config.ts` per swapped file, keyed by the import as production writes it, e.g. `"./parts"`; a key
 catches every import written that way in the build, so name each one the key catches). Never a CSS override over
 production's classes, and never an edit under production's tree. Applying it moves the file over the original and
-drops the alias (`build.md`).
+drops the alias (`build.md`). Two next versions of different `./parts` modules cannot coexist: the one `"./parts"`
+key catches every `./parts` import, so the first design that needs two has to change how the alias is keyed first.
 
-## The check
+## The layout check
 
-`${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs` drives `playwright-cli` over a served build:
+The layout check, `${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs`, drives `playwright-cli` over a served build. It
+is not the folder's production-exclusion check (platform's `design:check`), which measures no page:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs" --base http://127.0.0.1:<port> --manifest <folder>/out/manifest.json --out <evidence folder>
@@ -57,8 +62,12 @@ node "${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs" --base http://127.0.0.1:
 
 It walks every page of the manifest (or the URLs given) and each state its widget lists, at 1440 and 390 px, and
 prints only failures, each with a cropped screenshot: console errors and failed requests, sideways overflow,
-clipped text, overlapping or covered controls, targets under 24 px. A clean build prints one `ok` line. A product
-may copy it into its folder. The drafter answers every failure before it returns; you run it again before a stop.
+clipped text, overlapping or covered controls, targets under 24 px. Every run (a page, at one width, in one state)
+opens in a fresh browser context, so no state a run stores reaches the next, and a page with a state widget must
+show the state its run names, else `FAIL state` and that run is not measured. A clean build prints one `ok` line;
+exit 1 is layout failures, exit 2 a usage or driver error (`driver error: …`: no server, a `playwright-cli`
+failure), where nothing was checked. A product may copy it into its folder. The drafter answers every failure
+before it returns; you run it again before a stop.
 
 ## Options
 

@@ -18,9 +18,9 @@ import { NOW, RECORDING, type Recording } from "./recording";
  * - `empty`: a linked, synced workspace with no agenda item; `many`: 46 items (23 open, 14 deferred, 9 ended);
  * - `waiting`: three web changes the engine has not taken yet (an add, a defer, an edit: rows marked waiting).
  *
- * Two are made here, because no API answer holds them (`result.md` of P73-nv.F1 says why): `behind` (a sync
- * older than the server's 24 hours, which only time makes) and `waiting`'s one open change that no row
- * carries (the engine applies the inbox before any local change it syncs, so the race never shows on demand).
+ * Two are made here, because no API answer holds them on demand: `behind` (a sync older than the server's 24
+ * hours, which only time makes) and `waiting`'s one open change that no row carries (the engine applies the
+ * inbox before any local change it syncs, so the race never shows on demand).
  */
 
 /** A data set the store can hold: a workspace and each item as its own route answered it. */

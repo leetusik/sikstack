@@ -241,7 +241,10 @@ for required in (
     "**A committed recording comes only from a sample project.**", "**Synthesize only what no API answers**",
     "Every page lists only its own states in the design-only state widget", "never invented",
     "`${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs`", "prints only failures, each with a cropped screenshot",
-    "A clean build prints one `ok` line.", "Options exist only for a **named decision**",
+    # F3: one name per thing: the layout check (check.mjs) is never the folder's production-exclusion check.
+    "## The layout check", "It is not the folder's production-exclusion check", "opens in a fresh browser context",
+    "`data-design-current=\"<key>\"`", "exit 2 a usage or driver error",
+    "A clean build prints one `ok` line;", "Options exist only for a **named decision**",
     "gather references first", "the options page is deleted", "never add your own taste",
     # build.md: applying is a file move; the verification doctrine and the playwright-cli how-to stay.
     "## Applying — a file move", "RESPECT THE DESIGN", "Matching is the floor, never acceptance.",
@@ -281,7 +284,7 @@ for gone in ("design-preview", "design-check", "canvas", "Artifact", "judge", "h
     assert gone not in drafter, gone
 critic = " ".join((root / "agents/design-critic.md").read_text().split())
 for required in ("run only when the operator asks for one", "**You get one pass**", "**Problems, never prescriptions.**",
-                 "the check script's output", "never fixes", "Never the drafter's `draft.md` self-assessment"):
+                 "the layout check's output", "never fixes", "Never the drafter's `draft.md` self-assessment"):
     assert required in critic, required
 for gone in ("judge mode", "## Judge mode", "design_preview", "DesignBrowser", "canvas", "Artifact", "```python"):
     assert gone not in critic, gone

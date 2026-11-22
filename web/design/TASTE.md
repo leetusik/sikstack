@@ -10,18 +10,18 @@ tokens and components say the rest: `src/sikstack/styles/tokens.css`, `@/sikstac
    the page on screen, and clicking one shows the page in that state.** (`lib/states.tsx`)
    - "I would like to have what we had on claude design. the status bar on the top. maybe improved version ok.
      scroll following maybe good, maybe some kind of little widget could work. the point, I can see the various
-     status of the page, by clicking the statuses." The operator, 2026-11-22, at the click-through stop after
-     P73-nv.S1's design-folder trial.
+     status of the page, by clicking the statuses." The operator, 2026-11-22, at the click-through of the first
+     design-folder trial.
    - Kept from the old state bar: "the status nav should contain only what the showing page got. not the whole."
-   - Source: the workspace's operator bar (`docs/reference/design/bar.md`, rule 1).
-2. **Not wordy, not generated-looking.** "too much descriptive, ai slob like design." The operator, at the P57-4q
-   mood-directions round (quoted in the signed round's handoff, below); and of two signed rounds: "too long and
-   fat", "only remove the descriptive texts. leave only essential ones."
+     The operator, at the old design canvas's state bar (its standing rule 1).
+2. **Not wordy, not generated-looking.** "too much descriptive, ai slob like design." The operator, at the
+   mood-directions round of the foundations design (quoted in the signed round's handoff, below); and of two signed
+   rounds: "too long and fat", "only remove the descriptive texts. leave only essential ones."
 
-## The look (the signed P57-4q foundations, "Instrument")
+## The look (the signed foundations, "Instrument")
 
-Source: job `01-foundations-and-shell`, round `03-instrument`, signed 2026-11-15 ("accept."): its `frame.md`
-(F6 house style, F7 layout rules) and `handoff.md`, in the workspace's design record.
+Source: the foundations and Shell design, its "Instrument" round, signed by the operator 2026-11-15 ("accept."): its
+house style and layout rules.
 
 - **Mood:** Instrument: a precise tool, light by default, one blue accent; a dark scheme beside it.
 - **Type:** IBM Plex Sans (IBM Plex Sans KR for Korean) in five steps: 12 meta, 14 text, 16 head, 22 title,

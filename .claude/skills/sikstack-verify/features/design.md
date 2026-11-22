@@ -9,6 +9,8 @@ awk '/^```bash drive$/{on=1;next} /^```$/{on=0} on' .claude/skills/sikstack-veri
 WEB=http://127.0.0.1:3040 EV="$EV" SESSION=sikstack-design bash -euo pipefail "$EV/design.sh"
 ```
 
+**Two checks, two names:** `pnpm --dir web design:check` is the production-exclusion check (a production build holds none of the design; it measures no page). The layout check is the sikstack plugin's `check.mjs`, over the served build: `node plugins/sikstack/templates/design/check.mjs --base "$WEB" --manifest web/design/out/manifest.json --out "$EV/layout"` prints one `ok` line, or one `FAIL` line per failure with a crop (exit 1); exit 2 is a usage or driver error, where nothing was checked. Each of its runs starts from empty storage.
+
 The pages sit at production's addresses for the recording's project (`00000000-0000-4000-8000-000000000001`): the Agenda at `/projects/<id>/workspace/`, an item at `…/workspace/agenda/<item>/`. Every change stays in the browser (`localStorage`). The **state widget** (`web/design/lib/states.tsx`, the pill at the window's bottom left, `Design states: <page>, <state>`) opens to the page's own states and **Reset design data**; a state is in the address as `?state=<key>`.
 
 **Drive it:** every Agenda action by client clicks, each change seen at once, after a reload and gone after Reset; an item added in the browser opened and edited, its Markdown note drawn; each page's states, each clicked, shown and kept by a reload; the widget by keyboard; the widget over no control at 1440 and 390 wide, scrolled to the top, middle and bottom; then the network log (only static files from `$WEB`) and the console (no error, so no hydration error).

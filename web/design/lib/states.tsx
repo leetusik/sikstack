@@ -16,7 +16,8 @@
  * List only states production draws for this page (`from` names the branch). A `data` state is the page's
  * data: `enter` puts it in place when the address names it (doing nothing when it is there already), and
  * `implied` (what the data is now) is shown as current, so a click on the design itself is never contradicted.
- * A preset never leaves the page.
+ * A preset never leaves the page. The widget marks the state on screen (`data-design-current`), which the layout
+ * check reads to confirm each run shows the state it names.
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -175,7 +176,14 @@ function StateWidget<K extends string>({
 
   return (
     // The pill comes first, so Tab goes from it into the open list; the list is drawn above it (CSS).
-    <div ref={root} className={css.root} data-design-states="" aria-label="Design states" role="region">
+    <div
+      ref={root}
+      className={css.root}
+      data-design-states=""
+      data-design-current={now.key}
+      aria-label="Design states"
+      role="region"
+    >
       <button
         ref={pill}
         type="button"

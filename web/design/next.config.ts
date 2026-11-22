@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { NextConfig } from "next";
@@ -19,8 +21,23 @@ const recording = path.resolve(
   process.env.DESIGN_RECORDING || "data/sample/recording.json",
 );
 
+/**
+ * The build's stamp (`lib/mark.ts`, `DESIGN_STAMP`): a hash of what the browser store holds, so a browser that kept
+ * a snapshot of another recording or another build's data drops it on load. It covers the recording, the state
+ * answers and the files that shape a snapshot.
+ */
+const states = path.join(here, "data", "sample", "states");
+const stamped = [
+  recording,
+  ...readdirSync(states).filter((f) => f.endsWith(".json")).sort().map((f) => path.join(states, f)),
+  ...["answers.ts", "apply.ts", "ids.ts", "store.ts"].map((f) => path.join(here, "lib", f)),
+];
+const stamp = createHash("sha256");
+for (const file of stamped) stamp.update(path.relative(here, file)).update("\0").update(readFileSync(file)).update("\0");
+
 const config: NextConfig = {
   output: "export",
+  env: { DESIGN_STAMP: stamp.digest("hex").slice(0, 16) },
   trailingSlash: true,
   // `out/` is the export; the build's own files stay in `design/.next/` (both gitignored).
   distDir: "out",
