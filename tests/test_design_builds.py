@@ -9,6 +9,8 @@ removing the row and the files and its host answering 404; on the design origin,
 member only through a ticket for that build and that member, used once and within
 its minute; a non-member never; a share link opening that one build while on, and
 neither the link nor an open tab after it is off; ``frame-ancestors`` on every answer.
+Every answer about a build names its viewer on the app, and every refusal on a build's
+host links there.
 """
 
 from __future__ import annotations
@@ -268,6 +270,22 @@ def test_every_publish_is_kept_newest_first_with_its_facts(db):
     assert _builds_on_disk(tmp_path) == sorted([a["id"], b["id"]])
 
 
+def test_every_build_answer_leads_with_its_viewer_on_the_app(db):
+    """The URL a member opens is the build's viewer on the app; its own host needs a ticket."""
+    client, _engine, _tmp = db
+    owner = _account(client)
+    published = _publish(client, owner).json()
+    a = published["build"]["id"]
+    viewer = f"{_APP}/projects/{owner['project']}/design/{a}"
+    assert published["viewer"] == viewer and published["build"]["viewer"] == viewer
+    assert published["url"] == f"http://{a}.design.test/"
+    by_key = client.get(f"/api/design/{owner['project']}/builds", headers=owner["key"]).json()["builds"]
+    assert [b["viewer"] for b in by_key] == [viewer]
+    base = f"/app/projects/{owner['project']}/design/builds"
+    assert client.get(base, headers=owner["session"]).json()["builds"][0]["viewer"] == viewer
+    assert client.get(f"{base}/{a}", headers=owner["session"]).json()["build"]["viewer"] == viewer
+
+
 def test_only_the_projects_workspace_key_reaches_the_engine_routes(db):
     client, _engine, _tmp = db
     owner, other = _account(client), _account(client)
@@ -460,6 +478,51 @@ def test_a_private_builds_share_link_is_refused_even_with_next(db):
         )
     for params in ({}, {"next": "/system/"}):
         assert _origin(a).get(f"/_share/{token}", params=params).status_code == 403, params
+
+
+def _links_to_viewer(res, viewer: str) -> bool:
+    return (
+        res.status_code == 403
+        and res.headers["content-type"].startswith("text/html")
+        and f'href="{viewer}"' in res.text
+        and "sign in and open" not in res.text
+    )
+
+
+def test_every_refusal_on_a_builds_host_links_to_its_viewer(db):
+    """No ticket, a spent or stale ticket, a stranger's cookie, a share link that is off: each is
+    still a 403 with no page, and each links to the build's viewer on the app, never a dead end."""
+    client, _engine, _tmp = db
+    owner, stranger = _account(client), _account(client)
+    a = _publish(client, owner).json()["build"]["id"]
+    viewer = f"{_APP}/projects/{owner['project']}/design/{a}"
+    from server.design import tokens
+
+    bare = _origin(a)
+    for path in ("/", "/system/", "/_next/static/app.js"):
+        res = bare.get(path)
+        assert _links_to_viewer(res, viewer), (path, res.text)
+        assert b"home" not in res.content and b"console.log" not in res.content
+
+    url = _ticket_url(client, owner, a)
+    assert _enter(_origin(a), url).status_code == 303
+    assert _links_to_viewer(_enter(_origin(a), url), viewer)  # spent
+    stale = tokens.mint_ticket(_SECRET.encode(), a, owner["user"], now=time.time() - 120)
+    assert _links_to_viewer(_origin(a).get(f"/_open?t={stale}"), viewer)
+    theirs = tokens.mint_ticket(_SECRET.encode(), a, stranger["user"])
+    assert _links_to_viewer(_origin(a).get(f"/_open?t={theirs}"), viewer)
+    strangers = _origin(a)
+    strangers.cookies.set("sikstack_design", tokens.member_cookie(_SECRET.encode(), a, stranger["user"]))
+    assert _links_to_viewer(strangers.get("/"), viewer)
+
+    switch = f"/app/projects/{owner['project']}/design/builds/{a}/share"
+    link = urlsplit(client.post(switch, json={"on": True}, headers=owner["session"]).json()["build"]["share"]["url"]).path
+    guest = _origin(a)
+    assert guest.get(link).status_code == 303 and guest.get("/").status_code == 200
+    client.post(switch, json={"on": False}, headers=owner["session"])
+    off = _origin(a).get(link)
+    assert _links_to_viewer(off, viewer) and "This share link is off." in off.text
+    assert _links_to_viewer(guest.get("/system/"), viewer)  # the open tab
 
 
 def test_every_design_origin_answer_carries_frame_ancestors_for_the_app(db):

@@ -23,7 +23,14 @@ Every other request needs that cookie and is re-checked against the database: th
 build still exists; a member's cookie, that they are still an approved member of the
 build's org; a share cookie, that sharing is still on with the same link. So
 turning sharing off, or deleting the build, closes tabs already open. Only ``GET``
-and ``HEAD``. Files resolve as ``design:serve`` does (``dir/`` as ``dir/index.html``,
+and ``HEAD``.
+
+A refusal on an existing build's host (no cookie, a spent or stale ticket, a
+non-member, a share link that is off) is a 403 page with no part of the build, whose
+one link is the build's viewer on the app (``viewer_url``): a member signed in there
+opens it, a signed-out browser is asked to sign in there first, and anyone else is
+refused there as on any other project page. Nobody is told to sign in with no way
+forward. Files resolve as ``design:serve`` does (``dir/`` as ``dir/index.html``,
 anything else the build's own ``404.html`` with a 404).
 
 Every response, refusals included, carries ``Content-Security-Policy:
@@ -41,6 +48,7 @@ import logging
 import mimetypes
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from urllib.parse import unquote
 from uuid import UUID
@@ -48,7 +56,7 @@ from uuid import UUID
 from starlette.applications import Starlette
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
-from starlette.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -80,8 +88,35 @@ def _text(status: int, line: str) -> PlainTextResponse:
     return PlainTextResponse(line + "\n", status_code=status)
 
 
-def _refused() -> PlainTextResponse:
-    return _text(403, "This design build opens from sikstack: sign in and open it from the project's Design page.")
+def viewer_url(project_id: UUID | str, build_id: str) -> str:
+    """The build's viewer on the app (``<app origin>/projects/<project>/design/<build>``): the
+    address a person opens a build at; it frames the build through a ticket."""
+
+    return f"{settings.app_origin()}/projects/{project_id}/design/{build_id}"
+
+
+_REFUSAL_PAGE = """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open this design build in sikstack</title></head>
+<body>
+<p>{line}</p>
+<p><a href="{viewer}" target="_top">{action}</a></p>
+</body>
+</html>
+"""
+
+
+def _refused(
+    served: ServedBuild,
+    line: str = "This design build opens from sikstack, on its project's Design page.",
+    action: str = "Open it in sikstack",
+) -> HTMLResponse:
+    """A 403 with none of the build, whose one link is the build's viewer on the app."""
+
+    viewer = viewer_url(served.build.project_id, served.build.id)
+    page = _REFUSAL_PAGE.format(line=escape(line), viewer=escape(viewer, quote=True), action=escape(action))
+    return HTMLResponse(page, status_code=403)
 
 
 def _safe_next(value: str | None) -> str:
@@ -185,18 +220,18 @@ async def serve(request: Request) -> Response:
         return _text(404, "This design build does not exist, or was deleted.")
     secret = settings.secret()
     if secret is None:
-        return _refused()
+        return _refused(served)
 
     if path == "/_open":
         ticket = tokens.open_ticket(secret, request.query_params.get("t"))
         if ticket is None or ticket.build_id != build_id or not _LEDGER.spend(ticket):
-            return _text(403, "This link has expired or was already used: open the build again from sikstack.")
+            return _refused(served, "This link has expired or was already used.", "Open the build again in sikstack")
         try:
             member = await store.is_member(served.tenant_id, UUID(ticket.user_id))
         except (ValueError, DesignStoreError):
             member = False
         if not member:
-            return _refused()
+            return _refused(served)
         return _enter(_safe_next(request.query_params.get("next")), tokens.member_cookie(secret, build_id, ticket.user_id))
 
     if path.startswith("/_share/"):
@@ -208,7 +243,7 @@ async def serve(request: Request) -> Response:
             and build.share_token
             and hmac.compare_digest(token.encode("utf-8"), build.share_token.encode("utf-8"))
         ):
-            return _text(403, "This share link is off.")
+            return _refused(served, "This share link is off.", "Members open it in sikstack")
         target = _safe_next(request.query_params.get("next"))
         return _enter(target, tokens.share_cookie(secret, build_id, build.share_token))
 
@@ -221,7 +256,7 @@ async def serve(request: Request) -> Response:
                 return _file(folder, path)
         except DesignStoreError:
             return _text(503, "The design builds store is unavailable.")
-    return _refused()
+    return _refused(served)
 
 
 class _EveryResponse:

@@ -4,7 +4,7 @@
 
 `run.sh workspace <dir>` makes that checkout: a scratch repo with a `sikstack init` workspace (the branch's engine), linked to the test account's project `sikstack` by a workspace key it mints through the API and hands to `link` on stdin. The key stays in the home's XDG folder (0700, its file 0600), which `down` removes. `run.sh signin other` signs a second account (its own org, a member of nothing here) into `$SESSION-other`; `run.sh api <method> <path> [json]` calls the API as the test account. Every build is made in a scratch copy of `web/` (deleted when the block ends), never in the design folder itself.
 
-**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 390.
+**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the printed URL (the build's viewer) and the bare build host (a 403 linking to it); the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 390.
 
 ```bash drive
 OTHER="$SESSION-other"; GUEST="$SESSION-guest"
@@ -135,6 +135,28 @@ host() { printf '%s' "${DESIGN/\{build\}/$1}"; }
 VIEW="$WEB/projects/$PROJECT/design"
 echo "builds: options $OPT, private $PRIV, attack $ATK, to delete $DEL"
 
+# 1. The URL design-publish and design-builds print (url=) is the build's viewer on the app, and the member who
+#    published opens it there. The build's own host, opened bare (before any viewer has traded a ticket for its
+#    cookie), is a 403 with none of the build, whose one link is that viewer (it never says to sign in with no way
+#    forward); following it opens the viewer.
+PRINTED=$(sed -n "s/^published=$OPT url=\([^ ]*\) .*/\1/p" "$EV/publish.log" | head -1)
+[ "$PRINTED" = "$VIEW/$OPT" ] || { echo "design-publish printed url=$PRINTED, not the viewer $VIEW/$OPT"; exit 1; }
+sk design-builds >"$EV/builds.log"; cat "$EV/builds.log"
+grep -q "^$OPT url=$VIEW/$OPT .* host=$(host "$OPT")/\$" "$EV/builds.log" || { echo "design-builds does not lead $OPT with its viewer"; exit 1; }
+page=$(visit "$SESSION" "$(host "$OPT")/")
+must "the bare host is a 403 saying where the build opens, never to sign in" "$page" \
+  'd["status"] == 403 and "opens from sikstack" in d["text"] and "sign in" not in d["text"].lower() and "3 directions" not in d["text"]'
+see "document.querySelectorAll('a').length === 1 && document.querySelector('a').href === '$VIEW/$OPT'"
+shot 01-bare-host
+pw click "a[href=\"$VIEW/$OPT\"]"
+see "location.href === '$VIEW/$OPT'" "$(shows "3 directions")" 'document.querySelectorAll("iframe").length === 3'
+pw goto "$WEB/dashboard"
+page=$(visit "$SESSION" "$PRINTED")
+must "the printed URL opens the viewer for the member who published" "$page" 'd["status"] == 200 and d["url"] == "'"$VIEW/$OPT"'"'
+see "$(shows "3 directions")" 'document.querySelectorAll("iframe").length === 3'
+shot 01-printed-url
+echo "printed url: the viewer, opened by the member; the bare host links to it"
+
 # 2. The viewer: the options directions side by side, bar hidden, each frame at its page's full height, in one
 #    screenshot; every manifest page opened from the viewer's link and a state clicked; no console error.
 pw resize 1440 900
@@ -200,6 +222,9 @@ page=$(visit "$OTHER" "$WEB/api/design/open?project=$PROJECT&build=$OPT&path=%2F
 must "the second account gets no ticket to the build" "$page" 'd["status"] == 404 and d["url"].startswith("'"$WEB"'")'
 page=$(visit "$OTHER" "$(host "$OPT")/")
 must "the second account is refused at the build's own host" "$page" 'd["status"] == 403 and "opens from sikstack" in d["text"]'
+playwright-cli -s="$OTHER" click "a[href=\"$VIEW/$OPT\"]" >>"$EV/drive.log" 2>&1
+IN="$OTHER" see "location.href === '$VIEW/$OPT'" "$(shows "Project not found")" "!document.querySelector('iframe')"
+echo "ok   the refusal's link takes the second account to the app, which refuses it too"
 pw goto "$VIEW/$OPT"
 playwright-cli -s="$SESSION" --raw run-code "async page => { await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: $(q "$WEB") }); return 'ok'; }" >/dev/null
 pw click 'role=button[name="Turn on"]'
@@ -235,6 +260,9 @@ page=$(visit "$GUEST" "$(host "$OPT")/system/")
 must "the open tab's next page is refused" "$page" 'd["status"] == 403 and "opens from sikstack" in d["text"]'
 page=$(visit "$GUEST" "$PAGE_LINK")
 must "the same copy link is off" "$page" 'd["status"] == 403 and "This share link is off." in d["text"]'
+playwright-cli -s="$GUEST" click "a[href=\"$VIEW/$OPT\"]" >>"$EV/drive.log" 2>&1
+IN="$GUEST" see "location.pathname === '/login'"
+echo "ok   the off link's one link asks the signed-out browser to sign in on the app, and opens nothing"
 playwright-cli -s="$GUEST" close >>"$EV/drive.log" 2>&1
 echo "sharing: a non-member refused three ways; a signed-out browser in by the link and out after it was turned off"
 
@@ -356,4 +384,4 @@ pw screenshot --filename="$EV/design-service.png"
 echo "design-service: PASS"
 ```
 
-**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|390>.png`, `design-service-08-viewer-<1440|390>.png` and `design-service-08-viewer-shared-390.png`; `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.
+**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-01-printed-url.png` (the URL `design-publish` printed, opened by the member: the viewer), `design-service-01-bare-host.png` (the build's own host without a ticket: a 403 whose one link is the viewer), `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|390>.png`, `design-service-08-viewer-<1440|390>.png` and `design-service-08-viewer-shared-390.png`; `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.

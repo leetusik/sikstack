@@ -9,7 +9,7 @@ revoked key 401), like ``/api/workspace``:
   (16 MB) is a 413 before or while it is read; it is unpacked under the caps
   (``server.design.unpack``: files and folders only, clean relative names, 50 MB
   unpacked, 5,000 files, a 413 or 400 naming the size and the cap) and must hold a
-  marked ``manifest.json``. ``201 {build, url}``; every publish is a new build. A
+  marked ``manifest.json``. ``201 {build, viewer, url}``; every publish is a new build. A
   build whose manifest's ``recording.file`` is under ``design/data/local/`` is
   private. An ``X-Sikstack-Checkout`` header, when sent, is kept as where it came from.
 - ``GET /api/design/{project_id}/builds`` → ``{builds}``, newest first.
@@ -29,10 +29,15 @@ build it does not hold, is a 404):
   (``<origin>/_open?t=…&next=<path>``). The web's ``/api/design/open`` redirects there.
   503 when the server has no design origin or secret.
 
-A build's JSON: ``{id, url, commit, branch, dirty, recording, recording_name,
-private, size, files, pages, options, published_at, published_from, share: {on,
-url?}}`` (the share link's ``url`` only for members). Every route answers 404
-without ``DATABASE_URL``.
+A build's JSON: ``{id, viewer, url, commit, branch, dirty, recording,
+recording_name, private, size, files, pages, options, published_at, published_from,
+share: {on, url?}}`` (the share link's ``url`` only for members). ``viewer`` is the
+address a person opens: the build's viewer on the app
+(``<app origin>/projects/<project>/design/<build>``, the app's origin from
+``KB_DESIGN_APP_ORIGIN``, else ``KB_PUBLIC_BASE_URL``), which frames the build
+through a ticket. ``url`` is the build's own host, which admits only a ticket, a
+cookie it traded for, or a share link while on. Every route answers 404 without
+``DATABASE_URL``.
 """
 
 from __future__ import annotations
@@ -56,6 +61,7 @@ from server.app_api import _load_scoped_project
 from server.design import settings, store, tokens
 from server.design.store import BuildRecord, DesignStoreError
 from server.design.unpack import BuildRefused, facts, mb, unpack
+from server.design_serve import viewer_url
 from server.usage.metering import stamp_credential_used
 
 router = APIRouter()
@@ -94,6 +100,7 @@ def _build_json(build: BuildRecord, *, member: bool) -> dict[str, Any]:
         )
     return {
         "id": build.id,
+        "viewer": viewer_url(build.project_id, build.id),
         "url": f"{origin}/" if origin else None,
         "commit": build.source_commit,
         "branch": build.source_branch,
@@ -230,7 +237,7 @@ async def publish_build(
         if not placed:
             store.remove_folder(folder)
     body = _build_json(build, member=False)
-    return JSONResponse({"build": body, "url": body["url"]}, status_code=201)
+    return JSONResponse({"build": body, "viewer": body["viewer"], "url": body["url"]}, status_code=201)
 
 
 @router.get("/api/design/{project_id}/builds")

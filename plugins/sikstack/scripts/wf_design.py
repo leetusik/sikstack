@@ -210,7 +210,9 @@ def _measure(out: Path, prog: str) -> tuple:
 
 def design_publish(args: argparse.Namespace) -> None:
     """Publish the design folder's build (out/, manifest.json at its root) to the linked project: refused unmarked,
-    over a cap or unlinked before anything is sent; prints the build's URL and whether it is private."""
+    over a cap or unlinked before anything is sent; prints the build's URL to open (`url=`, its viewer on sikstack, as
+    the server names it: the build's own host admits only a ticket or a share link, so it is `host=`, last) and
+    whether it is private."""
     import tarfile
     import tempfile
     prog, nothing = "design-publish", "nothing was published"
@@ -249,18 +251,25 @@ def design_publish(args: argparse.Namespace) -> None:
     _design_call(link, prog, nothing, "GET")
     answer = _design_call(link, prog, nothing, "POST", body=body)
     build = answer.get("build") if isinstance(answer.get("build"), dict) else {}
-    url = answer.get("url") or build.get("url")
     private = bool(build.get("private"))
-    print(f"published={build.get('id')} url={url} private={'yes' if private else 'no'} "
+    print(f"published={build.get('id')} url={_open_url(build, answer)} private={'yes' if private else 'no'} "
           f"commit={str(build.get('commit') or 'none')[:12]} branch={build.get('branch') or 'none'} "
-          f"size={build.get('size')} files={build.get('files')} compressed={packed}")
+          f"size={build.get('size')} files={build.get('files')} compressed={packed} "
+          f"host={answer.get('url') or build.get('url')}")
     if private:
         print(f"private: made from a private recording ({build.get('recording') or 'design/data/local/'}), so its "
               "share link cannot be turned on")
 
 
+def _open_url(build: dict, answer: dict | None = None):
+    """The address a person opens a build at: the server's `viewer` (the build's viewer on sikstack), else (a server
+    from before it named one) the build's host. Composed by the server, never here."""
+    answer = answer or {}
+    return answer.get("viewer") or build.get("viewer") or answer.get("url") or build.get("url")
+
+
 def design_builds(args: argparse.Namespace) -> None:
-    """The linked project's design builds, newest first, one line each."""
+    """The linked project's design builds, newest first, one line each: the id, then the URL to open (`url=`)."""
     prog, nothing = "design-builds", "nothing was read"
     link = _design_link(prog, nothing)
     builds = _design_call(link, prog, nothing, "GET").get("builds")
@@ -268,13 +277,15 @@ def design_builds(args: argparse.Namespace) -> None:
     print(f"builds={len(builds)} project={link.project}")
     for b in builds:
         share = b.get("share") if isinstance(b.get("share"), dict) else {}
-        print(f"{b.get('id')} published_at={b.get('published_at')} commit={str(b.get('commit') or 'none')[:12]} "
-              f"branch={b.get('branch') or 'none'} size={b.get('size')} files={b.get('files')} "
-              f"private={'yes' if b.get('private') else 'no'} share={'on' if share.get('on') else 'off'} url={b.get('url')}")
+        print(f"{b.get('id')} url={_open_url(b)} published_at={b.get('published_at')} "
+              f"commit={str(b.get('commit') or 'none')[:12]} branch={b.get('branch') or 'none'} size={b.get('size')} "
+              f"files={b.get('files')} private={'yes' if b.get('private') else 'no'} "
+              f"share={'on' if share.get('on') else 'off'} host={b.get('url')}")
 
 
 def design_delete(args: argparse.Namespace) -> None:
-    """Delete one design build of the linked project: its row, then its files; its URL answers 404 from then on."""
+    """Delete one design build of the linked project: its row, then its files; its host answers 404 and its viewer
+    says it is gone."""
     from urllib.parse import quote
     prog = "design-delete"
     nothing = "nothing was deleted"
@@ -301,16 +312,17 @@ def add_design_parsers(sub) -> None:
                        "marked $design: sikstack-design-build) to the linked project's Design service with this checkout's "
                        "workspace key (read from the key file, never argv); refused before anything is sent when unlinked, "
                        f"unmarked or over a cap ({_mb(CAP_UNPACKED)} unpacked, {CAP_FILES:,} files, {_mb(CAP_COMPRESSED)} "
-                       "compressed); prints the build's URL and whether it is private (a --data local/<name> recording)",
+                       "compressed); prints the URL to open the build at (its viewer on sikstack; the build's own host is host=) "
+                       "and whether it is private (a --data local/<name> recording)",
                        description="Run only when the operator's words ask to publish; publishing is never a sign-off. "
                        "Every publish is a new build, kept beside the earlier ones.")
     p.add_argument("--folder", required=True, help="the design folder: its path inside the product repo (e.g. web/design) or an absolute path")
     p.add_argument("--repo", default=None, help="the product repo's registered name (a multi-repo host with more than one repo)")
     p.set_defaults(func=design_publish)
-    p = sub.add_parser("design-builds", help="List the linked project's design builds, newest first: id, when, commit, "
-                       "branch, size, files, private, share and URL")
+    p = sub.add_parser("design-builds", help="List the linked project's design builds, newest first: id, the URL to "
+                       "open (its viewer on sikstack), when, commit, branch, size, files, private, share and its host")
     p.set_defaults(func=design_builds)
     p = sub.add_parser("design-delete", help="Delete one design build of the linked project (an id design-builds lists); "
-                       "its URL answers 404 from then on")
+                       "its host answers 404 and its viewer says it is gone")
     p.add_argument("build", help="the build's id (b followed by 25 letters and digits)")
     p.set_defaults(func=design_delete)

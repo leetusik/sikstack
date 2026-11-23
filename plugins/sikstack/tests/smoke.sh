@@ -4494,7 +4494,7 @@ printf '%s\n' "$si_f1" | grep -q '^sent: ' && [ "$(printf '%s\n' "$si_f1" | tail
   || bad "feedback -- f1=[$si_f1] f2=[$si_f2] f3=[$si_f3] f4=[$si_f4] f5=[$si_f5] reports=[$si_rep]"
 
 # ---------------------------------------------------------------------------
-echo "== Test 33: the design publish verbs against the local fake sikstack -- design-publish refuses an unlinked checkout with the sign-in line, a folder with no manifest or an unmarked one, and a build over a cap (files, unpacked, compressed) naming the size and the cap, each before any request; it uploads out/ as one tar.gz (manifest.json at its root) with the workspace key as a Bearer, outside the cloud boundary, and prints the URL and private=; a second publish is a second row listed first; a local/ recording is private; design-delete removes one (a second delete is the server's 404 line); a wrong key and the server's 403 and 413 are one line each; the key appears nowhere =="
+echo "== Test 33: the design publish verbs against the local fake sikstack -- design-publish refuses an unlinked checkout with the sign-in line, a folder with no manifest or an unmarked one, and a build over a cap (files, unpacked, compressed) naming the size and the cap, each before any request; it uploads out/ as one tar.gz (manifest.json at its root) with the workspace key as a Bearer, outside the cloud boundary, and prints the build's viewer on sikstack first (url=, as the server answers it), private= and the build's host last (host=); a second publish is a second row listed first; a local/ recording is private; design-delete removes one (a second delete is the server's 404 line); a wrong key and the server's 403 and 413 are one line each; the key appears nowhere =="
 newtmp DPW; DPX="$DPW/xdg"; DPH="$DPW/prod"; DPU="$DPW/unlinked"
 dp() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$DPX" python3 "$ENG" "$@" ) 2>&1; }
 { mkhost "$DPH" && git -C "$DPH/.sikstack" add -A && git -C "$DPH/.sikstack" commit -q --allow-empty -m install && mkhost "$DPU"; } > "$DPW/setup.txt" 2>&1 \
@@ -4542,17 +4542,17 @@ dp_id2=$(printf '%s\n' "$dp_o2" | sed -n 's/^published=\([^ ]*\) .*/\1/p'); dp_i
 dp_o4=$(dp "$DPH" design-builds); dp_rc4=$?
 dp_post=$(grep '"route": "design"' "$DPL" | grep '"method": "POST"' | head -1)
 [ "$dp_rc2" = 0 ] && [ "$dp_rc3" = 0 ] && [ -n "$dp_id2" ] && [ -n "$dp_id3" ] && [ "$dp_id2" != "$dp_id3" ] \
-  && printf '%s\n' "$dp_o2" | grep -q "^published=$dp_id2 url=http://$dp_id2.design.fake.localhost/ private=no commit=0123456789ab branch=main size=" \
+  && printf '%s\n' "$dp_o2" | grep -q "^published=$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 private=no commit=0123456789ab branch=main size=[0-9]* files=[0-9]* compressed=[0-9]* host=http://$dp_id2.design.fake.localhost/\$" \
   && [ "$dp_rc4" = 0 ] && [ "$(printf '%s\n' "$dp_o4" | sed -n 1p)" = "builds=2 project=proj-1" ] \
-  && printf '%s\n' "$dp_o4" | sed -n 2p | grep -q "^$dp_id3 " && printf '%s\n' "$dp_o4" | sed -n 3p | grep -q "^$dp_id2 .*private=no share=off url=http://$dp_id2" \
+  && printf '%s\n' "$dp_o4" | sed -n 2p | grep -q "^$dp_id3 " && printf '%s\n' "$dp_o4" | sed -n 3p | grep -q "^$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 published_at=.* private=no share=off host=http://$dp_id2.design.fake.localhost/\$" \
   && printf '%s\n' "$dp_post" | grep -q '"auth": "ok"' && printf '%s\n' "$dp_post" | grep -q '"content_type": "application/gzip"' \
   && printf '%s\n' "$dp_post" | grep -q '"names": \["_next", "_next/static", "_next/static/a.js", "index.html", "manifest.json", "system", "system/index.html"\]' \
   && [ "$(dp_ws)" = "$dp_ws0" ] \
-  && ok "design-publish uploads out/ as one tar.gz (manifest.json at its root) with the key as a Bearer, prints published=, the URL and private=no; a second publish of the same commit is a second row, listed first by design-builds; no workspace request around them" \
+  && ok "design-publish uploads out/ as one tar.gz (manifest.json at its root) with the key as a Bearer, prints published= led by the build's viewer on sikstack (url=), private=no and its host last (host=); design-builds leads each row with the id and that url=; a second publish of the same commit is a second row, listed first by design-builds; no workspace request around them" \
   || bad "publish and list are wrong -- rc=$dp_rc2/$dp_rc3/$dp_rc4 [$dp_o2] [$dp_o4] post=[$dp_post] ws=$dp_ws0/$(dp_ws)"
 # (c) a local/ recording publishes as private, and the verb says so.
 dp_o5=$(dp "$DPH" design-publish --folder "$DPW/private"); dp_rc5=$?
-[ "$dp_rc5" = 0 ] && printf '%s\n' "$dp_o5" | sed -n 1p | grep -q '^published=b[a-z2-7]* url=.* private=yes ' \
+[ "$dp_rc5" = 0 ] && printf '%s\n' "$dp_o5" | sed -n 1p | grep -q "^published=b[a-z2-7]* url=$DPS/projects/proj-1/design/b[a-z2-7]* private=yes " \
   && printf '%s\n' "$dp_o5" | sed -n 2p | grep -q '^private: made from a private recording (design/data/local/acme/recording.json), so its share link cannot be turned on$' \
   && ok "a build from a design/data/local/ recording publishes as private=yes, with the one line saying its share link cannot be turned on" \
   || bad "the private publish is wrong -- rc=$dp_rc5 [$dp_o5]"

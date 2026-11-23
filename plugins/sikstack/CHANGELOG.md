@@ -13,9 +13,11 @@ integer version per release, `## v<N>` below; that history continues here.
   `design-publish --folder <design folder> [--repo <name>]` reads `<folder>/out/manifest.json` (refused when it is
   missing or lacks `$design: sikstack-design-build`), checks the caps before anything is sent (50 MB unpacked, 5,000
   files, 16 MB compressed; each refusal names the size and the cap), uploads `out/` as one tar.gz with the checkout's
-  workspace key (read from the key file, never argv, never printed) over the cloud transport, and prints the build's
-  URL and `private=yes|no` (a `design/data/local/` recording is private); every publish is a new build.
-  `design-builds` lists the project's builds, newest first; `design-delete <build>` removes one (its URL answers 404).
+  workspace key (read from the key file, never argv, never printed) over the cloud transport, and prints the URL to
+  open the build at, `url=`, its viewer on sikstack (`<app>/projects/<project>/design/<build>`, as the server answers
+  it; the build's own host, which admits only a ticket or a share link, is `host=`, last) and `private=yes|no` (a
+  `design/data/local/` recording is private); every publish is a new build. `design-builds` lists the project's
+  builds, newest first, each led by its id and `url=`; `design-delete <build>` removes one (its host answers 404).
   They run outside the cloud boundary (no pull, no batch). An unlinked checkout is refused with the sign-in line; the
   server's 401, 403, 404, 400 and 413 are one line each.
 - **design-cowork's Show step publishes only on the operator's words**: `sikstack design-publish`, then the URL in

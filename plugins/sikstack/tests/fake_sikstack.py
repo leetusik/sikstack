@@ -38,7 +38,8 @@ install routes sign-in and feedback use, each logged whole (the poll token and k
 - Test-only POST /_fake/sign-in {code, state: approved|denied|expired} decides a code as the connect page would.
 
 The design API (S1's, P77): POST /api/design/<project>/builds (the raw tar.gz of a build folder; a marked
-manifest.json at its root, else 400; a recording under design/data/local/ is private) -> 201 {build, url};
+manifest.json at its root, else 400; a recording under design/data/local/ is private) -> 201 {build, viewer, url}
+(viewer: the build's viewer on this server, http://<Host>/projects/<project>/design/<id>; url: its own host);
 GET .../builds -> {builds}, newest first; DELETE .../builds/<id> -> {deleted}, an unknown id 404; a wrong key 401,
 another project 404. Each request is logged (route "design": method, bytes, Content-Type, the tar's names, the
 status; never the key). control design_answer: {status, detail, method?} answers the next design request (of that
@@ -461,14 +462,16 @@ def make_handler(store: Store, key: str, log_path: str):
                     bid = "b" + "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz234567") for _ in range(25))
                     source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
                     rec = manifest.get("recording") if isinstance(manifest.get("recording"), dict) else {}
-                    build = {"id": bid, "url": f"http://{bid}.design.fake.localhost/", "commit": source.get("commit"),
+                    host = self.headers.get("Host") or "127.0.0.1"
+                    build = {"id": bid, "viewer": f"http://{host}/projects/{store.project_id}/design/{bid}",
+                             "url": f"http://{bid}.design.fake.localhost/", "commit": source.get("commit"),
                              "branch": source.get("branch"), "dirty": bool(source.get("dirty")),
                              "recording": rec.get("file"), "private": str(rec.get("file") or "").startswith("design/data/local/"),
                              "size": sum(m.size for m in members if m.isreg()), "files": sum(1 for m in members if m.isreg()),
                              "published_at": f"2026-11-23T00:00:{len(store.builds):02d}Z",
                              "published_from": entry["checkout"], "share": {"on": False}}
                     store.builds.insert(0, build)
-                    status, payload = 201, {"build": build, "url": build["url"]}
+                    status, payload = 201, {"build": build, "viewer": build["viewer"], "url": build["url"]}
             elif len(parts) == 5 and method == "DELETE":
                 kept = [b for b in store.builds if b["id"] != parts[4]]
                 if len(kept) == len(store.builds):
