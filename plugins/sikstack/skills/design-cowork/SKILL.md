@@ -1,6 +1,6 @@
 ---
 name: design-cowork
-description: "How to run product visual design in this workspace: the design subagent drafts, the operator decides. A design lives in the product repo's design folder, on the product's own components, built and served at a local URL the operator clicks through, and signed only by their literal words in the session; applying it is a later slice that moves its files into production. You write the brief, dispatch the drafter, build, serve, run the layout check, stop, record their words. Use when a phase or slice touches a design system, a redesign, mockups, a design gate, brand/palette/typography, or the look of user-facing pages. NOT for non-visual design (schema, API, architecture)."
+description: "How to run product visual design in this workspace: the design subagent drafts, the operator decides. A design lives in the product repo's design folder, on the product's own components, built and served at a local URL the operator clicks through, and signed only by their literal words in the session; applying it is a later slice that moves its files into production. You write the brief, dispatch the drafter, build, serve, run the layout check, stop, record their words, publish when they ask. Use when a phase or slice touches a design system, a redesign, mockups, a design gate, brand/palette/typography, or the look of user-facing pages. NOT for non-visual design (schema, API, architecture)."
 allowed-tools: Bash(sikstack:*), Read, Edit, Write, Glob, Grep, Bash, Agent
 ---
 
@@ -45,12 +45,16 @@ apply   a separate slice moves the signed files into production
   decision of yours.
 - **Draft.** `sikstack-adapter route --drafter --phase <P>` names the model (the design row, or the phase's
   `Drafter:` line); dispatch `sikstack:design-drafter` in the background with the brief's path, the folder, its
-  commands and `slice: <S>`. A critic runs only when the operator asked (`route --critic`): one critique file, then
-  one drafter pass answering it; what stays open goes to the operator.
+  commands and `slice: <S>`. A critic runs only when the operator asked (`route --critic`), judging from the screen:
+  it runs the layout check with `--shots <slice folder>/shots` and opens those tiles; one critique file, then one
+  drafter pass answering it; what stays open goes to the operator.
 - **Show.** Build and serve with the folder's own commands on a free loopback port; run the layout check
   (`reference/folder.md`, *The layout check*), never only the folder's production-exclusion check, and read its
   failures yourself. Commit the design folder, then stop `pending --stop-kind wave` and report the URL, the pages and states to open, the screenshots, what the drafter
-  left open. Leave the server running for the operator; stop it when their words come back.
+  left open. Leave the server running for the operator; stop it when their words come back. Publish only when
+  their words ask to: `sikstack design-publish --folder <folder> [--repo <name>]` uploads the build to the
+  project's Design service (linked checkouts only) and prints its URL, `private=yes` for a real project's recording;
+  report the URL. Never publish unasked, and a publish is never a sign-off.
 - **Words.** Literal approval ("approved", "ship it", words to that effect) signs:
   `sikstack design-sign --slice <S> --words "<their exact words>" --folder <folder> [--repo <name>]` records the
   words with the product repo's commit. Anything else is feedback: append it verbatim to the slice's `feedback.md`,

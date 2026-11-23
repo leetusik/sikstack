@@ -252,10 +252,13 @@ for required in (
     "`npm install -g @playwright/cli@0.1.25`", "`playwright-cli install-browser chrome-for-testing`",
     "`playwright-cli kill-all`", "**How to call it.** Plainly", "send a password's `fill` to `/dev/null`",
     "`playwright-cli` blocks `file:` URLs", "**When the design never drew it**", "**Signing a design is not accepting the product**",
+    # 2.1.0: publishing runs only on the operator's words and is never a sign-off; the critic judges from --shots tiles.
+    "`sikstack design-publish --folder <folder> [--repo <name>]`", "Never publish unasked, and a publish is never a sign-off.",
+    "`--shots <slice folder>/shots`", "[--shots <dir>]",
 ):
     assert required in design, required
-for gone in ("Artifact", "Design canvas", "Design System Artifact", "DesignSync", "claude-design", "design-open", "design-publish",
-             "design-readback", "design-canvas", "design-close", "design-check", "design-preview", "design-init", "design-system",
+for gone in ("Artifact", "Design canvas", "Design System Artifact", "DesignSync", "claude-design", "design-open",
+             "design-publish-plan", "design-readback", "design-canvas", "design-close", "design-check", "design-preview", "design-init", "design-system",
              "design-migrate", "critic+judge", "the judge", "PENDING #", "Mockup: requested", "canvas.json", "handoff.md", "frame pass",
              "in-product mockup route"):
     assert gone not in design, gone
