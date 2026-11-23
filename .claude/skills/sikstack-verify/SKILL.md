@@ -17,6 +17,6 @@ One script, `run.sh` (beside this file), runs the whole product on loopback with
 
 ## Features
 
-`features/<name>.md`: **Reach it**, **Drive it** (a ```` ```bash drive ```` block of the kept steps), **Proof**. Run one whole with `run.sh feature <name>` (log and screenshot in the evidence folder), or follow its steps by hand. Pick the file named after the surface the change touches; read only that one. Today: `sign-in`, `overview`, `library`, `feedback`, and `design` (the static design build under `web/design/`: no `up`, its own steps).
+`features/<name>.md`: **Reach it**, **Drive it** (a ```` ```bash drive ```` block of the kept steps), **Proof**. Run one whole with `run.sh feature <name>` (log and screenshot in the evidence folder), or follow its steps by hand. Pick the file named after the surface the change touches; read only that one. Today: `sign-in`, `overview`, `library`, `feedback`, `design-service` (the Design list and viewer over published builds: a linked scratch checkout from `run.sh workspace <dir>`, a second account from `run.sh signin other`, share links, the size cap, `design-delete` and a build's script against the session), and `design` (the static design build under `web/design/`: no `up`, its own steps).
 
 **Add one** when a probe worked: copy the `playwright-cli` lines you ran (the CLI prints each as Playwright code), with `$WEB`, `$EV`, `$SESSION` and `"$RUN"` for the URL, the evidence folder, the session name and this script, end with an `expect` and a `screenshot`, and run `run.sh feature <name>` once before keeping it.
