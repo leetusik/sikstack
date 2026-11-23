@@ -235,10 +235,10 @@ printf '[claude.nope]\nmodel = "opus"\n' > "$F/config.toml"
   && ok "an unknown [claude.<row>] is refused" || bad "[claude.nope] was accepted"
 rm -f "$F/config.toml"
 er_out=$(er)
-[ "$(printf '%s\n' "$er_out" | grep -cE '^(high|research|design|critic|judge|mid|explore) ')" = "7" ] && ! printf '%s\n' "$er_out" | grep -q '^cheap ' && printf '%s\n' "$er_out" | grep -qx 'proxy=none' \
+[ "$(printf '%s\n' "$er_out" | grep -cE '^(high|research|design|critic|mid|explore) ')" = "6" ] && ! printf '%s\n' "$er_out" | grep -qE '^(cheap|judge) ' && printf '%s\n' "$er_out" | grep -qx 'proxy=none' \
   && printf '%s\n' "$er_out" | grep -qE '^route +agent +model +effort +source$' \
   && printf '%s\n' "$er_out" | grep -qE '^design +sikstack:design-drafter +fable +high +default$' \
-  && printf '%s\n' "$er_out" | grep -qE '^critic +sikstack:design-critic +opus +high +default$' && printf '%s\n' "$er_out" | grep -qE '^judge +sikstack:design-critic +opus +high +default$' \
+  && printf '%s\n' "$er_out" | grep -qE '^critic +sikstack:design-critic +opus +high +default$' \
   && printf '%s\n' "$er_out" | grep -qE '^high +sikstack:slice-executor +opus +high +default$' && printf '%s\n' "$er_out" | grep -qE '^research +sikstack:slice-executor +opus +high +default$' \
   && printf '%s\n' "$er_out" | grep -qE '^mid +sikstack:slice-executor +opus +medium +default$' \
   && printf '%s\n' "$er_out" | grep -qE '^explore +sikstack:Explore +haiku +xhigh +default$' \
@@ -326,32 +326,25 @@ er_out=$(er --drafter --phase P1)
 printf '%s\n' "$er_out" | grep -qx 'model=fable' \
   && ok "an earlier '### Design style' subsection never hides the real section's Drafter: line" || bad "route --drafter lost the real Design Style section: $er_out"
 mv "$F/intent.bak" "$F/works/phases/active/P1/intent.md"
-# P36.S5B, P39.S1, v75: the critic and the judge both run design-critic; either may share the drafter's model.
-er_out=$(er --critic); er_j=$(er --judge)
+# P36.S5B, v75: the critic runs design-critic and may share the drafter's model. 2.0.0 retired the judge row:
+# --judge is gone, and a [claude.judge] table left in config.toml is a warning= line, never an error.
+er_out=$(er --critic); er_j=$( cd "$F" && python3 "$ADP" route --judge 2>&1 ); er_jrc=$?
 printf '%s\n' "$er_out" | grep -qx 'route=critic' && printf '%s\n' "$er_out" | grep -qx 'subagent_type=sikstack:design-critic' \
   && printf '%s\n' "$er_out" | grep -qx 'model=opus' && printf '%s\n' "$er_out" | grep -qx 'effort=high' \
-  && printf '%s\n' "$er_j" | grep -qx 'route=judge' && printf '%s\n' "$er_j" | grep -qx 'subagent_type=sikstack:design-critic' \
-  && printf '%s\n' "$er_j" | grep -qx 'model=opus' && printf '%s\n' "$er_j" | grep -qx 'effort=high' && ! printf '%s\n' "$er_j" | grep -q '^tier=' \
-  && ok "route --critic (opus@high) and --judge (opus@high) both dispatch design-critic" || bad "route --critic/--judge wrong: $er_out / $er_j"
+  && [ "$er_jrc" = 2 ] && printf '%s\n' "$er_j" | grep -q 'unrecognized arguments: --judge' \
+  && ok "route --critic (opus@high) dispatches design-critic; route --judge is gone (usage error)" || bad "route --critic/--judge wrong: $er_out / $er_j"
 printf '[claude.critic]\nmodel = "opus"\neffort = "xhigh"\n' > "$F/config.toml"
 er_out=$( cd "$F" && env -u ANTHROPIC_BASE_URL python3 "$ADP" route --critic 2>&1 ); er_rc=$?
 [ "$er_rc" -eq 0 ] && printf '%s\n' "$er_out" | grep -qx 'model=opus' \
   && ! printf '%s\n' "$(er)" | grep -q '^warning=fairness' \
   && ok "a critic on the drafter's model is accepted (exit 0, model=opus) and the bare table does not warn (v75)" || bad "the critic on the drafter's model was refused or warned (rc=$er_rc): $er_out"
-rm -f "$F/config.toml"
-# P39.S1: the judge is exempt from the critic-vs-drafter rule -- at the defaults it is Opus over the Opus drafter.
-er_out=$( cd "$F" && env -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE python3 "$ADP" route --judge 2>&1 ); er_rc=$?
-[ "$er_rc" -eq 0 ] && printf '%s\n' "$er_out" | grep -qx 'model=opus' && ! printf '%s\n' "$er_out" | grep -q 'warning=fairness' \
-  && ! printf '%s\n' "$er_out" | grep -q '^skip=' \
-  && ok "the judge on the drafter's model (opus over opus) is allowed: route --judge exits 0 with no fairness warning" || bad "route --judge refused or warned at the defaults (rc=$er_rc): $er_out"
-# The loopback-proxy skip needs a Fable judge: it never fires at the default (Opus), only on a Fable override.
-er_out=$( cd "$F" && env -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE ANTHROPIC_BASE_URL=http://127.0.0.1:10100 python3 "$ADP" route --judge 2>&1 ); er_rc=$?
-[ "$er_rc" -eq 0 ] && ! printf '%s\n' "$er_out" | grep -q '^skip=' \
-  && ok "behind a loopback proxy the default (opus) judge prints no skip= and exits 0" || bad "route --judge proxy at the default wrong (rc=$er_rc): $er_out"
-printf '[claude.judge]\nmodel = "fable"\n' > "$F/config.toml"
-er_out=$( cd "$F" && env -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE ANTHROPIC_BASE_URL=http://127.0.0.1:10100 python3 "$ADP" route --judge 2>&1 ); er_rc=$?
-[ "$er_rc" -eq 0 ] && printf '%s\n' "$er_out" | grep -q '^skip=yes reason=loopback ' \
-  && ok "behind a loopback proxy (no Fable) a Fable-overridden judge prints skip=yes and exits 0" || bad "route --judge proxy skip wrong (rc=$er_rc): $er_out"
+printf '[claude.judge]\nmodel = "fable"\neffort = "high"\n[claude.mid]\neffort = "high"\n' > "$F/config.toml"
+er_out=$( cd "$F" && env -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE python3 "$ADP" route 2>&1 ); er_rc=$?
+er_s=$( cd "$F" && env -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE python3 "$ADP" route P1.DECOMP 2>&1 ); er_src=$?
+[ "$er_rc" -eq 0 ] && [ "$er_src" -eq 0 ] && printf '%s\n' "$er_out" | grep -q '^warning=config.toml line 1: the \[claude.judge\] row retired in sikstack 2.0.0' \
+  && printf '%s\n' "$er_out" | grep -qE '^mid +sikstack:slice-executor +opus +high ' && ! printf '%s\n' "$er_out" | grep -q '^judge ' \
+  && printf '%s\n' "$er_s" | grep -q '^warning=config.toml line 1: the \[claude.judge\]' \
+  && ok "a [claude.judge] table left in config.toml is a warning= line (exit 0), skipped, and the rows after it still read" || bad "a [claude.judge] table was refused or silent (rc=$er_rc/$er_src): $er_out / $er_s"
 rm -f "$F/config.toml"
 ( cd "$F" && env -u ANTHROPIC_BASE_URL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE CLAUDE_CODE_EFFORT_LEVEL=high python3 "$ADP" route P1.DECOMP 2>&1 | grep -q '^warning=CLAUDE_CODE_EFFORT_LEVEL' ) \
   && ok "route warns that CLAUDE_CODE_EFFORT_LEVEL outranks every per-dispatch effort" || bad "route did not warn on CLAUDE_CODE_EFFORT_LEVEL"
@@ -526,20 +519,19 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 41 in all, and no
+# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 36 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
-design = {"design-init", "design-system", "design-open", "design-check", "design-canvas", "design-publish-plan", "design-preview",
-          "design-readback", "design-sign", "design-close", "design-migrate"}
+design = {"design-sign"}  # 2.0.0: the ten canvas commands retired
 agenda = {"deferred", "defer-job", "promote-deferred", "drop-deferred", "agenda", "agenda-add", "agenda-edit", "agenda-move",
           "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink"}
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 46 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 46 commands: init and the eleven verbs, setup, feedback and migrate, plus the design, agenda and cloud parts' own, no adapter command" \
+assert len(names) == 36 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 36 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign and the agenda and cloud parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -1166,714 +1158,64 @@ nogit_scope=$( cd "$F" && PATH="/var/empty" "$nogit_py" "$ENG" phase scope P3 2>
   || bad "phase scope failed or was silent without git (rc=$nogit_rc) -- $nogit_scope"
 
 # ---------------------------------------------------------------------------
-echo "== Test 13: schema-2 design record -- design-open makes a job and refuses a second open round of it, one connected job per slice (P46-nb: --new-job refused while the slice has an open round, the merge after the close, a legacy multi-job slice still passes and takes --job, --critique, the 10-Page size warning, mounted boards not counted), the board lint (leaves-canvas, same-target-list, unlinked-page), design-check names a missing board, a missing support line, a .. reference and a title gap, design-canvas / design-system / design-publish-plan (system copies on a first publish or a changed pin only), design-preview skips honestly without a browser, v61 design-preview machine checks on fixture boards (non-text-contrast, reflow and overprint, keyboard, the state bar, --strict, the .preview render and contact sheets; skipped with no browser), design-close snapshots and signs, a superseded round's slice reuses its job, v61 design-readback / design-sign / a generated SIGNOFF.md / the absolute-path lint and wave briefs, design-migrate --to 2; claude-design/ is skipped, the pre-v47 design-migrate, design-register is gone =="
-# Runs in the fresh workspace $F.
-newtmp DZ
-DR="$F/docs/reference/design"
-JD="$DR/jobs/01-signin"
-CP="$JD/canvas/project"
-dw() { ( cd "$F" && python3 "$ENG" "$@" ); }
-tree_sig() { ( cd "${1:-$DR}" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
-# 1. The slice's first round creates its job; at most one open round per job (P36.S5C: per job, not per project).
-dw design-init --id smoke-design --name "Smoke design" >/dev/null 2>&1 || bad "design probe: design-init failed"
-open_out=$(dw design-open --slug signin --slice P9.S1 2>&1); open_rc=$?
-out=$(dw design-open --slug other --slice P9.S1 2>&1); rc=$?
-if [ "$open_rc" -eq 0 ] && [ -f "$JD/job.json" ] && [ -f "$JD/rounds/01-signin/round.json" ] \
-    && [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -Fq 'refused -- 01-signin/01-signin is open' \
-    && [ ! -e "$JD/rounds/02-other" ] && [ ! -e "$DR/jobs/02-other" ]; then
-  ok "design-open creates job 01-signin with round 01-signin, and a second round of the same job while one is open refuses and creates nothing"
-else bad "design-open did not create the job and round, or a second round of the open job was not refused (rc=$open_rc/$rc) -- $open_out $out"; fi
-# 2. A minimal valid canvas tree passes; one broken variant names each kind of break.
-python3 - "$JD" <<'CANVAS' || bad "design probe: could not write the canvas tree"
-import json, pathlib, sys
-job = pathlib.Path(sys.argv[1])
-project = job / "canvas/project"
-(job / "rounds/01-signin/handoff.md").write_text("# handoff\n")
-project.mkdir(parents=True, exist_ok=True)
-boards = {"Main.dc.html": {"x": 0, "y": 0, "w": 880, "h": 560, "title": "01 · Sign-in"},
-          "Error.dc.html": {"x": 960, "y": 0, "w": 880, "h": 560, "title": "02 · Error"}}
-index = {"v": 3, "createdOnFiles": {"v": 1, "at": "2026-10-14T00:00:00Z"}, "title": "Sign-in", "launch": {"view": "canvas"},
-         "pages": [], "boards": boards, "order": list(boards), "notes": {}, "designSystems": []}
-(project / "canvas.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-for name, board in boards.items():
-    (project / name).write_text(
-        '<!doctype html>\n<html><head>\n<script src="./support.js"></script>\n'
-        '<link rel="stylesheet" href="ds/smoke/tokens.css">\n</head>\n'
-        # the allowed references besides a relative path inside project/: #, data:, https, /_blob/, a {{hole}}
-        '<body><x-dc><a href="#top"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></a>'
-        '<a href="https://example.com/">more</a><img src="/_blob/abc123" alt=""><img src="{{logo}}" alt="">'
-        f'<p>{board["title"]}</p></x-dc></body></html>\n', encoding="utf-8")
-CANVAS
-mkdir -p "$DZ/good" && cp -R "$CP/." "$DZ/good/"
-python3 - "$CP" <<'BREAK' || bad "design probe: could not break the canvas tree"
-import json, pathlib, sys
-project = pathlib.Path(sys.argv[1])
-index = json.loads((project / "canvas.json").read_text(encoding="utf-8"))
-index["boards"]["Gone.dc.html"] = {"x": 0, "y": 680, "w": 400, "h": 300, "title": "04 · Gone"}  # no file, and no 03
-index["order"].append("Gone.dc.html")
-(project / "canvas.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-main = (project / "Main.dc.html").read_text(encoding="utf-8")
-main = main.replace('<script src="./support.js"></script>\n', "").replace('href="ds/smoke/tokens.css"', 'href="../escape.css"')
-(project / "Main.dc.html").write_text(main, encoding="utf-8")
-BREAK
-out=$(dw design-check 01-signin 2>&1); rc=$?
-cp -R "$DZ/good/." "$CP/"
-ok_out=$(dw design-check 2>&1); ok_rc=$?
-if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -Fq "board 'Gone.dc.html' is listed but its file is missing" \
-    && printf '%s\n' "$out" | grep -Fq 'Main.dc.html: missing the exact line <script src="./support.js"></script>' \
-    && printf '%s\n' "$out" | grep -Fq "Main.dc.html: references '../escape.css' (" \
-    && printf '%s\n' "$out" | grep -Fq 'no board titled "03 · …"' && [ "$ok_rc" -eq 0 ]; then
-  ok "design-check names a missing listed board, a missing support line, a .. reference and a title gap (exit 1), and passes the valid tree with #, data:, https, /_blob/ and {{hole}} references"
-else bad "design-check missed a break in the canvas tree, or failed the valid tree (rc=$rc, valid rc=$ok_rc) -- $out $ok_out"; fi
-# 3. The canvas record and the publish plan: null for a removed board; v60 (P36.S9): the system install
-# copies only on a first publish or a changed system pin (canvas.system), never on a plain republish.
-url_out=$(dw design-canvas 01-signin --url https://example.com/artifact/abc 2>&1); url_rc=$?
-dw design-canvas 01-signin --url https://claude.ai/artifact/SmokeCanvas1 >/dev/null 2>&1 \
-  || bad "design probe: design-canvas --url failed"
-dw design-system --artifact https://claude.ai/artifact/SmokeSystem1 --namespace smoke --version 5-sys \
-  --files tokens.json,tokens.css >/dev/null 2>&1 || bad "design probe: design-system failed"
-pin() { python3 - "$CP/canvas.json" "$1" <<'PIN'
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-index = json.loads(path.read_text(encoding="utf-8"))
-index["designSystems"] = [{"title": "Smoke", "namespace": "smoke", "artifact": "https://claude.ai/artifact/SmokeSystem1",
-                           "version": sys.argv[2], "copiedAt": "2026-10-18T00:00:00Z"}]
-path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-PIN
-}
-# plan_is <expect-system-copies: 1|0> <expect Error.dc.html: live|null>
-plan_is() { dw design-publish-plan 01-signin 2>&1 | python3 -c '
+echo "== Test 13: design-sign, the one design command left (2.0.0) -- the ten canvas commands are gone from --help; an empty --words and a missing design folder refuse with nothing written; a real sign-off records the words verbatim, the product repo's HEAD, the folder's last commit and its uncommitted paths in the slice folder, and a second one is appended; the retired canvas record on disk is read by nothing (check passes over a broken one) =="
+newtmp DS
+mkhost "$DS/prod" || bad "design-sign probe: mkhost failed"
+dw() { ( cd "$DS/prod/.sikstack" && python3 "$ENG" "$@" ); }
+dw phase new --phase P1 --name design --objective design >/dev/null 2>&1 && dw slice new --phase P1 --slice P1.S1 --name look --kind co-work >/dev/null 2>&1 \
+  || bad "design-sign probe: phase or slice new failed"
+SO="$DS/prod/.sikstack/works/phases/active/P1/slices/P1.S1/design-signoff.json"
+help_out=$(dw --help 2>&1)
+gone=""
+for c in design-init design-system design-open design-check design-canvas design-publish-plan design-preview design-readback design-close design-migrate; do
+  printf '%s\n' "$help_out" | grep -q -- "$c\b" && gone="$gone $c"
+done
+[ -z "$gone" ] && printf '%s\n' "$help_out" | grep -q 'design-sign' \
+  && ok "--help lists design-sign and none of the ten retired design commands" || bad "--help still lists:$gone"
+e_out=$(dw design-sign --slice P1.S1 --words "  " --folder web/design 2>&1); e_rc=$?
+mkdir -p "$DS/prod/web"
+f_out=$(dw design-sign --slice P1.S1 --words "approved" --folder web/design 2>&1); f_rc=$?
+x_out=$(dw design-sign --slice P1.S1 --words "approved" --folder ../elsewhere 2>&1); x_rc=$?
+[ "$e_rc" = 1 ] && printf '%s\n' "$e_out" | grep -Fq -- "--words must carry the operator's literal words" \
+  && [ "$f_rc" = 1 ] && printf '%s\n' "$f_out" | grep -Fq 'refused -- no design folder web/design' \
+  && [ "$x_rc" = 1 ] && [ ! -e "$SO" ] \
+  && ok "design-sign refuses empty --words, a missing design folder and a path outside the repo, writing nothing" \
+  || bad "design-sign refusals wrong (rc=$e_rc/$f_rc/$x_rc) -- $e_out / $f_out / $x_out"
+mkdir -p "$DS/prod/web/design/app" && printf 'page\n' > "$DS/prod/web/design/app/page.tsx" \
+  && git -C "$DS/prod" add web && git -C "$DS/prod" commit -qm "feat: design folder" \
+  && git -C "$DS/prod" commit -q --allow-empty -m "chore: later" && printf 'draft\n' > "$DS/prod/web/design/app/new.tsx"
+s_out=$(dw design-sign --slice P1.S1 --words 'approved, ship it "as is"' --folder web/design/ 2>&1); s_rc=$?
+s2_out=$(dw design-sign --slice P1.S1 --words "second look: yes" --folder web/design 2>&1); s2_rc=$?
+HEADC=$(git -C "$DS/prod" rev-parse HEAD); FOLDERC=$(git -C "$DS/prod" rev-parse HEAD~1)
+[ "$s_rc" = 0 ] && [ "$s2_rc" = 0 ] && printf '%s\n' "$s_out" | grep -q "^signed=P1.S1 repo=prod folder=web/design commit=${HEADC:0:12} folder_commit=${FOLDERC:0:12} uncommitted=1 signoffs=1 " \
+  && python3 - "$SO" "$HEADC" "$FOLDERC" <<'PY' && ok "design-sign records the words verbatim, HEAD, the folder's last commit and its uncommitted path in the slice's design-signoff.json; a second sign-off is appended" || bad "the sign-off record is wrong -- $s_out / $s2_out / $(cat "$SO" 2>&1)"
 import json, sys
-plan = json.load(sys.stdin)
-system = "https://claude.ai/artifact/SmokeSystem1"
-assert plan["url"] == "https://claude.ai/artifact/SmokeCanvas1", plan
-assert plan["root"].endswith("/jobs/01-signin/canvas") and plan["file_path"].endswith("/jobs/01-signin/canvas/project/canvas.json"), plan
-want = {"project/Main.dc.html": "project/Main.dc.html",
-        "project/Error.dc.html": "project/Error.dc.html" if sys.argv[2] == "live" else None}
-if sys.argv[1] == "1":
-    want.update({"project/ds/smoke/tokens.json": {"artifact": system, "path": "project/tokens.json"},
-                 "project/ds/smoke/tokens.css": {"artifact": system, "path": "project/tokens.css"}})
-assert plan["files"] == want, plan["files"]
-' "$1" "$2" >/dev/null 2>&1; }
-pin 5-sys || bad "design probe: could not pin the system in canvas.json"
-plan_is 1 live && first_ok=1 || first_ok=0
-dw design-canvas 01-signin --version 1700000000-aaaa >/dev/null 2>&1 || bad "design probe: design-canvas --version failed"
-published=$(python3 -c 'import json, sys; c = json.load(open(sys.argv[1]))["canvas"]; print(" ".join(c["published"]), c["system"])' "$JD/job.json")
-[ "$url_rc" -ne 0 ] && printf '%s\n' "$url_out" | grep -Fq 'is not an Artifact address' \
-  && [ "$published" = "project/Error.dc.html project/Main.dc.html project/canvas.json 5-sys" ] \
-  && ok "design-canvas rejects a non-claude host, and --version records the published file list and the installed system pin (canvas.system)" \
-  || bad "design-canvas accepted a foreign host or recorded the wrong published list or system pin (rc=$url_rc) -- $url_out / $published"
-mv "$CP/Error.dc.html" "$DZ/Error.dc.html"
-python3 - "$CP/canvas.json" <<'DROP' || bad "design probe: could not drop the board from canvas.json"
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-index = json.loads(path.read_text(encoding="utf-8"))
-del index["boards"]["Error.dc.html"]
-index["order"].remove("Error.dc.html")
-path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-DROP
-plan_is 0 null && again_ok=1 || again_ok=0
-dw design-system --artifact https://claude.ai/artifact/SmokeSystem1 --namespace smoke --version 6-sys \
-  --files tokens.json,tokens.css >/dev/null 2>&1 && pin 6-sys || bad "design probe: could not move the system to 6-sys"
-plan_is 1 null && moved_ok=1 || moved_ok=0
-python3 - "$JD/job.json" <<'PRE60' || bad "design probe: could not write a pre-v60 job.json"
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-job = json.loads(path.read_text(encoding="utf-8"))
-del job["canvas"]["system"]
-path.write_text(json.dumps(job, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PRE60
-pre60_chk=$(dw design-check 01-signin 2>&1); pre60_rc=$?
-plan_is 0 null && pre60_ok=1 || pre60_ok=0
-if [ "$first_ok$again_ok$moved_ok$pre60_ok" = "1111" ] && [ "$pre60_rc" -eq 0 ]; then
-  ok "design-publish-plan maps each project file to itself and a board removed since the last publish to null; the system install copies ride a first publish, are left out of a republish, come back when canvas.json's pin moves, and a pre-v60 job.json without canvas.system is valid and leaves them out"
-else bad "design-publish-plan sent or dropped the system copies at the wrong time (first=$first_ok republish=$again_ok moved=$moved_ok pre-v60=$pre60_ok check rc=$pre60_rc) -- $(dw design-publish-plan 01-signin 2>&1) $pre60_chk"; fi
-# P36.S4: design-preview with no browser is an honest skip -- it says so, exits 0 and writes nothing.
-printf '/* a stand-in runtime path; never run */\n' > "$DZ/dc-runtime.js"
-before=$(tree_sig)
-out=$( export AGENTIC_DESIGN_BROWSER=/nonexistent; dw design-preview 01-signin --runtime "$DZ/dc-runtime.js" 2>&1 ); rc=$?
-[ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qx 'preview=skipped reason=no-browser' && ! printf '%s\n' "$out" | grep -q '^board=' \
-  && [ "$(tree_sig)" = "$before" ] \
-  && ok "design-preview with no browser prints preview=skipped reason=no-browser, exits 0 and leaves the design root byte-identical" \
-  || bad "design-preview did not skip honestly without a browser (rc=$rc) -- $out"
-# P36.S5A: --click skips the same way: no state or link line, no --out folder, no preview.json.
-out=$( export AGENTIC_DESIGN_BROWSER=/nonexistent; dw design-preview 01-signin --runtime "$DZ/dc-runtime.js" --click --out "$DZ/pv" 2>&1 ); rc=$?
-[ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qx 'preview=skipped reason=no-browser' && ! printf '%s\n' "$out" | grep -Eq '^(board=|state |link )' \
-  && [ ! -e "$DZ/pv" ] && [ "$(tree_sig)" = "$before" ] \
-  && ok "design-preview --click with no browser prints preview=skipped reason=no-browser, exits 0 and writes nothing" \
-  || bad "design-preview --click did not skip honestly without a browser (rc=$rc) -- $out"
-# v61 (P37.S6): the machine checks on tiny fixture boards, in a copy of this workspace (a job of its own).
-# Each fixture shows one finding: a 1.5:1 button border (non-text-contrast) beside a 3.5:1 one (none);
-# two labels that cross only at 200% text (overprint, text200 only); a row wider than 320px (reflow,
-# w320 only); a <span> with a click listener and no tabindex that opens a dialog (keyboard); a sticky
-# state bar (state-bar, rendered and static). --strict exits 1 naming the blocking checks, the render
-# stays in .preview/<job>/<round>/, and --contact-sheet writes one sheet per board. With no browser on
-# this machine the block says so and asserts nothing (the honest skip above still runs everywhere).
-newtmp MC; cp -R "$F/../." "$MC/"; MC="$MC/.sikstack"
-mc() { ( cd "$MC" && python3 "$ENG" "$@" ); }
-MJ=$(mc design-open --slug fixture --slice P9.S6 2>&1 | sed -n 's#^design-open: created job .*/jobs/\([^/]*\)/ .*#\1#p')
-[ -n "$MJ" ] || bad "machine-check probe: design-open failed"
-python3 - "$MC/docs/reference/design/jobs/$MJ/canvas/project" <<'FIXTURE' || bad "machine-check probe: could not write the fixture boards"
-import json, pathlib, sys
-project = pathlib.Path(sys.argv[1])
-project.mkdir(parents=True, exist_ok=True)
-boards = {"Main.dc.html": {"x": 0, "y": 0, "w": 800, "h": 600, "title": "01 · Page — Fixture", "expand": "fill", "is_interactive": True},
-          "Borders.dc.html": {"x": 0, "y": 700, "w": 400, "h": 200, "title": "02 · Component — Borders"}}
-index = {"v": 3, "createdOnFiles": {"v": 1, "at": "2026-10-20T00:00:00Z"}, "title": "Fixture", "launch": {"view": "canvas"},
-         "pages": [], "boards": boards, "order": list(boards), "notes": {}, "designSystems": []}
-(project / "canvas.json").write_text(json.dumps(index), encoding="utf-8")
-head = '<!doctype html>\n<html><head>\n<script src="./support.js"></script>\n</head>\n'
-(project / "Main.dc.html").write_text(head + '''<body style="margin:0;background:#fff;color:#111;font:16px/1.4 Arial,sans-serif"><x-dc>
-<div data-proto="state-bar" style="position:sticky;top:0;background:#eee"><div role="group" aria-label="Fixture"><button type="button" aria-pressed="true" style="min-height:44px">Only</button></div></div>
-<h1>Fixture</h1>
-<div style="position:relative;height:60px"><span style="position:absolute;left:0;top:0">Alpha label</span><span style="position:absolute;left:130px;top:0">Beta</span></div>
-<div style="min-width:360px;background:#ddd">A row 360px wide</div>
-<p><span id="pop" style="cursor:pointer">Open the note</span></p>
-<button type="button" style="width:120px;height:48px;background:#fff;border:1px solid #888;color:#111">Go</button>
-</x-dc>
-<script>document.getElementById('pop').addEventListener('click', () => { const d = document.createElement('div');
-  d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Note'); d.textContent = 'The note'; document.body.appendChild(d); });</script>
-</body></html>
-''', encoding="utf-8")
-(project / "Borders.dc.html").write_text(head + '''<body style="margin:0;background:#fff;color:#111;font:16px Arial,sans-serif"><x-dc>
-<button type="button" style="width:120px;height:48px;background:#fff;border:1px solid #d0d0d0;color:#111">Weak</button>
-<button type="button" style="width:120px;height:48px;background:#fff;border:1px solid #8a8a8a;color:#111">Strong</button>
-</x-dc></body></html>
-''', encoding="utf-8")
-FIXTURE
-printf '/* a stand-in runtime: the fixture boards need none */\n' > "$MC/stub-runtime.js"
-mc_out=$(mc design-preview $MJ --runtime stub-runtime.js --strict --contact-sheet 2>&1); mc_rc=$?
-if printf '%s\n' "$mc_out" | grep -qx 'preview=skipped reason=no-browser'; then
-  printf 'SKIP: %s\n' "design-preview machine checks on fixture boards: no Chrome/Chromium on this machine (nothing asserted)"
-else
-  MCO="$MC/docs/reference/design/.preview/$MJ/01-fixture"
-  mc_lint=$(mc design-check $MJ 2>&1)
-  has() { printf '%s\n' "$mc_out" | grep -Eq "$1"; }
-  [ "$mc_rc" -eq 1 ] && has '^self_check=fail blocking=non-text-contrast:1,reflow:1,overprint:1,keyboard:1$' \
-    && ok "design-preview --strict exits 1 and self_check=fail names the blocking checks (non-text-contrast, reflow, overprint, keyboard)" \
-    || bad "design-preview --strict did not fail the self-check as expected (rc=$mc_rc) -- $(printf '%s\n' "$mc_out" | grep -E '^(issue|self_check)')"
-  has 'board=Borders\.dc\.html view=frame check=non-text-contrast: button "Weak": the control.s boundary is 1\.[45][0-9]:1' \
-    && ! has 'check=non-text-contrast: button "Strong"' \
-    && ok "non-text-contrast names a 1.5:1 button border and passes a 3.5:1 one" \
-    || bad "non-text-contrast missed the 1.5:1 border or flagged the 3.5:1 one -- $(printf '%s\n' "$mc_out" | grep 'non-text')"
-  has 'view=text200 check=overprint: span "Alpha label" and span "Beta" overprint' && ! has 'view=w320 check=overprint' \
-    && has 'view=w320 check=reflow: content is 36[0-9]px wide at 320px wide' && ! has 'view=text200 check=reflow' \
-    && ok "overprint names two labels that cross only at 200% text, and reflow a row wider than 320px only at 320px" \
-    || bad "overprint or reflow missed its fixture or fired in the wrong view -- $(printf '%s\n' "$mc_out" | grep -E 'overprint|reflow')"
-  has 'check=keyboard: span#pop "Open the note" opens dialog .*on click \(a click handler\) but never keyboard focus' \
-    && ok "keyboard names a <span> with a click listener and no tabindex, and the dialog it opens" \
-    || bad "keyboard missed the click-only span -- $(printf '%s\n' "$mc_out" | grep -E 'keyboard')"
-  has 'board=Main\.dc\.html view=frame check=state-bar: the state bar is position: sticky' \
-    && printf '%s\n' "$mc_lint" | grep -q "Main.dc.html: the state bar's own style is position: sticky (check=state-bar)" \
-    && ok "a sticky state bar is a rendered state-bar issue and a design-check lint" \
-    || bad "the sticky state bar was not flagged by both halves -- $(printf '%s\n' "$mc_out" | grep state-bar) / $mc_lint"
-  sheets=$(ls "$MCO" 2>/dev/null | grep -c '\.sheet\.png$')
-  [ "$sheets" -eq 2 ] && [ -f "$MCO/preview.json" ] && [ "$(cat "$MC/docs/reference/design/.preview/.gitignore" 2>/dev/null)" = "*" ] \
-    && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["self_check"]["result"]=="fail" and len(d["sheets"])==2 and d["out"].endswith(".preview/"+sys.argv[2]+"/01-fixture")' "$MCO/preview.json" "$MJ" \
-    && ok "the render stays in the git-ignored .preview/<job>/<round>/ with preview.json naming it, and --contact-sheet writes one sheet per board" \
-    || bad "the default render folder, its preview.json or the contact sheets are wrong (sheets=$sheets) -- $(ls -a "$MCO" "$MC/docs/reference/design/.preview" 2>&1)"
-fi
-# 4. design-close snapshots the tree byte for byte and signs the job; a superseded round's slice reuses it.
-# v61 (P37.S5): signing needs a settled read-back of the round's publish and the round's build contract
-# (result.md ## Build); a hand-written SIGNOFF.md (legacy) is kept, with a warning.
-printf 'Published files of x (version 1700000000-aaaa), 2 files:\n- "project/Main.dc.html"  text/html  1 bytes\n' \
-  | dw design-readback 01-signin --listing - >/dev/null 2>&1 || bad "design probe: design-readback --listing failed"
-printf -- '- verdict: done\n\n## Summary\n\nSign-in.\n\n## Build\n\nBuild the boards.\n' > "$JD/rounds/01-signin/result.md"
-pre=$(tree_sig "$CP")
-printf 'Signed: "ship it"\n' > "$JD/rounds/01-signin/SIGNOFF.md"
-close_out=$(dw design-close 01-signin/01-signin --words "ship it" 2>&1) || bad "design probe: design-close --words failed -- $close_out"
-printf '%s\n' "$close_out" | grep -Fq 'kept the hand-written' && grep -qx 'Signed: "ship it"' "$JD/rounds/01-signin/SIGNOFF.md" \
-  && ok "design-close keeps a hand-written (legacy) SIGNOFF.md, with a warning" \
-  || bad "design-close overwrote a hand-written SIGNOFF.md or did not warn -- $close_out"
-if [ "$(tree_sig "$JD/rounds/01-signin/canvas/project")" = "$pre" ] && python3 - "$JD" <<'SIGNED'
-import json, pathlib, sys
-job = pathlib.Path(sys.argv[1])
-rnd = json.loads((job / "rounds/01-signin/round.json").read_text())
-assert rnd["status"] == "signed" and rnd["signoff_words"] == "ship it" and rnd["canvas_version"] == "1700000000-aaaa", rnd
-assert json.loads((job / "job.json").read_text())["status"] == "signed"
-SIGNED
-then ok "design-close --words snapshots the canvas tree byte-identical, records canvas_version and signs the job"
-else bad "design-close lost the snapshot, the canvas_version or the job's signed status"; fi
-before=$(tree_sig); again=$(dw design-close 01-signin --words "ship it" 2>&1); rc=$?
-[ "$rc" -eq 0 ] && printf '%s\n' "$again" | grep -q 'already signed' && [ "$(tree_sig)" = "$before" ] \
-  && ok "design-close is idempotent: a second run writes nothing" || bad "a second design-close was not a no-op (rc=$rc) -- $again"
-{ dw design-open --slug revise --slice P9.S1 && printf '# handoff\n' > "$JD/rounds/02-revise/handoff.md" \
-    && dw design-close 01-signin/02-revise --superseded && dw design-open --slug third --slice P9.S1 \
-    && printf '# handoff\n' > "$JD/rounds/03-third/handoff.md"; } >/dev/null 2>&1 || bad "design probe: the superseding rounds failed"
-[ "$(ls "$DR/jobs")" = "01-signin" ] && [ "$(ls "$JD/rounds" | tr '\n' ' ')" = "01-signin 02-revise 03-third " ] \
-  && python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))["supersedes"] == ["02-revise"]' "$JD/rounds/03-third/round.json" \
-  && ok "a superseded round's slice reuses its job: rounds 02 and 03 open in job 01-signin, each superseding the last" \
-  || bad "design-open after --superseded did not reuse the slice's job -- $(ls -R "$DR/jobs")"
-# P36.S1: design-register and its registry / design-deck hint are retired -- the command is unknown.
-out=$(dw design-register 2>&1); rc=$?
-[ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q 'invalid choice' \
-  && ok "design-register is gone: the engine rejects it as an unknown command (exit $rc)" \
-  || bad "design-register still answers (rc=$rc) -- $out"
-# v48 (P27.S1): the claude-design tool's records live in claude-design/, which the scan never reads.
-mkdir -p "$DR/claude-design/grounding/previews" "$DR/claude-design/rounds/01-old"
-printf '<p>preview</p>\n' > "$DR/claude-design/grounding/previews/x.html"
-printf '# old handoff\n' > "$DR/claude-design/rounds/01-old/handoff.md"
-out=$(dw design-check 2>&1); rc=$?
-[ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -q 'claude-design' \
-  && ok "design-check skips claude-design/: neither its grounding HTML nor its legacy rounds are problems" \
-  || bad "design-check read claude-design/ (rc=$rc) -- $out"
-# With design.json present, design-migrate moves only the old record's parts and lists the rest.
-mkdir -p "$DR/rounds/02-legacy" && printf '# legacy\n' > "$DR/rounds/02-legacy/handoff.md"
-printf 'Signed: "old"\n' > "$DR/SIGNOFF.md" && printf 'notes\n' > "$DR/notes.txt"
-out=$(dw design-migrate --apply 2>&1); rc=$?
-[ "$rc" -eq 0 ] && [ -f "$DR/claude-design/rounds/02-legacy/handoff.md" ] && [ -f "$DR/claude-design/SIGNOFF.md" ] \
-  && [ ! -e "$DR/rounds" ] && [ ! -e "$DR/SIGNOFF.md" ] && [ -f "$JD/rounds/01-signin/round.json" ] && [ -f "$DR/notes.txt" ] \
-  && printf '%s\n' "$out" | grep -Fq 'left in place .sikstack/docs/reference/design/notes.txt' && dw design-check >/dev/null 2>&1 \
-  && ok "design-migrate beside design.json moves only a round without round.json and the root SIGNOFF.md, lists other files as left in place, and design-check passes after" \
-  || bad "design-migrate beside design.json moved the wrong entries (rc=$rc) -- $out"
-# A pre-v47 root (no design.json): every top-level entry moves, a dry run first, all-or-nothing.
-MG="$DZ/legacy/.sikstack"; MD="$MG/docs/reference/design"
-mkhost "${MG%/.sikstack}" && mkdir -p "$MG/works" "$MD/rounds/01-a" "$MD/grounding"
-printf '# handoff\n' > "$MD/rounds/01-a/handoff.md"; printf 'Signed: "go"\n' > "$MD/SIGNOFF.md"
-printf '<p>g</p>\n' > "$MD/grounding/g.html"; printf '# the old record\n' > "$MD/README.md"
-mw() { ( cd "$MG" && HOME="$DZ/home" python3 "$ENG" "$@" ); }
-mig_sig() { ( cd "$MD" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
-# P27.F2: a pre-v47 root is steered to design-migrate -- design-init refuses and writes nothing (so the old
-# tokens.css cannot silently become schema 1's), and design-check names design-migrate ahead of design-init.
-legacy_before=$(mig_sig); init_out=$(mw design-init 2>&1); init_rc=$?; chk_out=$(mw design-check 2>&1); chk_rc=$?
-if [ "$init_rc" -ne 0 ] && printf '%s\n' "$init_out" | grep -Fq 'design-migrate' && [ ! -e "$MD/design.json" ] \
-    && [ "$chk_rc" -ne 0 ] && printf '%s\n' "$chk_out" | grep -Fq 'design.json missing; pre-v47 record: run sikstack design-migrate' \
-    && [ "$(mig_sig)" = "$legacy_before" ]; then
-  ok "a pre-v47 design root is steered to design-migrate: design-init refuses without writing, and design-check names design-migrate ahead of design-init"
-else bad "a pre-v47 root was not steered to design-migrate (init rc=$init_rc, check rc=$chk_rc) -- $init_out $chk_out"; fi
-out=$(mw design-migrate 2>&1); rc=$?
-if [ "$rc" -eq 0 ] && [ "$(mig_sig)" = "$legacy_before" ] && printf '%s\n' "$out" | grep -q 'dry run -- nothing moved' \
-    && ( for e in README.md SIGNOFF.md grounding rounds; do printf '%s\n' "$out" \
-           | grep -Fqx "design-migrate: would move .sikstack/docs/reference/design/$e -> .sikstack/docs/reference/design/claude-design/$e" || exit 1; done ); then
-  ok "design-migrate is a dry run by default: it names every top-level entry of a design.json-less root and moves nothing"
-else bad "design-migrate's dry run moved something or missed an entry (rc=$rc) -- $out"; fi
-out=$(mw design-migrate --apply 2>&1); rc=$?; again=$(mw design-migrate --apply 2>&1); again_rc=$?
-if [ "$rc" -eq 0 ] && [ "$(ls -A "$MD")" = "claude-design" ] \
-    && [ "$(mig_sig)" = "$(printf '%s\n' "$legacy_before" | sed 's#^\./#./claude-design/#')" ] \
-    && [ "$again_rc" -eq 0 ] && printf '%s\n' "$again" | grep -q 'nothing to migrate'; then
-  ok "design-migrate --apply moves all four entries under claude-design/ byte-identical, and a second --apply has nothing to migrate"
-else bad "design-migrate --apply lost, changed or left an entry, or was not idempotent (rc=$rc/$again_rc) -- $out $again"; fi
-printf 'Signed again\n' > "$MD/SIGNOFF.md"; printf '# brief\n' > "$MD/BRIEF.md"
-mkdir -p "$MD/rounds/02-b" && printf '{}\n' > "$MD/rounds/02-b/round.json"
-conflict_before=$(mig_sig); out=$(mw design-migrate --apply 2>&1); rc=$?
-[ "$rc" -ne 0 ] && [ "$(mig_sig)" = "$conflict_before" ] && printf '%s\n' "$out" | grep -Fq 'claude-design/SIGNOFF.md already exists' \
-  && printf '%s\n' "$out" | grep -Fq 'schema-1 round(s) 02-b' \
-  && ok "design-migrate refuses an existing destination and a round.json in a design.json-less root, naming both, and moves nothing (not even the free BRIEF.md)" \
-  || bad "design-migrate moved something past a conflict, or did not name every conflict (rc=$rc) -- $out"
-# 5. P36.S3: a schema-1 (v47 card) record is legacy -- design-open refuses it with the migrate hint, and
-# design-migrate --to 2 moves cards/, tokens.css and rounds/ into schema1/ byte-identical (a dry run first).
-S1="$DZ/schema1/.sikstack"; SD="$S1/docs/reference/design"
-mkhost "${S1%/.sikstack}" && mkdir -p "$S1/works" "$SD/cards" "$SD/rounds/01-a/cards"
-printf '{"schema": 1, "id": "old-cards", "name": "Old cards"}\n' > "$SD/design.json"
-printf '<!-- @dsCard group="Components" viewport="480x200" -->\n<p>a</p>\n' > "$SD/cards/01-a.html"
-cp "$SD/cards/01-a.html" "$SD/rounds/01-a/cards/01-a.html" && printf ':root { --ink: #111; }\n' > "$SD/tokens.css"
-printf '{"schema": 1, "round": "01-a", "status": "signed"}\n' > "$SD/rounds/01-a/round.json"
-sw() { ( cd "$S1" && HOME="$DZ/home" python3 "$ENG" "$@" ); }
-s1_before=$(tree_sig "$SD")
-open_out=$(sw design-open --slug b --slice P9.S1 2>&1); open_rc=$?
-dry=$(sw design-migrate --to 2 2>&1); dry_rc=$?
-if [ "$open_rc" -ne 0 ] && printf '%s\n' "$open_out" | grep -Fq 'is schema 1; schema-1 record (numbered cards): run sikstack design-migrate --to 2' \
-    && [ "$dry_rc" -eq 0 ] && printf '%s\n' "$dry" | grep -q 'dry run -- nothing moved' && [ "$(tree_sig "$SD")" = "$s1_before" ]; then
-  ok "an unmigrated schema-1 root makes design-open refuse with the design-migrate --to 2 hint, and the dry run moves nothing"
-else bad "a schema-1 root was not refused with the hint, or the dry run moved something (open rc=$open_rc, dry rc=$dry_rc) -- $open_out $dry"; fi
-out=$(sw design-migrate --to 2 --apply 2>&1); rc=$?
-if [ "$rc" -eq 0 ] && [ "$(ls -A "$SD" | tr '\n' ' ')" = "design.json schema1 " ] \
-    && [ "$(tree_sig "$SD/schema1")" = "$(printf '%s\n' "$s1_before" | grep -v '^\./design\.json ')" ] \
-    && python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); assert d["schema"] == 2 and d["id"] == "old-cards" and d["name"] == "Old cards" and d["system"]["artifact"] is None, d' "$SD/design.json" \
-    && sw design-check >/dev/null 2>&1; then
-  ok "design-migrate --to 2 --apply moves cards/, tokens.css and rounds/ under schema1/ byte-identical, rewrites design.json to schema 2, and design-check passes after"
-else bad "design-migrate --to 2 lost, changed or left an entry, or did not rewrite design.json (rc=$rc) -- $out"; fi
-
-# 6. P46-nb.S1: one connected group per co-work slice, one job. --new-job refuses while another job of the
-# slice has an open round and writes nothing; once the slice's other rounds are closed it creates the job
-# (a merge into one connected job); a legacy multi-job slice (a wave drawn before the rule) still passes and
-# takes --job; a critique level per round. The size warning sits at 10 Pages / 30 boards.
-WV="$DZ/wave/.sikstack"; WR="$WV/docs/reference/design"
-mkhost "${WV%/.sikstack}" && mkdir -p "$WV/works"
-ww() { ( cd "$WV" && HOME="$DZ/home" python3 "$ENG" "$@" ); }
-# legacy_job <design root> <src job> <src round> <new job> <new round>: a second job of the same slice,
-# hand-written beside the first with its round open, the way a pre-P46-nb wave left it.
-legacy_job() { python3 - "$@" <<'LEGACY'
-import json, pathlib, sys
-root, sjob, srnd, njob, nrnd = pathlib.Path(sys.argv[1]), *sys.argv[2:]
-job = json.loads((root / "jobs" / sjob / "job.json").read_text())
-rnd = json.loads((root / "jobs" / sjob / "rounds" / srnd / "round.json").read_text())
-(root / "jobs" / njob / "rounds" / nrnd).mkdir(parents=True)
-(root / "jobs" / njob / "job.json").write_text(json.dumps(dict(job, job=njob, title=njob.split("-", 1)[1])))
-(root / "jobs" / njob / "rounds" / nrnd / "round.json").write_text(json.dumps(dict(rnd, round=nrnd, title=nrnd.split("-", 1)[1])))
-LEGACY
-}
-ww design-init --id wave >/dev/null 2>&1 || bad "wave probe: design-init failed"
-a_out=$(ww design-open --slug checkout --slice P9.S4 --critique critic 2>&1); a_rc=$?
-b_out=$(ww design-open --slug settings --slice P9.S4 --new-job 2>&1); b_rc=$?
-bad_out=$(ww design-open --slug loud --slice P9.S4 --new-job --critique judge 2>&1); bad_rc=$?
-printf '# handoff\n\ncritique: critic\n' > "$WR/jobs/01-checkout/rounds/01-checkout/handoff.md"
-if [ "$a_rc" -eq 0 ] && [ "$b_rc" -ne 0 ] \
-    && printf '%s\n' "$b_out" | grep -Fq 'refused -- P9.S4 has 01-checkout/01-checkout open; a co-work slice designs one connected group as one job: draw it in this job (--job 01-checkout): an unrelated page stays on this canvas, unlinked' \
-    && [ ! -e "$WR/jobs/02-settings" ] \
-    && [ "$bad_rc" -ne 0 ] && printf '%s\n' "$bad_out" | grep -Fq -e "--critique 'judge' is not one of off, critic, critic+judge" \
-    && [ ! -e "$WR/jobs/02-loud" ] && ww design-check >/dev/null 2>&1; then
-  ok "--new-job refuses while another job of the slice has an open round, names it and points at --job (an unrelated page stays on that canvas, unlinked), and writes nothing; a bad --critique level is refused and creates nothing"
-else bad "--new-job with a round open in the slice, or the critique level, is wrong (rc=$a_rc/$b_rc/$bad_rc) -- $a_out $b_out $bad_out"; fi
-m_out=$( { ww design-close 01-checkout/01-checkout --superseded >/dev/null && ww design-open --slug settings --slice P9.S4 --new-job; } 2>&1); m_rc=$?
-printf '# handoff\n\ncritique: off\n' > "$WR/jobs/02-settings/rounds/01-settings/handoff.md"
-chk=$(ww design-check 2>&1); chk_rc=$?
-if [ "$m_rc" -eq 0 ] && [ -f "$WR/jobs/02-settings/rounds/01-settings/round.json" ] \
-    && python3 -c 'import json, sys; assert [json.load(open(p)).get("critique") for p in sys.argv[1:]] == ["critic", "off"]' \
-         "$WR/jobs/01-checkout/rounds/01-checkout/round.json" "$WR/jobs/02-settings/rounds/01-settings/round.json" \
-    && [ "$chk_rc" -eq 0 ] && printf '%s\n' "$chk" | grep -Fq 'open rounds: 02-settings/01-settings'; then
-  ok "once every other round of the slice is closed, --new-job creates the merged job; --critique critic is stored, a new job's default is off, and design-check passes"
-else bad "the merge path (--new-job after the close) failed (rc=$m_rc/$chk_rc) -- $m_out $chk"; fi
-bare=$(ww design-open --slug again --slice P9.S4 2>&1); bare_rc=$?
-{ ww design-close 02-settings/01-settings --superseded \
-    && ww design-open --slug settings-v2 --slice P9.S4 --job 02-settings; } >/dev/null 2>&1; job_rc=$?
-if [ "$bare_rc" -ne 0 ] && printf '%s\n' "$bare" | grep -Fq 'P9.S4 has 2 jobs (01-checkout, 02-settings); name the one this round belongs to with --job <job> (02-settings/01-settings open); a co-work slice designs one connected group as one job; draw it in this job: an unrelated page stays on this canvas, unlinked' \
-    && ! printf '%s\n' "$bare" | grep -Fq -e '--new-job' \
-    && [ "$job_rc" -eq 0 ] && [ ! -e "$WR/jobs/03-again" ] \
-    && python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); assert d["status"] == "open" and d["supersedes"] == ["01-settings"] and d["critique"] == "off", d' \
-         "$WR/jobs/02-settings/rounds/02-settings-v2/round.json"; then
-  ok "a bare design-open in a slice with two jobs (one closed, one open) refuses, asks for --job and names the open round, never the refused --new-job, and --job opens the job's next round after a close"
-else bad "the bare design-open was not refused, or --job did not open the superseding round (rc=$bare_rc/$job_rc) -- $bare"; fi
-printf '# handoff\n' > "$WR/jobs/02-settings/rounds/02-settings-v2/handoff.md"
-# A legacy multi-job slice: P9.S5's jobs 03-alpha and 04-beta both open, hand-written as a wave left them.
-ww design-open --slug alpha --slice P9.S5 >/dev/null 2>&1 && legacy_job "$WR" 03-alpha 01-alpha 04-beta 01-beta \
-  || bad "wave probe: could not write the legacy two-job slice"
-printf '# handoff\n' > "$WR/jobs/03-alpha/rounds/01-alpha/handoff.md"; printf '# handoff\n' > "$WR/jobs/04-beta/rounds/01-beta/handoff.md"
-leg=$(ww design-check 2>&1); leg_rc=$?
-leg_job=$( { ww design-close 04-beta/01-beta --superseded >/dev/null && ww design-open --slug beta-v2 --slice P9.S5 --job 04-beta; } 2>&1); leg_job_rc=$?
-if [ "$leg_rc" -eq 0 ] && printf '%s\n' "$leg" | grep -Fq '03-alpha/01-alpha, 04-beta/01-beta' && ! printf '%s\n' "$leg" | grep -q 'warning' \
-    && [ "$leg_job_rc" -eq 0 ] && [ -f "$WR/jobs/04-beta/rounds/02-beta-v2/round.json" ]; then
-  ok "a legacy slice with two open jobs passes design-check with no problem and no warning, and --job opens a job's next round as before"
-else bad "the legacy multi-job slice got a problem or a warning, or refused --job (rc=$leg_rc/$leg_job_rc) -- $leg $leg_job"; fi
-printf '# handoff\n' > "$WR/jobs/04-beta/rounds/02-beta-v2/handoff.md"
-# pages_canvas <project> <N>: N Pages (expand: fill), Main first, each linking to the next.
-pages_canvas() { python3 - "$1" "$2" <<'PAGES'
-import json, pathlib, shutil, sys
-project, count = pathlib.Path(sys.argv[1]), int(sys.argv[2])
-shutil.rmtree(project, ignore_errors=True); project.mkdir(parents=True)
-names = ["Main"] + [f"Step{n}" for n in range(2, count + 1)]
-boards = {f"{n}.dc.html": {"x": i * 1500, "y": 0, "w": 1440, "h": 900, "title": f"{i + 1:02d} · {n}", "expand": "fill"}
-          for i, n in enumerate(names)}
-(project / "canvas.json").write_text(json.dumps({"v": 3, "createdOnFiles": {"v": 1}, "boards": boards, "order": list(boards)}))
-for i, name in enumerate(boards):
-    nxt = f'<a href="{names[i + 1]}.dc.html">next</a>\n' if i + 1 < len(names) else ""
-    (project / name).write_text('<!doctype html>\n<script src="./support.js"></script>\n<p>page</p>\n' + nxt)
-PAGES
-}
-pages_canvas "$WR/jobs/02-settings/canvas/project" 11 || bad "wave probe: could not write the eleven-Page canvas"
-out=$(ww design-check 2>&1); rc=$?
-pages_canvas "$WR/jobs/02-settings/canvas/project" 10 || bad "wave probe: could not write the ten-Page canvas"
-ten=$(ww design-check 2>&1); ten_rc=$?
-if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Fq 'warning: job 02-settings has 11 Pages / 11 boards — past one review of a connected group; split into rounds or slices along the least-connected seam' \
-    && [ "$ten_rc" -eq 0 ] && ! printf '%s\n' "$ten" | grep -Fq 'past one review' && ! printf '%s\n' "$out$ten" | grep -Fq 'check=unlinked-page'; then
-  ok "a job past the size threshold (11 Pages) makes design-check warn with the connected-group text, exit 0; 10 Pages does not warn"
-else bad "the size warning is wrong at 11 / 10 Pages (rc=$rc/$ten_rc) -- $out $ten"; fi
-# check=unlinked-page: a second Page the entry Page reaches by no link or mount warns; a mount of a flow
-# board that links to it (fragment and ./ stripped) clears it.
-python3 - "$WR/jobs/02-settings/canvas/project" <<'UNLINKED' || bad "wave probe: could not write the unlinked canvas"
-import json, pathlib, shutil, sys
-project = pathlib.Path(sys.argv[1]); shutil.rmtree(project); project.mkdir(parents=True)
-boards = {"Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "01 · Main", "expand": "fill"},
-          "Flow.dc.html": {"x": 1500, "y": 0, "w": 400, "h": 300, "title": "02 · Flow"},
-          "Other.dc.html": {"x": 2000, "y": 0, "w": 1440, "h": 900, "title": "03 · Other", "expand": "fill"}}
-(project / "canvas.json").write_text(json.dumps({"v": 3, "createdOnFiles": {"v": 1}, "boards": boards, "order": list(boards)}))
-for name in boards:
-    (project / name).write_text('<!doctype html>\n<script src="./support.js"></script>\n<a href="{{ next }}">x</a>\n')
-UNLINKED
-un=$(ww design-check 2>&1); un_rc=$?
-CV="$WR/jobs/02-settings/canvas/project"
-printf '<dc-import name="Flow"></dc-import>\n' >> "$CV/Main.dc.html"; printf '<a href="./Other.dc.html#top">other</a>\n' >> "$CV/Flow.dc.html"
-linked=$(ww design-check 2>&1); linked_rc=$?
-if [ "$un_rc" -eq 0 ] && printf '%s\n' "$un" | grep -Fq "jobs/02-settings/canvas/project/Other.dc.html: Page not reachable from the entry Page Main.dc.html by a link or a mount (check=unlinked-page) -- link it from a board the entry reaches, or list it as unrelated in the round's join.json (it stays on this canvas, unlinked)" \
-    && [ "$linked_rc" -eq 0 ] && ! printf '%s\n' "$linked" | grep -Fq 'check=unlinked-page'; then
-  ok "design-check warns on a Page the entry Page reaches by no link or mount (check=unlinked-page), exit 0; a mounted flow board linking it clears the warning"
-else bad "check=unlinked-page is wrong (rc=$un_rc/$linked_rc) -- $un $linked"; fi
-# 6b. v88 (P47-p5.S4): the per-page round record. design-open --pages records the page list (a reserved
-# slug refuses and writes nothing); design-check prints the round's stage= from disk; --page checks one
-# page without canvas.json (a foreign-prefix board and a #to: to a non-page are problems); check=pending-link
-# warns before join.json and is a problem after it, so design-close --words refuses; join.json's unrelated
-# list exempts a Page from check=unlinked-page; check=token-drift and check=transition-all warn; v90 (P47-p5.F3):
-# a calc(var()) radius is token-derived (silent) and a padding px only an fs- token holds gets no suggestion.
-PG="$DZ/pages/.sikstack"; PR="$PG/docs/reference/design"; PJ="$PR/jobs/01-board"; PP="$PJ/canvas/project"; PRD="$PJ/rounds/01-board"
-mkhost "${PG%/.sikstack}" && mkdir -p "$PG/works"
-pw() { ( cd "$PG" && HOME="$DZ/home" python3 "$ENG" "$@" ); }
-pw design-init --id pages >/dev/null 2>&1 || bad "pages probe: design-init failed"
-res_out=$(pw design-open --slug board --slice P9.S6 --pages list,frame 2>&1); res_rc=$?
-open_out=$(pw design-open --slug board --slice P9.S6 --pages list,detail 2>&1); open_rc=$?
-printf '# handoff\n' > "$PRD/handoff.md"; st_frame=$(pw design-check 01-board 2>&1)
-if [ "$res_rc" -ne 0 ] && printf '%s\n' "$res_out" | grep -Fq "page 'frame' is reserved" && [ "$open_rc" -eq 0 ] \
-    && python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))["pages"] == ["list", "detail"]' "$PRD/round.json" \
-    && printf '%s\n' "$st_frame" | grep -Fqx 'design-check: 01-board/01-board stage=frame'; then
-  ok "design-open --pages records the round's page list in round.json (a reserved slug refuses), and design-check prints stage=frame"
-else bad "design-open --pages or the stage line is wrong (rc=$res_rc/$open_rc) -- $res_out $open_out $st_frame"; fi
-# page_files <project> <round> <boards.json body> [extra List.dc.html line]: the list page's files.
-page_files() { python3 - "$@" <<'PAGE'
-import pathlib, sys
-project, rdir, boards = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
-extra = sys.argv[4] if len(sys.argv) > 4 else '<a href="#to:detail">open</a>'
-project.mkdir(parents=True, exist_ok=True); (rdir / "pages/list").mkdir(parents=True, exist_ok=True)
-head = '<!doctype html>\n<script src="./support.js"></script>\n'
-(project / "List.dc.html").write_text(head + extra + "\n")
-(project / "ListRow.dc.html").write_text(head + "<p>row</p>\n")
-(rdir / "pages/list/boards.json").write_text(boards)
-(rdir / "frame.md").write_text("# frame\n")
-PAGE
-}
-LB='{"List.dc.html": {"w": 1440, "h": 900, "title": "List", "expand": "fill"}, "ListRow.dc.html": {"w": 400, "h": 80, "title": "List row"}}'
-page_files "$PP" "$PRD" "$LB" || bad "pages probe: could not write the list page"
-clean=$(pw design-check 01-board --page list 2>&1); clean_rc=$?
-whole=$(pw design-check 01-board 2>&1); whole_rc=$?
-page_files "$PP" "$PRD" "${LB%\}}, \"Detail.dc.html\": {\"w\": 1440, \"h\": 900, \"title\": \"Detail\"}}" '<a href="#to:settings">x</a>' \
-  && printf '<!doctype html>\n<script src="./support.js"></script>\n' > "$PP/Detail.dc.html" || bad "pages probe: could not write the foreign board"
-foreign=$(pw design-check 01-board --page list 2>&1); foreign_rc=$?
-rm -f "$PP/Detail.dc.html"; page_files "$PP" "$PRD" "$LB"
-if [ "$clean_rc" -eq 0 ] && printf '%s\n' "$clean" | grep -Fq 'design-check: OK -- page list of 01-board/01-board: 2 board(s), 2 file(s)' \
-    && printf '%s\n' "$clean" | grep -Fqx 'design-check: 01-board/01-board stage=pages 0/2' \
-    && [ "$whole_rc" -eq 0 ] && printf '%s\n' "$whole" | grep -Fq 'List.dc.html: 1 #to: placeholder link(s) left (detail) (check=pending-link)' \
-    && [ "$foreign_rc" -ne 0 ] && printf '%s\n' "$foreign" | grep -Fq "board 'Detail.dc.html' is outside page list's files (a page writes only files whose stem starts List; this stem is page detail's)" \
-    && printf '%s\n' "$foreign" | grep -Fq 'List.dc.html: links #to:settings, which is not a page of 01-board/01-board'; then
-  ok "design-check --page passes a clean page with no canvas.json and flags a foreign-prefix board and a #to: to a non-page; the whole-job check warns check=pending-link before the join"
-else bad "design-check --page is wrong (rc=$clean_rc/$whole_rc/$foreign_rc) -- $clean $whole $foreign"; fi
-# The join: every page done, canvas.json written, then join.json -- the #to: left becomes a problem.
-python3 - "$PP" "$PRD" <<'JOIN' || bad "pages probe: could not write the joined canvas"
-import json, pathlib, sys
-project, rdir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-for slug in ("list", "detail"):
-    (rdir / "pages" / slug).mkdir(parents=True, exist_ok=True)
-    (rdir / "pages" / slug / "result.md").write_text("- status: done\n")
-boards = {"Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "01 · Main", "expand": "fill"},
-          "List.dc.html": {"x": 1500, "y": 0, "w": 1440, "h": 900, "title": "02 · List", "expand": "fill"},
-          "ListRow.dc.html": {"x": 0, "y": 1000, "w": 400, "h": 80, "title": "03 · List row"}}
-(project / "canvas.json").write_text(json.dumps({"v": 3, "createdOnFiles": {"v": 1}, "boards": boards, "order": list(boards)}))
-(project / "Main.dc.html").write_text('<!doctype html>\n<script src="./support.js"></script>\n<a href="List.dc.html">list</a>\n')
-JOIN
-pre=$(pw design-check 01-board 2>&1); pre_rc=$?
-printf '{"related": ["list"], "unrelated": []}\n' > "$PRD/join.json"
-post=$(pw design-check 01-board 2>&1); post_rc=$?
-pw design-canvas 01-board --url https://claude.ai/artifact/pages1 --version 1700000000-pg >/dev/null 2>&1
-close=$(pw design-close 01-board/01-board --words "ship it" 2>&1); close_rc=$?
-if [ "$pre_rc" -eq 0 ] && printf '%s\n' "$pre" | grep -Fqx 'design-check: 01-board/01-board stage=join' && printf '%s\n' "$pre" | grep -Fq 'warning: jobs/01-board/canvas/project/List.dc.html: 1 #to: placeholder link(s) left (detail) (check=pending-link)' \
-    && [ "$post_rc" -ne 0 ] && printf '%s\n' "$post" | grep -Fqx 'design-check: 01-board/01-board stage=joined' \
-    && printf '%s\n' "$post" | grep -Fq -- '- jobs/01-board/canvas/project/List.dc.html: 1 #to: placeholder link(s) left (detail) (check=pending-link) -- the join rewires each to a real link; design-close --words refuses while one is left' \
-    && [ "$close_rc" -ne 0 ] && printf '%s\n' "$close" | grep -Fq 'check=pending-link' \
-    && python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))["status"] == "open"' "$PRD/round.json"; then
-  ok "check=pending-link is a warning before join.json (stage=join) and a problem after it (stage=joined), and design-close --words refuses the round"
-else bad "check=pending-link or the close refusal is wrong (rc=$pre_rc/$post_rc/$close_rc) -- $pre $post $close"; fi
-# The unrelated-page exemption, and the style lints on a frame.css that names tokens.
-python3 - "$PP" <<'UNREL' || bad "pages probe: could not write the unrelated Page"
-import json, pathlib, sys
-project = pathlib.Path(sys.argv[1]); index = json.loads((project / "canvas.json").read_text())
-index["boards"]["Detail.dc.html"] = {"x": 3000, "y": 0, "w": 1440, "h": 900, "title": "04 · Detail", "expand": "fill"}
-index["order"].append("Detail.dc.html"); (project / "canvas.json").write_text(json.dumps(index))
-head = '<!doctype html>\n<script src="./support.js"></script>\n'
-(project / "Detail.dc.html").write_text(head + "<p>detail</p>\n")
-(project / "List.dc.html").write_text(head + '<a href="Main.dc.html">back</a>\n')
-(project / "frame.css").write_text(":root { --ink: #1a1a1a; --radius-md: 6px; --space-4: 16px; --fs-14: 14px; }\n")
-(project / "ListRow.dc.html").write_text(head + '<style>.row { color: #1A1A1A; border: 1px solid var(--ink); padding: 16px; '
-    'border-radius: 50%; transition: all .2s; } .cap { border-radius: calc(var(--radius-md) - 1px); padding: 14px; } '
-    '[data-proto="state-bar"] { background: #ff0000; }</style>\n<p class="row">row</p>\n')
-UNREL
-un=$(pw design-check 01-board 2>&1); un_rc=$?
-printf '{"related": ["list"], "unrelated": ["detail"]}\n' > "$PRD/join.json"
-ex=$(pw design-check 01-board 2>&1); ex_rc=$?
-printf '<a href="Detail.dc.html">detail</a>\n' >> "$PP/Main.dc.html"
-reached=$(pw design-check 01-board 2>&1)
-if [ "$un_rc" -eq 0 ] && printf '%s\n' "$un" | grep -Fq "Detail.dc.html: Page not reachable from the entry Page Main.dc.html by a link or a mount (check=unlinked-page) -- link it from a board the entry reaches, or list it as unrelated in the round's join.json (it stays on this canvas, unlinked)" \
-    && [ "$ex_rc" -eq 0 ] && ! printf '%s\n' "$ex" | grep -Fq 'check=unlinked-page' \
-    && printf '%s\n' "$reached" | grep -Fq "Detail.dc.html: the round's join.json lists this Page as unrelated, but the entry Page Main.dc.html reaches it (check=unlinked-page)" \
-    && printf '%s\n' "$ex" | grep -Fq 'ListRow.dc.html: 2 raw value(s) where the system or frame.css names a token (check=token-drift): #1A1A1A (color = var(--ink)), 16px (padding = var(--space-4))' \
-    && ! printf '%s\n' "$ex" | grep -Fq -e '#ff0000' -e '50%' -e 'calc(' -e 'fs-14' \
-    && printf '%s\n' "$ex" | grep -Fq 'ListRow.dc.html: transition: all (check=transition-all)'; then
-  ok "join.json's unrelated list exempts a Page from check=unlinked-page (a reached one warns); check=token-drift names raw values a token names, allowing 1px borders, %, [data-proto] chrome and a calc(var()) radius and suggesting no cross-role token; check=transition-all warns"
-else bad "the unrelated-page exemption or the style lints are wrong (rc=$un_rc/$ex_rc) -- $un $ex $reached"; fi
-# 6c. v88 (P47-p5.S5): design-preview --page renders one page of a per-page round from its boards.json (a
-# synthesized index.json in the render folder, never canvas.json), into .preview/<job>/<round>/pages/<slug>/,
-# and only that page's boards; check=align names one known miss per cheap kind (first-line, beside-control,
-# control-height), each printed line with its 2x zoom crop beside the render, and self_check is unchanged
-# (advisory). With no browser the block says so and asserts nothing.
-AL="$DZ/align/.sikstack"; AR="$AL/docs/reference/design"; AJ="$AR/jobs/01-rows"; AP="$AJ/canvas/project"; ARD="$AJ/rounds/01-rows"
-mkhost "${AL%/.sikstack}" && mkdir -p "$AL/works"
-aw() { ( cd "$AL" && python3 "$ENG" "$@" ); }
-{ aw design-init --id align && aw design-open --slug rows --slice P9.S7 --pages list,detail; } >/dev/null 2>&1 || bad "align probe: design-init or design-open --pages failed"
-printf '# handoff\n' > "$ARD/handoff.md"
-python3 - "$AP" "$ARD" <<'ALIGN' || bad "align probe: could not write the page fixtures"
-import json, pathlib, sys
-project, rdir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-project.mkdir(parents=True, exist_ok=True)
-head = '<!doctype html>\n<html><head>\n<script src="./support.js"></script>\n</head>\n'
-btn = 'style="width:64px;height:{h}px;background:#fff;border:1px solid #555;color:#111;font:16px Arial,sans-serif"'
-(project / "ListAlign.dc.html").write_text(head + '<body style="margin:0;background:#fff;color:#111;font:16px/1.25 Arial,sans-serif"><x-dc>\n'
-    '<div style="display:flex;align-items:center;gap:16px;width:420px;margin:24px"><span style="width:140px">A cell that wraps onto two lines</span><span>Short</span></div>\n'
-    f'<div style="display:flex;align-items:flex-start;gap:16px;margin:24px"><span>Label</span><button type="button" {btn.format(h=44)}>Act</button></div>\n'
-    f'<div style="display:flex;align-items:flex-start;gap:16px;margin:24px"><button type="button" {btn.format(h=44)}>One</button><button type="button" {btn.format(h=40)}>Two</button></div>\n'
-    '</x-dc></body></html>\n', encoding="utf-8")
-(project / "Detail.dc.html").write_text(head + '<body><x-dc><p>detail</p></x-dc></body></html>\n', encoding="utf-8")
-for slug, boards in (("list", {"ListAlign.dc.html": {"w": 520, "h": 360, "title": "Rows"}}),
-                     ("detail", {"Detail.dc.html": {"w": 400, "h": 200, "title": "Detail"}})):
-    (rdir / "pages" / slug).mkdir(parents=True, exist_ok=True)
-    (rdir / "pages" / slug / "boards.json").write_text(json.dumps(boards), encoding="utf-8")
-ALIGN
-printf '/* a stand-in runtime: the fixture boards need none */\n' > "$AL/stub-runtime.js"
-al_out=$(aw design-preview 01-rows --runtime stub-runtime.js --page list 2>&1); al_rc=$?
-bad_out=$(aw design-preview 01-rows --runtime stub-runtime.js --page nope 2>&1); bad_rc=$?
-if printf '%s\n' "$al_out" | grep -qx 'preview=skipped reason=no-browser'; then
-  printf 'SKIP: %s\n' "design-preview --page and check=align on fixture boards: no Chrome/Chromium on this machine (nothing asserted)"
-else
-  ALO="$AR/.preview/01-rows/01-rows/pages/list"
-  has() { printf '%s\n' "$al_out" | grep -Eq "$1"; }
-  [ "$al_rc" -eq 0 ] && has '^board=ListAlign\.dc\.html ' && ! has 'board=Detail\.dc\.html' && [ -f "$ALO/ListAlign.frame.png" ] \
-    && [ -f "$ALO/index.json" ] && [ ! -e "$AP/canvas.json" ] && has '^self_check=pass blocking=none$' \
-    && [ "$bad_rc" -ne 0 ] && printf '%s\n' "$bad_out" | grep -Fq "design-preview: --page 'nope' is not a page of 01-rows/01-rows (pages: list, detail; or frame)" \
-    && ok "design-preview --page renders only that page's boards from its boards.json into .preview/<job>/<round>/pages/<slug>/ (index.json there, no canvas.json written), self_check unchanged; an unknown page refuses" \
-    || bad "design-preview --page is wrong (rc=$al_rc/$bad_rc) -- $al_out $bad_out"
-  has 'board=ListAlign\.dc\.html view=frame check=align: first-line [0-9.]+px \(span "A cell that wraps o…" vs span "Short"\)' \
-    && has 'check=align: beside-control [0-9.]+px \(span "Label" vs button "Act"\)' \
-    && has 'check=align: control-height 4px \(button "One" vs button "Two"\)' \
-    && has 'check=align: first-line .* crop=.*/ListAlign\.align-0[1-9]\.png$' && [ -f "$ALO/ListAlign.align-01.png" ] \
-    && has '^advisory=align:[0-9]' \
-    && ok "check=align names a first-line, a beside-control and a control-height miss, each line ending with its 2x zoom crop beside the render; advisory= counts them" \
-    || bad "check=align missed a fixture miss or its crop -- $(printf '%s\n' "$al_out" | grep -E 'align|advisory')"
-fi
-# 7. P36.S8C: the board lint and the board count. A link to an outside https page (Google Fonts CSS
-# excepted) and a <sc-for> whose every row links to one board are warnings; a board another board
-# <dc-import>s is not counted (34 boards, 4 mounted: 30 counted, no size warning); bar.md at the root is no stray.
-python3 - "$WR" <<'LINT' || bad "lint probe: could not write the canvas"
-import json, pathlib, sys
-root = pathlib.Path(sys.argv[1]); project = root / "jobs/01-checkout/canvas/project"; project.mkdir(parents=True, exist_ok=True)
-(root / "bar.md").write_text("# The operator's bar\n\n- none beyond the shipped bar\n")
-names = ["Main", "Item"] + [f"Part{n}" for n in range(1, 33)]
-boards = {f"{n}.dc.html": {"x": i * 500, "y": 0, "w": 400, "h": 300, "title": f"{i + 1:02d} · {n}"} for i, n in enumerate(names)}
-(project / "canvas.json").write_text(json.dumps({"v": 3, "createdOnFiles": {"v": 1}, "boards": boards, "order": list(boards)}))
-head = '<!doctype html>\n<script src="./support.js"></script>\n'
-for name in boards:
-    (project / name).write_text(head + "<p>board</p>\n")
-(project / "Main.dc.html").write_text(head + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">\n'
-    '<sc-for list="{{ rows }}" as="r"><a href="Item.dc.html">{{ r.name }}</a></sc-for>\n'
-    '<a href="https://elsewhere.example/sign-in">Sign in</a>\n'
-    '<dc-import name="Part1"></dc-import><dc-import name="Part2"></dc-import><dc-import name="Part3"></dc-import><dc-import name="Part4"></dc-import>\n')
-LINT
-out=$(ww design-check 01-checkout 2>&1); rc=$?
-all_out=$(ww design-check 2>&1); all_rc=$?
-if [ "$rc" -eq 0 ] && [ "$all_rc" -eq 0 ] && ! printf '%s\n' "$all_out" | grep -Fq 'bar.md' \
-    && printf '%s\n' "$out" | grep -Fq 'Main.dc.html: 1 link(s) leave the prototype (check=leaves-canvas): https://elsewhere.example/sign-in' \
-    && ! printf '%s\n' "$out" | grep -Fq 'fonts.googleapis.com' \
-    && printf '%s\n' "$out" | grep -Fq 'Main.dc.html: every row of a <sc-for> list links to Item.dc.html (check=same-target-list)' \
-    && ! printf '%s\n' "$out" | grep -Fq 'past one review' && ! printf '%s\n' "$out" | grep -Fq 'bar.md'; then
-  ok "design-check warns on a link leaving the prototype (not Google Fonts) and on a list whose rows all link to one board, exit 0; boards another board mounts are not counted (34 boards, 4 mounted: no size warning); bar.md is no stray"
-else bad "the board lint, the mounted-board count or bar.md is wrong (rc=$rc/$all_rc) -- $out $all_out"; fi
-
-# 8. v61 (P37.S5): the design lifecycle one-liners. The publish records a size manifest; design-readback
-# reads a canvas listing (no hash) and names only what to fetch; --fetched diffs, --apply copies in;
-# design-close generates SIGNOFF.md and refuses without a read-back; design-sign signs every presented job
-# or none; a superseding round's critique defaults off; the record carries repo-relative paths only, and a
-# brief a handoff names must exist. Its second job is a legacy wave's (hand-written: --new-job now refuses
-# while the slice's first round is open), so design-sign --slice signs a legacy slice's presented jobs.
-LF="$DZ/life/.sikstack"; LR="$LF/docs/reference/design"
-mkhost "${LF%/.sikstack}" && mkdir -p "$LF/works"
-lw() { ( cd "$LF" && HOME="$DZ/home" python3 "$ENG" "$@" ); }
-lw design-init --id life >/dev/null 2>&1 && lw design-open --slug one --slice P9.S7 --critique critic >/dev/null 2>&1 \
-  && legacy_job "$LR" 01-one 01-one 02-two 01-two || bad "life probe: design-open failed"
-python3 - "$LR" <<'LIFE' || bad "life probe: could not write the canvases"
-import json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-(root / "waves/P9.S7").mkdir(parents=True, exist_ok=True)
-(root / "waves/P9.S7/brief.md").write_text("# Wave P9.S7\n\nruntime: docs/reference/design/.type/artifact-type/dc-runtime.js\n")
-for job, rnd in (("01-one", "01-one"), ("02-two", "01-two")):
-    project = root / "jobs" / job / "canvas/project"; project.mkdir(parents=True, exist_ok=True)
-    boards = {"Main.dc.html": {"x": 0, "y": 0, "w": 400, "h": 300, "title": "01 · Main"},
-              "Two.dc.html": {"x": 500, "y": 0, "w": 400, "h": 300, "title": "02 · Two"}}
-    (project / "canvas.json").write_text(json.dumps({"v": 3, "createdOnFiles": {"v": 1}, "boards": boards, "order": list(boards)}))
-    for name in boards:
-        (project / name).write_text('<!doctype html>\n<script src="./support.js"></script>\n<p>' + name + '</p>\n')
-    (project / "app.css").write_text("p { color: #222; }\n")
-    rdir = root / "jobs" / job / "rounds" / rnd
-    (rdir / "handoff.md").write_text("# handoff\n\nbrief: waves/P9.S7/brief.md\ncritique: off\n")
-    (rdir / "result.md").write_text("- verdict: done\n- open_items: D1, D2\n\n## Summary\n\nTwo boards.\n\n## Build\n\nBuild both.\n")
-LIFE
-printf '# handoff\n\nbrief: waves/P9.S7/brief.md\nruntime: /private/tmp/scratch/dc-runtime.js\n' > "$LR/jobs/01-one/rounds/01-one/handoff.md"
-abs_out=$(lw design-check 2>&1); abs_rc=$?
-printf '# handoff\n\nbrief: waves/P9.S7/brief.md\ncritique: critic\n' > "$LR/jobs/01-one/rounds/01-one/handoff.md"
-mv "$LR/waves/P9.S7/brief.md" "$DZ/brief.md"; brief_out=$(lw design-check 2>&1); brief_rc=$?; mv "$DZ/brief.md" "$LR/waves/P9.S7/brief.md"
-clean_out=$(lw design-check 2>&1); clean_rc=$?
-if [ "$abs_rc" -eq 1 ] && printf '%s\n' "$abs_out" | grep -Fq 'jobs/01-one/rounds/01-one/handoff.md: an absolute path (check=abs-path): line 4 /private/' \
-    && [ "$brief_rc" -eq 1 ] && printf '%s\n' "$brief_out" | grep -Fq 'jobs/02-two/rounds/01-two/handoff.md: names brief waves/P9.S7/brief.md, which is missing' \
-    && [ "$clean_rc" -eq 0 ] && grep -qx '\*' "$LR/.type/.gitignore"; then
-  ok "design-check makes an absolute path in an open round's handoff a problem and a missing named wave brief a problem; the record passes with repo-relative paths, and design-open git-ignores the type cache"
-else bad "the absolute-path lint or the brief check is wrong (rc=$abs_rc/$brief_rc/$clean_rc) -- $abs_out $brief_out $clean_out"; fi
-{ lw design-canvas 01-one --url https://claude.ai/artifact/LifeOne && lw design-canvas 01-one --version 300-a \
-    && lw design-canvas 02-two --url https://claude.ai/artifact/LifeTwo && lw design-canvas 02-two --version 400-a; } >/dev/null 2>&1 \
-  || bad "life probe: design-canvas failed"
-python3 - "$LR/jobs/01-one" <<'MANIFEST' && ok "design-canvas --version records the publish's size manifest in job.json and the version on the open round" || bad "design-canvas recorded no manifest or no round publish"
-import json, pathlib, sys
-job = pathlib.Path(sys.argv[1]); project = job / "canvas/project"
-manifest = json.loads((job / "job.json").read_text())["canvas"]["manifest"]
-assert manifest == {f"project/{f.name}": f.stat().st_size for f in project.iterdir() if f.is_file()}, manifest
-assert json.loads((job / "rounds/01-one/round.json").read_text())["published"] == "300-a"
-MANIFEST
-# listing <version> [<file to grow by 9 bytes>]: an Artifact list scope:files output of job 01-one's local tree
-listing() { python3 - "$LR/jobs/01-one/canvas/project" "$1" "${2:-}" <<'LISTING'
-import pathlib, sys
-project, version, grow = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-print(f'Published files of https://claude.ai/artifact/LifeOne (version {version}), an Artifact of type "Design", 9 files by path:')
-for path, size in (("SKILL.md", 16042), ("index.html", 34176), ("artifact-type/dc-runtime.js", 187897), ("project/ds/life/tokens.css", 900)):
-    print(f'- "{path}"  text/plain  {size} bytes')
-for f in sorted(project.iterdir()):
-    print(f'- "project/{f.name}"  text/plain  {f.stat().st_size + (9 if f.name == grow else 0)} bytes')
-LISTING
-}
-close_out=$(lw design-close 01-one/01-one --words "ship it" 2>&1); close_rc=$?
-same=$(listing 300-a | lw design-readback 01-one --listing - 2>&1)
-moved=$(listing 301-b app.css | lw design-readback 01-one --listing - 2>&1)
-unloc=$(listing 302-c | lw design-readback 01-one --listing - 2>&1)
-if [ "$close_rc" -ne 0 ] && printf '%s\n' "$close_out" | grep -Fq 'no read-back since the last publish (300-a): run design-readback 01-one --listing' \
-    && [ ! -e "$LR/jobs/01-one/rounds/01-one/SIGNOFF.md" ] \
-    && printf '%s\n' "$same" | grep -qx 'readback=unchanged version=300-a' \
-    && printf '%s\n' "$moved" | grep -qx 'readback=changed version=301-b files=1' && printf '%s\n' "$moved" | grep -qx 'fetch=project/app.css' \
-    && printf '%s\n' "$unloc" | grep -qx 'readback=changed-unlocated version=302-c reason=same-sizes files=2' \
-    && printf '%s\n' "$unloc" | grep -qx 'fetch=project/Main.dc.html,project/Two.dc.html' \
-    && ! printf '%s\n%s\n%s\n' "$same" "$moved" "$unloc" | grep -Eq 'SKILL|artifact-type|index.html|ds/|color'; then
-  ok "design-close --words refuses with no read-back and writes nothing; design-readback reads a listing: same version unchanged, a resized file changed (only it fetched), same sizes changed-unlocated (the boards fetched), the type's files and ds/ ignored, no content printed"
-else bad "the read-back of a listing is wrong (close rc=$close_rc) -- $close_out / $same / $moved / $unloc"; fi
-listing 303-d app.css | lw design-readback 01-one --listing - >/dev/null 2>&1
-mkdir -p "$DZ/fetched/project" && printf 'p { color: #222; }\nb { font-weight: 600; }\n' > "$DZ/fetched/project/app.css"
-diff_out=$(lw design-readback 01-one --fetched "$DZ/fetched" 2>&1); diff_rc=$?
-cmp -s "$DZ/fetched/project/app.css" "$LR/jobs/01-one/canvas/project/app.css" && copied_early=1 || copied_early=0
-apply_out=$(lw design-readback 01-one --fetched "$DZ/fetched" --apply 2>&1); apply_rc=$?
-if [ "$diff_rc" -eq 0 ] && printf '%s\n' "$diff_out" | grep -qx 'diff=project/app.css +1 -0' && printf '%s\n' "$diff_out" | grep -q '^readback=differs ' \
-    && [ "$copied_early" -eq 0 ] && [ -f "$DZ/fetched/readback.diff" ] \
-    && [ "$apply_rc" -eq 0 ] && printf '%s\n' "$apply_out" | grep -q '^readback=edited version=303-d files=1' \
-    && cmp -s "$DZ/fetched/project/app.css" "$LR/jobs/01-one/canvas/project/app.css"; then
-  ok "design-readback --fetched prints diff=<path> +A -B and writes the diff to the scratch dir only; --apply copies the fetched file over the canvas file (read-back edited)"
-else bad "design-readback --fetched / --apply is wrong (rc=$diff_rc/$apply_rc) -- $diff_out / $apply_out"; fi
-sign_no=$(lw design-sign --slice P9.S7 --words "accept" 2>&1); sign_no_rc=$?
-st() { python3 -c 'import json, sys; print(" ".join(json.load(open(p))["status"] for p in sys.argv[1:]))' "$@"; }
-no_state=$(st "$LR/jobs/01-one/rounds/01-one/round.json" "$LR/jobs/02-two/rounds/01-two/round.json")
-[ -e "$LR/jobs/01-one/rounds/01-one/SIGNOFF.md" ] && no_state="$no_state signoff-written"
-printf 'Published files of x (version 400-a), 1 file:\n- "project/Main.dc.html"  text/html  80 bytes\n' | lw design-readback 02-two --listing - >/dev/null 2>&1
-sign_out=$(lw design-sign --slice P9.S7 --words "accept" 2>&1); sign_rc=$?
-if [ "$sign_no_rc" -ne 0 ] && printf '%s\n' "$sign_no" | grep -Fq '02-two/01-two: no read-back since the last publish (400-a)' \
-    && [ "$no_state" = "open open" ] \
-    && [ "$sign_rc" -eq 0 ] && printf '%s\n' "$sign_out" | grep -qx 'signed=01-one/01-one version=303-d readback=edited open_items=D1,D2 files=4' \
-    && printf '%s\n' "$sign_out" | grep -qx 'signed=02-two/01-two version=400-a readback=unchanged open_items=D1,D2 files=4' \
-    && [ "$(st "$LR/jobs/01-one/rounds/01-one/round.json" "$LR/jobs/02-two/rounds/01-two/round.json" "$LR/jobs/01-one/job.json" "$LR/jobs/02-two/job.json")" = "signed signed signed signed" ] \
-    && [ -f "$LR/jobs/02-two/rounds/01-two/SIGNOFF.md" ] && lw design-check >/dev/null 2>&1; then
-  ok "design-sign signs neither job while one lacks a read-back, then signs both presented jobs in one call, one line each"
-else bad "design-sign is not all-or-nothing or did not sign both (rc=$sign_no_rc/$sign_rc) -- $sign_no / $sign_out"; fi
-sup_out=$(lw design-open --slug one-fix --slice P9.S7 --job 01-one 2>&1)
-RD="$LR/jobs/01-one/rounds/02-one-fix"
-printf '# handoff\n\nbrief: waves/P9.S7/brief.md\ncritique: off\n' > "$RD/handoff.md"
-printf -- '- verdict: done\n- open_items: none\n\n## Summary\n\nFixed.\n\n## Build\n\nAs drawn.\n' > "$RD/result.md"
-printf -- '- verdict: pass\n- open_items: C4, C7\n' > "$RD/critique-01.md"
-{ lw design-canvas 01-one --version 500-e && listing 500-e | lw design-readback 01-one --listing -; } >/dev/null 2>&1
-close_out=$(lw design-close 01-one/02-one-fix --words "ship it, as drawn" 2>&1); close_rc=$?
-if printf '%s\n' "$sup_out" | grep -Fq 'critique off (a superseding round'"'"'s default' \
-    && python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))["critique"] == "off"' "$RD/round.json" \
-    && [ "$close_rc" -eq 0 ] && printf '%s\n' "$close_out" | grep -Fq 'SIGNOFF.md generated' \
-    && grep -qx '  > ship it, as drawn' "$RD/SIGNOFF.md" && grep -qx -- '- \*\*Canvas version:\*\* 500-e' "$RD/SIGNOFF.md" \
-    && grep -qx -- '- \*\*Read-back:\*\* unchanged at 500-e (published 500-e)' "$RD/SIGNOFF.md" \
-    && grep -qx -- '- \*\*Open items:\*\* C4, C7' "$RD/SIGNOFF.md" && grep -qx -- '- \*\*Supersedes:\*\* 01-one' "$RD/SIGNOFF.md"; then
-  ok "a superseding round defaults critique off; design-close --words generates SIGNOFF.md: the words verbatim, the canvas version, the read-back and the open-item ids"
-else bad "the superseding round's critique or the generated SIGNOFF.md is wrong (close rc=$close_rc) -- $sup_out / $close_out / $(cat "$RD/SIGNOFF.md" 2>&1)"; fi
+rec = json.load(open(sys.argv[1]))
+first, second = rec["signoffs"]
+assert rec["schema"] == 1 and rec["slice"] == "P1.S1", rec
+assert first["words"] == 'approved, ship it "as is"' and first["repo"] == "prod" and first["folder"] == "web/design", first
+assert first["commit"] == sys.argv[2] and first["folder_commit"] == sys.argv[3], first
+assert first["uncommitted"] == ["web/design/app/new.tsx"] and first["signed_at"], first
+assert second["words"] == "second look: yes", second
+PY
+# The uncommitted paths are the paths on disk (porcelain v1 -z, never C-quoted): a name with a space, a Korean name,
+# and a staged rename recorded as its new path, with the path it came from under `renamed`.
+printf 'edit\n' > "$DS/prod/web/design/app/page.tsx" && git -C "$DS/prod" mv web/design/app/page.tsx "web/design/app/pa ge.tsx" \
+  && printf 'ko\n' > "$DS/prod/web/design/app/한글 이름.tsx" && printf 'sp\n' > "$DS/prod/web/design/app/c d.tsx"
+p_out=$(dw design-sign --slice P1.S1 --words "paths: ok" --folder web/design 2>&1); p_rc=$?
+[ "$p_rc" = 0 ] && python3 - "$SO" "$DS/prod" <<'PY' && ok "design-sign records real paths: a space name, a Korean name and a rename's new path as on disk (unquoted), the rename's old path under renamed" || bad "design-sign recorded quoted or arrowed paths (rc=$p_rc) -- $p_out / $(cat "$SO" 2>&1)"
+import json, os, sys
+last = json.load(open(sys.argv[1], encoding="utf-8"))["signoffs"][-1]
+want = ["web/design/app/c d.tsx", "web/design/app/new.tsx", "web/design/app/pa ge.tsx", "web/design/app/한글 이름.tsx"]
+assert last["uncommitted"] == want, last["uncommitted"]
+assert last["renamed"] == [{"path": "web/design/app/pa ge.tsx", "from": "web/design/app/page.tsx"}], last.get("renamed")
+assert all(os.path.exists(os.path.join(sys.argv[2], p)) for p in last["uncommitted"]), last["uncommitted"]
+PY
+mkdir -p "$DS/prod/.sikstack/docs/reference/design/jobs/01-x" && printf '{broken' > "$DS/prod/.sikstack/docs/reference/design/design.json" \
+  && printf '{' > "$DS/prod/.sikstack/docs/reference/design/jobs/01-x/job.json"
+c_out=$(dw check 2>&1); c_rc=$?
+[ "$c_rc" = 0 ] && ! printf '%s\n' "$c_out" | grep -qi 'design' \
+  && ok "check passes over a broken retired design record: nothing reads docs/reference/design/ any more" || bad "check read the retired design record (rc=$c_rc) -- $c_out"
 
 # ---------------------------------------------------------------------------
 echo "== Test 14: P28 nested engine -- .sikstack/.agentic-nested.json: host anchors, host-side phase scope, the paired worktree lifecycle (v86: an explain phase's detached pair), the convention gate, a malformed marker fails validate =="
@@ -4447,25 +3789,51 @@ pl6=$( cd "$PLA" && env -u PYTHONDONTWRITEBYTECODE -u SIKSTACK_ROOT -u WORKFLOW_
   || bad "plugin path: with no workspace above (rc $pl5_rc) -- $pl5"
 [ "$(pl_sig)" = "$pl_s0" ] && ok "plugin path: nothing was written into the engine's own folder (no works/, no __pycache__)" \
   || bad "plugin path: the engine wrote into its own folder -- $(diff <(printf '%s\n' "$pl_s0") <(pl_sig) | tail -5 | tr '\n' ' ')"
-# The design-critic's harness (P74 finding 2), run as the plugin loads it: ${CLAUDE_PLUGIN_ROOT} filled in with the
-# copied plugin's folder, from the session's directory (the host), its import lines bind every engine name it calls
-# and design_root() resolves under the host's .sikstack/. The plugin's own skills say the same for design-preview.
-critic_harness() { ( cd "$1" && PYTHONDONTWRITEBYTECODE=1 python3 - "$PLUGIN/agents/design-critic.md" "$PLW/plugin" <<'PY'
-import re, sys
-text = open(sys.argv[1]).read().replace("${CLAUDE_PLUGIN_ROOT}", sys.argv[2])
-block = re.search(r"```python\n(.*?)```", text, re.S).group(1).splitlines()
-assert "workflow/scripts" not in "\n".join(block), "the harness still guesses workflow/scripts"
-ns = {}
-exec("\n".join(l for l in block[:3] if "import" in l), ns)
-w = ns["w"]
-missing = [n for n in ("design_root", "design_preview_server", "DesignBrowser", "design_preview_browser", "design_preview_click") if not hasattr(w, n)]
-assert not missing, missing
-assert str(w.design_root()).endswith("/.sikstack/docs/reference/design"), w.design_root()
-PY
-) 2>&1; }
-ch_nest=$(critic_harness "$PLA"); ch_nest_rc=$?
-[ "$ch_nest_rc" = 0 ] && ok "the design-critic's harness, with \${CLAUDE_PLUGIN_ROOT} filled in, imports the plugin's engine from a repo subfolder and binds design_root (under .sikstack/), design_preview_server, DesignBrowser, design_preview_browser and design_preview_click" \
-  || bad "the design-critic's harness does not bind its names from the plugin (rc $ch_nest_rc) -- $(printf '%s\n' "$ch_nest" | tail -2)"
+# 2.0.0: the design critic and drafter carry no engine harness (the canvas preview retired); they read the shipped
+# check script's output. The script parses as an ES module wherever node runs (CI's runner has it).
+if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-critic.md" "$PLUGIN/agents/design-drafter.md" \
+    && [ -f "$PLUGIN/templates/design/check.mjs" ] && [ -f "$PLUGIN/templates/design/options.html" ] && [ -f "$PLUGIN/templates/design/TASTE.md" ]; then
+  if command -v node >/dev/null 2>&1; then
+    ck_out=$(node --check "$PLUGIN/templates/design/check.mjs" 2>&1) && ck_help=$(node "$PLUGIN/templates/design/check.mjs" --help 2>&1) \
+      && printf '%s\n' "$ck_help" | grep -q 'usage: node check.mjs' && printf '%s\n' "$ck_help" | grep -q 'exit 2: a usage error, or a driver error' \
+      && ok "the design agents bind no engine harness; templates/design/ ships check.mjs (it parses and prints its usage), options.html and TASTE.md" \
+      || bad "templates/design/check.mjs does not parse or print its usage -- $ck_out $ck_help"
+    # The layout check's run plan, without a browser: every page at every width, the default first and expecting the
+    # first listed state, then each other state; every step opens in a fresh browser context (empty storage), so a
+    # state one run stores never reaches the next run's label. Importing the script runs nothing.
+    ck_plan=$(CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const m = await import(pathToFileURL(process.env.CK_FILE).href);
+      const assert = (c, msg) => { if (!c) { console.log("plan: " + msg); process.exit(1); } };
+      const base = "http://127.0.0.1:9";
+      const pages = m.pagesFromManifest({ pages: [
+        { name: "Agenda", entry: "/ws/", states: ["recorded", { key: "behind" }, "loading"] },
+        { name: "Item", entry: "/ws/a/1/", entries: ["/ws/a/1/", "/ws/a/2/"], states: ["open", "deferred"] },
+        { name: "System", entry: "/system/" } ] }, false);
+      assert(pages.length === 3 && pages[0].states.join() === "recorded,behind,loading" && pages[2].states === null, "pagesFromManifest " + JSON.stringify(pages));
+      assert(m.pagesFromManifest({ pages: [{ entry: "/ws/a/1/", entries: ["/ws/a/1/", "/ws/a/2/"] }] }, true).length === 2, "all entries");
+      pages[2].states = [];
+      const steps = m.plan(pages, [1440, 390], base);
+      const at = (s) => s.page + "@" + s.width + ":" + (s.state ?? "default") + ">" + (s.expect ?? "-");
+      assert(steps.map(at).join(" ") === "/ws/@1440:default>recorded /ws/@1440:behind>behind /ws/@1440:loading>loading /ws/@390:default>recorded /ws/@390:behind>behind /ws/@390:loading>loading /ws/a/1/@1440:default>open /ws/a/1/@1440:deferred>deferred /ws/a/1/@390:default>open /ws/a/1/@390:deferred>deferred /system/@1440:default>- /system/@390:default>-", "order " + steps.map(at).join(" "));
+      assert(steps.every((s) => s.fresh === true), "a step reuses a browser context");
+      assert(steps[1].url === base + "/ws/?state=behind" && steps[3].url === base + "/ws/" && steps[3].state === null, "urls " + steps[1].url + " " + steps[3].url);
+      const d = m.discoverStep({ name: "x", url: "/x/" }, 1440, base);
+      assert(d.fresh === true && d.discover === true && d.expect === null, "discover step");
+      console.log("plan ok");
+    ' 2>&1)
+    [ "$ck_plan" = "plan ok" ] \
+      && ok "the layout check's run plan (no browser): pages x widths x states in order, the default first expecting the first listed state at every width, every step in a fresh browser context" \
+      || bad "the layout check's run plan is wrong -- $ck_plan"
+    # Nothing served: a driver error, exit 2, never a layout FAIL (playwright-cli absent is a driver error too).
+    ck_port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+    newtmp CKT
+    ck_drv=$(cd "$CKT" && node "$PLUGIN/templates/design/check.mjs" --base "http://127.0.0.1:$ck_port" --widths 390 --out "$CKT/out" / 2>&1); ck_drv_rc=$?
+    [ "$ck_drv_rc" = 2 ] && printf '%s\n' "$ck_drv" | grep -q '^driver error: ' && ! printf '%s\n' "$ck_drv" | grep -q '^FAIL ' \
+      && ok "the layout check with no server prints a driver error and exits 2, with no FAIL line" \
+      || bad "the layout check with no server (rc=$ck_drv_rc) -- $ck_drv"
+  else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
+else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 
 # ---------------------------------------------------------------------------
 echo "== Test 28: close -- the close's fixed order against a stub gh: an uncleared required gate is refused first, writing nothing; pr record --url stores the draft's head, updatedAt and comment count and pr sync says whether the PR is unchanged since; a PR changed since its draft stops at the re-read; an unchanged one records the pass and stops at Ready, then walks to the landing step; a red check stops at the CI step; merged, it stops for the one commit, then reads close=done; zero GitHub writes =="
@@ -5113,13 +4481,14 @@ si_f3=$(si_fb --message "a third report")
 si_f4=$(si_fb --message "it broke at /home/me/app/main.py")
 si_f5=$(si_fb --message "the repo2 checkout failed")
 si_id2=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["install_id"])' "$SIW/data2/install.json")
+si_pv=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN/.claude-plugin/plugin.json")
 si_rep=$(curl -s "$SIS/_fake/reports" | python3 -c 'import json,sys; r=json.load(sys.stdin)["reports"]; print(len(r), r[0])')
 kill "$si_up" 2>/dev/null; wait "$si_up" 2>/dev/null
 printf '%s\n' "$si_f1" | grep -q '^sent: ' && [ "$(printf '%s\n' "$si_f1" | tail -1)" = rc=0 ] && printf '%s\n' "$si_f2" | grep -q '^sent: ' \
   && [ "$(printf '%s\n' "$si_f3" | grep -c '')" = 2 ] && printf '%s\n' "$si_f3" | grep -q 'refused -- this install has sent as many reports as it may for now (HTTP 429)' \
   && printf '%s\n' "$si_f4" | grep -q 'names a path outside the plugin' && [ "$(printf '%s\n' "$si_f4" | tail -1)" = rc=2 ] \
   && printf '%s\n' "$si_f5" | grep -q 'names this repo (repo2)' \
-  && [ "$si_rep" = "2 {'install_id': '$si_id2', 'message': 'sign-in printed its code twice; expected once. plugin 1.0.0', 'plugin_version': '1.0.0'}" ] \
+  && [ "$si_rep" = "2 {'install_id': '$si_id2', 'message': 'sign-in printed its code twice; expected once. plugin 1.0.0', 'plugin_version': '$si_pv'}" ] \
   && [ "$(grep -c '"route": "feedback"' "$SIW/up/requests.jsonl")" = 3 ] \
   && ok "feedback sends {install_id, message, plugin_version} from an install that never signed in, reports the per-install limit in one line, and refuses a path or the repo's name before any request" \
   || bad "feedback -- f1=[$si_f1] f2=[$si_f2] f3=[$si_f3] f4=[$si_f4] f5=[$si_f5] reports=[$si_rep]"

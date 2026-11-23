@@ -1,0 +1,306 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "sample",
+  "now": "2026-11-20T09:00:00Z",
+  "timeZone": "Asia/Seoul",
+  "source": {
+    "routes": [
+      "GET /app/projects/{project}/workspace",
+      "GET /app/projects/{project}/workspace/agenda/{item}"
+    ],
+    "note": "project id and dates normalized; the Shell's names are fixed"
+  },
+  "shell": {
+    "org": {
+      "id": "00000000-0000-4000-8000-0000000000a1",
+      "name": "Sample org"
+    },
+    "project": {
+      "name": "sample-product",
+      "visibility": "private",
+      "created_at": "2026-11-20T08:55:16Z"
+    },
+    "email": "design@example.invalid"
+  },
+  "workspace": {
+    "project": "00000000-0000-4000-8000-000000000001",
+    "linked": true,
+    "version": "v1.0.0",
+    "sync": {
+      "state": "fresh",
+      "at": "2026-11-20T08:55:43Z"
+    },
+    "streams": [
+      {
+        "id": "default",
+        "label": null,
+        "branch": null,
+        "phase": null,
+        "slice": null,
+        "sliceRef": null
+      }
+    ],
+    "pointer": {
+      "phase": null,
+      "slice": null,
+      "next": null,
+      "sliceRef": null,
+      "nextRef": null,
+      "waiting": []
+    },
+    "phases": [],
+    "deferred": [],
+    "docs": [],
+    "retired": [],
+    "agenda": [
+      {
+        "id": "A1-5h",
+        "title": "Write the onboarding checklist",
+        "lang": "en",
+        "note": "What a new member reads on day one:\n\n- **Install** the CLI and sign in\n- Link a workspace with `sikstack link`\n- Open the Agenda and pick the first item",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A7-gg",
+        "title": "Show the sync time in the header",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A5-xr",
+        "title": "Check the empty state copy",
+        "lang": "en",
+        "note": "The empty Agenda says nothing about where items come from.\n\n> Add one here, or with `sikstack agenda-add`.",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A3-1z",
+        "title": "Pick a name for the export button",
+        "lang": "en",
+        "note": "Candidates:\n\n1. Export\n2. Download\n3. Save a copy\n\n*Export* reads best beside **Share**.",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A4-jq",
+        "title": "Draft the release note",
+        "lang": "en",
+        "note": "Cover the new Agenda and the design folder.",
+        "state": "deferred",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A2-ry",
+        "title": "Decide the retry policy for sync",
+        "lang": "en",
+        "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "Three tries, a minute apart, then stop and say so",
+        "reason": "",
+        "sync": null
+      },
+      {
+        "id": "A6-ca",
+        "title": "Try a darker sidebar",
+        "lang": "en",
+        "note": "An old idea from the first round.",
+        "state": "dropped",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "The light sidebar tested better",
+        "sync": null
+      }
+    ],
+    "unplaced": []
+  },
+  "items": {
+    "A1-5h": {
+      "id": "A1-5h",
+      "title": "Write the onboarding checklist",
+      "lang": "en",
+      "note": "What a new member reads on day one:\n\n- **Install** the CLI and sign in\n- Link a workspace with `sikstack link`\n- Open the Agenda and pick the first item",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A7-gg": {
+      "id": "A7-gg",
+      "title": "Show the sync time in the header",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A5-xr": {
+      "id": "A5-xr",
+      "title": "Check the empty state copy",
+      "lang": "en",
+      "note": "The empty Agenda says nothing about where items come from.\n\n> Add one here, or with `sikstack agenda-add`.",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A3-1z": {
+      "id": "A3-1z",
+      "title": "Pick a name for the export button",
+      "lang": "en",
+      "note": "Candidates:\n\n1. Export\n2. Download\n3. Save a copy\n\n*Export* reads best beside **Share**.",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A4-jq": {
+      "id": "A4-jq",
+      "title": "Draft the release note",
+      "lang": "en",
+      "note": "Cover the new Agenda and the design folder.",
+      "state": "deferred",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A2-ry": {
+      "id": "A2-ry",
+      "title": "Decide the retry policy for sync",
+      "lang": "en",
+      "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "Three tries, a minute apart, then stop and say so",
+      "reason": "",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    },
+    "A6-ca": {
+      "id": "A6-ca",
+      "title": "Try a darker sidebar",
+      "lang": "en",
+      "note": "An old idea from the first round.",
+      "state": "dropped",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "The light sidebar tested better",
+      "sync": null,
+      "workspace": {
+        "version": "v1.0.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:55:43Z"
+        }
+      }
+    }
+  }
+}

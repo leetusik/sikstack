@@ -406,13 +406,14 @@ SLICE_STATUSES = {"todo", "ready", "in_progress", "in_review", "changes_requeste
 # return will do. Stored on the slice as `pending: {kind, on_words, since}` while it is `pending`, and
 # cleared whenever it leaves `pending`. A closed set; `other` is the escape hatch.
 SLICE_STOP_KINDS = {
-    "wave": "a design-round stop (the slice's canvas is published; the operator reviews it)",
-    "mockup": "the mockup gate (the operator walks the requested mockup)",
+    "wave": "a design stop (the design build is served on loopback; the operator reviews it at its URL)",
     "decision": "a question only the operator answers (DECOMP's design style, a needs_operator)",
     "operator-action": "the operator must run or provide something",
     "limit": "a usage limit with no reset time",
     "other": "anything else",
 }
+# A kind a retired flow typed (2.0.0 retired the in-product mockup): an older pending record still validates.
+RETIRED_STOP_KINDS = ("mockup",)
 DEFERRED_STATUSES = {"deferred", "ready", "promoted", "done", "dropped"}
 # An agenda item's STORED status. In progress is never stored: it is derived (an Open item with a linked
 # phase not done), so a listing shows five statuses. AGENDA_SHOWN is the one table of their signed words.
@@ -3110,7 +3111,7 @@ def validate() -> int:
                 elif not isinstance(record, dict) or set(record) != {"kind", "on_words", "since"}:
                     errors.append(f"slice {s['id']} has a malformed pending record {record!r}; expected {{kind, on_words, since}} (slice status {s['id']} pending --stop-kind ... --on-words ...)")
                 else:
-                    if record.get("kind") not in SLICE_STOP_KINDS:
+                    if record.get("kind") not in SLICE_STOP_KINDS and record.get("kind") not in RETIRED_STOP_KINDS:
                         errors.append(f"slice {s['id']} has unknown pending kind {record.get('kind')!r}; expected one of {list(SLICE_STOP_KINDS)}")
                     if not isinstance(record.get("on_words"), str) or not record["on_words"].strip():
                         errors.append(f"slice {s['id']}'s pending record has no on_words (what the operator's words will do)")
@@ -4173,7 +4174,7 @@ def _card_next_action(sid: str, sdata: dict, sdir: Path, spans) -> str:
     if not (sdir / "plan.md").is_file():
         return f"{start}plan it: write plan.md" + ("" if kind == "co-work" else f" and pin its route (the adapter's `route {sid}`) as its ## Dispatch")
     if kind == "co-work":
-        return f"{start}continue the design-cowork loop inline from the round on disk; a running span below is its drafter, critic or mockup -- wait for it"
+        return f"{start}continue the design-cowork loop inline from the round on disk; a running span below is its drafter or critic -- wait for it"
     if spans:
         return "an executor is running (see spans): wait for its notification, never re-dispatch"
     if spans is None:

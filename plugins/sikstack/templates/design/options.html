@@ -1,0 +1,181 @@
+<!doctype html>
+<!--
+  OPTIONS PAGE (sikstack template: templates/design/options.html). THROWN AWAY AFTER THE PICK.
+
+  One named decision, two or three labelled directions, the same sample screens under each, one switcher.
+  - Name the decision first (DECISION below). No decision, no options page.
+  - When the direction is open, gather references and let the operator pick directions before building this.
+  - Each direction is a token set with its type choices: edit the [data-direction] blocks in <style> and the
+    DIRECTIONS list in <script>; the sample screens read only the tokens, so they stay the same markup.
+  - Replace the sample screens with the product's own (real copy and data, never lorem).
+  - Once the operator picks, the chosen tokens move into the product (its tokens file and TASTE.md) and this file
+    is deleted. It is plain HTML, CSS and a little JS: no framework, no network, opens from disk or any server.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options: the product's base look</title>
+<style>
+  /* ---- the directions: one token set each (colors, type, space, shape) ---- */
+  [data-direction="a"] {
+    --bg: #f7f7f5; --surface: #ffffff; --ink: #1d1d1b; --muted: #5f5f5a; --line: #e2e2dd;
+    --accent: #2457c5; --accent-ink: #ffffff;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif; --font-head: var(--font-body);
+    --size-body: 15px; --size-small: 13px; --size-h1: 26px; --size-h2: 18px; --weight-head: 600; --leading: 1.5;
+    --space: 8px; --radius: 8px;
+  }
+  [data-direction="b"] {
+    --bg: #fbfaf7; --surface: #ffffff; --ink: #222018; --muted: #615d52; --line: #e6e1d6;
+    --accent: #7a3e1d; --accent-ink: #ffffff;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif; --font-head: Charter, "Iowan Old Style", Georgia, serif;
+    --size-body: 16px; --size-small: 13px; --size-h1: 32px; --size-h2: 20px; --weight-head: 700; --leading: 1.6;
+    --space: 10px; --radius: 4px;
+  }
+  [data-direction="c"] {
+    --bg: #eef0f3; --surface: #ffffff; --ink: #14171c; --muted: #4f5866; --line: #d5dae1;
+    --accent: #0f6b5c; --accent-ink: #ffffff;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif; --font-head: var(--font-body);
+    --size-body: 14px; --size-small: 12px; --size-h1: 22px; --size-h2: 16px; --weight-head: 650; --leading: 1.4;
+    --space: 6px; --radius: 6px;
+  }
+
+  /* ---- the page frame (options chrome: the same for every direction) ---- */
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1b1b1b; background: #e9e9e9; }
+  .bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+         padding: 12px 24px; background: #1b1b1b; color: #f2f2f2; }
+  .bar h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .bar .note { font-size: 12px; color: #b9b9b9; }
+  .switch { display: flex; gap: 4px; flex-wrap: wrap; }
+  .switch button { min-height: 32px; padding: 4px 12px; border: 1px solid #666; border-radius: 6px; background: transparent;
+                   color: #f2f2f2; font: inherit; cursor: pointer; }
+  .switch button[aria-pressed="true"] { background: #f2f2f2; color: #1b1b1b; border-color: #f2f2f2; }
+  .switch button:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+  .why { margin: 0 24px; padding: 12px 0; font-size: 13px; color: #333; max-width: 72ch; }
+
+  /* ---- the sample screens: they read only the direction's tokens ---- */
+  .stage { padding: 0 24px 32px; display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+  .screen { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: var(--size-body);
+            line-height: var(--leading); border: 1px solid #cfcfcf; border-radius: 10px; overflow: hidden; min-width: 0; }
+  .screen .label { margin: 0; padding: 6px 12px; font: 12px system-ui, sans-serif; color: #666; background: #f2f2f2; border-bottom: 1px solid #ddd; }
+  .screen .body { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); }
+  .screen h2 { margin: 0; font-family: var(--font-head); font-size: var(--size-h1); font-weight: var(--weight-head); line-height: 1.2; }
+  .screen h3 { margin: 0; font-family: var(--font-head); font-size: var(--size-h2); font-weight: var(--weight-head); }
+  .screen .meta { color: var(--muted); font-size: var(--size-small); margin: 0; }
+  .list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .list li { display: flex; gap: calc(var(--space) * 2); align-items: baseline; justify-content: space-between;
+             padding: calc(var(--space) * 1.5) calc(var(--space) * 2); border-top: 1px solid var(--line); }
+  .list li:first-child { border-top: 0; }
+  .list .title { min-width: 0; overflow-wrap: anywhere; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: calc(var(--space) * 2); display: grid; gap: var(--space); }
+  .row { display: flex; gap: var(--space); flex-wrap: wrap; align-items: center; }
+  .btn { min-height: 36px; padding: 0 calc(var(--space) * 2); border-radius: var(--radius); border: 1px solid var(--line);
+         background: var(--surface); color: var(--ink); font: inherit; font-size: var(--size-small); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .field { display: grid; gap: 4px; }
+  .field label { font-size: var(--size-small); color: var(--muted); }
+  .field input { min-height: 36px; padding: 0 var(--space); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; background: var(--surface); color: var(--ink); }
+  .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space); margin: 0; }
+  .tokens div { display: flex; gap: var(--space); align-items: center; font-size: var(--size-small); }
+  .tokens dt { width: 20px; height: 20px; border-radius: 4px; border: 1px solid var(--line); flex: none; }
+  .tokens dd { margin: 0; }
+  .type p { margin: 0; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1 id="decision">Decision: <span data-decision>the product's base look (color, type, density)</span></h1>
+  <div class="switch" role="group" aria-labelledby="decision" data-switch></div>
+  <span class="note">Options page: thrown away after the pick.</span>
+</header>
+<p class="why" data-why></p>
+
+<main class="stage" data-direction="a">
+  <!-- Sample screen 1: a list. Replace with the product's own list screen and its real copy. -->
+  <section class="screen" aria-label="Sample: the list">
+    <p class="label">Sample · list</p>
+    <div class="body">
+      <div>
+        <h2>Open items</h2>
+        <p class="meta">4 open · synced 2 minutes ago</p>
+      </div>
+      <ul class="list">
+        <li><span class="title">Write the release notes for 2.0.0</span><span class="meta">Today</span></li>
+        <li><span class="title">Check the sign-in page at phone width</span><span class="meta">Tue</span></li>
+        <li><span class="title">Move the design tokens into the system page</span><span class="meta">Wed</span></li>
+        <li><span class="title">Answer the operator's question about the empty state</span><span class="meta">Fri</span></li>
+      </ul>
+      <div class="row"><button class="btn primary" type="button">Add item</button><button class="btn" type="button">Show solved</button></div>
+    </div>
+  </section>
+
+  <!-- Sample screen 2: a detail with a form. Replace with the product's own. -->
+  <section class="screen" aria-label="Sample: the detail">
+    <p class="label">Sample · detail</p>
+    <div class="body">
+      <div>
+        <h2>Write the release notes for 2.0.0</h2>
+        <p class="meta">Opened today · no phase linked</p>
+      </div>
+      <div class="card">
+        <h3>Note</h3>
+        <p>Say what changed for installs and that an open round finishes on its current version.</p>
+      </div>
+      <div class="field"><label for="title-a">Title</label><input id="title-a" value="Write the release notes for 2.0.0"></div>
+      <div class="row"><button class="btn primary" type="button">Save</button><button class="btn" type="button">Defer</button></div>
+    </div>
+  </section>
+
+  <!-- The direction itself: its tokens and its type choices, read from the CSS above. -->
+  <section class="screen" aria-label="This direction's tokens">
+    <p class="label">Tokens and type</p>
+    <div class="body">
+      <dl class="tokens" data-tokens></dl>
+      <div class="type" data-type></div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // The directions: a key (its [data-direction] block above), a label, and one line on what it trades.
+  const DIRECTIONS = [
+    { key: "a", label: "A · Quiet", why: "Neutral ground, one blue accent, a sans throughout: reads as a tool; the least personality." },
+    { key: "b", label: "B · Editorial", why: "Serif headings, warmer neutrals, more air: more character; longer pages, fewer rows on screen." },
+    { key: "c", label: "C · Dense", why: "Smaller type and tighter spacing: more rows at a glance; tiring for long reading." },
+  ];
+  const TOKENS = ["--bg", "--surface", "--ink", "--muted", "--line", "--accent"];
+  const stage = document.querySelector(".stage");
+  const sw = document.querySelector("[data-switch]");
+  const show = (key, push) => {
+    const d = DIRECTIONS.find((x) => x.key === key) || DIRECTIONS[0];
+    stage.dataset.direction = d.key;
+    document.querySelector("[data-why]").textContent = d.label + ": " + d.why;
+    for (const b of sw.children) b.setAttribute("aria-pressed", String(b.dataset.key === d.key));
+    const s = getComputedStyle(stage);
+    document.querySelector("[data-tokens]").innerHTML = TOKENS.map((t) =>
+      `<div><dt style="background:var(${t})"></dt><dd>${t.slice(2)} ${s.getPropertyValue(t).trim()}</dd></div>`).join("");
+    const v = (t) => s.getPropertyValue(t).trim();
+    document.querySelector("[data-type]").innerHTML =
+      `<p>Headings: ${v("--font-head").split(",")[0]} ${v("--weight-head")}, ${v("--size-h1")} / ${v("--size-h2")}</p>` +
+      `<p>Body: ${v("--font-body").split(",")[0]} ${v("--size-body")}, line height ${v("--leading")}; small ${v("--size-small")}</p>` +
+      `<p>Space step ${v("--space")}, radius ${v("--radius")}</p>`;
+    if (push) { const u = new URL(location.href); u.searchParams.set("direction", d.key); history.replaceState(null, "", u); }
+  };
+  for (const d of DIRECTIONS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = d.label; b.dataset.key = d.key;
+    b.addEventListener("click", () => show(d.key, true));
+    sw.append(b);
+  }
+  sw.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = DIRECTIONS.findIndex((d) => d.key === stage.dataset.direction);
+    const next = DIRECTIONS[(i + (e.key === "ArrowRight" ? 1 : DIRECTIONS.length - 1)) % DIRECTIONS.length];
+    show(next.key, true); sw.querySelector(`[data-key="${next.key}"]`).focus();
+  });
+  show(new URL(location.href).searchParams.get("direction"), false);
+</script>
+</body>
+</html>

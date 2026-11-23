@@ -556,7 +556,7 @@ def cloud_truth_rel(rel: str) -> bool:
 
 
 def _cloud_ignored_dir(folder: Path) -> bool:
-    """A folder the engine keeps local (its .gitignore holds only `*`: the design caches and renders)."""
+    """A folder the engine keeps local (its .gitignore holds only `*`: a local cache, such as the retired design renders)."""
     try:
         lines = [l.strip() for l in (folder / ".gitignore").read_text(encoding="utf-8").splitlines() if l.strip()]
     except (OSError, UnicodeDecodeError):

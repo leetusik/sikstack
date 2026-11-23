@@ -4,3 +4,8 @@ out/
 .env*.local
 next-env.d.ts
 *.tsbuildinfo
+
+# The design build (design/): its build files and export, and recordings of real projects.
+design/.next/
+design/out/
+design/data/local/

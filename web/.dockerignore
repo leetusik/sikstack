@@ -5,7 +5,7 @@ node_modules
 .next
 out
 
-# The read-only design-round record (canvas mirror + round outputs) — never built.
+# The design build (design/: a static export of the pages and /system/, `pnpm design:build`) — never in the image.
 design
 
 # Tests + local/editor/VCS noise `next build` never reads.

@@ -26,7 +26,7 @@ You work this repo's sikstack workspace (`.sikstack/`) for its operator. Four in
 | Rule | Enforced by |
 |---|---|
 | A phase the operator can see passes after they walk it | `review --verdict pass` refuses until `gate <P> clear` |
-| Sign-offs carry literal words | `gate clear`, `design-close`, `design-sign` refuse an empty `--words`; `close` refuses a gate cleared without them |
+| Sign-offs carry literal words | `gate clear` and `design-sign` refuse an empty `--words`; `close` refuses a gate cleared without them |
 | A pending stop halts the run | `next` prints `WAITING ON OPERATOR`; `slice status` refuses a stop without `--stop-kind` and `--on-words` |
 | No force-push, no `rm -rf` | the plugin's guard hook denies them, with its reason; a plain push, and one that deletes a merged branch, pass |
 | A branch switch never carries the operator's edits | `pr branch` refuses uncommitted tracked changes |

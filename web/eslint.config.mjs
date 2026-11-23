@@ -6,6 +6,10 @@ import next from "eslint-config-next";
  * the TypeScript block, and the global ignores (.next, out, build,
  * next-env.d.ts) — so no FlatCompat shim is needed.
  */
-const eslintConfig = [...next];
+const eslintConfig = [
+  ...next,
+  // The design build's own output (design/next.config.ts): generated files, like web's `.next`.
+  { ignores: ["design/.next/**", "design/out/**", "design/next-env.d.ts"] },
+];
 
 export default eslintConfig;
