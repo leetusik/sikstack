@@ -8,7 +8,7 @@ import sharedRaw from "../data/sample/states/design-shared.json";
 import shotA from "../data/sample/design/options-a.png";
 import shotB from "../data/sample/design/options-b.png";
 import shotC from "../data/sample/design/options-c.png";
-import type { DesignBuild, DesignManifest } from "../next/design/model";
+import type { DesignBuild, DesignManifest } from "@/sikstack/design/model";
 
 import { RECORDING } from "./recording";
 

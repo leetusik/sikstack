@@ -123,6 +123,7 @@ export const SHELL = {
     workspace: "Workspace",
     library: "Library",
     feedback: "Feedback",
+    design: "Design",
     review: "Review",
   },
   card: "card",

@@ -43,8 +43,13 @@ export const DESIGN = {
     turningOn: "Turning on",
     turningOff: "Turning off",
     copyLabel: "Copy share link",
-    /** A private build: the one line, in place of the control. */
+    /** A private build: the one line, in place of the control (also when the API answers its 409). */
     refused: (file: string) => `Made from a private recording (${file}), so it cannot be shared.`,
+    /** Any other failed change: one line under the control, which stays. */
+    failed: "Could not change the share link. Try again.",
+    /** While sharing is on, each page row copies the share link that lands on that page. */
+    copyPage: "Copy link",
+    copyPageLabel: (page: string) => `Copy share link to ${page}`,
   },
   options: {
     title: "Options",

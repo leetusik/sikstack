@@ -3,16 +3,20 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { COPY } from "@/content/sikstack-frame";
 import { Copy } from "@/sikstack/frame";
+import { copyMachine, type CopyResult } from "@/sikstack/frame/copy-state";
 import { StateBlock } from "@/sikstack/states";
-import { Button, Panel, Section, SectionHead } from "@/sikstack/ui";
+import { Button, buttonClass, FieldError, Panel, Section, SectionHead, Swap } from "@/sikstack/ui";
 import { at, bytes } from "@/lib/feedback/format";
 
-import { DESIGN } from "../content/design";
+import { DESIGN } from "@/content/design";
 import {
   buildTitle,
   designHref,
   designOpenHref,
+  framedHeight,
+  pageShareUrl,
   recordingWord,
   type DesignBuild,
   type DesignManifest,
@@ -26,8 +30,10 @@ import {
  * route (`designOpenHref`), in a new tab, from its name (one look for the one action); each direction is also
  * framed beside the others, at its page's full height, so the page's own scroll moves the directions together and
  * no frame scrolls inside. The share link is the
- * one thing a member changes here: on (a new link, shown with Copy) or off. A build made from a private
- * recording says, in one line, that it cannot be shared. No comment, pick, sign-off, edit or delete.
+ * one thing a member changes here: on (a new link, shown with Copy) or off. While it is on, each page row copies
+ * the share link that lands on that page (`pageShareUrl`). A build made from a private recording says, in one
+ * line, that it cannot be shared (also when the API refuses the change with its 409); any other failed change
+ * says so in one line under the control. No comment, pick, sign-off, edit or delete.
  */
 export interface DesignBuildViewProps {
   project: string;
@@ -38,6 +44,15 @@ export interface DesignBuildViewProps {
   /** A share change is on its way: its button shows it and both wait. */
   busy?: boolean;
   onShare?: (on: boolean) => void;
+  /** The last change was refused for a private build (the API's 409): the one line, in place of the control. */
+  refused?: boolean;
+  /** The last change failed otherwise: one line under the control. */
+  failed?: boolean;
+  /**
+   * The build's own origin (`KB_DESIGN_ORIGIN` with its id), or null when the app has none: then nothing is framed
+   * and every page and direction still opens in a new tab through the open route.
+   */
+  origin?: string | null;
   /** What a direction's frame holds; production frames the direction on the build's host. */
   frameOf?: (direction: DesignOptions["directions"][number]) => ReactNode;
   timeZone?: string;
@@ -45,23 +60,64 @@ export interface DesignBuildViewProps {
 }
 
 /**
- * A direction framed on the build's host. Its height is the one the framed page posts (`{ designHeight }` from the
- * options page, matched to this frame's window), so the frame never scrolls inside; until it posts, the sheet's
- * height holds. Production owes the options page's side: post its height and drop its own bar when framed.
+ * A direction framed on the build's host, sandboxed to `allow-scripts allow-same-origin` (a Next export needs its
+ * own origin for its files and `localStorage`; the frame stays cross-origin to the app, so it cannot lift the
+ * sandbox, and top navigation, popups and forms stay barred). Its height is the one the framed page posts
+ * (`{ designHeight }`), taken only from this frame's own window and the build's origin (`framedHeight`), so the
+ * frame never scrolls inside; until it posts, the sheet's height holds. Only the options page's directions are
+ * framed, never a Next page of the build (those log focus-policy errors under the sandbox).
  */
-function DirectionFrame({ src, title }: { src: string; title: string }) {
+function DirectionFrame({ src, title, origin }: { src: string; title: string; origin: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState<number | null>(null);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (!ref.current || e.source !== ref.current.contentWindow) return;
-      const v = (e.data as { designHeight?: unknown } | null)?.designHeight;
-      if (typeof v === "number" && v > 0) setHeight(Math.ceil(v));
+      const h = framedHeight(e, { window: ref.current?.contentWindow ?? null, origin });
+      if (h !== null) setHeight(h);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
-  return <iframe ref={ref} src={src} title={title} loading="lazy" style={height ? { height } : undefined} />;
+  }, [origin]);
+  return (
+    <iframe
+      ref={ref}
+      src={src}
+      title={title}
+      loading="lazy"
+      sandbox="allow-scripts allow-same-origin"
+      style={height ? { height } : undefined}
+    />
+  );
+}
+
+/** A page row's copy of the share link that lands on that page: `Copy link`, `Copied` for 2 s at the same width. */
+function CopyPageLink({ text, page }: { text: string; page: string }) {
+  const [result, setResult] = useState<CopyResult>("rest");
+  const [machine] = useState(() => copyMachine((r) => setResult(r)));
+  useEffect(() => () => machine.dispose(), [machine]);
+  return (
+    <>
+      <button
+        type="button"
+        className={buttonClass("quiet", "design-page-copy")}
+        aria-label={DESIGN.share.copyPageLabel(page)}
+        data-swap={result === "copied" ? "true" : undefined}
+        onClick={() => {
+          void machine.press(text, typeof navigator === "undefined" ? undefined : navigator.clipboard);
+        }}
+      >
+        <Swap labels={[DESIGN.share.copyPage, COPY.copied]} />
+      </button>
+      <span className="sr-only" role="status">
+        {result === "copied" ? COPY.copied : ""}
+      </span>
+      {result === "failed" ? (
+        <FieldError role="alert" className="design-page-copy-failed">
+          {COPY.failed}
+        </FieldError>
+      ) : null}
+    </>
+  );
 }
 
 function BackRow({ project }: { project: string }) {
@@ -81,6 +137,9 @@ export function DesignBuildView({
   share,
   busy = false,
   onShare,
+  refused = false,
+  failed = false,
+  origin = null,
   frameOf,
   timeZone,
   now,
@@ -91,7 +150,12 @@ export function DesignBuildView({
   const open = (path: string) => designOpenHref(project, build.id, path);
   const frame =
     frameOf ??
-    ((d: DesignOptions["directions"][number]) => <DirectionFrame src={open(d.entry)} title={d.label} />);
+    (origin
+      ? (d: DesignOptions["directions"][number]) => (
+          <DirectionFrame src={open(d.entry)} title={d.label} origin={origin} />
+        )
+      : null);
+  const shareUrl = !build.private && !refused && share.on ? share.url : null;
 
   return (
     <div className="column">
@@ -131,7 +195,7 @@ export function DesignBuildView({
             <div className="fact design-share">
               <dt>{DESIGN.share.label}</dt>
               <dd>
-                {build.private ? (
+                {build.private || refused ? (
                   <p className="design-share-line">
                     {DESIGN.share.refused(build.recording ?? DESIGN.private)}
                   </p>
@@ -160,6 +224,9 @@ export function DesignBuildView({
                     </Button>
                   </div>
                 )}
+                {failed && !build.private && !refused ? (
+                  <FieldError role="alert">{DESIGN.share.failed}</FieldError>
+                ) : null}
               </dd>
             </div>
           </dl>
@@ -186,7 +253,7 @@ export function DesignBuildView({
                     {d.label}
                   </a>
                 </figcaption>
-                <div className="design-frame">{frame(d)}</div>
+                {frame ? <div className="design-frame">{frame(d)}</div> : null}
               </figure>
             ))}
           </div>
@@ -201,7 +268,7 @@ export function DesignBuildView({
         <Panel>
           <ul className="design-pages">
             {pages.map((p) => (
-              <li key={p.entry} className="row design-page">
+              <li key={p.entry} className={shareUrl ? "row design-page has-copy" : "row design-page"}>
                 <a
                   className="link-strong"
                   href={open(p.entry)}
@@ -212,6 +279,7 @@ export function DesignBuildView({
                   {p.name}
                 </a>
                 {p.route ? <span className="mono meta">{p.route}</span> : null}
+                {shareUrl ? <CopyPageLink text={pageShareUrl(shareUrl, p.entry)} page={p.name} /> : null}
               </li>
             ))}
           </ul>

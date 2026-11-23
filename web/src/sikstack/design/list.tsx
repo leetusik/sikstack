@@ -1,10 +1,8 @@
-import Link from "next/link";
-
 import { StackTable } from "@/sikstack/feedback";
 import { Badge, Status } from "@/sikstack/ui";
 import { at, bytes } from "@/lib/feedback/format";
 
-import { DESIGN } from "../content/design";
+import { DESIGN } from "@/content/design";
 import {
   buildTitle,
   designHref,
@@ -70,13 +68,15 @@ export function DesignListView({ project, builds, timeZone, now }: DesignListVie
                 <tr key={b.id}>
                   <td className="has-control is-main">
                     <div className="design-build">
-                      <Link
+                      {/* A plain link, a full page load: the viewer's CSP, which lets it frame the build, is the
+                          document's, and a client-side navigation would keep this list's (`@/lib/csp`). */}
+                      <a
                         className="link-strong mono"
                         href={designHref(project, b.id)}
                         aria-label={buildTitle(b)}
                       >
                         {shortCommit(b.commit) ?? b.id.slice(0, 8)}
-                      </Link>
+                      </a>
                       {b.dirty ? <Badge>{DESIGN.dirty}</Badge> : null}
                     </div>
                   </td>

@@ -250,7 +250,7 @@ up() {
   key=$(sed -n 's/^SIKSTACK_FEEDBACK_CAPTURE_KEY=//p' "$ENV_FILE" | tr -d '"')
   set -m
   (cd "$REPO" && exec env -i "${BASE_ENV[@]}" KB_API_BASE_URL="http://127.0.0.1:$API_PORT" SESSION_SECRET="$secret" \
-    NEXT_PUBLIC_APP_URL="http://$APP_HOST:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" \
+    NEXT_PUBLIC_APP_URL="http://$APP_HOST:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" KB_DESIGN_ORIGIN="$DESIGN" \
     nohup pnpm --dir web exec next dev -H 127.0.0.1 -p "$WEB_PORT") </dev/null >"$EV/web.log" 2>&1 &
   WEB_PID=$!; set +m; launched "$WEB_PID" || die "next dev did not start (see $EV/web.log)"; write_state
   wait_http "http://127.0.0.1:$WEB_PORT/login" 120 || die "web /login did not answer (see $EV/web.log)"

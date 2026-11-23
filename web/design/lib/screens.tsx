@@ -29,7 +29,7 @@ import AgendaItemRouteError from "@/app/(app)/projects/[projectId]/workspace/age
 import AgendaItemRouteLoading from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/loading";
 import { agendaItemBack } from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/back";
 
-import { Shell } from "../next/shell/shell";
+import { Shell } from "@/sikstack/shell/shell";
 
 import { DATA_SETS, HEADS, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";
@@ -48,7 +48,7 @@ import {
 
 /**
  * The design's screens: production's own components (`@/sikstack/...`) inside the Shell as
- * `AppShell` draws it (its next version, `next/shell/`: the project rail's Design entry), on the browser store's workspace. The clock is the recording's (`NOW`) and
+ * `AppShell` draws it (with the project rail's Design entry, P77), on the browser store's workspace. The clock is the recording's (`NOW`) and
  * the zone is the recording's, so the build and the browser draw the same text (no hydration
  * mismatch). What production does not have is the state widget (`states.tsx`), which holds Reset: each
  * page lists the states production's own branches draw for it, and draws each with production's parts.

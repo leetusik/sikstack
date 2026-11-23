@@ -208,6 +208,10 @@ services:
       # Unset/blank → the BFF throws at request time (src/lib/env.ts) — `docker
       # compose config` still passes (a dummy value suffices for local validation).
       SESSION_SECRET: ${SESSION_SECRET}
+      # The design builds' origin pattern, the api's value (`{build}` where the id
+      # goes): a Design build's viewer frames that build's origin, named in its CSP
+      # at request time (src/proxy.ts). Unset: the viewer frames nothing. P70 sets it.
+      KB_DESIGN_ORIGIN: ${KB_DESIGN_ORIGIN:-}
       # hi2vi's own Send feedback control (landing footer, org home). OPTIONAL, all
       # seven, interpolated from the box's `.env` with `:-` so an unset name passes
       # an empty value (never a compose warning, never a default key):

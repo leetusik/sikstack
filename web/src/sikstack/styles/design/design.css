@@ -1,7 +1,7 @@
 /* sikstack — the Design service's sheet (P77): the project's Design list and a build's viewer
-   (`next/design/list.tsx`, `next/design/viewer.tsx`). Scoped like every system sheet (../README.md): it applies inside
+   (`src/sikstack/design/list.tsx`, `src/sikstack/design/viewer.tsx`). Scoped like every system sheet (../README.md): it applies inside
    a `.ui` root and stops at `[data-ui-legacy]`. It declares no custom property, so the boundary has nothing to restore.
-   Applying it: `src/sikstack/styles/design/design.css`, imported by `styles/index.css` after Feedback's sheets. */
+   Imported by `styles/index.css` after Feedback's sheets. */
 @scope (.ui) to ([data-ui-legacy]) {
 
 /* the list's empty block: the command never breaks inside */
@@ -25,8 +25,9 @@
 .design-share { flex: 1 1 100%; }
 .design-share > dd { display: flex; flex-direction: column; min-height: var(--control-h); justify-content: center; }
 .design-share-line { min-width: 0; }
-/* the link and its Copy, then Turn off, on one line while the link fits it (a build's link is about 90 characters) */
-.design-share-on { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); max-width: 64em; }
+/* the link and its Copy, then Turn off, on one line while the link fits it (a real build's link is about 100
+   characters: a 26-character id in the host and a 32-character token) */
+.design-share-on { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); max-width: 80em; }
 .design-share-on > :first-child { flex: 1 1 40em; min-width: 0; }
 
 /* the options page's directions, side by side while each has 18em, one under another below that; their frames share
@@ -44,8 +45,15 @@
 .design-pages > .row:first-child { border-top: 0; }
 .design-page { display: flex; align-items: baseline; justify-content: space-between; gap: 0 var(--space-4); padding-block: 0; }
 .design-page > .mono { min-width: 0; padding-block: var(--space-3); overflow-wrap: anywhere; text-align: right; }
+/* while sharing is on, a row ends with its page's copy link: name, route, copy on one line; under 40em the name and
+   the copy share the first line and the route sits under them (a refused copy's line runs the row's width) */
+.design-page.has-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; }
+.design-page-copy { flex: none; }
+.design-page.has-copy > .design-page-copy-failed { grid-column: 1 / -1; margin: 0 0 var(--space-3); }
 @container dpages (max-width: 40em) {
   .design-page { flex-direction: column; align-items: flex-start; }
   .design-page > .mono { margin-top: calc(-1 * var(--space-2)); padding-block: 0 var(--space-3); text-align: left; }
+  .design-page.has-copy { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+  .design-page.has-copy > .mono { grid-column: 1 / -1; grid-row: 2; }
 }
 }

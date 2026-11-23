@@ -64,7 +64,7 @@ export const PAGES: readonly BuildPage[] = [
   {
     name: "Design",
     route: "/projects/[projectId]/design",
-    production: null,
+    production: "src/app/(app)/projects/[projectId]/design/page.tsx",
     entry: design,
     recording: true,
     reads: ["design.builds"],
@@ -73,7 +73,7 @@ export const PAGES: readonly BuildPage[] = [
   {
     name: "Design build",
     route: "/projects/[projectId]/design/[build]",
-    production: null,
+    production: "src/app/(app)/projects/[projectId]/design/[build]/page.tsx",
     entry: `${design}${plain}/`,
     entries: builds.map((id) => `${design}${id}/`),
     recording: true,

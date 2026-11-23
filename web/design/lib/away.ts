@@ -1,6 +1,6 @@
 import { workspaceHrefs } from "@/sikstack/workspace/agenda/model";
 
-import { railFor } from "../next/shell/model";
+import { railFor } from "@/sikstack/shell/model";
 
 /**
  * The addresses the design's pages link to but do not draw (the Shell's rail and menus, the
@@ -24,7 +24,7 @@ export function awayPaths(project: string): string[] {
     projectRail.review.href,
     ...orgRail.items.map((i) => i.href),
     "/dashboard",
-    // The Design viewer opens a build on its own host through this route (`next/design/model.ts`).
+    // The Design viewer opens a build on its own host through this route (`src/sikstack/design/model.ts`).
     "/api/design/open",
   ];
   const paths = new Set<string>();

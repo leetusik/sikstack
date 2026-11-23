@@ -3,8 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 
-import { DesignListView } from "../next/design/list";
-import { DesignBuildGone, DesignBuildView } from "../next/design/viewer";
+import { DesignListView } from "@/sikstack/design/list";
+import { DesignBuildGone, DesignBuildView } from "@/sikstack/design/viewer";
 
 import {
   DESIGN_LISTS,
@@ -22,9 +22,9 @@ import { DESIGN_BUILD_STATES, DESIGN_LIST_STATES } from "./page-states";
 import { StatePage } from "./states";
 
 /**
- * The Design service's screens (P77): the list and a build's viewer, drawn by their next components
- * (`next/design/`) inside the Shell, on the recorded answers (`design-data.ts`). Production does not draw them
- * yet, so each state's `from` (`page-states.ts`) names the next component's branch and the answer it draws.
+ * The Design service's screens (P77): the list and a build's viewer, drawn by production's components
+ * (`src/sikstack/design/`) inside the Shell, on the recorded answers (`design-data.ts`). Each state's `from`
+ * (`page-states.ts`) names the component's branch and the answer it draws.
  */
 
 type ListState = (typeof DESIGN_LIST_STATES.list)[number]["key"];

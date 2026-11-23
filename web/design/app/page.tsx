@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 
 import { Badge, Panel, UiRoot } from "@/sikstack/ui";
 
-import { DESIGN } from "../next/content/design";
-import { shortCommit } from "../next/design/model";
+import { DESIGN } from "@/content/design";
+import { shortCommit } from "@/sikstack/design/model";
 
 import css from "../lib/index.module.css";
 import { DESIGN_MARK } from "../lib/mark";
