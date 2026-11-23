@@ -3,7 +3,11 @@
 #
 # Runs the whole product on loopback without touching the checkout: a throwaway
 # postgres:17 container, the API on the host (scratch KB_ROOT, KB_GIT_COMMIT=false),
-# the web dev server, a local test account, and a headless playwright-cli session.
+# the design origin (server.design_serve), the web dev server, a local test account,
+# and a headless playwright-cli session. The app is reached at sikstack.localhost:<web>
+# and each design build at <build>.design.sikstack.localhost:<design>: same-site, never
+# the same host, as sikstack.com and its subdomains will be (Chromium resolves every
+# *.localhost name to loopback; Next 16's dev guard allows **.localhost by default).
 # Every process starts from a scrubbed environment: no vendor API keys, no SMTP, no
 # operator account, whatever the caller's shell exports.
 # Everything it writes (state, logs, screenshots, the saved sign-in) lives under
@@ -33,6 +37,7 @@ CONTAINER="sikstack-verify-pg-$(hash8 "$HOME_DIR")"
 SESSION="sikstack-verify-$(hash8 "$HOME_DIR")"
 LABEL="sikstack-verify.home"
 CLI_VERSION="0.1.25"
+APP_HOST="sikstack.localhost"
 # The only variables the servers inherit; everything else (GOOGLE_API_KEY, GEMINI_API_KEY,
 # KB_SMTP_*, KB_OPERATOR_*, KB_API_TOKEN, KB_GIT_PUSH, UV_ENV_FILE, ...) is dropped.
 BASE_ENV=(PATH="$PATH" HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="$_tmp/"
@@ -136,7 +141,7 @@ doctor() {
       bad=1
     fi
   done
-  for p in 3030 8766; do
+  for p in 3030 8766 3061; do
     who=$(who_listens "$p")
     if [ -z "$who" ]; then say "ok   port $p free"
     else say "note port $p is taken by $who (not ours: left alone); up uses port $(free_port "$p")"; fi
@@ -150,7 +155,8 @@ write_state() {
   {
     echo "EV='$EV'"; echo "KB_ROOT_DIR='$KB_ROOT_DIR'"; echo "PG_PORT='$PG_PORT'"
     echo "API_PORT='$API_PORT'"; echo "WEB_PORT='$WEB_PORT'"; echo "API_PID='${API_PID:-}'"
-    echo "WEB_PID='${WEB_PID:-}'"; echo "WEB='http://127.0.0.1:$WEB_PORT'"; echo "ENV_FILE='$ENV_FILE'"
+    echo "WEB_PID='${WEB_PID:-}'"; echo "WEB='http://$APP_HOST:$WEB_PORT'"; echo "ENV_FILE='$ENV_FILE'"
+    echo "DESIGN_PORT='${DESIGN_PORT:-}'"; echo "DESIGN_PID='${DESIGN_PID:-}'"; echo "DESIGN='${DESIGN:-}'"
     echo "CONTAINER='$CONTAINER'"; echo "CONTAINER_ID='${CONTAINER_ID:-}'"; echo "SESSION='$SESSION'"
   } >"$STATE"
 }
@@ -158,13 +164,14 @@ write_state() {
 # api_start <db url> [VAR=value...]: launch the API as its own process group (set -m for this launch only: bash sets
 # the pgid before $! returns, so down stops it and all its children by that group, whatever the server execs into),
 # record it and wait for /healthz. KB_PUBLIC_BASE_URL is the web's address (the sikstack connect page's links);
-# SIKSTACK_VERIFY_WAITLIST=1 in the caller's environment turns the sign-up waitlist on.
+# SIKSTACK_VERIFY_WAITLIST=1 in the caller's environment turns the sign-up waitlist on. The design settings
+# (DESIGN_ENV: the builds folder, the origin pattern, the app's origin, the secret) are the design origin's own.
 api_start() {
   local db=$1; shift
   set -m
   (cd "$REPO" && exec env -i "${BASE_ENV[@]}" DATABASE_URL="$db" KB_ROOT="$KB_ROOT_DIR" KB_GIT_COMMIT=false \
-    KB_GIT_PUSH=false KB_STARTUP_REINDEX=false KB_PUBLIC_BASE_URL="http://127.0.0.1:$WEB_PORT" \
-    KB_SIGNUP_WAITLIST="${SIKSTACK_VERIFY_WAITLIST:-false}" "$@" \
+    KB_GIT_PUSH=false KB_STARTUP_REINDEX=false KB_PUBLIC_BASE_URL="http://$APP_HOST:$WEB_PORT" \
+    KB_SIGNUP_WAITLIST="${SIKSTACK_VERIFY_WAITLIST:-false}" "${DESIGN_ENV[@]}" "$@" \
     nohup uv run uvicorn server.main:app --host 127.0.0.1 --port "$API_PORT") </dev/null >>"$EV/api.log" 2>&1 &
   API_PID=$!; set +m; launched "$API_PID" || die "the API did not start (see $EV/api.log)"; write_state
   wait_http "http://127.0.0.1:$API_PORT/healthz" 60 || die "API /healthz did not answer (see $EV/api.log)"
@@ -187,9 +194,13 @@ up() {
   mkdir -p "$HOME_DIR"; rm -f "$OWNED"
   KB_ROOT_DIR="$HOME_DIR/kb-root"; rm -rf "$KB_ROOT_DIR"; mkdir -p "$KB_ROOT_DIR"
   ENV_FILE="$HOME_DIR/web.env"; rm -f "$ENV_FILE"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
-  PG_PORT=$(free_port 55471); API_PORT=$(free_port 8766); WEB_PORT=$(free_port 3030)
-  API_PID=""; WEB_PID=""; CONTAINER_ID=""; write_state; UPPING=1
-  say "up: evidence $EV; ports pg $PG_PORT, api $API_PORT, web $WEB_PORT; container $CONTAINER; session $SESSION"
+  PG_PORT=$(free_port 55471); API_PORT=$(free_port 8766); WEB_PORT=$(free_port 3030); DESIGN_PORT=$(free_port 3061)
+  while [ "$DESIGN_PORT" = "$WEB_PORT" ] || [ "$DESIGN_PORT" = "$API_PORT" ]; do DESIGN_PORT=$(free_port $((DESIGN_PORT + 1))); done
+  DESIGN="http://{build}.design.$APP_HOST:$DESIGN_PORT"
+  DESIGN_ENV=(KB_DESIGN_BUILDS_DIR="$KB_ROOT_DIR/data/design-builds" KB_DESIGN_ORIGIN="$DESIGN"
+    KB_DESIGN_APP_ORIGIN="http://$APP_HOST:$WEB_PORT" KB_DESIGN_SECRET="$(openssl rand -hex 32)")
+  API_PID=""; WEB_PID=""; DESIGN_PID=""; CONTAINER_ID=""; write_state; UPPING=1
+  say "up: evidence $EV; ports pg $PG_PORT, api $API_PORT, web $WEB_PORT, design $DESIGN_PORT; container $CONTAINER; session $SESSION"
 
   docker run -d --name "$CONTAINER" --label "$LABEL=$HOME_DIR" -e POSTGRES_DB=kb -e POSTGRES_USER=kb -e POSTGRES_PASSWORD=kb \
     -p "127.0.0.1:$PG_PORT:5432" postgres:17 >/dev/null 2>>"$EV/run.log"
@@ -225,17 +236,26 @@ up() {
   api_start "$db" KB_INSTALL_FEEDBACK_PROJECT_ID="$FEEDBACK_PROJECT"
   say "up: api restarted with the install Feedback project (sikstack, $FEEDBACK_PROJECT)"
 
+  # The design origin: each published build at the root of its own host (server.design_serve), its own group.
+  set -m
+  (cd "$REPO" && exec env -i "${BASE_ENV[@]}" DATABASE_URL="$db" KB_ROOT="$KB_ROOT_DIR" "${DESIGN_ENV[@]}" \
+    nohup uv run uvicorn server.design_serve:app --host 127.0.0.1 --port "$DESIGN_PORT") </dev/null >>"$EV/design.log" 2>&1 &
+  DESIGN_PID=$!; set +m; launched "$DESIGN_PID" || die "the design origin did not start (see $EV/design.log)"; write_state
+  wait_http "http://127.0.0.1:$DESIGN_PORT/_healthz" 60 || die "the design origin's /_healthz did not answer (see $EV/design.log)"
+  own_refresh
+  say "up: design origin $DESIGN ok"
+
   local secret key
   secret=$(openssl rand -hex 32)
   key=$(sed -n 's/^SIKSTACK_FEEDBACK_CAPTURE_KEY=//p' "$ENV_FILE" | tr -d '"')
   set -m
   (cd "$REPO" && exec env -i "${BASE_ENV[@]}" KB_API_BASE_URL="http://127.0.0.1:$API_PORT" SESSION_SECRET="$secret" \
-    NEXT_PUBLIC_APP_URL="http://127.0.0.1:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" \
+    NEXT_PUBLIC_APP_URL="http://$APP_HOST:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" \
     nohup pnpm --dir web exec next dev -H 127.0.0.1 -p "$WEB_PORT") </dev/null >"$EV/web.log" 2>&1 &
   WEB_PID=$!; set +m; launched "$WEB_PID" || die "next dev did not start (see $EV/web.log)"; write_state
   wait_http "http://127.0.0.1:$WEB_PORT/login" 120 || die "web /login did not answer (see $EV/web.log)"
   own_refresh; UPPING=""
-  say "up: web http://127.0.0.1:$WEB_PORT/login ok"
+  say "up: web http://$APP_HOST:$WEB_PORT/login ok"
   say "up: ready. next: $0 signin; drive with playwright-cli -s=$SESSION <command>"
 }
 
@@ -332,6 +352,7 @@ status() {
   if [ ! -f "$STATE" ]; then say "status: nothing up in $HOME_DIR (no state.env)"; fi
   [ -n "${WEB:-}" ] && say "web      $WEB ($( [ -n "${WEB_PID:-}" ] && is_ours "$WEB_PID" && echo running || echo stopped))"
   [ -n "${API_PORT:-}" ] && say "api      http://127.0.0.1:$API_PORT ($( [ -n "${API_PID:-}" ] && is_ours "$API_PID" && echo running || echo stopped))"
+  [ -n "${DESIGN:-}" ] && say "design   $DESIGN ($( [ -n "${DESIGN_PID:-}" ] && is_ours "$DESIGN_PID" && echo running || echo stopped))"
   say "postgres $(docker ps --filter "name=^/$CONTAINER\$" --format '{{.Names}} {{.Status}}' 2>/dev/null | grep . || echo "no $CONTAINER")"
   say "browser  $(playwright-cli list 2>/dev/null | grep -F "$SESSION" || echo "no $SESSION session") (drive: playwright-cli -s=$SESSION <command>)"
   [ -n "${EV:-}" ] && say "evidence $EV"
@@ -363,7 +384,7 @@ down() {
     still=""; for g in $left; do group_alive "$g" && still="$still $g"; done; left="$still"
     [ -n "$left" ] && sleep 0.2; i=$((i + 1))
   done
-  for p in ${WEB_PORT:-} ${API_PORT:-}; do
+  for p in ${WEB_PORT:-} ${API_PORT:-} ${DESIGN_PORT:-}; do
     who=$(who_listens "$p")
     [ -n "$who" ] && say "down: port $p is held by $who, not started by this run: left alone"
   done

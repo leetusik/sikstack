@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Build the design folder: `next build design` (a static export to `design/out/`), then
-// `design/out/manifest.json` (the pages, their entry paths, the recording each reads, the source commit),
+// `design/out/manifest.json` (the pages, their entry paths, the recording each reads, the source commit, and the
+// options page's entry and directions when there is one),
 // then a link check: every in-site link the pages draw must have a file in `out/`, so nothing the design
 // links to 404s on a static server.
 //
@@ -107,6 +108,46 @@ const manifest = {
     },
   ],
 };
+// The options page, when the build has one (`templates/design/options.html`, copied into the design folder for
+// a named decision): its entry and each direction's key and label, read from the page's `DIRECTIONS`, so a
+// viewer can put the directions side by side, `?direction=<key>` opening each.
+function* pageFiles(dir) {
+  for (const name of readdirSync(dir)) {
+    const p = path.join(dir, name);
+    if (statSync(p).isDirectory()) {
+      if (name !== "_next") yield* pageFiles(p);
+    } else if (name.endsWith(".html")) yield p;
+  }
+}
+const quoted = (body, field) => {
+  const m = new RegExp(`\\b${field}\\s*:\\s*(["'\`])((?:\\\\.|(?!\\1)[^\\\\])*)\\1`).exec(body);
+  return m ? m[2].replace(/\\(.)/g, "$1") : null;
+};
+const optionPages = [];
+for (const file of pageFiles(OUT)) {
+  const html = readFileSync(file, "utf8");
+  const at = html.search(/\bconst\s+DIRECTIONS\s*=\s*\[/);
+  if (at < 0) continue;
+  const list = html.slice(at, html.indexOf("];", at) + 1);
+  const directions = [];
+  for (const [object] of list.matchAll(/\{[^{}]*\}/g)) {
+    const key = quoted(object, "key");
+    const label = quoted(object, "label");
+    if (key && label) directions.push({ key, label });
+  }
+  const rel = path.relative(OUT, file).split(path.sep).join("/");
+  if (directions.length === 0) die(`${rel} has a DIRECTIONS list with no { key, label } entries`);
+  const entry = rel.endsWith("/index.html") || rel === "index.html" ? `/${rel.slice(0, -"index.html".length)}` : `/${rel}`;
+  const title = /<title>([^<]*)<\/title>/.exec(html)?.[1]?.trim() || null;
+  optionPages.push({
+    name: title,
+    entry,
+    directions: directions.map((d) => ({ ...d, entry: `${entry}?direction=${encodeURIComponent(d.key)}` })),
+  });
+}
+if (optionPages.length > 1) die(`more than one options page (${optionPages.map((o) => o.entry).join(", ")}): keep one`);
+if (optionPages.length === 1) manifest.options = optionPages[0];
+
 writeFileSync(path.join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 // -- the link check -----------------------------------------------------------------------------
@@ -173,5 +214,5 @@ console.log(
   `design:build: /system/ holds ${fileTokens.size} tokens and ${drawn.size + listed.size} shared exports`,
 );
 console.log(
-  `design:build: out/ (${manifest.pages.length} pages, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
+  `design:build: out/ (${manifest.pages.length} pages${manifest.options ? `, an options page of ${manifest.options.directions.length} directions` : ""}, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
 );
