@@ -23,6 +23,8 @@ integer version per release, `## v<N>` below; that history continues here.
 - The design critic judges from the screen, code-blind: it opens viewport tiles before any DOM query, runs a look
   checklist per screen, and cites an opened screenshot for every finding (`## Screens`, `screens_opened`); the layout
   check gains `--shots <dir>` to save those tiles.
+- The options page template frames cleanly: inside a frame it hides its bar and posts `{ designHeight }` to its
+  parent on load and on resize, so a viewer can show one direction per frame at its height; unframed, no change.
 
 ## 2.0.0 — 2026-11-22
 

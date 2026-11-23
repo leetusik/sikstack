@@ -15,7 +15,9 @@ How a browser gets in, always onto that one build's host, by a host-only cookie
   their session for this build and this member (the web's ``/api/design/open``
   redirects here). It must be unexpired, for this build, and unspent (each works
   once), and its member must still belong to the build's org.
-- ``GET /_share/<token>``: the build's share link, while sharing is on.
+- ``GET /_share/<token>?next=<path>``: the build's share link, while sharing is on.
+
+Both land on ``next`` when it is a path on this host, else on ``/``.
 
 Every other request needs that cookie and is re-checked against the database: the
 build still exists; a member's cookie, that they are still an approved member of the
@@ -207,7 +209,8 @@ async def serve(request: Request) -> Response:
             and hmac.compare_digest(token.encode("utf-8"), build.share_token.encode("utf-8"))
         ):
             return _text(403, "This share link is off.")
-        return _enter("/", tokens.share_cookie(secret, build_id, build.share_token))
+        target = _safe_next(request.query_params.get("next"))
+        return _enter(target, tokens.share_cookie(secret, build_id, build.share_token))
 
     for value in _cookie_values(request):
         entry = tokens.open_cookie(secret, value)

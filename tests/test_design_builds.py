@@ -423,6 +423,45 @@ def test_the_share_link_opens_that_build_only_while_on(db):
     assert fresh.get(urlsplit(again).path).status_code == 303 and fresh.get("/").status_code == 200
 
 
+def test_a_share_link_with_next_lands_on_that_page_and_an_unsafe_next_on_home(db):
+    client, _engine, _tmp = db
+    owner = _account(client)
+    a = _publish(client, owner).json()["build"]["id"]
+    switch = f"/app/projects/{owner['project']}/design/builds/{a}/share"
+    link = urlsplit(client.post(switch, json={"on": True}, headers=owner["session"]).json()["build"]["share"]["url"]).path
+
+    deep = _origin(a)
+    entered = deep.get(link, params={"next": "/system/?state=empty"})
+    assert entered.status_code == 303 and entered.headers["location"] == "/system/?state=empty"
+    assert deep.cookies.get("sikstack_design")
+    assert deep.get("/system/").status_code == 200
+    for unsafe in (None, "", "https://evil.example/", "//evil.example/", "/\\evil", "\\\\evil", "/a\x01b", "system/"):
+        origin = _origin(a)
+        res = origin.get(link, params={} if unsafe is None else {"next": unsafe})
+        assert res.status_code == 303 and res.headers["location"] == "/", unsafe
+        assert origin.get("/").status_code == 200, unsafe
+
+    client.post(switch, json={"on": False}, headers=owner["session"])
+    for params in ({}, {"next": "/system/"}):
+        refused = _origin(a).get(link, params=params)
+        assert refused.status_code == 403 and "location" not in refused.headers, params
+
+
+def test_a_private_builds_share_link_is_refused_even_with_next(db):
+    client, engine, _tmp = db
+    owner = _account(client)
+    manifest = {**MANIFEST, "recording": {"file": "design/data/local/acme.json", "name": "acme"}}
+    a = _publish(client, owner, manifest=manifest).json()["build"]["id"]
+    # Force the row into the state the API refuses to make: a private build with sharing on.
+    token = f"forced-{uuid4().hex}"
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE design_builds SET share_on = true, share_token = :token WHERE id = :id"), {"token": token, "id": a}
+        )
+    for params in ({}, {"next": "/system/"}):
+        assert _origin(a).get(f"/_share/{token}", params=params).status_code == 403, params
+
+
 def test_every_design_origin_answer_carries_frame_ancestors_for_the_app(db):
     client, _engine, _tmp = db
     owner = _account(client)
