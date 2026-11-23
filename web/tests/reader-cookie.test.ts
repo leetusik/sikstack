@@ -46,9 +46,9 @@ describe("kb_reader", () => {
 
   it("reads its own cookie out of a jar that also holds the sealed session", () => {
     const jar =
-      "knowledge_session=v1.abc=.def; kb_reader=size=1&theme=light; kb_rail=collapsed";
+      "__Host-knowledge_session=v1.abc=.def; kb_reader=size=1&theme=light; kb_rail=collapsed";
     expect(readReaderCookie(jar)).toEqual({ size: 1, theme: "light" });
-    expect(readReaderCookie("knowledge_session=v1.x")).toEqual(
+    expect(readReaderCookie("__Host-knowledge_session=v1.x")).toEqual(
       DEFAULT_READER_SETTINGS,
     );
   });

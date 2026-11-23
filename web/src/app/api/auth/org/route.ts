@@ -19,7 +19,7 @@ import {
 // sends only that part of `/api/` to the web app (`deploy/hi2vi.conf`).
 //
 // POST is the org menu's plain form post (it works with no JS). It sets the
-// `sikstack_org` cookie ONLY to an org the API has just confirmed the user is a member
+// `__Host-sikstack_org` cookie ONLY to an org the API has just confirmed the user is a member
 // of (`GET /auth/me` with that org named answers 200; a non-member is the API's 403),
 // then lands on `/dashboard`: a page of the old org's project would 404 in the new one.
 //

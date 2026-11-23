@@ -21,8 +21,16 @@ import { loginHref, REQUEST_PATH_HEADER, safeNextPath } from "./next-path";
 // that use this run on the nodejs runtime (never Edge). The key/token/cookie are
 // never logged.
 
+// The app's cookies carry the `__Host-` prefix: a browser stores such a cookie only when it
+// is `Secure`, `Path=/` and has no `Domain`, set by this host itself. A page on a sibling
+// host (a design build at `<build>.design.<app domain>`) can set `Domain=<app domain>`
+// cookies the app's host then receives; with a plain name it could plant another account's
+// sealed session (login fixation) or a foreign org (a redirect loop). The prefix makes the
+// browser refuse those. Always `Secure`: Chromium keeps such cookies on plain http at
+// `127.0.0.1`, `localhost` and `*.localhost` (dev and the verify stack); production is https.
+
 /** Cookie name holding the sealed knowledge session. */
-export const SESSION_COOKIE = "knowledge_session";
+export const SESSION_COOKIE = "__Host-knowledge_session";
 
 /** Session lifetime: 30 days — matches knowledge's opaque-token TTL exactly. */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -37,11 +45,11 @@ interface SealedPayload {
   exp: number;
 }
 
-/** Cookie attributes (Secure only in prod — dev is plain http on 127.0.0.1). */
+/** Cookie attributes: always `Secure` and `Path=/`, never a `Domain` (the `__Host-` rules). */
 export interface SessionCookieOptions {
   httpOnly: true;
   sameSite: "strict";
-  secure: boolean;
+  secure: true;
   path: "/";
   maxAge: number;
 }
@@ -51,7 +59,7 @@ export function sessionCookieOptions(): SessionCookieOptions {
   return {
     httpOnly: true,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   };
@@ -71,7 +79,24 @@ export function clearedSessionCookieOptions(): SessionCookieOptions {
 // cleared by the reset (`GET /api/auth/org`), by sign-in, sign-up and sign-out.
 
 /** Cookie name holding the active org's tenant id. */
-export const ORG_COOKIE = "sikstack_org";
+export const ORG_COOKIE = "__Host-sikstack_org";
+
+/**
+ * The cookies' names before the `__Host-` prefix. Never read: a browser may still hold
+ * them from before, or a sibling host may have planted them. Sign-in, sign-up and sign-out
+ * expire the host's own copies (`clearLegacyCookies`); a planted `Domain` copy is left to
+ * expire, ignored.
+ */
+export const LEGACY_COOKIES = ["knowledge_session", "sikstack_org"] as const;
+
+/** Expire the pre-prefix cookies this host set itself (see `LEGACY_COOKIES`). */
+export function clearLegacyCookies(res: {
+  cookies: { set(name: string, value: string, options: SessionCookieOptions): unknown };
+}): void {
+  for (const name of LEGACY_COOKIES) {
+    res.cookies.set(name, "", clearedSessionCookieOptions());
+  }
+}
 
 /** The request header the API reads the active org from (`server/accounts/auth.py`). */
 export const ORG_HEADER = "X-Sikstack-Org";
@@ -212,8 +237,11 @@ export function readSessionCookie(req: Request): string | undefined {
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === SESSION_COOKIE) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+    // Only the header's own spaces and tabs are stripped: `trim()` would also take a
+    // Unicode space, letting a planted `\u00a0__Host-…` cookie (no prefix, so a sibling
+    // host could set it) pass for ours.
+    if (part.slice(0, eq).replace(/^[ \t]+|[ \t]+$/g, "") === SESSION_COOKIE) {
+      return decodeURIComponent(part.slice(eq + 1).replace(/^[ \t]+|[ \t]+$/g, ""));
     }
   }
   return undefined;
