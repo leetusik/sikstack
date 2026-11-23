@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Build the design folder: `next build design` (a static export to `design/out/`), then
-// `design/out/manifest.json` (the pages, their entry paths, the recording each reads, the source commit, and the
-// options page's entry and directions when there is one),
+// `design/out/manifest.json` (the pages and their states, from `lib/pages.ts` as the front page lists them, their
+// entry paths, the recording each reads, the source commit, and the options page's entry and directions when there
+// is one),
 // then a link check: every in-site link the pages draw must have a file in `out/`, so nothing the design
 // links to 404s on a static server.
 //
 //   node design/scripts/build.mjs [--data sample | --data local/<name>]     (pnpm --dir web design:build)
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,20 +34,35 @@ if (!existsSync(recordingPath)) die(`no recording at design/${recordingRel} (rec
 const recording = JSON.parse(readFileSync(recordingPath, "utf8"));
 if (recording.$design !== MARK) die(`design/${recordingRel} is not a design recording`);
 
+// The source, read before the build: the front page names the build by its commit (`lib/pages.ts`, `buildSource`).
+const git = (...args) => {
+  const r = spawnSync("git", args, { cwd: WEB, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+};
+const source = {
+  repo: "platform",
+  commit: git("rev-parse", "HEAD"),
+  branch: git("rev-parse", "--abbrev-ref", "HEAD"),
+  dirty: (git("status", "--porcelain", "--", ".") ?? "") !== "",
+};
+
 const next = path.join(WEB, "node_modules", ".bin", "next");
 const built = spawnSync(next, ["build", "design"], {
   cwd: WEB,
   stdio: "inherit",
-  env: { ...process.env, DESIGN_RECORDING: recordingRel, NEXT_TELEMETRY_DISABLED: "1" },
+  env: {
+    ...process.env,
+    DESIGN_RECORDING: recordingRel,
+    DESIGN_COMMIT: source.commit ?? "",
+    DESIGN_BRANCH: source.branch ?? "",
+    DESIGN_DIRTY: source.dirty ? "1" : "",
+    NEXT_TELEMETRY_DISABLED: "1",
+  },
 });
 if (built.status !== 0) die("next build failed");
 
 // -- the manifest -------------------------------------------------------------------------------
 
-const git = (...args) => {
-  const r = spawnSync("git", args, { cwd: WEB, encoding: "utf8" });
-  return r.status === 0 ? r.stdout.trim() : null;
-};
 const project = recording.workspace.project;
 const ws = `/projects/${encodeURIComponent(project)}/workspace/`;
 const itemDir = path.join(OUT, "projects", project, "workspace", "agenda");
@@ -66,78 +82,28 @@ const minted = itemIds
   .filter((id) => !recordedSet.has(id) && !stateIds.has(id))
   .sort((a, b) => num(a) - num(b));
 const recordingRef = `design/${recordingRel}`;
-// The Design service's pages (P77), when the recording holds its answers (`design:record --design`): the list, and
-// a build's viewer, one page for each recorded build and the deleted one.
-function designPages() {
-  const d = recording.design;
-  if (!d || !Array.isArray(d.builds)) return [];
-  const list = `/projects/${encodeURIComponent(project)}/design/`;
-  const ids = [...d.builds.map((b) => b.id), ...(d.gone?.build ? [d.gone.build] : [])];
-  // The viewer's entry is a build in its first state (no options: not private, not shared, no options page), so the
-  // page with no `state` shows the first state its widget lists; every other build page shows its own.
-  const plain = d.builds.find((b) => !b.private && !b.share?.on && !b.options)?.id ?? ids[0];
-  return [
-    {
-      name: "Design",
-      route: "/projects/[projectId]/design",
-      production: null,
-      entry: list,
-      recording: recordingRef,
-      reads: ["design.builds"],
-    },
-    {
-      name: "Design build",
-      route: "/projects/[projectId]/design/[build]",
-      production: null,
-      entry: `${list}${plain}/`,
-      entries: ids.map((id) => `${list}${id}/`),
-      recording: recordingRef,
-      reads: ["design.details", "design.shareRefused", "design.gone"],
-    },
-  ];
-}
+// The pages, from the list the front page draws (`lib/pages.ts`, written to `out/pages.json` by its route): each
+// with its states; the recording's file named where a page reads it, and the item page's other paths found in out/.
+const PAGES_JSON = path.join(OUT, "pages.json");
+if (!existsSync(PAGES_JSON)) die("out/pages.json is missing (app/pages.json/route.ts)");
+const ITEM_ROUTE = "/projects/[projectId]/workspace/agenda/[item]";
+const pages = JSON.parse(readFileSync(PAGES_JSON, "utf8")).pages.map(({ recording: readsRecording, ...p }) => ({
+  ...p,
+  ...(readsRecording ? { recording: recordingRef } : {}),
+  ...(p.route === ITEM_ROUTE
+    ? { presetItems: presetItems.map((id) => `${ws}agenda/${id}/`), browserAdded: minted.map((id) => `${ws}agenda/${id}/`) }
+    : {}),
+}));
+rmSync(PAGES_JSON);
 
 const manifest = {
   $design: MARK,
   built_at: new Date().toISOString(),
-  source: {
-    repo: "platform",
-    commit: git("rev-parse", "HEAD"),
-    branch: git("rev-parse", "--abbrev-ref", "HEAD"),
-    dirty: (git("status", "--porcelain", "--", ".") ?? "") !== "",
-  },
+  source,
   recording: { file: recordingRef, name: recording.name, now: recording.now, project },
-  // Each page lists its states on the state widget (`lib/states.tsx`); `?state=<key>` opens one.
+  // Each page's states (`pages[].states`, `lib/page-states.ts`) are its state widget's; `?state=<key>` opens one.
   states: stateFiles.map((f) => `design/data/sample/states/${f}`),
-  pages: [
-    {
-      name: "Workspace · Agenda",
-      route: "/projects/[projectId]/workspace",
-      production: "src/app/(app)/projects/[projectId]/workspace/page.tsx",
-      entry: ws,
-      recording: recordingRef,
-      reads: ["workspace"],
-    },
-    {
-      name: "Agenda item",
-      route: "/projects/[projectId]/workspace/agenda/[item]",
-      production: "src/app/(app)/projects/[projectId]/workspace/agenda/[item]/page.tsx",
-      entry: `${ws}agenda/${recorded[0]}/`,
-      entries: recorded.map((id) => `${ws}agenda/${id}/`),
-      presetItems: presetItems.map((id) => `${ws}agenda/${id}/`),
-      browserAdded: minted.map((id) => `${ws}agenda/${id}/`),
-      recording: recordingRef,
-      reads: ["workspace", "items"],
-    },
-    ...designPages(),
-    {
-      name: "System",
-      route: "/system",
-      production: null,
-      entry: "/system/",
-      reads: ["src/sikstack/styles/tokens.css", "@/sikstack/ui", "@/sikstack/frame", "@/sikstack/states", "@/sikstack/shell"],
-    },
-  ],
+  pages,
 };
 // The options page, when the build has one (`templates/design/options.html`, copied into the design folder for
 // a named decision): its entry and each direction's key and label, read from the page's `DIRECTIONS`, so a

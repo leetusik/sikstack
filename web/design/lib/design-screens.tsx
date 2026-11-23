@@ -18,25 +18,15 @@ import {
 } from "./design-data";
 import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
 import { Frame } from "./screens";
-import { pageStates, StatePage } from "./states";
+import { DESIGN_BUILD_STATES, DESIGN_LIST_STATES } from "./page-states";
+import { StatePage } from "./states";
 
 /**
  * The Design service's screens (P77): the list and a build's viewer, drawn by their next components
  * (`next/design/`) inside the Shell, on the recorded answers (`design-data.ts`). Production does not draw them
- * yet, so each state's `from` names the next component's branch and the answer it draws.
+ * yet, so each state's `from` (`page-states.ts`) names the next component's branch and the answer it draws.
  */
 
-const LIST = "next/design/list.tsx";
-const VIEW = "next/design/viewer.tsx";
-
-/** The Design list's states: the recorded list at each step of the publishes (`design-data.ts`). */
-export const DESIGN_LIST_STATES = pageStates("Design", [
-  { key: "many", label: "Many builds", from: `${LIST}:69 rows · data/sample/recording.json design.builds` },
-  { key: "one", label: "One build", from: `${LIST}:69 rows · data/sample/states/design-one.json` },
-  { key: "private", label: "A private build", from: `${LIST}:84 Private · data/sample/states/design-private.json` },
-  { key: "shared", label: "A shared build", from: `${LIST}:86 Shared · data/sample/states/design-shared.json` },
-  { key: "empty", label: "No builds yet", from: `${LIST}:44 none · data/sample/states/design-empty.json` },
-]);
 type ListState = (typeof DESIGN_LIST_STATES.list)[number]["key"];
 
 export function DesignListRoute() {
@@ -51,14 +41,6 @@ export function DesignListRoute() {
   );
 }
 
-/** The viewer's states: the build's own, or a recorded build in the state named; gone is the API's 404. */
-export const DESIGN_BUILD_STATES = pageStates("Design build", [
-  { key: "no-options", label: "No options", from: `${VIEW}:196 pages · recording design.details (no manifest options)` },
-  { key: "options", label: "Options", from: `${VIEW}:169 options side by side · recording design.details (manifest options)` },
-  { key: "shared", label: "Shared", from: `${VIEW}:138 share on, Copy · recording design.details (share.on)` },
-  { key: "private", label: "Private", from: `${VIEW}:134 one line · recording design.shareRefused (409)` },
-  { key: "gone", label: "Gone", from: `${VIEW}:225 DesignBuildGone · recording design.gone (404)` },
-]);
 type BuildState = (typeof DESIGN_BUILD_STATES.list)[number]["key"];
 
 /**

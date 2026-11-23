@@ -34,7 +34,8 @@ import { Shell } from "../next/shell/shell";
 import { DATA_SETS, HEADS, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";
 import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
-import { pageStates, StatePage } from "./states";
+import { AGENDA_STATES, ITEM_STATES } from "./page-states";
+import { StatePage } from "./states";
 import {
   dataOf,
   getServerSnapshot,
@@ -131,23 +132,6 @@ function ProjectNotFound() {
   );
 }
 
-const WS = "src/app/(app)/projects/[projectId]/workspace";
-
-/** The Agenda's states: every branch of its route (`page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`)
- * and the data shapes its parts draw. The data states put a data set from `answers.ts` in the store. */
-export const AGENDA_STATES = pageStates("Agenda", [
-  { key: "recorded", label: "Recorded", from: `${WS}/page.tsx:75 (ready) · data/sample/recording.json`, data: true },
-  { key: "many", label: "Many items", from: `${WS}/page.tsx:75 (ready) · data/sample/states/many.json`, data: true },
-  { key: "empty", label: "Empty agenda", from: "agenda-list.tsx:853 emptyText · data/sample/states/empty.json", data: true },
-  { key: "waiting", label: "Waiting for sync", from: "agenda-list.tsx:760 unplaced, WaitingBadge · data/sample/states/waiting.json", data: true },
-  { key: "behind", label: "Synced long ago", from: "frame/sync-model.ts:44 behind (made: answers.ts)", data: true },
-  { key: "loading", label: "Loading", from: `${WS}/loading.tsx` },
-  { key: "unlinked", label: "Not linked", from: `${WS}/page.tsx:48 unlinked · data/sample/states/unlinked.json` },
-  { key: "never", label: "Never synced", from: `${WS}/page.tsx:48 never · data/sample/states/never.json` },
-  { key: "failed", label: "Read failed", from: `${WS}/page.tsx:66 error` },
-  { key: "not-found", label: "Not found", from: `${WS}/page.tsx:46 notFound() → not-found.tsx` },
-  { key: "error", label: "Page error", from: `${WS}/error.tsx` },
-]);
 export type AgendaState = (typeof AGENDA_STATES.list)[number]["key"];
 
 export function AgendaScreen({
@@ -226,22 +210,6 @@ export function AgendaScreen({
   return <Frame>{body}</Frame>;
 }
 
-const ITEM = `${WS}/agenda/[item]`;
-
-/** An agenda item's states: every branch of its route (`page.tsx`, `load.ts`, `loading.tsx`, `error.tsx`)
- * and the item in each state the store can give it. The data states set this item's own fields. */
-export const ITEM_STATES = pageStates("Agenda item", [
-  { key: "open", label: "Open", from: "agenda-item/item-page.tsx (ready) · item.state open", data: true },
-  { key: "deferred", label: "Deferred", from: "agenda-item/item-page.tsx (ready) · item.state deferred", data: true },
-  { key: "solved", label: "Solved", from: "agenda-item/item-page.tsx (ready) · item.state solved, its outcome", data: true },
-  { key: "dropped", label: "Dropped", from: "agenda-item/item-page.tsx (ready) · item.state dropped, its reason", data: true },
-  { key: "waiting", label: "Waiting for sync", from: "frame/waiting.tsx WaitingBadge · item.sync waiting (states/waiting.json)", data: true },
-  { key: "loading", label: "Loading", from: `${ITEM}/loading.tsx` },
-  { key: "not-found", label: "Not found", from: `${ITEM}/page.tsx:98 · load.ts:67 (no such item)` },
-  { key: "project-not-found", label: "Project not found", from: `${ITEM}/page.tsx:65 notFound() → workspace/not-found.tsx` },
-  { key: "failed", label: "Read failed", from: `${ITEM}/page.tsx:67 · load.ts:66 error` },
-  { key: "error", label: "Page error", from: `${ITEM}/error.tsx` },
-]);
 export type ItemState = (typeof ITEM_STATES.list)[number]["key"];
 
 export function ItemScreen({

@@ -1,0 +1,17 @@
+/* The build's front page (`app/page.tsx`): every page, its route, and its states as links. The product's own
+   classes (`.row`, `.link-strong`, `.link-row`, `.meta`, `.mono`) draw the parts; this sheet only lays them out. */
+
+/* a page's name (its default state) and its route in the product, the route at the row's end while the row has
+   40em; under that the route sits under the name */
+.pages { container: index-pages / inline-size; }
+.pages > li:first-child { border-top: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--space-4); min-width: 0; }
+.route { min-width: 0; overflow-wrap: anywhere; }
+@container index-pages (max-width: 40em) {
+  .head { flex-direction: column; }
+}
+
+/* the page's states, one link each, wrapping as words do; each link one control tall and as wide as its words (a
+   short one, "Open", would otherwise stretch to a square target and leave a gap the others do not) */
+.states { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); min-width: 0; }
+.states a { min-width: 0; }
