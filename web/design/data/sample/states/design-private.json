@@ -1,0 +1,49 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "design-private",
+  "now": "2026-11-20T09:00:00Z",
+  "design": {
+    "builds": [
+      {
+        "id": "bl36hfnqco2keayp566ce3tu2v",
+        "url": "http://bl36hfnqco2keayp566ce3tu2v.design.sikstack.localhost:3061/",
+        "commit": "54a2288ee0ee9a3104e75a1b2a2f17bb7a6066aa",
+        "branch": "feat/design-service",
+        "dirty": false,
+        "recording": "design/data/local/acme.json",
+        "recording_name": "acme",
+        "private": true,
+        "size": 10466130,
+        "files": 729,
+        "pages": 3,
+        "options": false,
+        "published_at": "2026-11-20T08:59:57Z",
+        "published_from": "sample-checkout",
+        "share": {
+          "on": false,
+          "url": null
+        }
+      },
+      {
+        "id": "bjxophow5wb7hfhobijz4uvmot",
+        "url": "http://bjxophow5wb7hfhobijz4uvmot.design.sikstack.localhost:3061/",
+        "commit": "54a2288ee0ee9a3104e75a1b2a2f17bb7a6066aa",
+        "branch": "feat/design-service",
+        "dirty": false,
+        "recording": "design/data/sample/recording.json",
+        "recording_name": "sample",
+        "private": false,
+        "size": 10466162,
+        "files": 729,
+        "pages": 3,
+        "options": false,
+        "published_at": "2026-11-20T08:59:27Z",
+        "published_from": "sample-checkout",
+        "share": {
+          "on": false,
+          "url": null
+        }
+      }
+    ]
+  }
+}

@@ -23,6 +23,9 @@ export default function DesignIndex() {
           </li>
         ) : null}
         <li>
+          <Link href={`/projects/${PROJECT}/design/`}>Design</Link>
+        </li>
+        <li>
           <Link href="/system/">System · tokens and components</Link>
         </li>
       </ul>

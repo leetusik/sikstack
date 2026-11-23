@@ -59,13 +59,43 @@ const STATES = path.join(DESIGN, "data", "sample", "states");
 const stateFiles = existsSync(STATES) ? readdirSync(STATES).filter((f) => f.endsWith(".json")).sort() : [];
 const stateIds = new Set();
 for (const f of stateFiles)
-  for (const a of JSON.parse(readFileSync(path.join(STATES, f), "utf8")).workspace.agenda ?? [])
+  for (const a of JSON.parse(readFileSync(path.join(STATES, f), "utf8")).workspace?.agenda ?? [])
     if (!recordedSet.has(a.id)) stateIds.add(a.id);
 const presetItems = itemIds.filter((id) => stateIds.has(id)).sort((a, b) => num(a) - num(b));
 const minted = itemIds
   .filter((id) => !recordedSet.has(id) && !stateIds.has(id))
   .sort((a, b) => num(a) - num(b));
 const recordingRef = `design/${recordingRel}`;
+// The Design service's pages (P77), when the recording holds its answers (`design:record --design`): the list, and
+// a build's viewer, one page for each recorded build and the deleted one.
+function designPages() {
+  const d = recording.design;
+  if (!d || !Array.isArray(d.builds)) return [];
+  const list = `/projects/${encodeURIComponent(project)}/design/`;
+  const ids = [...d.builds.map((b) => b.id), ...(d.gone?.build ? [d.gone.build] : [])];
+  // The viewer's entry is a build in its first state (no options: not private, not shared, no options page), so the
+  // page with no `state` shows the first state its widget lists; every other build page shows its own.
+  const plain = d.builds.find((b) => !b.private && !b.share?.on && !b.options)?.id ?? ids[0];
+  return [
+    {
+      name: "Design",
+      route: "/projects/[projectId]/design",
+      production: null,
+      entry: list,
+      recording: recordingRef,
+      reads: ["design.builds"],
+    },
+    {
+      name: "Design build",
+      route: "/projects/[projectId]/design/[build]",
+      production: null,
+      entry: `${list}${plain}/`,
+      entries: ids.map((id) => `${list}${id}/`),
+      recording: recordingRef,
+      reads: ["design.details", "design.shareRefused", "design.gone"],
+    },
+  ];
+}
 
 const manifest = {
   $design: MARK,
@@ -99,6 +129,7 @@ const manifest = {
       recording: recordingRef,
       reads: ["workspace", "items"],
     },
+    ...designPages(),
     {
       name: "System",
       route: "/system",

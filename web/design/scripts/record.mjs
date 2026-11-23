@@ -17,6 +17,13 @@
 // `design/data/sample/states/<name>.json`: the same shape, but the Workspace may be unlinked or never
 // synced (its agenda then absent or empty), and an item its own route does not hold yet (an add that
 // waits for the sync) is kept as its row alone.
+//
+// `--design` records the Design service's answers instead of the Workspace's: `GET /app/projects/{id}/design/builds`,
+// each `GET …/design/builds/{build}`, and, for each private build, the one line `POST …/{build}/share {on: true}`
+// answers (a 409: nothing changes). `--gone <build>` adds the 404 a deleted build's address answers. Without
+// `--state`, they go into the recording named by `--to` as its `design` part, the rest of the file kept as it
+// is; with `--state <name>`, the list alone goes to `design/data/sample/states/<name>.json`. A share link's
+// token is replaced by a fixed one (`SHARE_TOKEN`), like the project id.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +34,10 @@ const SAMPLE_PROJECT = "00000000-0000-4000-8000-000000000001";
 const SAMPLE_ORG = "00000000-0000-4000-8000-0000000000a1";
 const ANCHOR = Date.parse("2026-11-20T09:00:00Z");
 const DAY = 86_400_000;
+/** What a recorded share link's token becomes: a recording never holds a link that opened a build. */
+const SHARE_TOKEN = "sampleshareTOKEN";
+/** What a build's `published_from` (the publishing machine's name) becomes: never the account's machine. */
+const SAMPLE_CHECKOUT = "sample-checkout";
 
 function args(argv) {
   const out = {
@@ -42,6 +53,10 @@ function args(argv) {
     else if (k === "--project-name") out.projectName = v;
     else if (k === "--time-zone") out.timeZone = v;
     else if (k === "--state") out.state = v;
+    else if (k === "--design") {
+      out.design = true;
+      i--;
+    } else if (k === "--gone") out.gone = v;
     else throw new Error(`unknown argument ${k}`);
     i++;
   }
@@ -50,6 +65,8 @@ function args(argv) {
     throw new Error("--to takes sample or local/<name> (lowercase letters, digits, dashes)");
   if (out.state !== undefined && (out.to !== "sample" || !/^[a-z0-9][a-z0-9-]*$/.test(out.state)))
     throw new Error("--state takes a name (lowercase letters, digits, dashes) and records only to sample");
+  if (out.gone !== undefined && (!out.design || out.state !== undefined || !/^b[a-z2-7]{25}$/.test(out.gone)))
+    throw new Error("--gone takes a build id, with --design and without --state");
   return out;
 }
 
@@ -71,6 +88,16 @@ async function get(api, route, bearer) {
 }
 
 /** The same, or null on a 404 (an item its own route does not hold yet). */
+/** A POST's status and its answer, refused or not. */
+async function post(api, route, bearer, body) {
+  const res = await fetch(api + route, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+}
+
 async function getOrNull(api, route, bearer) {
   try {
     return await get(api, route, bearer);
@@ -113,9 +140,86 @@ function normalizer(projectId, takenAt, timeZone) {
   return walk;
 }
 
+/**
+ * Every share link's token replaced by `SHARE_TOKEN` (no recording holds one that opened a build), and every
+ * `published_from` by `SAMPLE_CHECKOUT` (the engine sends the machine's name, which may name its owner).
+ */
+function scrub(v) {
+  if (typeof v === "string") return v.replace(/\/_share\/[^/?#\s"]+/g, `/_share/${SHARE_TOKEN}`);
+  if (Array.isArray(v)) return v.map(scrub);
+  if (v && typeof v === "object")
+    return Object.fromEntries(
+      Object.entries(v).map(([k, x]) => [k, k === "published_from" && typeof x === "string" ? SAMPLE_CHECKOUT : scrub(x)]),
+    );
+  return v;
+}
+
+/** The Design service's answers for the project: the list, each build as its own route answers it, the refusals. */
+async function recordDesign(o, bearer) {
+  const base = `/app/projects/${encodeURIComponent(o.project)}/design/builds`;
+  const takenAt = Date.now();
+  const { builds } = await get(o.api, base, bearer);
+  if (!Array.isArray(builds)) throw new Error(`GET ${base} answered no builds list`);
+  const norm = normalizer(o.project, takenAt, o.timeZone);
+  const design = { builds };
+  if (o.state === undefined) {
+    design.details = {};
+    design.shareRefused = {};
+    for (const b of builds) {
+      design.details[b.id] = await get(o.api, `${base}/${encodeURIComponent(b.id)}`, bearer);
+      if (!b.private) continue;
+      const r = await post(o.api, `${base}/${encodeURIComponent(b.id)}/share`, bearer, { on: true });
+      if (r.status !== 409 || typeof r.body?.detail !== "string")
+        throw new Error(`sharing private build ${b.id} answered ${r.status}, not a 409 line`);
+      design.shareRefused[b.id] = r.body.detail;
+    }
+    if (o.gone !== undefined) {
+      const res = await fetch(`${o.api}${base}/${o.gone}`, { headers: { Authorization: `Bearer ${bearer}` } });
+      const body = await res.json().catch(() => null);
+      if (res.status !== 404) throw new Error(`GET the gone build answered ${res.status}, not 404`);
+      design.gone = { build: o.gone, status: res.status, detail: body?.detail ?? null };
+    }
+  }
+  const part = scrub(norm(design));
+  const file =
+    o.state !== undefined
+      ? path.join(DESIGN, "data", "sample", "states", `${o.state}.json`)
+      : o.to === "sample"
+        ? path.join(DESIGN, "data", "sample", "recording.json")
+        : path.join(DESIGN, "data", "local", `${o.to.slice("local/".length)}.json`);
+  let out;
+  if (o.state !== undefined) {
+    out = { $design: MARK, name: o.state, now: new Date(ANCHOR).toISOString().replace(/\.\d+Z$/, "Z"), design: part };
+  } else {
+    out = JSON.parse(readFileSync(file, "utf8"));
+    if (out.$design !== MARK) throw new Error(`${path.relative(process.cwd(), file)} is not a design recording`);
+    out.design = part;
+    const routes = new Set(out.source?.routes ?? []);
+    for (const r of [
+      "GET /app/projects/{project}/design/builds",
+      "GET /app/projects/{project}/design/builds/{build}",
+      "POST /app/projects/{project}/design/builds/{build}/share (a private build's 409)",
+    ])
+      routes.add(r);
+    out.source = { ...out.source, routes: [...routes] };
+  }
+  const text = `${JSON.stringify(out, null, 2)}\n`;
+  if (text.includes(o.project)) throw new Error("the real project id survived normalization: nothing written");
+  if (text.includes(bearer)) throw new Error("the token appears in the recording: nothing written");
+  for (const b of builds)
+    if (b.published_from && text.includes(`"${b.published_from}"`))
+      throw new Error("a publishing machine's name survived: nothing written");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, text);
+  console.log(
+    `recorded ${builds.length} design build(s) of project ${SAMPLE_PROJECT} (normalized) to ${path.relative(process.cwd(), file)}`,
+  );
+}
+
 async function main() {
   const o = args(process.argv.slice(2));
   const bearer = token();
+  if (o.design) return recordDesign(o, bearer);
   const base = `/app/projects/${encodeURIComponent(o.project)}`;
   const takenAt = Date.now();
   const workspace = await get(o.api, `${base}/workspace`, bearer);

@@ -5,7 +5,7 @@ import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "reac
 
 import { SKIP_TO_CONTENT } from "@/content";
 import { PROJECT_HOME } from "@/content/project";
-import { Shell, ShellOrgNameProvider, ToastRegion } from "@/sikstack/shell";
+import { ShellOrgNameProvider, ToastRegion } from "@/sikstack/shell";
 import { StateBlock } from "@/sikstack/states";
 import { Block, BlockText, BlockTitle, buttonClass } from "@/sikstack/ui";
 import { Legacy } from "@/sikstack/ui/boundary";
@@ -29,6 +29,8 @@ import AgendaItemRouteError from "@/app/(app)/projects/[projectId]/workspace/age
 import AgendaItemRouteLoading from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/loading";
 import { agendaItemBack } from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/back";
 
+import { Shell } from "../next/shell/shell";
+
 import { DATA_SETS, HEADS, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";
 import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
@@ -45,7 +47,7 @@ import {
 
 /**
  * The design's screens: production's own components (`@/sikstack/...`) inside the Shell as
- * `AppShell` draws it, on the browser store's workspace. The clock is the recording's (`NOW`) and
+ * `AppShell` draws it (its next version, `next/shell/`: the project rail's Design entry), on the browser store's workspace. The clock is the recording's (`NOW`) and
  * the zone is the recording's, so the build and the browser draw the same text (no hydration
  * mismatch). What production does not have is the state widget (`states.tsx`), which holds Reset: each
  * page lists the states production's own branches draw for it, and draws each with production's parts.
@@ -67,7 +69,7 @@ function useHydrated() {
 
 const SHELL = RECORDING.shell;
 
-function Frame({ children }: { children: ReactNode }) {
+export function Frame({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
   return (
     <UiRoot data-design={DESIGN_MARK}>
@@ -345,20 +347,21 @@ function enterAgenda(key: AgendaState) {
 
 /** A page the design links to but does not draw. */
 export function AwayScreen({ path }: { path: string }) {
+  // The Design viewer's links open a build on its own host (`/api/design/open`), which a static build has not.
+  const open = path === "/api/design/open";
   return (
     <Frame>
       <div className="column">
         <StateBlock
           state={{
             title: "Not in this design",
-            text: `${path} is not part of this design build. It draws the Workspace's Agenda and its items.`,
+            text: open
+              ? "In sikstack this opens the build on its own host, which this design build does not have."
+              : `${path} is not part of this design build. It draws the Workspace's Agenda and its items, and Design.`,
             actions: [
-              {
-                kind: "link",
-                label: "Open the Agenda",
-                href: agendaHref(PROJECT),
-                variant: "primary",
-              },
+              open
+                ? { kind: "link", label: "Open Design", href: `/projects/${PROJECT}/design`, variant: "primary" }
+                : { kind: "link", label: "Open the Agenda", href: agendaHref(PROJECT), variant: "primary" },
             ],
             reference: null,
           }}

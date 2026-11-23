@@ -1,0 +1,8 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "design-empty",
+  "now": "2026-11-20T09:00:00Z",
+  "design": {
+    "builds": []
+  }
+}
