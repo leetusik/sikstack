@@ -3,7 +3,7 @@ name: executor-route
 description: Show the executor route table (model and effort per route, the per-row .sikstack/config.toml overrides, the agent files' sync state) and the adapter's meter; with a slice id, the dispatch decision for that slice.
 argument-hint: "[<slice_id> [--retry] | --drafter [--phase <P>] | --explore]"
 allowed-tools: Bash(sikstack-adapter:*)
-disable-model-invocation: true
+user-invocable: false
 ---
 
 # executor-route

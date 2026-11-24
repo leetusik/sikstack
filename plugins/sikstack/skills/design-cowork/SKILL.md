@@ -2,6 +2,7 @@
 name: design-cowork
 description: "How to run product visual design in this workspace: the design subagent drafts, the operator decides. A design lives in the product repo's design folder, on the product's own components, built and served at a local URL the operator clicks through, and signed only by their literal words in the session; applying it is a later slice that moves its files into production. You write the brief, dispatch the drafter, build, serve, run the layout check, stop, record their words, publish when they ask. Use when a phase or slice touches a design system, a redesign, mockups, a design gate, brand/palette/typography, or the look of user-facing pages. NOT for non-visual design (schema, API, architecture)."
 allowed-tools: Bash(sikstack:*), Read, Edit, Write, Glob, Grep, Bash, Agent
+user-invocable: false
 ---
 
 # design-cowork

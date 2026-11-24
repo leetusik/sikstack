@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = phase("scope", help="Read-only: the phase's boundary from git -- creation commit, base..head range, the pathspec= line it read with (works/ and docs/ excluded at root, the nested workflow folder in a nested install; one per repo and the host's on a multi-repo host; paste-ready after -- in a git command run from the folder it was read in) and the product files it changed; advisory, exit 0 without git. --pathspec prints only the pathspec line(s), with no phase needed")
     p.add_argument("phase", nargs="?", default=None, help=PHASE_ARG_HELP + "; omit it only with --pathspec")
-    p.add_argument("--pathspec", action="store_true", help="print only the product pathspec line(s) (the JSON with --json), the same value phase scope <P> reads with; needs no phase (/read-code, outside a phase)")
+    p.add_argument("--pathspec", action="store_true", help="print only the product pathspec line(s) (the JSON with --json), the same value phase scope <P> reads with; needs no phase (the read-code skill, outside a phase)")
     p.add_argument("--base", default=None, help="use this ref as the range base verbatim (skips creation-commit / merge-base detection)")
     p.add_argument("--head", default=None, help="use this ref as the range head (default: HEAD, or the commit that recorded a passing review on a done phase)")
     p.add_argument("--json", action="store_true", help="print the same answer as one JSON object")

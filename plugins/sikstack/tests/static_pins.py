@@ -46,11 +46,18 @@ for name in ("design-cowork", "do-whole-phase"):
     assert named and named == shipped, (name, sorted(named ^ shipped))
 for gone in ("AGENTS.md", ".agents", ".codex"):
     assert not (root / gone).exists(), gone
-model_invocable = {"design-cowork", "create-phase", "sik-mode"}  # the pr skill carries the marker too: callers read it by path
+# 0.5.0: archive-phase, commit, pr and review-phase carry both markers (path-only: callers read them by path).
+model_invocable = {"create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route"}
+# 0.5.0: the `/` menu holds the 9 skills a person types; these 8 are the agents' and carry `user-invocable: false`.
+agent_only = {"archive-phase", "commit", "pr", "review-phase", "parallel-phase", "read-code", "executor-route", "design-cowork"}
+assert len(skills) == 17 and agent_only <= set(skills), sorted(skills)
 for name in sorted(skills):
     body = (root / "skills" / name / "SKILL.md").read_text()
+    front = body.split("\n---\n", 1)[0]
     marker = "disable-model-invocation: true"
-    assert (marker in body) == (name not in model_invocable), name
+    assert (marker in front) == (name not in model_invocable), name
+    assert ("\nuser-invocable: false\n" in front + "\n") == (name in agent_only), name
+    assert front.count("user-invocable") == (name in agent_only), name
 create_phase = (root / "skills/create-phase/SKILL.md").read_text()
 assert "the agent when instructed" in create_phase
 assert "Never on the agent's own initiative" in create_phase

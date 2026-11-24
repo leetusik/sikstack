@@ -2,7 +2,7 @@
 name: parallel-phase
 description: "Run a phase in its own git worktree when the operator asks for one: start it, add a repo, see every stream; it integrates back by the pr skill's close."
 allowed-tools: Bash(sikstack:*), Read, Edit, Write, Glob, Grep, Bash
-disable-model-invocation: true
+user-invocable: false
 ---
 
 # parallel-phase

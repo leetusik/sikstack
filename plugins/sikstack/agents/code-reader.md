@@ -1,6 +1,6 @@
 ---
 name: code-reader
-description: "The blind code reader. Reads one code change cold, in one pass, to break it: only the diff between base and head over the pathspec, the repo's files at head and public vendor docs, never the workspace's records. Reproduces each suspicion before it reports it and writes one findings file of problems and effects, never fixes. Dispatched once per phase by the review's executor, or from /read-code."
+description: "The blind code reader. Reads one code change cold, in one pass, to break it: only the diff between base and head over the pathspec, the repo's files at head and public vendor docs, never the workspace's records. Reproduces each suspicion before it reports it and writes one findings file of problems and effects, never fixes. Dispatched once per phase by the review's executor, or by the read-code skill."
 tools: Read, Glob, Grep, Bash, Write, WebFetch, WebSearch
 model: opus
 effort: high

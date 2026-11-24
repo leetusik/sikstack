@@ -36,7 +36,7 @@ While an executor runs you may prepare the **next** slice only, read-only (a `si
 
 ## Special slices
 
-- decomposition → `reference/decomposition.md` (the gate, the PR branches); the review → `reference/review.md` and the `review-phase` skill; co-work → `reference/co-work.md`.
+- decomposition → `reference/decomposition.md` (the gate, the PR branches); the review → `reference/review.md` and the `review-phase` skill (its executor reads it by path); co-work → `reference/co-work.md`.
 - an explain phase (`## Explain` in `intent.md`): `reference/explain-decomposition.md`, `reference/explain-chapter.md`, `reference/explain-review.md`.
 - a worktree: only on the operator's word (an explain: its confirmation asked), or when the phase already runs in one or `next` prints `merge_ready=`: `reference/worktree.md`.
 

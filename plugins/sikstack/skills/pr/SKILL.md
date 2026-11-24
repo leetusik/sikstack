@@ -2,6 +2,7 @@
 name: pr
 description: "Write, check, open and close a phase's pull requests under PR rule v1: one body per recorded branch, measured by pr check, opened as drafts when the review passes, closed on the operator's accept."
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch --show-current), Bash(git branch --list:*), Bash(git rev-parse:*), Bash(git check-attr:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh api repos/*/community/profile), Bash(sikstack next), Bash(sikstack pr check:*), Bash(sikstack pr rules), Bash(sikstack pr team), Read, Write, Edit, Glob, Grep
+user-invocable: false
 disable-model-invocation: true
 ---
 
@@ -11,7 +12,7 @@ A phase that changes product files ships as **one branch per repo it changed, on
 
 - the review's executor: *Write and check* below, then it hands back;
 - the orchestrator: `reference/close.md`, from the review's would-pass to the phase's end;
-- the operator by hand (`/pr`), for a change made outside a phase: steps 2, 3, 5 and 6 below, the body in a scratch file, checked by `sikstack pr check --body <file> [--base <branch>] [--branch <b>] [--limit <n>]`.
+- the operator asking in words ("open a PR for this"), for a change made outside a phase: steps 2, 3, 5 and 6 below, the body in a scratch file, checked by `sikstack pr check --body <file> [--base <branch>] [--branch <b>] [--limit <n>]`.
 
 **The operator's run of the phase is the word for the draft's push**; Ready and the merge wait for their `accept`, and waiving the PR (`pr record <P> --waive --note "why"`) is the only opt-out. No remote write is pre-allowed here: `git push` and `gh pr create|comment|edit|ready|merge` reach the permission prompt, bar the close's deletion of a merged head branch, which the shipped settings allow. Recording (`pr branch`, `pr record`, `pr sync`, `pr team --record`, `pr rules --rule`) is the orchestrator's.
 

@@ -1466,7 +1466,7 @@ assert {"status": "A", "path": "src/probe.py"} in d["files"], d
   && ok "phase scope --json parses and carries the same creation commit, mode and file list" \
   || bad "phase scope --json is not the same answer as the text form"
 # F2: it prints the pathspec it read with, paste-ready after `--` (a guessed `.` would list works/), the same in
-# --json and from the phase-less `phase scope --pathspec` that /read-code runs.
+# --json and from the phase-less `phase scope --pathspec` that the read-code skill runs.
 p3_spec=$(printf '%s\n' "$scope_out" | sed -n 's/^pathspec=//p')
 p3_diff=$( cd "$FH" && eval "git diff --name-only $p3_created HEAD -- $p3_spec" 2>&1 )
 p3_json=$( cd "$F" && python3 "$ENG" phase scope P3 --json 2>/dev/null | python3 -c 'import json, shlex, sys; print(json.load(sys.stdin)["pathspec"] == shlex.split(sys.argv[1]))' "$p3_spec" 2>&1 )

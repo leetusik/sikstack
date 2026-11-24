@@ -2,6 +2,7 @@
 name: archive-phase
 description: "Archive review-passed phases: phase archive --all (full sweep), phase rotate (partial), or phase archive <P> (single)."
 allowed-tools: Bash(sikstack:*)
+user-invocable: false
 disable-model-invocation: true
 ---
 

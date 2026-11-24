@@ -2,6 +2,7 @@
 name: commit
 description: Group pending changes by topic into focused conventional commits.
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git reset:*), Bash(git commit:*), Bash(git -C .sikstack status:*), Bash(git -C .sikstack diff:*), Bash(git -C .sikstack log:*), Bash(git -C .sikstack add:*), Bash(git -C .sikstack reset:*), Bash(git -C .sikstack commit:*)
+user-invocable: false
 disable-model-invocation: true
 ---
 
@@ -13,7 +14,7 @@ Inspect pending changes, group them by topic, and make one focused commit per gr
 
 Never push, force-push, use `git add -A`, or skip hooks unless explicitly asked. A phase's pushes are the `pr` skill's, never this skill's: the draft opening when its review passes, the close's solo landing, and a fix round's or a stack merge's push to an open PR's branch.
 
-**Product files committed outside a phase** (no slice is active): end the report with a line saying they have not been read, and that `/read-code` reads them before a push.
+**Product files committed outside a phase** (no slice is active): end the report with a line saying they have not been read, and that a blind read (the operator asks to read the code: the `read-code` skill) reads them before a push.
 
 **The workflow state is its own repo** (`.sikstack/`, hidden from the product repo by `.git/info/exclude`): commit the product repo first, then the workflow state.
 - product changes go to their repo on the phase's branch (`pr branch`; before `DECOMP`'s end or outside a phase, the current branch), in that repo's conventions (`sikstack repo convention [--repo <name>]`): `Co-Authored-By` only where it says `allowed`, and no phase or slice IDs, `.sikstack/` paths or workspace files in the message. On a multi-repo host (`repo list` lists repos) the host folder gets no commit: check `git -C <repo> status --porcelain` for each repo and commit each one that changed with `git -C <repo> …`;
