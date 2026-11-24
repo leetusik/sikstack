@@ -141,9 +141,9 @@ export const AGENDA = {
     before: "Delete “",
     after: "”?",
     titleMany: (n: number): string => `Delete ${n} items?`,
-    text: "It leaves the agenda for good, with its note. Its phases and deferred jobs stay. You cannot undo this.",
+    text: "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
     textMany:
-      "They leave the agenda for good, with their notes. Their phases and deferred jobs stay. You cannot undo this.",
+      "They leave the agenda for good, with their threads. Their phases stay. You cannot undo this.",
     cancel: WS_ACTIONS.cancel,
     yes: ["Yes, delete", WS_ACTIONS.delete[1]] as const,
     /** F4's sentence for a send that did not get an answer (F45's pattern; listed for the walk). */

@@ -33,7 +33,7 @@ export const AGENDA_ITEM = {
   /** The Delete confirm (F303), one item. */
   confirm: {
     title: (title: string) => `Delete “${title}”?`,
-    text: "It leaves the agenda for good, with its note. Its phases and deferred jobs stay. You cannot undo this.",
+    text: "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
     yes: "Yes, delete",
     pending: WS_ACTIONS.delete[1],
   },

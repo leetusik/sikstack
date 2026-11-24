@@ -81,6 +81,7 @@ const { EMPTY_OVERLAY, reconcile, view } =
   await import("@/lib/workspace/optimistic");
 const { dates, phaseLookup } = await import("@/lib/workspace/model");
 const { TITLE_REFUSAL } = await import("@/lib/workspace/rules");
+const { AGENDA_ITEM } = await import("@/content/workspace/agenda-item");
 const AgendaPage = (
   await import("@/app/(app)/projects/[projectId]/workspace/page")
 ).default;
@@ -608,7 +609,7 @@ describe("the confirm", () => {
       '<h2>Delete “<span lang="en">Sign-in emails land in spam</span>”?</h2>',
     );
     expect(out).toContain(
-      "<p>It leaves the agenda for good, with its note. Its phases and deferred jobs stay. You cannot undo this.</p>",
+      "<p>It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.</p>",
     );
     expect(out).toMatch(
       />Cancel<\/button><button type="button" class="btn btn-danger"><span class="swap"><span>Yes, delete<\/span><span>Deleting…<\/span>/,
@@ -624,6 +625,13 @@ describe("the confirm", () => {
     expect((props.returnFocus as () => unknown)()).toBeNull();
     (props.onClose as () => void)();
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the thread goes with the item and only its phases stay, on the item page's Delete too", () => {
+    // a delete removes the item's whole thread, folded deferred jobs included (P61-e9)
+    expect(AGENDA_ITEM.confirm.text).toBe(
+      "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
+    );
   });
 
   it("holds while the delete is sent: Escape does nothing", () => {

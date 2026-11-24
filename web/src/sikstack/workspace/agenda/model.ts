@@ -151,7 +151,7 @@ export interface DeferredPlace {
 
 /**
  * Where the Deferred part is: the address's page when there is one, else page 1; a page past the last (an action
- * emptied it) is held to the last page, as the Deferred jobs list and the Backlog's Archived phases do.
+ * emptied it) is held to the last page, as the Backlog's Archived phases are.
  */
 export function deferredPlace(
   asked: number | null,

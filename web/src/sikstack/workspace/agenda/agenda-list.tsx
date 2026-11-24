@@ -287,7 +287,7 @@ export function AgendaList({
     setPicks((p) => ({ ...p, deferred: [] }));
   }
 
-  // A page asked for from the pager opens with the Deferred part's head in view, as the Deferred jobs list does:
+  // A page asked for from the pager opens with the Deferred part's head in view:
   // the page stays where it was while the next page is read, then the part's head comes to the top.
   const deferredPart = useRef<HTMLElement>(null);
   const paged = useRef(false);
