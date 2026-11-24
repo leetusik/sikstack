@@ -10,6 +10,8 @@
   - Replace the sample screens with the product's own (real copy and data, never lorem).
   - Once the operator picks, the chosen tokens move into the product (its tokens file and TASTE.md) and this file
     is deleted. It is plain HTML, CSS and a little JS: no framework, no network, opens from disk or any server.
+  - Framed (a viewer shows one direction per frame, ?direction=a|b|c): the bar is hidden and the page posts
+    { designHeight } to its parent on load and on resize, so the frame can take its height. Unframed, no change.
 -->
 <html lang="en">
 <head>
@@ -52,6 +54,7 @@
                    color: #f2f2f2; font: inherit; cursor: pointer; }
   .switch button[aria-pressed="true"] { background: #f2f2f2; color: #1b1b1b; border-color: #f2f2f2; }
   .switch button:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+  .framed .bar { display: none; }
   .why { margin: 0 24px; padding: 12px 0; font-size: 13px; color: #333; max-width: 72ch; }
 
   /* ---- the sample screens: they read only the direction's tokens ---- */
@@ -176,6 +179,20 @@
     show(next.key, true); sw.querySelector(`[data-key="${next.key}"]`).focus();
   });
   show(new URL(location.href).searchParams.get("direction"), false);
+
+  // Framed: hide the bar and tell the parent this page's height (a height is no secret; the parent checks the
+  // message's source and origin). Unframed, nothing here runs.
+  if (window.self !== window.top) {
+    document.documentElement.classList.add("framed");
+    let last = -1;
+    const post = () => {
+      const h = document.documentElement.scrollHeight;
+      if (h !== last) { last = h; window.parent.postMessage({ designHeight: h }, "*"); }
+    };
+    addEventListener("load", post);
+    new ResizeObserver(post).observe(document.body);
+    post();
+  }
 </script>
 </body>
 </html>

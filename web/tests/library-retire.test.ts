@@ -73,7 +73,7 @@ describe("the old list's address maps onto the Library's own", () => {
 const get = (url: string, cookie = false) =>
   GET(
     new Request(`http://localhost${url}`, {
-      headers: cookie ? { cookie: "knowledge_session=x" } : {},
+      headers: cookie ? { cookie: "__Host-knowledge_session=x" } : {},
     }),
   );
 

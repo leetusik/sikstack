@@ -37,6 +37,15 @@ install routes sign-in and feedback use, each logged whole (the poll token and k
   "feedback"); GET /_fake/reports lists what landed.
 - Test-only POST /_fake/sign-in {code, state: approved|denied|expired} decides a code as the connect page would.
 
+The design API (S1's, P77): POST /api/design/<project>/builds (the raw tar.gz of a build folder; a marked
+manifest.json at its root, else 400; a recording under design/data/local/ is private) -> 201 {build, viewer, url}
+(viewer: the build's viewer on this server, http://<Host>/projects/<project>/design/<id>; url: its own host);
+GET .../builds -> {builds}, newest first; DELETE .../builds/<id> -> {deleted}, an unknown id 404; a wrong key 401,
+another project 404. Each request is logged (route "design": method, bytes, Content-Type, the tar's names, the
+status; never the key). control design_answer: {status, detail, method?} answers the next design request (of that
+method) with that one line (a 403, a 413, ...); one-shot. A refused key is answered before the body is read, and the
+connection closed, as the server does (a big upload then sees its pipe broken).
+
 Test-only routes (no key, 127.0.0.1 only): GET /_fake/state (the records, no content),
 POST /_fake/write {path, content, kind?, deleted?} or {path, lines} (a change made by another checkout: a revision,
 or its lines appended to an append-only record), GET /_fake/file?path=
@@ -105,9 +114,10 @@ class Store:
         self.sign_ins = {}  # code -> {token, install_id, repo, state, delivered}
         self.reports = []   # POST /api/installs/feedback bodies that landed
         self.inbox = []     # the web's agenda changes: {id, created_at, kind, items, fields, minted_id, state, ...}
+        self.builds = []    # the design API's builds, newest first: {id, url, commit, branch, private, size, files, ...}
         self.control = {"offline": False, "commit": None, "race": None, "gate": None, "fetch_page": None,
                         "inbox_race": None, "break": None, "slow": 0, "drip": 0, "drip_route": None,
-                        "rate": 0, "feedback_limit": 2}
+                        "rate": 0, "feedback_limit": 2, "design_answer": None}
         self.gate = threading.Condition()
         self.gate_seen = 0
 
@@ -407,6 +417,74 @@ def make_handler(store: Store, key: str, log_path: str):
             store.reports.append(dict(body))
             return 202, {"request_id": f"r{len(store.reports)}", "accepted_at": "now", "status": "accepted"}
 
+        def _design(self, method: str, parts: list) -> tuple:
+            """The design API (S1's): POST/GET /api/design/<project>/builds, DELETE .../builds/<id>."""
+            import io
+            import secrets
+            import tarfile
+            auth = self.headers.get("Authorization") or ""
+            bearer = auth[7:] if auth.startswith("Bearer ") else None
+            entry = {"method": method, "path": "/" + "/".join(parts), "route": "design",
+                     "checkout": self.headers.get("X-Sikstack-Checkout"), "content_type": self.headers.get("Content-Type"),
+                     "auth": "none" if bearer is None else ("ok" if hmac.compare_digest(bearer, key) else "bad")}
+            answer = store.control.get("design_answer")
+            if isinstance(answer, dict) and answer.get("method") in (None, method):
+                store.control["design_answer"] = None
+            else:
+                answer = None
+            length = int(self.headers.get("Content-Length") or 0)
+            if entry["auth"] != "ok" and answer is None:  # like the server: a key refused before the body is read
+                raw, self.close_connection = b"", True
+            else:
+                raw = self.rfile.read(length) if length else b""
+            entry["bytes"] = len(raw)
+            if isinstance(answer, dict):
+                status, payload = int(answer.get("status", 400)), {"detail": answer.get("detail")}
+            elif entry["auth"] != "ok":
+                status, payload = 401, {"detail": "a workspace key is required"}
+            elif len(parts) not in (4, 5) or parts[3] != "builds" or parts[2] != store.project_id:
+                status, payload = 404, {"detail": "Not Found"}
+            elif len(parts) == 4 and method == "GET":
+                status, payload = 200, {"builds": list(store.builds)}
+            elif len(parts) == 4 and method == "POST":
+                try:
+                    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tar:
+                        members = tar.getmembers()
+                        names = [m.name for m in members]
+                        found = tar.extractfile("manifest.json") if "manifest.json" in names else None
+                        manifest = json.loads(found.read()) if found else None
+                except (tarfile.TarError, OSError, ValueError):
+                    manifest, members, names = None, [], []
+                entry["names"] = sorted(names)
+                if not isinstance(manifest, dict) or manifest.get("$design") != "sikstack-design-build":
+                    status, payload = 400, {"detail": "the build has no marked manifest.json at its root"}
+                else:
+                    bid = "b" + "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz234567") for _ in range(25))
+                    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+                    rec = manifest.get("recording") if isinstance(manifest.get("recording"), dict) else {}
+                    host = self.headers.get("Host") or "127.0.0.1"
+                    build = {"id": bid, "viewer": f"http://{host}/projects/{store.project_id}/design/{bid}",
+                             "url": f"http://{bid}.design.fake.localhost/", "commit": source.get("commit"),
+                             "branch": source.get("branch"), "dirty": bool(source.get("dirty")),
+                             "recording": rec.get("file"), "private": str(rec.get("file") or "").startswith("design/data/local/"),
+                             "size": sum(m.size for m in members if m.isreg()), "files": sum(1 for m in members if m.isreg()),
+                             "published_at": f"2026-11-23T00:00:{len(store.builds):02d}Z",
+                             "published_from": entry["checkout"], "share": {"on": False}}
+                    store.builds.insert(0, build)
+                    status, payload = 201, {"build": build, "viewer": build["viewer"], "url": build["url"]}
+            elif len(parts) == 5 and method == "DELETE":
+                kept = [b for b in store.builds if b["id"] != parts[4]]
+                if len(kept) == len(store.builds):
+                    status, payload = 404, {"detail": "build not found"}
+                else:
+                    store.builds[:] = kept
+                    status, payload = 200, {"deleted": parts[4]}
+            else:
+                status, payload = 405, {"detail": "Method Not Allowed"}
+            entry["status"] = status
+            self._log(entry)
+            return status, payload
+
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.raw if self.raw is not None else (self.rfile.read(length) if length else b"")
@@ -452,6 +530,10 @@ def make_handler(store: Store, key: str, log_path: str):
                     shown = {k: v for k, v in body.items() if k != "poll_token"}
                     self._log({"method": method, "path": url.path, "route": url.path.rsplit("/", 1)[-1],
                                "body": shown, "status": self.reply[0]})
+                return
+            if parts[:2] == ["api", "design"]:
+                with store.lock:
+                    self.reply = self._design(method, parts)
                 return
             if parts[:1] != ["_fake"]:
                 with store.lock:
@@ -605,6 +687,9 @@ def make_handler(store: Store, key: str, log_path: str):
 
         def do_POST(self):
             self._serve("POST")
+
+        def do_DELETE(self):
+            self._serve("DELETE")
 
     return Handler
 

@@ -112,7 +112,7 @@ from wf_agenda import (  # noqa: E402
     add_agenda_parsers, AGENDA_ID_HELP, cmd_deferred,
 )
 from wf_design import (  # noqa: E402
-    add_design_parsers,
+    DESIGN_API_COMMANDS, add_design_parsers,
 )
 from wf_cloud import (  # noqa: E402
     add_cloud_parsers, cloud_linked, CLOUD_OWN, cloud_refusal, cloud_run, mark_committed,
@@ -388,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--page", type=int, metavar="N", help=f"with a section or topic block name: print page N of it ({PAGE_BYTES // 1024} KB pages that break only between entries, each opening with a `<!-- page i of n ... -->` header); a plain read over {PAGE_BYTES // 1024} KB prints page 1; refused with any write flag, --list or --entry")
     p.set_defaults(func=phase_section)
 
-    add_design_parsers(sub)  # design-sign
+    add_design_parsers(sub)  # design-sign, design-publish, design-builds, design-delete
 
     add_agenda_parsers(sub)  # defer-job, promote-deferred, drop-deferred, agenda, agenda-*
 
@@ -416,9 +416,9 @@ def run(args: argparse.Namespace, tokens: list) -> int:
         # Never fall back to at-root mode on a broken marker: refuse, and let check list it all.
         raise SystemExit(f"{shown(ROOT / NESTED_MARKER)} is malformed, so this nested install cannot run {args.cmd}: "
                          f"{'; '.join(NESTED_PROBLEMS)} -- fix the file (run: {WORKFLOW_CMD} check --no-rebuild)")
-    if not cloud_linked() or args.cmd in CLOUD_OWN:
+    if not cloud_linked() or args.cmd in CLOUD_OWN or args.cmd in DESIGN_API_COMMANDS:
         # local mode: no link, so the command runs exactly as before; link, unlink and sync each take the lock
-        # themselves and never run the begin step. Every typed phase / deferred-id / slice argument becomes its
+        # themselves and never run the begin step; the design API verbs touch no workspace truth, so they need neither. Every typed phase / deferred-id / slice argument becomes its
         # stored id here, once.
         normalize_id_args(args)
         result = args.func(args)

@@ -232,7 +232,16 @@
       "tests/test_library_reads.py",
       "server/published_fill.py",
       "tests/test_publish_time.py",
-      "tests/test_search_excerpt.py"
+      "tests/test_search_excerpt.py",
+      "server/design/__init__.py",
+      "server/design/settings.py",
+      "server/design/store.py",
+      "server/design/tokens.py",
+      "server/design/unpack.py",
+      "server/design_api.py",
+      "server/design_serve.py",
+      "tests/test_design_builds.py",
+      "tests/test_design_unpack.py"
     ],
     "parameterized": [
       "mkdocs.yml",

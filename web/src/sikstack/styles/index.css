@@ -2,7 +2,8 @@
    (src/app/layout.tsx), after globals.css and outside Tailwind's processing. The Library's sheets follow the
    system's: its frame, then one sheet a part, each owned by one slice; then Listen's and Review's sheets (job 07);
    then the Workspace's (job 02): its frame, then one sheet a page; then the Library's boundary. Feedback's follow
-   the Library's in the Library's shape: its frame, its list, item and agenda sheets, then its boundary. A page or a
+   the Library's in the Library's shape: its frame, its list, item and agenda sheets, then its boundary. The Design
+   service's one sheet (P77) comes last; it declares no custom property, so it needs no boundary. A page or a
    component never imports a sheet of its own. */
 @import "./tokens.css";
 @import "./bundle.css";
@@ -35,3 +36,4 @@
 @import "./feedback/item.css";
 @import "./feedback/agenda.css";
 @import "./feedback/boundary.css";
+@import "./design/design.css";

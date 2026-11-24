@@ -7,7 +7,7 @@ import { openSession, readSessionCookie } from "@/lib/session";
 // timeline the player loads from `/api/listen/play/…`, relayed to knowledge's
 // session-only `GET|HEAD /app/listen/play/<path>?<query>`. Modelled on the image
 // relay (`app/api/documents/[id]/assets/[file]/route.ts`), with what media needs:
-//   - SESSION ONLY: the sealed `knowledge_session` cookie is unsealed and its
+//   - SESSION ONLY: the sealed `__Host-knowledge_session` cookie is unsealed and its
 //     bearer forwarded; without one the answer is 401 and nothing is called.
 //     knowledge decides visibility (a part plays exactly when its document reads),
 //     and every miss is its one 404.

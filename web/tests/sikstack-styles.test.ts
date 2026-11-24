@@ -127,7 +127,7 @@ describe("the sikstack sheets", () => {
     );
   });
 
-  it("load the system, then each job's sheets as one run: the Library's (its boundary after Listen's, Review's and the Workspace's), then Feedback's", () => {
+  it("load the system, then each job's sheets as one run: the Library's (its boundary after Listen's, Review's and the Workspace's), then Feedback's, then Design's", () => {
     const imports = [
       ...read(join(styles, "index.css")).matchAll(/@import "([^"]+)";/g),
     ].map((m) => m[1]);
@@ -143,6 +143,7 @@ describe("the sikstack sheets", () => {
       "workspace",
       "library",
       "feedback",
+      "design",
     ]);
   });
 });

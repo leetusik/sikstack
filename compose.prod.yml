@@ -38,6 +38,9 @@ services:
       # recreate and stay out of the git clone. KB_FEEDBACK_ATTACHMENTS_DIR below
       # points the api at it (server/feedback/storage.py).
       - knowledge-feedback-attachments:/data/feedback-attachments
+      # Design builds (each publish's static files): a named volume, shared read-only
+      # with knowledge-design below. KB_DESIGN_BUILDS_DIR points the api at it.
+      - knowledge-design-builds:/data/design-builds
     env_file:
       # Box-only, gitignored. Holds the SECRETS by name (no values in the repo):
       #   KB_API_TOKEN=<generated>          # bearer for writes + (with the flag) reads
@@ -98,6 +101,15 @@ services:
       # Feedback attachments live on the named volume mounted above (default
       # without it: KB_ROOT/data/feedback-attachments, inside the git clone).
       KB_FEEDBACK_ATTACHMENTS_DIR: /data/feedback-attachments
+      # Design builds live on the named volume mounted above. KB_DESIGN_ORIGIN is a
+      # build's own origin, `{build}` where its id goes (one level, https://d-{build}.sikstack.com,
+      # or two, https://{build}.design.sikstack.com: whichever the edge serves, P70), and
+      # KB_DESIGN_SECRET signs the tickets knowledge-design trades for its cookie: both
+      # from the box's `.env` (the secret: `openssl rand -hex 32`). Blank = builds are
+      # stored and listed but have no address and open nowhere (server/design/settings.py).
+      KB_DESIGN_BUILDS_DIR: /data/design-builds
+      KB_DESIGN_ORIGIN: ${KB_DESIGN_ORIGIN:-}
+      KB_DESIGN_SECRET: ${KB_DESIGN_SECRET:-}
       # Fetch + reindex on boot (drift + deleted-doc reconciliation self-heal).
       KB_STARTUP_REINDEX: "true"
       # Async accounts plane (Postgres control plane, P10). Points at the durable
@@ -196,6 +208,10 @@ services:
       # Unset/blank → the BFF throws at request time (src/lib/env.ts) — `docker
       # compose config` still passes (a dummy value suffices for local validation).
       SESSION_SECRET: ${SESSION_SECRET}
+      # The design builds' origin pattern, the api's value (`{build}` where the id
+      # goes): a Design build's viewer frames that build's origin, named in its CSP
+      # at request time (src/proxy.ts). Unset: the viewer frames nothing. P70 sets it.
+      KB_DESIGN_ORIGIN: ${KB_DESIGN_ORIGIN:-}
       # hi2vi's own Send feedback control (landing footer, org home). OPTIONAL, all
       # seven, interpolated from the box's `.env` with `:-` so an unset name passes
       # an empty value (never a compose warning, never a default key):
@@ -295,6 +311,46 @@ services:
     # only (the api owns the public `= /healthz`); public liveness is proven on /mcp.
     restart: unless-stopped
 
+  knowledge-design:
+    # The design origin (P77): each published design build at the root of its own host,
+    # entered by a member's one-minute ticket or the build's share link
+    # (server/design_serve.py). Same image as the api, its code from the same bind
+    # mount; the builds volume read-only. One worker only: its spent-ticket ledger is
+    # in memory. Reached only through the edge's design vhost, which P70 adds; until
+    # then nothing routes to it. frame-ancestors names KB_PUBLIC_BASE_URL (the app).
+    build: .
+    container_name: knowledge-design
+    command: ["uvicorn", "server.design_serve:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - .:/repo
+      - knowledge-design-builds:/data/design-builds:ro
+    environment:
+      KB_ROOT: /repo
+      TZ: Asia/Seoul
+      KB_PUBLIC_BASE_URL: https://hi2vi.com
+      DATABASE_URL: postgresql+psycopg://kb:${POSTGRES_PASSWORD}@knowledge-postgres:5432/kb
+      KB_DESIGN_BUILDS_DIR: /data/design-builds
+      KB_DESIGN_ORIGIN: ${KB_DESIGN_ORIGIN:-}
+      KB_DESIGN_SECRET: ${KB_DESIGN_SECRET:-}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - changple_shared_network
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/_healthz', timeout=3).status==200 else sys.exit(1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
   postgres:
     # Durable control-plane datastore (accounts/tenancy/projects/credentials/
     # sessions) for the P10 two-plane app. Reached by the api BY CONTAINER NAME
@@ -327,6 +383,9 @@ volumes:
   # Feedback's uploaded attachments (the api mounts it at /data/feedback-attachments).
   # Durable user data: back it up with pgdata.
   knowledge-feedback-attachments:
+  # Design builds' files (the api writes, knowledge-design reads). Durable user data:
+  # back it up with pgdata.
+  knowledge-design-builds:
 
 networks:
   # Pre-existing external network the shared edge + co-tenant apps share.

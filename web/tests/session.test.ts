@@ -2,8 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   assertSameOrigin,
+  clearedOrgCookieOptions,
   clearedSessionCookieOptions,
+  LEGACY_COOKIES,
   openSession,
+  ORG_COOKIE,
+  orgCookieOptions,
   readSessionCookie,
   SESSION_COOKIE,
   sealSession,
@@ -86,10 +90,28 @@ describe("cookie options", () => {
     expect(sessionCookieOptions()).toEqual({
       httpOnly: true,
       sameSite: "strict",
-      secure: false, // NODE_ENV is not "production" under test
+      secure: true, // always: the `__Host-` prefix requires it (localhost counts as secure)
       path: "/",
       maxAge: THIRTY_DAYS_MS / 1000,
     });
+  });
+
+  it("names both cookies `__Host-` and keeps every option inside that prefix's rules", () => {
+    // A sibling host (a design build) can set `Domain=<app domain>` cookies; the prefix
+    // makes the browser refuse any that would pass for the app's own.
+    expect(SESSION_COOKIE).toBe("__Host-knowledge_session");
+    expect(ORG_COOKIE).toBe("__Host-sikstack_org");
+    for (const options of [
+      sessionCookieOptions(),
+      clearedSessionCookieOptions(),
+      orgCookieOptions(),
+      clearedOrgCookieOptions(),
+    ]) {
+      expect(options.secure).toBe(true);
+      expect(options.path).toBe("/");
+      expect(options).not.toHaveProperty("domain");
+    }
+    expect(LEGACY_COOKIES).toEqual(["knowledge_session", "sikstack_org"]);
   });
 
   it("clears with maxAge 0, keeping the other attributes", () => {
@@ -105,6 +127,15 @@ describe("readSessionCookie", () => {
   it("finds the session cookie among others", () => {
     const req = withCookie(`a=1; ${SESSION_COOKIE}=sealed-value; b=2`);
     expect(readSessionCookie(req)).toBe("sealed-value");
+  });
+
+  it("ignores the pre-prefix name and a name that differs only by a Unicode space", () => {
+    // Both can be planted by a sibling host; neither is ours.
+    expect(readSessionCookie(withCookie("knowledge_session=planted"))).toBeUndefined();
+    expect(
+      readSessionCookie(withCookie(`\u00a0${SESSION_COOKIE}=planted`)),
+    ).toBeUndefined();
+    expect(readSessionCookie(withCookie(`a=1;\t${SESSION_COOKIE}=ours`))).toBe("ours");
   });
 
   it("returns undefined when absent or when there is no cookie header", () => {

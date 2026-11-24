@@ -104,6 +104,7 @@ describe("the rail", () => {
       "workspace",
       "library",
       "feedback",
+      "design",
     ]);
   });
 
@@ -161,7 +162,33 @@ describe("the rail", () => {
       "/projects/p%201/workspace",
       "/projects/p%201/library",
       "/projects/p%201/feedback",
+      "/projects/p%201/design",
     ]);
+  });
+
+  it("links Design to the project's builds, current on the list and every build's viewer, Overview then not (P77)", () => {
+    const design = (path: string) =>
+      railFor(path).items.find((i) => i.key === "design");
+    expect(design("/projects/p1")).toEqual({
+      key: "design",
+      href: "/projects/p1/design",
+      current: false,
+    });
+    for (const path of [
+      "/projects/p1/design",
+      "/projects/p1/design/",
+      "/projects/p1/design?x=1",
+      "/projects/p1/design/babcdefghijklmnopqrstuvwxy",
+      "/projects/p1/design/babcdefghijklmnopqrstuvwxy/",
+    ]) {
+      expect(railFor(path).form).toBe("project");
+      expect(design(path)?.href).toBe("/projects/p1/design");
+      expect(current(path)).toEqual(["design"]);
+    }
+    // a path that only starts with the word is not Design
+    expect(current("/projects/p1/designs")).toEqual(["overview"]);
+    // the org form has no Design
+    expect(railFor("/dashboard").items.some((i) => i.key === "design")).toBe(false);
   });
 
   it("links the org form's Feedback to the org's list at rest", () => {

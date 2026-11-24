@@ -34,6 +34,7 @@ from server import books as books_mod
 from server import books_api
 from server import config, db
 from server import dashboard_api
+from server import design_api
 from server import documents_api
 from server import feedback_api
 from server import installs_api
@@ -210,6 +211,12 @@ app.include_router(workspace_web_api.router)
 # decline (/app/connect/{code}…, through the web's BFF), and an install's Feedback
 # (/api/installs/feedback). Postgres-only: with no DATABASE_URL every route answers 404.
 app.include_router(installs_api.router)
+
+# Design builds: the engine's publish, list and delete (/api/design/{project_id}/builds…,
+# the project's workspace key) and the members' list, read, share switch and open
+# ticket (/app/projects/{id}/design/builds…). The builds are served on their own
+# origin by server.design_serve. Postgres-only: with no DATABASE_URL every route answers 404.
+app.include_router(design_api.router)
 
 # One process-wide lock serializes the whole write critical section (file → index
 # → DB → git). Load-bearing invariant: the API runs a SINGLE uvicorn worker, so an

@@ -5,8 +5,9 @@ Ported from vocky's accounts/tenancy tables (the first six here) plus the P11
 a reader's anchors, quotes, snapshots and quiz responses), the five P41-sr.B1
 Listen tables (units, parts, jobs, runners and listening positions), vocky's
 three Feedback tables (events, comments, attachments; revision ``0009``), the
-eight workspace-store tables (revision ``0011``), and the sikstack plugin's
-``installs`` and ``install_sign_ins`` (revision ``0012``).
+eight workspace-store tables (revision ``0011``), the sikstack plugin's
+``installs`` and ``install_sign_ins`` (revision ``0012``), and ``design_builds``
+(revision ``0013``).
 """
 
 from __future__ import annotations
@@ -1216,3 +1217,44 @@ class InstallSignInModel(Base):
         nullable=True,
     )
     delivered_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+# One row per published design build (``design_builds``, revision ``0013``): the build
+# id (a random DNS label, the first label of its own origin), its project, what its
+# manifest says it was built from (commit, branch, dirty, the recording file), its size
+# and file count, the manifest itself, the key that published it and when, whether it
+# is private (made from a ``design/data/local/`` recording) and its share link. The
+# files live on disk under ``KB_DESIGN_BUILDS_DIR/<id>/`` (``server.design.store``).
+
+
+class DesignBuildModel(Base):
+    """One published design build. Every publish is kept, newest first per project."""
+
+    __tablename__ = "design_builds"
+    __table_args__ = (
+        Index("ix_design_builds_project_id_published_at", "project_id", "published_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[UUID] = _uuid_fk("projects.id")
+    source_commit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_branch: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_dirty: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recording_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    published_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("project_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    published_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime] = _ts()
+    private: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    share_token: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    share_on: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )

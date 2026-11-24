@@ -129,8 +129,12 @@ describe("POST /api/auth/login — knowledge outcomes", () => {
     expect(setCookie).toContain("SameSite=strict");
     expect(setCookie).toContain("Path=/");
     expect(setCookie).toContain("Max-Age=2592000");
-    // Not production ⇒ no Secure (dev is plain http on 127.0.0.1).
-    expect(setCookie).not.toContain("Secure");
+    // Always Secure: the `__Host-` prefix requires it (browsers treat localhost as secure).
+    const own = setCookie!
+      .split(/, (?=[^ ;]+=)/)
+      .find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+    expect(own).toContain("; Secure");
+    expect(setCookie).not.toMatch(/Domain=/i);
     // The raw knowledge token is never in the cookie — only its sealed envelope,
     // which must open back to exactly that token.
     expect(setCookie).not.toContain(TOKEN);
@@ -141,6 +145,19 @@ describe("POST /api/auth/login — knowledge outcomes", () => {
     stubKb(200, { token: TOKEN, user: USER, tenants: [TENANT] });
     const res = await loginPOST(makeReq("/api/auth/login", { ip: "10.0.1.5" }));
     expect(setCookieOf(res)).toMatch(new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`));
+  });
+
+  it("expires the pre-prefix cookies this host set before, never reading them", async () => {
+    stubKb(200, { token: TOKEN, user: USER, tenants: [TENANT] });
+    const res = await loginPOST(
+      makeReq("/api/auth/login", {
+        ip: "10.0.1.6",
+        headers: { cookie: "knowledge_session=old; sikstack_org=old" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(setCookieOf(res)).toMatch(/(^|, )knowledge_session=;[^,]*Max-Age=0/);
+    expect(setCookieOf(res)).toMatch(/(^|, )sikstack_org=;[^,]*Max-Age=0/);
   });
 
   it("calls knowledge with the right URL/method and no bearer, then 401s without leaking detail", async () => {
@@ -268,6 +285,8 @@ describe("POST /api/auth/logout", () => {
     expect(res.status).toBe(200);
     expect(setCookieOf(res)).toContain("Max-Age=0");
     expect(setCookieOf(res)).toMatch(new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`));
+    expect(setCookieOf(res)).toMatch(/(^|, )knowledge_session=;[^,]*Max-Age=0/);
+    expect(setCookieOf(res)).toMatch(/(^|, )sikstack_org=;[^,]*Max-Age=0/);
   });
 
   it("still clears the cookie when knowledge is unreachable (never fails open)", async () => {

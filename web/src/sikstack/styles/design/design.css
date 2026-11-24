@@ -1,0 +1,59 @@
+/* sikstack — the Design service's sheet (P77): the project's Design list and a build's viewer
+   (`src/sikstack/design/list.tsx`, `src/sikstack/design/viewer.tsx`). Scoped like every system sheet (../README.md): it applies inside
+   a `.ui` root and stops at `[data-ui-legacy]`. It declares no custom property, so the boundary has nothing to restore.
+   Imported by `styles/index.css` after Feedback's sheets. */
+@scope (.ui) to ([data-ui-legacy]) {
+
+/* the list's empty block: the command never breaks inside */
+.design-command { white-space: nowrap; }
+/* the list: a build's cell holds its commit (the viewer's link) and, beside it, the mark for uncommitted changes */
+.design-build { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-3); min-width: 0; }
+/* the panel's border is the table's top edge: the heads draw none of their own (no filter bar sits over this table) */
+.design-builds thead th { border-top: 0; }
+/* stacked, every build reads in one order: its build, then branch, recording and size, then (always on a line of
+   its own) sharing at the start and the date at the end; the zero-height break holds the line wherever line two ends */
+@container tstack (max-width: 48em) {
+  .design-builds tbody tr:first-child { border-top: 0; }
+  .design-builds tbody tr::after { content: ""; flex: 1 0 100%; order: 1; height: 0; }
+  .design-builds td.design-sharing, .design-builds td.to-end { order: 2; }
+}
+
+/* the viewer's back row, one control tall, as the Workspace's */
+.design-top { display: flex; align-items: center; min-height: var(--control-h); }
+/* the build's facts, then its share link, under the title */
+.design-head { display: flex; flex-direction: column; gap: var(--space-4); align-self: stretch; padding-top: var(--space-2); }
+.design-share { flex: 1 1 100%; }
+.design-share > dd { display: flex; flex-direction: column; min-height: var(--control-h); justify-content: center; }
+.design-share-line { min-width: 0; }
+/* the link and its Copy, then Turn off, on one line while the link fits it (a real build's link is about 100
+   characters: a 26-character id in the host and a 32-character token) */
+.design-share-on { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); max-width: 80em; }
+.design-share-on > :first-child { flex: 1 1 40em; min-width: 0; }
+
+/* the options page's directions, side by side while each has 18em, one under another below that; their frames share
+   a top edge and each runs its page's full height, so the page's scroll moves them together */
+.design-directions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18em, 100%), 1fr)); align-items: start; gap: var(--space-5); }
+.design-direction { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; margin: 0; }
+.design-direction-head { display: flex; align-items: baseline; min-width: 0; }
+/* a direction's frame: no scroll of its own; a framed page that has not posted its height yet holds 36em */
+.design-frame { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); }
+.design-frame > iframe { display: block; width: 100%; height: 36em; border: 0; }
+
+/* the manifest's pages: the page's name (its link) and its route in the product, the route at the row's end while
+   the list has 40em; under that every row is its name, then its route under it (one shape for every row) */
+.design-pages { container: dpages / inline-size; }
+.design-pages > .row:first-child { border-top: 0; }
+.design-page { display: flex; align-items: baseline; justify-content: space-between; gap: 0 var(--space-4); padding-block: 0; }
+.design-page > .mono { min-width: 0; padding-block: var(--space-3); overflow-wrap: anywhere; text-align: right; }
+/* while sharing is on, a row ends with its page's copy link: name, route, copy on one line; under 40em the name and
+   the copy share the first line and the route sits under them (a refused copy's line runs the row's width) */
+.design-page.has-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; }
+.design-page-copy { flex: none; }
+.design-page.has-copy > .design-page-copy-failed { grid-column: 1 / -1; margin: 0 0 var(--space-3); }
+@container dpages (max-width: 40em) {
+  .design-page { flex-direction: column; align-items: flex-start; }
+  .design-page > .mono { margin-top: calc(-1 * var(--space-2)); padding-block: 0 var(--space-3); text-align: left; }
+  .design-page.has-copy { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+  .design-page.has-copy > .mono { grid-column: 1 / -1; grid-row: 2; }
+}
+}

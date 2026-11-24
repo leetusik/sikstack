@@ -122,11 +122,15 @@ const frame = () => blocks(read(join(feedback, "frame.css")))[0].body;
 const rulesOn = (selector: string) =>
   styleRules(frame()).filter((r) => selectors(r.prelude).includes(selector));
 
-/** Where Feedback's classes may be drawn: its parts, its pages, and project home's Feedback panel (S7). */
+/**
+ * Where Feedback's classes may be drawn: its parts, its pages, project home's Feedback panel (S7), and the
+ * Design list, which composes Feedback's table that stacks and its cells (P77).
+ */
 const FEEDBACK_MARKUP = [
   "/sikstack/feedback/",
   "/app/(app)/feedback/",
   "/app/(app)/projects/[projectId]/",
+  "/sikstack/design/",
 ];
 
 describe("the Feedback frame's sheets", () => {
@@ -247,12 +251,14 @@ describe("the Feedback frame's sheets", () => {
       ...read(join(styles, "index.css")).matchAll(/@import "([^"]+)";/g),
     ].map((m) => m[1]);
     const first = imports.findIndex((i) => i.startsWith("./feedback/"));
+    // Feedback's run, then only the Design service's one sheet (P77), which follows it
     expect(imports.slice(first)).toEqual([
       "./feedback/frame.css",
       "./feedback/list.css",
       "./feedback/item.css",
       "./feedback/agenda.css",
       "./feedback/boundary.css",
+      "./design/design.css",
     ]);
     expect(imports[first - 1]).toBe("./library/boundary.css");
     expect(new Set(imports).size).toBe(imports.length);

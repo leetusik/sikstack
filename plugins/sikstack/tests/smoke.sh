@@ -14,8 +14,8 @@
 #   12 (the at-root worktree: there is no at-root workspace any more; the nested worktree is 11, 14, 17 and 28),
 #   and the install/--update/--to-multi-repo parts of 5, 17, 19, 23 and 25. Test 0's pins moved to
 #   tests/static_pins.py, less the installer's own; Test 29 is new (the finder, init, the hooks, the shipped text), and
-#   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install) and Test 32
-#   (sign-in and feedback against the fake server).
+#   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
+#   (sign-in and feedback against the fake server) and Test 33 (the design publish verbs against it).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -519,19 +519,19 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 36 in all, and no
+# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 39 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
-design = {"design-sign"}  # 2.0.0: the ten canvas commands retired
+design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
 agenda = {"deferred", "defer-job", "promote-deferred", "drop-deferred", "agenda", "agenda-add", "agenda-edit", "agenda-move",
           "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink"}
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 36 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 36 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign and the agenda and cloud parts' own, no adapter command" \
+assert len(names) == 39 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 39 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda and cloud parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -4492,6 +4492,141 @@ printf '%s\n' "$si_f1" | grep -q '^sent: ' && [ "$(printf '%s\n' "$si_f1" | tail
   && [ "$(grep -c '"route": "feedback"' "$SIW/up/requests.jsonl")" = 3 ] \
   && ok "feedback sends {install_id, message, plugin_version} from an install that never signed in, reports the per-install limit in one line, and refuses a path or the repo's name before any request" \
   || bad "feedback -- f1=[$si_f1] f2=[$si_f2] f3=[$si_f3] f4=[$si_f4] f5=[$si_f5] reports=[$si_rep]"
+
+# ---------------------------------------------------------------------------
+echo "== Test 33: the design publish verbs against the local fake sikstack -- design-publish refuses an unlinked checkout with the sign-in line, a folder with no manifest or an unmarked one, and a build over a cap (files, unpacked, compressed) naming the size and the cap, each before any request; it uploads out/ as one tar.gz (manifest.json at its root) with the workspace key as a Bearer, outside the cloud boundary, and prints the build's viewer on sikstack first (url=, as the server answers it), private= and the build's host last (host=); a second publish is a second row listed first; a local/ recording is private; design-delete removes one (a second delete is the server's 404 line); a wrong key and the server's 403 and 413 are one line each; the key appears nowhere =="
+newtmp DPW; DPX="$DPW/xdg"; DPH="$DPW/prod"; DPU="$DPW/unlinked"
+dp() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$DPX" python3 "$ENG" "$@" ) 2>&1; }
+{ mkhost "$DPH" && git -C "$DPH/.sikstack" add -A && git -C "$DPH/.sikstack" commit -q --allow-empty -m install && mkhost "$DPU"; } > "$DPW/setup.txt" 2>&1 \
+  || bad "design publish probe: the installs failed -- $(tail -3 "$DPW/setup.txt")"
+# dp_build <folder> <recording file> [no-mark]: a small design build at <folder>/out.
+dp_build() { mkdir -p "$1/out/_next/static" "$1/out/system" && printf '<html>%s</html>\n' "$1" > "$1/out/index.html" \
+  && printf 'x' > "$1/out/_next/static/a.js" && printf '<html>system</html>\n' > "$1/out/system/index.html" \
+  && python3 - "$1/out/manifest.json" "$2" "${3:-}" <<'PY2'
+import json, sys
+path, rec, nomark = sys.argv[1:]
+m = {"source": {"repo": "prod", "commit": "0123456789abcdef0123", "branch": "main", "dirty": False},
+     "recording": {"file": rec, "name": "x"}, "pages": [{"path": "/"}]}
+if not nomark:
+    m = {"$design": "sikstack-design-build", **m}
+open(path, "w").write(json.dumps(m))
+PY2
+}
+dp_build "$DPH/web/design" design/data/sample/recording.json; dp_build "$DPW/private" design/data/local/acme/recording.json
+dp_build "$DPW/unmarked" design/data/sample/recording.json nomark; mkdir -p "$DPW/nobuild/out"
+DPK="design-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$DPK" > "$DPW/key"; chmod 600 "$DPW/key"
+python3 "$REPO_ROOT/tests/fake_sikstack.py" --dir "$DPW/fake" --port-file "$DPW/port" --key-file "$DPW/key" \
+  --project proj-1 --org org-1 --lifetime 900 > "$DPW/fake.txt" 2>&1 &
+DP_PID=$!
+for _ in $(seq 1 100); do [ -s "$DPW/port" ] && break; sleep 0.1; done
+DPS="http://127.0.0.1:$(cat "$DPW/port" 2>/dev/null)"
+printf '%s\n' "$DPK" | ( cd "$DPH" && XDG_CONFIG_HOME="$DPX" python3 "$ENG" link "$DPS/projects/proj-1" ) > "$DPW/link.txt" 2>&1 \
+  || bad "design publish probe: the link failed -- $(tail -2 "$DPW/link.txt")"
+DPL="$DPW/fake/requests.jsonl"
+dp_n() { grep -c "\"route\": \"design\"" "$DPL" 2>/dev/null || true; }
+dp_ws() { grep -c '"path": "/api/workspace/' "$DPL" 2>/dev/null || true; }
+# (a) unlinked: the sign-in line, nothing sent.
+dp_o1=$(dp "$DPU" design-publish --folder "$DPH/web/design"); dp_rc1=$?
+dp_o1b=$(dp "$DPU" design-builds); dp_rc1b=$?
+[ "$dp_rc1" = 1 ] && [ "$dp_rc1b" = 1 ] && printf '%s\n' "$dp_o1" | grep -q '^design-publish: this checkout is not linked to sikstack .*run /sikstack:sign-in' \
+  && printf '%s\n' "$dp_o1b" | grep -q '^design-builds: this checkout is not linked' && [ "$(printf '%s\n' "$dp_o1" | grep -c '')" = 1 ] \
+  && ok "an unlinked checkout is refused with the one sign-in line, publish and list alike" \
+  || bad "the unlinked refusal is wrong -- rc=$dp_rc1/$dp_rc1b [$dp_o1] [$dp_o1b]"
+# (b) two publishes of the same commit: two rows, newest first; the body is one tar.gz with manifest.json at its root;
+# no workspace request around them (outside the boundary).
+dp_ws0=$(dp_ws)
+dp_o2=$(dp "$DPH" design-publish --folder web/design); dp_rc2=$?
+dp_o3=$(dp "$DPH" design-publish --folder web/design); dp_rc3=$?
+dp_id2=$(printf '%s\n' "$dp_o2" | sed -n 's/^published=\([^ ]*\) .*/\1/p'); dp_id3=$(printf '%s\n' "$dp_o3" | sed -n 's/^published=\([^ ]*\) .*/\1/p')
+dp_o4=$(dp "$DPH" design-builds); dp_rc4=$?
+dp_post=$(grep '"route": "design"' "$DPL" | grep '"method": "POST"' | head -1)
+[ "$dp_rc2" = 0 ] && [ "$dp_rc3" = 0 ] && [ -n "$dp_id2" ] && [ -n "$dp_id3" ] && [ "$dp_id2" != "$dp_id3" ] \
+  && printf '%s\n' "$dp_o2" | grep -q "^published=$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 private=no commit=0123456789ab branch=main size=[0-9]* files=[0-9]* compressed=[0-9]* host=http://$dp_id2.design.fake.localhost/\$" \
+  && [ "$dp_rc4" = 0 ] && [ "$(printf '%s\n' "$dp_o4" | sed -n 1p)" = "builds=2 project=proj-1" ] \
+  && printf '%s\n' "$dp_o4" | sed -n 2p | grep -q "^$dp_id3 " && printf '%s\n' "$dp_o4" | sed -n 3p | grep -q "^$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 published_at=.* private=no share=off host=http://$dp_id2.design.fake.localhost/\$" \
+  && printf '%s\n' "$dp_post" | grep -q '"auth": "ok"' && printf '%s\n' "$dp_post" | grep -q '"content_type": "application/gzip"' \
+  && printf '%s\n' "$dp_post" | grep -q '"names": \["_next", "_next/static", "_next/static/a.js", "index.html", "manifest.json", "system", "system/index.html"\]' \
+  && [ "$(dp_ws)" = "$dp_ws0" ] \
+  && ok "design-publish uploads out/ as one tar.gz (manifest.json at its root) with the key as a Bearer, prints published= led by the build's viewer on sikstack (url=), private=no and its host last (host=); design-builds leads each row with the id and that url=; a second publish of the same commit is a second row, listed first by design-builds; no workspace request around them" \
+  || bad "publish and list are wrong -- rc=$dp_rc2/$dp_rc3/$dp_rc4 [$dp_o2] [$dp_o4] post=[$dp_post] ws=$dp_ws0/$(dp_ws)"
+# (c) a local/ recording publishes as private, and the verb says so.
+dp_o5=$(dp "$DPH" design-publish --folder "$DPW/private"); dp_rc5=$?
+[ "$dp_rc5" = 0 ] && printf '%s\n' "$dp_o5" | sed -n 1p | grep -q "^published=b[a-z2-7]* url=$DPS/projects/proj-1/design/b[a-z2-7]* private=yes " \
+  && printf '%s\n' "$dp_o5" | sed -n 2p | grep -q '^private: made from a private recording (design/data/local/acme/recording.json), so its share link cannot be turned on$' \
+  && ok "a build from a design/data/local/ recording publishes as private=yes, with the one line saying its share link cannot be turned on" \
+  || bad "the private publish is wrong -- rc=$dp_rc5 [$dp_o5]"
+# (d) refusals before any request: no manifest, an unmarked one, and each cap naming the size and the cap.
+mkdir -p "$DPW/files/out" && printf '{"$design": "sikstack-design-build"}' > "$DPW/files/out/manifest.json" \
+  && ( cd "$DPW/files/out" && for i in $(seq 1 5000); do : > "f$i"; done )
+mkdir -p "$DPW/big/out" && cp "$DPW/files/out/manifest.json" "$DPW/big/out/" && dd if=/dev/zero of="$DPW/big/out/blob" bs=1048576 count=51 2>/dev/null
+mkdir -p "$DPW/packed/out" && cp "$DPW/files/out/manifest.json" "$DPW/packed/out/" && head -c 17000000 /dev/urandom > "$DPW/packed/out/noise"
+dp_n0=$(dp_n)
+dp_o6=$(dp "$DPH" design-publish --folder "$DPW/nobuild"); dp_rc6=$?
+dp_o7=$(dp "$DPH" design-publish --folder "$DPW/unmarked"); dp_rc7=$?
+dp_o8=$(dp "$DPH" design-publish --folder "$DPW/files"); dp_rc8=$?
+dp_o9=$(dp "$DPH" design-publish --folder "$DPW/big"); dp_rc9=$?
+dp_o10=$(dp "$DPH" design-publish --folder "$DPW/packed"); dp_rc10=$?
+[ "$dp_rc6$dp_rc7$dp_rc8$dp_rc9$dp_rc10" = 11111 ] && [ "$(dp_n)" = "$dp_n0" ] \
+  && printf '%s\n' "$dp_o6" | grep -q "^design-publish: refused -- .*nobuild has no build: .*manifest.json is missing" \
+  && printf '%s\n' "$dp_o7" | grep -q '^design-publish: refused -- .*manifest.json is not a design build.s manifest (no "\$design": "sikstack-design-build")' \
+  && printf '%s\n' "$dp_o8" | grep -q '^design-publish: refused -- the build holds 5,001 files: the cap is 5,000 files (nothing was published)$' \
+  && printf '%s\n' "$dp_o9" | grep -q '^design-publish: refused -- the build is 53,477,[0-9,]* bytes (51.0 MB) unpacked: the cap is 50 MB unpacked' \
+  && printf '%s\n' "$dp_o10" | grep -q '^design-publish: refused -- the build is [0-9,]* bytes (16.[2-9] MB) compressed: the cap is 16 MB compressed' \
+  && ok "a folder with no manifest, an unmarked manifest, and a build over each cap (5,000 files, 50 MB unpacked, 16 MB compressed) are refused naming the size and the cap, before any request" \
+  || bad "a pre-upload refusal is wrong -- rc=$dp_rc6$dp_rc7$dp_rc8$dp_rc9$dp_rc10 sent=$dp_n0/$(dp_n) [$dp_o6] [$dp_o7] [$dp_o8] [$dp_o9] [$dp_o10]"
+# (e) delete: gone from the list; a second delete is the server's 404 line; a bad id is refused unsent.
+dp_o11=$(dp "$DPH" design-delete "$dp_id2"); dp_rc11=$?
+dp_o12=$(dp "$DPH" design-builds)
+dp_o13=$(dp "$DPH" design-delete "$dp_id2"); dp_rc13=$?
+dp_o14=$(dp "$DPH" design-delete "../x"); dp_rc14=$?
+[ "$dp_rc11" = 0 ] && [ "$dp_o11" = "deleted=$dp_id2" ] && [ "$(printf '%s\n' "$dp_o12" | sed -n 1p)" = "builds=2 project=proj-1" ] \
+  && ! printf '%s\n' "$dp_o12" | grep -q "^$dp_id2 " && [ "$dp_rc13" = 1 ] \
+  && [ "$dp_o13" = "design-delete: sikstack refused (HTTP 404): build not found (nothing was deleted)" ] \
+  && [ "$dp_rc14" = 1 ] && printf '%s\n' "$dp_o14" | grep -q "is not a build id" \
+  && ok "design-delete removes the build (gone from design-builds); deleting it again relays the server's 404 in one line; a malformed id is refused unsent" \
+  || bad "delete is wrong -- rc=$dp_rc11/$dp_rc13/$dp_rc14 [$dp_o11] [$dp_o12] [$dp_o13] [$dp_o14]"
+# (f) a wrong key (401), the server's 403 and 413: one line each.
+dp_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$DPS/_fake/control" >/dev/null; }
+cp "$DPX/sikstack/workspace-keys.json" "$DPW/keys.saved"
+python3 - "$DPX/sikstack/workspace-keys.json" <<'PY2'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+for projects in d.values():
+    for entry in projects.values():
+        entry["key"] = "wrong-key"
+open(p, "w").write(json.dumps(d))
+PY2
+dp_o15=$(dp "$DPH" design-builds); dp_rc15=$?
+cp "$DPW/keys.saved" "$DPX/sikstack/workspace-keys.json"; chmod 600 "$DPX/sikstack/workspace-keys.json"
+dp_ctl '{"design_answer": {"status": 403, "detail": "this key cannot reach a workspace"}}'
+dp_o16=$(dp "$DPH" design-builds); dp_rc16=$?
+dp_ctl '{"design_answer": {"status": 413, "detail": "the build is 52,428,801 bytes (50.0 MB) unpacked: the cap is 50 MB", "method": "POST"}}'
+dp_o17=$(dp "$DPH" design-publish --folder web/design); dp_rc17=$?
+# a wrong key on a big upload: the server refuses before reading the body, so the key is checked before the upload.
+mkdir -p "$DPW/wide/out" && cp "$DPW/files/out/manifest.json" "$DPW/wide/out/" && head -c 4000000 /dev/urandom > "$DPW/wide/out/noise"
+python3 - "$DPX/sikstack/workspace-keys.json" <<'PY2'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+for projects in d.values():
+    for entry in projects.values():
+        entry["key"] = "wrong-key"
+open(p, "w").write(json.dumps(d))
+PY2
+dp_n18=$(dp_n); dp_o18=$(dp "$DPH" design-publish --folder "$DPW/wide"); dp_rc18=$?
+cp "$DPW/keys.saved" "$DPX/sikstack/workspace-keys.json"; chmod 600 "$DPX/sikstack/workspace-keys.json"
+[ "$dp_rc15$dp_rc16$dp_rc17$dp_rc18" = 1111 ] \
+  && [ "$dp_o18" = "design-publish: sikstack refused (HTTP 401): a workspace key is required; make a workspace key under Keys on the project's page and link again (nothing was published)" ] \
+  && [ "$(dp_n)" = "$((dp_n18 + 1))" ] \
+  && [ "$dp_o15" = "design-builds: sikstack refused (HTTP 401): a workspace key is required; make a workspace key under Keys on the project's page and link again (nothing was read)" ] \
+  && [ "$dp_o16" = "design-builds: sikstack refused (HTTP 403): this key cannot reach a workspace; this is not a workspace key: make one under Keys on the project's page (nothing was read)" ] \
+  && [ "$dp_o17" = "design-publish: sikstack refused (HTTP 413): the build is 52,428,801 bytes (50.0 MB) unpacked: the cap is 50 MB (nothing was published)" ] \
+  && ok "a wrong key's 401, the server's 403 and its 413 each end the verb in one line naming the status and the server's words; a wrong key on a 4 MB publish is refused by one small request before the upload" \
+  || bad "the server's refusals are wrong -- rc=$dp_rc15$dp_rc16$dp_rc17$dp_rc18 [$dp_o15] [$dp_o16] [$dp_o17] [$dp_o18]"
+if grep -rqF "$DPK" "$DPH" "$DPW"/*.txt "$DPW/fake" 2>/dev/null || printf '%s\n' "$dp_o2$dp_o4$dp_o5$dp_o13$dp_o15" | grep -qF "$DPK"; then
+  bad "the workspace key leaked into the tree, the output or the request log"
+fi
+kill "$DP_PID" 2>/dev/null; wait "$DP_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo

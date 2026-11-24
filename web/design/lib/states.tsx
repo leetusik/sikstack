@@ -3,9 +3,10 @@
 /**
  * The design's state widget: a small pill, fixed to the window's bottom left, that names the page and the
  * state on screen and opens to that page's states (and Reset). A state lives in the address (`?state=<key>`),
- * so it can be linked, reloaded and screenshotted; no `state` is the page's default. Usage, in a page's route:
+ * so it can be linked, reloaded and screenshotted; no `state` is the page's default. Usage: the page's list in
+ * `page-states.ts` (plain data: the build's front page and manifest read it too), and the widget in its route:
  *
- *   const STATES = pageStates("Agenda", [
+ *   export const STATES = pageStates("Agenda", [
  *     { key: "recorded", label: "Recorded", from: "workspace/page.tsx:75", data: true },
  *     { key: "loading", label: "Loading", from: "workspace/loading.tsx" },
  *   ]);
@@ -30,31 +31,8 @@ import {
   type ReactNode,
 } from "react";
 
+import type { PageStates } from "./page-states";
 import css from "./states.module.css";
-
-export interface StateDef<K extends string> {
-  key: K;
-  /** The preset's words on the widget. */
-  label: string;
-  /** Where production draws it (a file and line, or a component), shown as the preset's tooltip. */
-  from: string;
-  /** The state is the page's data (the store), not a view over it. */
-  data?: boolean;
-}
-
-export interface PageStates<K extends string> {
-  page: string;
-  list: readonly StateDef<K>[];
-}
-
-/** A page's states, typed by their keys; the first is the default. */
-export function pageStates<const K extends string>(
-  page: string,
-  list: readonly StateDef<K>[],
-): PageStates<K> {
-  if (list.length === 0) throw new Error(`${page}: a page has at least one state`);
-  return { page, list };
-}
 
 type Render<K extends string> = (
   state: K,

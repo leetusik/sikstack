@@ -28,6 +28,9 @@
 // sessionStorage, cookies and cache, so no run sees what an earlier one stored. A page with a state widget must show
 // the state its run names: the widget's data-design-current, else the pressed state in its list.
 //
+// --shots <dir> also saves what a person sees, for the design critic to open: every measured run's page in
+// viewport-height tiles from the top (at most 12 a run), <page>-w<width>-<state>-t<n>.png. Without it, none.
+//
 // Needs playwright-cli (npm install -g @playwright/cli@0.1.25) and a server already serving the build.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -35,12 +38,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const USAGE = `usage: node check.mjs --base <url> [--manifest <out/manifest.json>] [--all-entries] [--widths <w,w>] [--out <dir>] [<url-or-path> ...]
+export const USAGE = `usage: node check.mjs --base <url> [--manifest <out/manifest.json>] [--all-entries] [--widths <w,w>] [--out <dir>] [--shots <dir>] [<url-or-path> ...]
   --base         the server the build is served on, e.g. http://127.0.0.1:3042 (paths are joined to it)
   --manifest     the build's manifest; its pages are checked (default: none, the URLs given)
   --all-entries  also check each page's other entries (pages[].entries, presetItems)
   --widths       comma-separated widths (default: 1440,390)
   --out          the folder for the cropped screenshots (default: ./design-check)
+  --shots        also save every measured run as viewport-height tiles in this folder (default: none)
 Each run opens in a fresh browser context (empty storage); a page with a state widget must show the state its run names.
 exit 0: nothing failed, one ok line
 exit 1: layout failures, one FAIL line each (console, request, overflow, clipped, overlap, target, state)
@@ -103,7 +107,7 @@ const RUN = String.raw`async sessionPage => {
   const onFailed = (r) => failures.push({ kind: "request", detail: (r.failure() ? r.failure().errorText : "failed") + " " + r.url() });
   const onResponse = (r) => { if (r.status() >= 400) failures.push({ kind: "request", detail: r.status() + " " + r.url() }); };
   page.on("console", onConsole); page.on("pageerror", onError); page.on("requestfailed", onFailed); page.on("response", onResponse);
-  let states = [], shows = null, widget = false;
+  let states = [], shows = null, widget = false, tiles = 0;
   try {
     if (!C.fresh) await page.setViewportSize({ width: C.width, height: C.width < 600 ? 844 : 900 });
     const resp = await page.goto(C.url, { waitUntil: "networkidle", timeout: 30000 });
@@ -213,6 +217,17 @@ const RUN = String.raw`async sessionPage => {
       return out;
     });
     failures.push(...found);
+    // --shots: the page as a person scrolls it, one viewport-height tile at a time, taken after measuring
+    if (C.tiles) {
+      const vh = await page.evaluate(() => innerHeight), full = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (let k = 0; k < 12 && (k === 0 || k * vh < full); k++) {
+        await page.evaluate((y) => scrollTo(0, y), Math.min(k * vh, Math.max(0, full - vh)));
+        await page.waitForTimeout(80);
+        await page.screenshot({ path: C.tiles + "-t" + (k + 1) + ".png" });
+        tiles += 1;
+      }
+      await page.evaluate(() => scrollTo(0, 0));
+    }
     let n = 0;
     for (const f of failures) {
       n += 1;
@@ -249,7 +264,7 @@ const RUN = String.raw`async sessionPage => {
     page.off("console", onConsole); page.off("pageerror", onError); page.off("requestfailed", onFailed); page.off("response", onResponse);
     if (C.fresh) await ctx.close();
   }
-  return JSON.stringify({ failures, states, shows, widget });
+  return JSON.stringify({ failures, states, shows, widget, tiles });
 }`;
 
 const slug = (s) => s.replace(/^https?:\/\/[^/]+/, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(-60) || "root";
@@ -281,6 +296,8 @@ function main(argv) {
   const out = path.resolve(opt("--out", "design-check"));
   const widths = (opt("--widths", "1440,390") ?? "").split(",").map(Number).filter((n) => n > 0);
   const allEntries = flag("--all-entries");
+  const shotsArg = opt("--shots");
+  const shots = shotsArg ? path.resolve(shotsArg) : null;
   if (!base) return usage(`--base is required\n${USAGE}`);
   if (!/^https?:\/\//.test(base)) return usage(`--base must be an http(s) server (playwright-cli blocks file:); serve the folder first`);
   if (args.some((a) => a.startsWith("--"))) return usage(`unknown option ${args.find((a) => a.startsWith("--"))}\n${USAGE}`);
@@ -302,10 +319,11 @@ function main(argv) {
   const session = `design-check-${process.pid}`;
   const scratch = mkdtempSync(path.join(tmpdir(), "design-check-"));
   mkdirSync(out, { recursive: true });
+  if (shots) mkdirSync(shots, { recursive: true });
   const cli = (...a) => spawnSync("playwright-cli", [`-s=${session}`, ...a], { encoding: "utf8", cwd: scratch, maxBuffer: 64 << 20 });
   const firstLines = (r) => `${r.error ? r.error.message : ""} ${r.stdout ?? ""} ${r.stderr ?? ""}`.trim().split("\n").slice(0, 3).join(" ");
-  const exec = (step, shot) => {
-    const cfg = { url: step.url, width: step.width, fresh: step.fresh, expect: step.expect, discover: !!step.discover, shot };
+  const exec = (step, shot, tiles = null) => {
+    const cfg = { url: step.url, width: step.width, fresh: step.fresh, expect: step.expect, discover: !!step.discover, shot, tiles };
     const file = path.join(scratch, "run.js");
     writeFileSync(file, RUN.replace("__CFG__", JSON.stringify(cfg)));
     const r = cli("--raw", "run-code", `--filename=${file}`);
@@ -320,7 +338,7 @@ function main(argv) {
     }
   };
 
-  let failures = 0, stateCount = 0, driver = null;
+  let failures = 0, stateCount = 0, driver = null, tileCount = 0;
   // The same failure on the same page in several states or widths is one line: the first crop, then where else.
   const seen = new Map();
   const report = (page, where, f) => {
@@ -339,8 +357,9 @@ function main(argv) {
     }
     for (const p of pages) stateCount += Math.max(0, p.states.length - 1);
     for (const step of plan(pages, widths, base)) {
-      const shot = path.join(out, `${slug(step.page)}-w${step.width}-${step.state === null ? "default" : slug(step.state)}`);
-      const res = exec(step, shot);
+      const name = `${slug(step.page)}-w${step.width}-${step.state === null ? "default" : slug(step.state)}`;
+      const res = exec(step, path.join(out, name), shots && path.join(shots, name));
+      tileCount += res.tiles ?? 0;
       const where = `w=${step.width}${step.state === null ? "" : ` state=${step.state}`}`;
       for (const f of res.failures) report(step.page, where, f);
     }
@@ -355,6 +374,7 @@ function main(argv) {
     console.log(line);
     if (where.length > 1) console.log(`  the same at ${where.slice(1).join("; ")}`);
   }
+  if (shots) console.log(`shots: ${tileCount} tile(s) in ${shots}`);
   if (driver) {
     console.error(`driver error: ${driver.message}`);
     console.error("layout check: stopped at the driver error; nothing after it was checked (exit 2)");

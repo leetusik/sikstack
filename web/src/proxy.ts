@@ -1,6 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isReaderPath, newNonce, readerCsp } from "@/lib/csp";
+import {
+  designBuildOrigin,
+  designViewerBuild,
+  designViewerCsp,
+  isReaderPath,
+  newNonce,
+  readerCsp,
+} from "@/lib/csp";
 import { REQUEST_PATH_HEADER } from "@/lib/next-path";
 
 /**
@@ -25,7 +32,19 @@ export function proxy(request: NextRequest) {
     `${request.nextUrl.pathname}${request.nextUrl.search}`,
   );
   if (!isReaderPath(request.nextUrl.pathname)) {
-    return NextResponse.next({ request: { headers: forwarded } });
+    const response = NextResponse.next({ request: { headers: forwarded } });
+    // P77 — a Design build's viewer frames that build's options directions: its one
+    // policy names the build's exact origin in `frame-src`, from `KB_DESIGN_ORIGIN`
+    // at request time (`@/lib/csp`). Set, not appended: it replaces `APP_CSP` from
+    // next.config's `headers()`, since a second policy would be enforced too. No
+    // origin (unset or malformed): `APP_CSP` stands and the viewer frames nothing.
+    const build = designViewerBuild(request.nextUrl.pathname);
+    const origin = build
+      ? designBuildOrigin(process.env.KB_DESIGN_ORIGIN, build)
+      : null;
+    if (origin)
+      response.headers.set("Content-Security-Policy", designViewerCsp(origin));
+    return response;
   }
   // P30.S12 — the reader routes' nonce CSP (`@/lib/csp`). Next reads the nonce
   // from the REQUEST's CSP header and stamps it on its own scripts; the same

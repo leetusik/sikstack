@@ -7,6 +7,27 @@ Each entry says what changed and, when an install needs a manual step, a **Migra
 Before 1.0.0 the same engine shipped as the agentic workspace's installer (`bootstrap_agentic_workspace.sh`), one
 integer version per release, `## v<N>` below; that history continues here.
 
+## 2.1.0 — 2026-11-23
+
+- **The design folder's build publishes to the project's Design service.** Three engine verbs, for a linked checkout:
+  `design-publish --folder <design folder> [--repo <name>]` reads `<folder>/out/manifest.json` (refused when it is
+  missing or lacks `$design: sikstack-design-build`), checks the caps before anything is sent (50 MB unpacked, 5,000
+  files, 16 MB compressed; each refusal names the size and the cap), uploads `out/` as one tar.gz with the checkout's
+  workspace key (read from the key file, never argv, never printed) over the cloud transport, and prints the URL to
+  open the build at, `url=`, its viewer on sikstack (`<app>/projects/<project>/design/<build>`, as the server answers
+  it; the build's own host, which admits only a ticket or a share link, is `host=`, last) and `private=yes|no` (a
+  `design/data/local/` recording is private); every publish is a new build. `design-builds` lists the project's
+  builds, newest first, each led by its id and `url=`; `design-delete <build>` removes one (its host answers 404).
+  They run outside the cloud boundary (no pull, no batch). An unlinked checkout is refused with the sign-in line; the
+  server's 401, 403, 404, 400 and 413 are one line each.
+- **design-cowork's Show step publishes only on the operator's words**: `sikstack design-publish`, then the URL in
+  the report. Never unasked, and a publish is never a sign-off.
+- The design critic judges from the screen, code-blind: it opens viewport tiles before any DOM query, runs a look
+  checklist per screen, and cites an opened screenshot for every finding (`## Screens`, `screens_opened`); the layout
+  check gains `--shots <dir>` to save those tiles.
+- The options page template frames cleanly: inside a frame it hides its bar and posts `{ designHeight }` to its
+  parent on load and on resize, so a viewer can show one direction per frame at its height; unframed, no change.
+
 ## 2.0.0 — 2026-11-22
 
 - **Design moves into the product repo; the plugin no longer touches Claude artifacts.** A design lives in the

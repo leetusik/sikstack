@@ -5,7 +5,7 @@ import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "reac
 
 import { SKIP_TO_CONTENT } from "@/content";
 import { PROJECT_HOME } from "@/content/project";
-import { Shell, ShellOrgNameProvider, ToastRegion } from "@/sikstack/shell";
+import { ShellOrgNameProvider, ToastRegion } from "@/sikstack/shell";
 import { StateBlock } from "@/sikstack/states";
 import { Block, BlockText, BlockTitle, buttonClass } from "@/sikstack/ui";
 import { Legacy } from "@/sikstack/ui/boundary";
@@ -29,10 +29,13 @@ import AgendaItemRouteError from "@/app/(app)/projects/[projectId]/workspace/age
 import AgendaItemRouteLoading from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/loading";
 import { agendaItemBack } from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/back";
 
+import { Shell } from "@/sikstack/shell/shell";
+
 import { DATA_SETS, HEADS, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";
 import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
-import { pageStates, StatePage } from "./states";
+import { AGENDA_STATES, ITEM_STATES } from "./page-states";
+import { StatePage } from "./states";
 import {
   dataOf,
   getServerSnapshot,
@@ -45,7 +48,7 @@ import {
 
 /**
  * The design's screens: production's own components (`@/sikstack/...`) inside the Shell as
- * `AppShell` draws it, on the browser store's workspace. The clock is the recording's (`NOW`) and
+ * `AppShell` draws it (with the project rail's Design entry, P77), on the browser store's workspace. The clock is the recording's (`NOW`) and
  * the zone is the recording's, so the build and the browser draw the same text (no hydration
  * mismatch). What production does not have is the state widget (`states.tsx`), which holds Reset: each
  * page lists the states production's own branches draw for it, and draws each with production's parts.
@@ -67,7 +70,7 @@ function useHydrated() {
 
 const SHELL = RECORDING.shell;
 
-function Frame({ children }: { children: ReactNode }) {
+export function Frame({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
   return (
     <UiRoot data-design={DESIGN_MARK}>
@@ -129,23 +132,6 @@ function ProjectNotFound() {
   );
 }
 
-const WS = "src/app/(app)/projects/[projectId]/workspace";
-
-/** The Agenda's states: every branch of its route (`page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`)
- * and the data shapes its parts draw. The data states put a data set from `answers.ts` in the store. */
-export const AGENDA_STATES = pageStates("Agenda", [
-  { key: "recorded", label: "Recorded", from: `${WS}/page.tsx:75 (ready) · data/sample/recording.json`, data: true },
-  { key: "many", label: "Many items", from: `${WS}/page.tsx:75 (ready) · data/sample/states/many.json`, data: true },
-  { key: "empty", label: "Empty agenda", from: "agenda-list.tsx:853 emptyText · data/sample/states/empty.json", data: true },
-  { key: "waiting", label: "Waiting for sync", from: "agenda-list.tsx:760 unplaced, WaitingBadge · data/sample/states/waiting.json", data: true },
-  { key: "behind", label: "Synced long ago", from: "frame/sync-model.ts:44 behind (made: answers.ts)", data: true },
-  { key: "loading", label: "Loading", from: `${WS}/loading.tsx` },
-  { key: "unlinked", label: "Not linked", from: `${WS}/page.tsx:48 unlinked · data/sample/states/unlinked.json` },
-  { key: "never", label: "Never synced", from: `${WS}/page.tsx:48 never · data/sample/states/never.json` },
-  { key: "failed", label: "Read failed", from: `${WS}/page.tsx:66 error` },
-  { key: "not-found", label: "Not found", from: `${WS}/page.tsx:46 notFound() → not-found.tsx` },
-  { key: "error", label: "Page error", from: `${WS}/error.tsx` },
-]);
 export type AgendaState = (typeof AGENDA_STATES.list)[number]["key"];
 
 export function AgendaScreen({
@@ -224,22 +210,6 @@ export function AgendaScreen({
   return <Frame>{body}</Frame>;
 }
 
-const ITEM = `${WS}/agenda/[item]`;
-
-/** An agenda item's states: every branch of its route (`page.tsx`, `load.ts`, `loading.tsx`, `error.tsx`)
- * and the item in each state the store can give it. The data states set this item's own fields. */
-export const ITEM_STATES = pageStates("Agenda item", [
-  { key: "open", label: "Open", from: "agenda-item/item-page.tsx (ready) · item.state open", data: true },
-  { key: "deferred", label: "Deferred", from: "agenda-item/item-page.tsx (ready) · item.state deferred", data: true },
-  { key: "solved", label: "Solved", from: "agenda-item/item-page.tsx (ready) · item.state solved, its outcome", data: true },
-  { key: "dropped", label: "Dropped", from: "agenda-item/item-page.tsx (ready) · item.state dropped, its reason", data: true },
-  { key: "waiting", label: "Waiting for sync", from: "frame/waiting.tsx WaitingBadge · item.sync waiting (states/waiting.json)", data: true },
-  { key: "loading", label: "Loading", from: `${ITEM}/loading.tsx` },
-  { key: "not-found", label: "Not found", from: `${ITEM}/page.tsx:98 · load.ts:67 (no such item)` },
-  { key: "project-not-found", label: "Project not found", from: `${ITEM}/page.tsx:65 notFound() → workspace/not-found.tsx` },
-  { key: "failed", label: "Read failed", from: `${ITEM}/page.tsx:67 · load.ts:66 error` },
-  { key: "error", label: "Page error", from: `${ITEM}/error.tsx` },
-]);
 export type ItemState = (typeof ITEM_STATES.list)[number]["key"];
 
 export function ItemScreen({
@@ -345,20 +315,21 @@ function enterAgenda(key: AgendaState) {
 
 /** A page the design links to but does not draw. */
 export function AwayScreen({ path }: { path: string }) {
+  // The Design viewer's links open a build on its own host (`/api/design/open`), which a static build has not.
+  const open = path === "/api/design/open";
   return (
     <Frame>
       <div className="column">
         <StateBlock
           state={{
             title: "Not in this design",
-            text: `${path} is not part of this design build. It draws the Workspace's Agenda and its items.`,
+            text: open
+              ? "In sikstack this opens the build on its own host, which this design build does not have."
+              : `${path} is not part of this design build. It draws the Workspace's Agenda and its items, and Design.`,
             actions: [
-              {
-                kind: "link",
-                label: "Open the Agenda",
-                href: agendaHref(PROJECT),
-                variant: "primary",
-              },
+              open
+                ? { kind: "link", label: "Open Design", href: `/projects/${PROJECT}/design`, variant: "primary" }
+                : { kind: "link", label: "Open the Agenda", href: agendaHref(PROJECT), variant: "primary" },
             ],
             reference: null,
           }}

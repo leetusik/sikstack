@@ -8,6 +8,7 @@ import { checkRateLimit } from "./rate-limit";
 import {
   assertSameOrigin,
   clearedOrgCookieOptions,
+  clearLegacyCookies,
   ORG_COOKIE,
   sealSession,
   SESSION_COOKIE,
@@ -159,5 +160,6 @@ export async function handleCredentialRoute(
   // A new session starts in its first org: the previous session's choice (perhaps
   // another user's) never follows it.
   res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  clearLegacyCookies(res);
   return res;
 }

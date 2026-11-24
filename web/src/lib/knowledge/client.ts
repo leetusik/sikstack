@@ -68,7 +68,7 @@ export interface KbRequestOptions {
  * The bearer, plus the active org when the call carries a session token: the ONE
  * place every server-to-server call learns the org (multi-org sessions), so no call
  * site knows about it. The org comes from the explicit override when given, else
- * from the `sikstack_org` cookie of the request being served.
+ * from the `__Host-sikstack_org` cookie of the request being served.
  */
 async function authHeaders(
   options: KbRequestOptions,

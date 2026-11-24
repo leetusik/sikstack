@@ -364,7 +364,7 @@ describe("the post", () => {
     const { cookies } = await import("next/headers");
     vi.mocked(cookies).mockResolvedValue({
       get: (name: string) =>
-        name === "sikstack_org" ? { name, value: ORG } : undefined,
+        name === "__Host-sikstack_org" ? { name, value: ORG } : undefined,
     } as unknown as Awaited<ReturnType<typeof cookies>>);
     const sentHeaders = (call: number) =>
       fetchMock.mock.calls[call][1].headers as Record<string, string>;

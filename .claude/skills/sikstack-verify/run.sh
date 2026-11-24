@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# sikstack local verification stack: doctor | up | signin | seed | expect | feature <name> | status | down
+# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | api | expect | feature <name> | status | down
 #
 # Runs the whole product on loopback without touching the checkout: a throwaway
 # postgres:17 container, the API on the host (scratch KB_ROOT, KB_GIT_COMMIT=false),
-# the web dev server, a local test account, and a headless playwright-cli session.
+# the design origin (server.design_serve), the web dev server, a local test account,
+# and a headless playwright-cli session. The app is reached at sikstack.localhost:<web>
+# and each design build at <build>.design.sikstack.localhost:<design>: same-site, never
+# the same host, as sikstack.com and its subdomains will be (Chromium resolves every
+# *.localhost name to loopback; Next 16's dev guard allows **.localhost by default).
 # Every process starts from a scrubbed environment: no vendor API keys, no SMTP, no
 # operator account, whatever the caller's shell exports.
 # Everything it writes (state, logs, screenshots, the saved sign-in) lives under
@@ -33,6 +37,7 @@ CONTAINER="sikstack-verify-pg-$(hash8 "$HOME_DIR")"
 SESSION="sikstack-verify-$(hash8 "$HOME_DIR")"
 LABEL="sikstack-verify.home"
 CLI_VERSION="0.1.25"
+APP_HOST="sikstack.localhost"
 # The only variables the servers inherit; everything else (GOOGLE_API_KEY, GEMINI_API_KEY,
 # KB_SMTP_*, KB_OPERATOR_*, KB_API_TOKEN, KB_GIT_PUSH, UV_ENV_FILE, ...) is dropped.
 BASE_ENV=(PATH="$PATH" HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="$_tmp/"
@@ -136,7 +141,7 @@ doctor() {
       bad=1
     fi
   done
-  for p in 3030 8766; do
+  for p in 3030 8766 3061; do
     who=$(who_listens "$p")
     if [ -z "$who" ]; then say "ok   port $p free"
     else say "note port $p is taken by $who (not ours: left alone); up uses port $(free_port "$p")"; fi
@@ -150,7 +155,8 @@ write_state() {
   {
     echo "EV='$EV'"; echo "KB_ROOT_DIR='$KB_ROOT_DIR'"; echo "PG_PORT='$PG_PORT'"
     echo "API_PORT='$API_PORT'"; echo "WEB_PORT='$WEB_PORT'"; echo "API_PID='${API_PID:-}'"
-    echo "WEB_PID='${WEB_PID:-}'"; echo "WEB='http://127.0.0.1:$WEB_PORT'"; echo "ENV_FILE='$ENV_FILE'"
+    echo "WEB_PID='${WEB_PID:-}'"; echo "WEB='http://$APP_HOST:$WEB_PORT'"; echo "ENV_FILE='$ENV_FILE'"
+    echo "DESIGN_PORT='${DESIGN_PORT:-}'"; echo "DESIGN_PID='${DESIGN_PID:-}'"; echo "DESIGN='${DESIGN:-}'"
     echo "CONTAINER='$CONTAINER'"; echo "CONTAINER_ID='${CONTAINER_ID:-}'"; echo "SESSION='$SESSION'"
   } >"$STATE"
 }
@@ -158,13 +164,14 @@ write_state() {
 # api_start <db url> [VAR=value...]: launch the API as its own process group (set -m for this launch only: bash sets
 # the pgid before $! returns, so down stops it and all its children by that group, whatever the server execs into),
 # record it and wait for /healthz. KB_PUBLIC_BASE_URL is the web's address (the sikstack connect page's links);
-# SIKSTACK_VERIFY_WAITLIST=1 in the caller's environment turns the sign-up waitlist on.
+# SIKSTACK_VERIFY_WAITLIST=1 in the caller's environment turns the sign-up waitlist on. The design settings
+# (DESIGN_ENV: the builds folder, the origin pattern, the app's origin, the secret) are the design origin's own.
 api_start() {
   local db=$1; shift
   set -m
   (cd "$REPO" && exec env -i "${BASE_ENV[@]}" DATABASE_URL="$db" KB_ROOT="$KB_ROOT_DIR" KB_GIT_COMMIT=false \
-    KB_GIT_PUSH=false KB_STARTUP_REINDEX=false KB_PUBLIC_BASE_URL="http://127.0.0.1:$WEB_PORT" \
-    KB_SIGNUP_WAITLIST="${SIKSTACK_VERIFY_WAITLIST:-false}" "$@" \
+    KB_GIT_PUSH=false KB_STARTUP_REINDEX=false KB_PUBLIC_BASE_URL="http://$APP_HOST:$WEB_PORT" \
+    KB_SIGNUP_WAITLIST="${SIKSTACK_VERIFY_WAITLIST:-false}" "${DESIGN_ENV[@]}" "$@" \
     nohup uv run uvicorn server.main:app --host 127.0.0.1 --port "$API_PORT") </dev/null >>"$EV/api.log" 2>&1 &
   API_PID=$!; set +m; launched "$API_PID" || die "the API did not start (see $EV/api.log)"; write_state
   wait_http "http://127.0.0.1:$API_PORT/healthz" 60 || die "API /healthz did not answer (see $EV/api.log)"
@@ -187,9 +194,13 @@ up() {
   mkdir -p "$HOME_DIR"; rm -f "$OWNED"
   KB_ROOT_DIR="$HOME_DIR/kb-root"; rm -rf "$KB_ROOT_DIR"; mkdir -p "$KB_ROOT_DIR"
   ENV_FILE="$HOME_DIR/web.env"; rm -f "$ENV_FILE"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
-  PG_PORT=$(free_port 55471); API_PORT=$(free_port 8766); WEB_PORT=$(free_port 3030)
-  API_PID=""; WEB_PID=""; CONTAINER_ID=""; write_state; UPPING=1
-  say "up: evidence $EV; ports pg $PG_PORT, api $API_PORT, web $WEB_PORT; container $CONTAINER; session $SESSION"
+  PG_PORT=$(free_port 55471); API_PORT=$(free_port 8766); WEB_PORT=$(free_port 3030); DESIGN_PORT=$(free_port 3061)
+  while [ "$DESIGN_PORT" = "$WEB_PORT" ] || [ "$DESIGN_PORT" = "$API_PORT" ]; do DESIGN_PORT=$(free_port $((DESIGN_PORT + 1))); done
+  DESIGN="http://{build}.design.$APP_HOST:$DESIGN_PORT"
+  DESIGN_ENV=(KB_DESIGN_BUILDS_DIR="$KB_ROOT_DIR/data/design-builds" KB_DESIGN_ORIGIN="$DESIGN"
+    KB_DESIGN_APP_ORIGIN="http://$APP_HOST:$WEB_PORT" KB_DESIGN_SECRET="$(openssl rand -hex 32)")
+  API_PID=""; WEB_PID=""; DESIGN_PID=""; CONTAINER_ID=""; write_state; UPPING=1
+  say "up: evidence $EV; ports pg $PG_PORT, api $API_PORT, web $WEB_PORT, design $DESIGN_PORT; container $CONTAINER; session $SESSION"
 
   docker run -d --name "$CONTAINER" --label "$LABEL=$HOME_DIR" -e POSTGRES_DB=kb -e POSTGRES_USER=kb -e POSTGRES_PASSWORD=kb \
     -p "127.0.0.1:$PG_PORT:5432" postgres:17 >/dev/null 2>>"$EV/run.log"
@@ -225,53 +236,166 @@ up() {
   api_start "$db" KB_INSTALL_FEEDBACK_PROJECT_ID="$FEEDBACK_PROJECT"
   say "up: api restarted with the install Feedback project (sikstack, $FEEDBACK_PROJECT)"
 
+  # The design origin: each published build at the root of its own host (server.design_serve), its own group.
+  set -m
+  (cd "$REPO" && exec env -i "${BASE_ENV[@]}" DATABASE_URL="$db" KB_ROOT="$KB_ROOT_DIR" "${DESIGN_ENV[@]}" \
+    nohup uv run uvicorn server.design_serve:app --host 127.0.0.1 --port "$DESIGN_PORT") </dev/null >>"$EV/design.log" 2>&1 &
+  DESIGN_PID=$!; set +m; launched "$DESIGN_PID" || die "the design origin did not start (see $EV/design.log)"; write_state
+  wait_http "http://127.0.0.1:$DESIGN_PORT/_healthz" 60 || die "the design origin's /_healthz did not answer (see $EV/design.log)"
+  own_refresh
+  say "up: design origin $DESIGN ok"
+
   local secret key
   secret=$(openssl rand -hex 32)
   key=$(sed -n 's/^SIKSTACK_FEEDBACK_CAPTURE_KEY=//p' "$ENV_FILE" | tr -d '"')
   set -m
   (cd "$REPO" && exec env -i "${BASE_ENV[@]}" KB_API_BASE_URL="http://127.0.0.1:$API_PORT" SESSION_SECRET="$secret" \
-    NEXT_PUBLIC_APP_URL="http://127.0.0.1:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" \
+    NEXT_PUBLIC_APP_URL="http://$APP_HOST:$WEB_PORT" SIKSTACK_FEEDBACK_CAPTURE_KEY="$key" KB_DESIGN_ORIGIN="$DESIGN" \
     nohup pnpm --dir web exec next dev -H 127.0.0.1 -p "$WEB_PORT") </dev/null >"$EV/web.log" 2>&1 &
   WEB_PID=$!; set +m; launched "$WEB_PID" || die "next dev did not start (see $EV/web.log)"; write_state
   wait_http "http://127.0.0.1:$WEB_PORT/login" 120 || die "web /login did not answer (see $EV/web.log)"
   own_refresh; UPPING=""
-  say "up: web http://127.0.0.1:$WEB_PORT/login ok"
+  say "up: web http://$APP_HOST:$WEB_PORT/login ok"
   say "up: ready. next: $0 signin; drive with playwright-cli -s=$SESSION <command>"
 }
 
 cli() { playwright-cli -s="$SESSION" "$@"; }
 
-signin() {
+signin() { # [other]: the test account in $SESSION; `other`, the second account (not a member) in $SESSION-other
   load_state
   [ -n "${WEB_PID:-}" ] || die "not up: run '$0 up' first"
-  local auth="$EV/auth-state.json" email pw url
+  local s="$SESSION" auth="$EV/auth-state.json" ev=SIKSTACK_DEV_TEST_EMAIL pv=SIKSTACK_DEV_TEST_PASSWORD email pw url
+  if [ "${1:-}" = other ]; then
+    other_account || die "the second account could not be made (see $EV/run.log)"
+    s="$SESSION-other"; auth="$EV/auth-state-other.json"; ev=SIKSTACK_DEV_OTHER_EMAIL; pv=SIKSTACK_DEV_OTHER_PASSWORD
+  elif [ -n "${1:-}" ]; then die "usage: $0 signin [other]"; fi
   printf '{"outputDir": "%s"}\n' "$EV/cli-output" >"$EV/cli.config.json"
-  cli close >/dev/null 2>&1 || true # this home's own session only
-  cli open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1 || die "playwright-cli open failed"
+  playwright-cli -s="$s" close >/dev/null 2>&1 || true # this home's own session only
+  playwright-cli -s="$s" open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1 || die "playwright-cli open failed"
   if [ -f "$auth" ]; then
-    cli state-load "$auth" >>"$EV/run.log" 2>&1
-    cli goto "$WEB/dashboard" >>"$EV/run.log" 2>&1
-    url=$(cli --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
-    if [ "$url" = "/dashboard" ]; then say "signin: reused the saved sign-in ($auth), no new login"; return 0; fi
+    playwright-cli -s="$s" state-load "$auth" >>"$EV/run.log" 2>&1
+    playwright-cli -s="$s" goto "$WEB/dashboard" >>"$EV/run.log" 2>&1
+    url=$(playwright-cli -s="$s" --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
+    if [ "$url" = "/dashboard" ]; then say "signin: reused the saved sign-in ($auth) in $s, no new login"; return 0; fi
     say "signin: saved sign-in no longer valid; signing in again"
-    cli goto "$WEB/login" >>"$EV/run.log" 2>&1
+    playwright-cli -s="$s" goto "$WEB/login" >>"$EV/run.log" 2>&1
   fi
-  email=$(sed -n 's/^SIKSTACK_DEV_TEST_EMAIL=//p' "$ENV_FILE" | tr -d '"')
-  pw=$(sed -n 's/^SIKSTACK_DEV_TEST_PASSWORD=//p' "$ENV_FILE" | tr -d '"')
-  [ -n "$email" ] && [ -n "$pw" ] || die "no test account in $ENV_FILE"
-  cli fill 'role=textbox[name="Email"]' "$email" >>"$EV/run.log" 2>&1 || die "no Email field on /login"
+  email=$(sed -n "s/^$ev=//p" "$ENV_FILE" | tr -d '"')
+  pw=$(sed -n "s/^$pv=//p" "$ENV_FILE" | tr -d '"')
+  [ -n "$email" ] && [ -n "$pw" ] || die "no account $ev in $ENV_FILE"
+  playwright-cli -s="$s" fill 'role=textbox[name="Email"]' "$email" >>"$EV/run.log" 2>&1 || die "no Email field on /login"
   # The CLI echoes filled text and a snapshot shows a field's value: the password goes nowhere but the page.
-  cli fill 'role=textbox[name="Password"]' "$pw" --submit >/dev/null 2>&1 || die "no Password field on /login"
+  playwright-cli -s="$s" fill 'role=textbox[name="Password"]' "$pw" --submit >/dev/null 2>&1 || die "no Password field on /login"
   local i=0
   while [ "$i" -lt 20 ]; do
-    url=$(cli --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
+    url=$(playwright-cli -s="$s" --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
     [ "$url" = "/dashboard" ] && break
     sleep 1; i=$((i + 1))
   done
   [ "$url" = "/dashboard" ] || die "sign-in did not reach /dashboard (at '$url')"
-  cli state-save "$auth" >>"$EV/run.log" 2>&1
+  playwright-cli -s="$s" state-save "$auth" >>"$EV/run.log" 2>&1
   if grep -rqF -- "$pw" "$EV"; then die "the password reached $EV: delete that run folder"; fi
-  say "signin: signed in as the local test account; saved $auth"
+  say "signin: signed in as the $([ "$s" = "$SESSION" ] && echo "local test" || echo "second") account in $s; saved $auth"
+}
+
+# The second account: signed up once through the API with its own org, so it is a member of nothing the test
+# account owns. Its email and generated password go into the 0600 env file beside the test account's, never printed.
+other_account() {
+  grep -q '^SIKSTACK_DEV_OTHER_EMAIL=' "$ENV_FILE" && return 0
+  env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" python3 - <<'PY' >>"$EV/run.log" 2>&1
+import json, os, secrets, urllib.error, urllib.request
+api, path = os.environ["API"], os.environ["ENV_FILE"]
+email, password = "other-verify@example.com", secrets.token_urlsafe(18)
+req = urllib.request.Request(api + "/auth/signup", method="POST", headers={"Content-Type": "application/json"},
+                             data=json.dumps({"email": email, "password": password}).encode())
+try:
+    with urllib.request.urlopen(req) as r:
+        status = r.status
+except urllib.error.HTTPError as e:
+    status = e.code
+if status != 201:
+    raise SystemExit(f"other account: sign-up of {email} answered {status}")
+with open(path, "a") as f:
+    f.write(f"SIKSTACK_DEV_OTHER_EMAIL={email}\nSIKSTACK_DEV_OTHER_PASSWORD={password}\n")
+print(f"other account: created {email} (its own org)")
+PY
+}
+
+# api <method> <path> [json]: one call to the API as the local test account (a fresh login's token, never printed);
+# prints `status=<n>` and the answer's body.
+api() {
+  load_state
+  [ -n "${API_PORT:-}" ] || die "not up: run '$0 up' first"
+  env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" python3 - "$@" <<'PY'
+import json, os, sys, urllib.error, urllib.request
+api, env = os.environ["API"], {}
+for line in open(os.environ["ENV_FILE"]):
+    k, _, v = line.strip().partition("=")
+    env[k] = v.strip('"')
+def call(method, path, body=None, token=None):
+    req = urllib.request.Request(api + path, method=method, data=None if body is None else body.encode(),
+                                 headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+status, body = call("POST", "/auth/login", json.dumps({"email": env["SIKSTACK_DEV_TEST_EMAIL"], "password": env["SIKSTACK_DEV_TEST_PASSWORD"]}))
+if status != 200:
+    raise SystemExit(f"api: the test account's login answered {status}")
+token = json.loads(body)["token"]
+args = sys.argv[1:]
+status, body = call(args[0], args[1], args[2] if len(args) > 2 else None, token)
+print(f"status={status}")
+print(body)
+PY
+}
+
+# workspace <dir>: a scratch product repo at <dir> with a `sikstack init` workspace (the branch's engine), linked to the
+# test account's project `sikstack` by a workspace key minted through the API and handed to `link` on stdin. The key
+# lives only in this home's XDG folder (0700; its key file 0600), which `down` removes. Prints shell assignments
+# (WS, XDG, SK, PROJECT, API, DESIGN) for `eval`; never a key.
+workspace() {
+  load_state
+  [ -n "${API_PORT:-}" ] || die "not up: run '$0 up' first"
+  local dir xdg="$HOME_DIR/xdg" project
+  dir=$(abs "${1:?usage: $0 workspace <dir>}")
+  [ -e "$dir" ] && die "$dir exists: name a new folder"
+  mkdir -p "$dir" "$xdg" && chmod 700 "$xdg" || die "cannot make $dir or $xdg"
+  local gid=(GIT_AUTHOR_NAME=verify GIT_AUTHOR_EMAIL=verify@example.invalid GIT_COMMITTER_NAME=verify GIT_COMMITTER_EMAIL=verify@example.invalid)
+  (cd "$dir" && env -i "${BASE_ENV[@]}" "${gid[@]}" git init -q && env -i "${BASE_ENV[@]}" "${gid[@]}" git commit -q --allow-empty -m "chore: start" \
+    && env -i "${BASE_ENV[@]}" "${gid[@]}" XDG_CONFIG_HOME="$xdg" SIKSTACK_NO_OFFER=1 "$REPO/plugins/sikstack/bin/sikstack" init) >>"$EV/run.log" 2>&1 \
+    || die "sikstack init in $dir failed (see $EV/run.log)"
+  project=$(env -i "${BASE_ENV[@]}" "${gid[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" XDG_CONFIG_HOME="$xdg" SIKSTACK_NO_OFFER=1 \
+    SK="$REPO/plugins/sikstack/bin/sikstack" WS="$dir" LOG="$EV/run.log" python3 - <<'PY'
+import json, os, subprocess, urllib.error, urllib.request
+api, env = os.environ["API"], {}
+for line in open(os.environ["ENV_FILE"]):
+    k, _, v = line.strip().partition("=")
+    env[k] = v.strip('"')
+def call(method, path, body=None, token=None):
+    req = urllib.request.Request(api + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"{method} {path} answered {e.code}")
+token = call("POST", "/auth/login", {"email": env["SIKSTACK_DEV_TEST_EMAIL"], "password": env["SIKSTACK_DEV_TEST_PASSWORD"]})["token"]
+pid = next(p["id"] for p in call("GET", "/app/projects", token=token)["projects"] if p["name"] == "sikstack")
+key = call("POST", f"/app/projects/{pid}/credentials", {"name": "verify workspace", "scope": "workspace"}, token=token)["key"]
+with open(os.environ["LOG"], "a") as log:
+    done = subprocess.run([os.environ["SK"], "link", f"{api}/projects/{pid}"], cwd=os.environ["WS"], input=key + "\n",
+                          text=True, stdout=log, stderr=log)
+if done.returncode != 0:
+    raise SystemExit(f"link answered {done.returncode}")
+print(pid)
+PY
+) || die "linking $dir failed (see $EV/run.log)"
+  [ -n "$project" ] || die "linking $dir gave no project"
+  say "workspace: $dir linked to project sikstack ($project); its workspace key is in $xdg only" >&2
+  printf "WS='%s'\nXDG='%s'\nSK='%s'\nPROJECT='%s'\nAPI='%s'\nDESIGN='%s'\n" "$dir" "$xdg" "$REPO/plugins/sikstack/bin/sikstack" \
+    "$project" "http://127.0.0.1:$API_PORT" "$DESIGN"
 }
 
 seed() { # publish one sample document into the scratch library through the API
@@ -332,6 +456,7 @@ status() {
   if [ ! -f "$STATE" ]; then say "status: nothing up in $HOME_DIR (no state.env)"; fi
   [ -n "${WEB:-}" ] && say "web      $WEB ($( [ -n "${WEB_PID:-}" ] && is_ours "$WEB_PID" && echo running || echo stopped))"
   [ -n "${API_PORT:-}" ] && say "api      http://127.0.0.1:$API_PORT ($( [ -n "${API_PID:-}" ] && is_ours "$API_PID" && echo running || echo stopped))"
+  [ -n "${DESIGN:-}" ] && say "design   $DESIGN ($( [ -n "${DESIGN_PID:-}" ] && is_ours "$DESIGN_PID" && echo running || echo stopped))"
   say "postgres $(docker ps --filter "name=^/$CONTAINER\$" --format '{{.Names}} {{.Status}}' 2>/dev/null | grep . || echo "no $CONTAINER")"
   say "browser  $(playwright-cli list 2>/dev/null | grep -F "$SESSION" || echo "no $SESSION session") (drive: playwright-cli -s=$SESSION <command>)"
   [ -n "${EV:-}" ] && say "evidence $EV"
@@ -341,12 +466,16 @@ status() {
 down() {
   if [ ! -f "$STATE" ]; then say "down: nothing recorded in $HOME_DIR (no state.env): nothing stopped"; return 0; fi
   load_state
-  local pw g p who mine="" left="" still i
-  pw=$(sed -n 's/^SIKSTACK_DEV_TEST_PASSWORD=//p' "${ENV_FILE:-/dev/null}" 2>/dev/null | tr -d '"')
-  if [ -n "$pw" ] && [ -d "${EV:-}" ]; then
-    grep -rqF -- "$pw" "$EV" && say "down: WARNING the test password appears under $EV" || say "down: password check: not found under $EV"
-  fi
-  playwright-cli -s="$SESSION" close >/dev/null 2>&1 || true # named after this home: no other run's session
+  local pw g p s who mine="" left="" still i
+  for p in SIKSTACK_DEV_TEST_PASSWORD SIKSTACK_DEV_OTHER_PASSWORD; do
+    pw=$(sed -n "s/^$p=//p" "${ENV_FILE:-/dev/null}" 2>/dev/null | tr -d '"')
+    if [ -n "$pw" ] && [ -d "${EV:-}" ]; then
+      grep -rqF -- "$pw" "$EV" && say "down: WARNING $p appears under $EV" || say "down: password check ($p): not found under $EV"
+    fi
+  done
+  for s in "$SESSION" "$SESSION-other" "$SESSION-guest"; do # named after this home: no other run's session
+    playwright-cli -s="$s" close >/dev/null 2>&1 || true
+  done
   for g in $(owned_groups); do
     if group_ours "$g"; then mine="$mine $g"
     elif [ -n "$(proc_start "$g")" ] || group_alive "$g"; then say "down: process group $g is no longer the one up started: left alone"; fi
@@ -363,7 +492,7 @@ down() {
     still=""; for g in $left; do group_alive "$g" && still="$still $g"; done; left="$still"
     [ -n "$left" ] && sleep 0.2; i=$((i + 1))
   done
-  for p in ${WEB_PORT:-} ${API_PORT:-}; do
+  for p in ${WEB_PORT:-} ${API_PORT:-} ${DESIGN_PORT:-}; do
     who=$(who_listens "$p")
     [ -n "$who" ] && say "down: port $p is held by $who, not started by this run: left alone"
   done
@@ -372,18 +501,20 @@ down() {
       docker rm -fv "$CONTAINER_ID" >/dev/null 2>&1 && say "down: removed container $CONTAINER and its volume"
     else say "down: container $CONTAINER_ID is gone or not this home's: left alone"; fi
   fi
-  rm -rf "$HOME_DIR/kb-root"; rm -f "$HOME_DIR/web.env" "$OWNED" "$STATE"
+  rm -rf "$HOME_DIR/kb-root" "$HOME_DIR/xdg"; rm -f "$HOME_DIR/web.env" "$OWNED" "$STATE"
   say "down: stopped what this run started (process groups:${mine:- none}${left:+; still alive after KILL:$left}); browser session $SESSION closed${EV:+; evidence kept in $EV}"
 }
 
 case "${1:-}" in
   doctor) doctor ;;
   up) shift; up "$@" ;;
-  signin) signin ;;
+  signin) shift; signin "$@" ;;
+  workspace) shift; workspace "$@" ;;
+  api) shift; [ $# -ge 2 ] || die "usage: $0 api <method> <path> [json]"; api "$@" ;;
   seed) seed ;;
   expect) shift; load_state; expect "$@" ;;
   feature) shift; [ $# -ge 1 ] || die "usage: $0 feature <name>"; for n in "$@"; do feature "$n" || exit 1; done ;;
   status) status ;;
   down) down ;;
-  *) echo "usage: $0 doctor | up [evidence-dir] | signin | seed | expect <text>... | feature <name>... | status | down"; exit 2 ;;
+  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | api <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
 esac

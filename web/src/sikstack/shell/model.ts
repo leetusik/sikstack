@@ -1,6 +1,7 @@
 // The Shell's rules as pure functions (the signed Shell: job 01 round 03-instrument, frame.md F9, with
-// the org rail revised by job 03 round 02-one-library, F320). No React and no I/O, so the rules are
-// tested on their own (tests/sikstack-shell-*.test.ts); `shell.tsx` renders what these return.
+// the org rail revised by job 03 round 02-one-library, F320, and the project rail's Design entry, P77). No
+// React and no I/O, so the rules are tested on their own (tests/sikstack-shell-*.test.ts); `shell.tsx`
+// renders what these return.
 
 import { feedbackHref } from "@/lib/feedback/place";
 import { due as dueText } from "@/lib/format";
@@ -82,7 +83,7 @@ export function projectIdOf(pathname: string): string | null {
 }
 
 export type RailKey =
-  "overview" | "workspace" | "library" | "feedback" | "review";
+  "overview" | "workspace" | "library" | "feedback" | "design" | "review";
 
 export interface RailItem {
   key: RailKey;
@@ -120,6 +121,9 @@ const PROJECT_FEEDBACK = /^\/projects\/[^/?#]+\/feedback(?:[/?#]|$)/;
 /** `/projects/<id>/workspace` and beneath it: the project's Workspace (job 02, F41 and F74). */
 const PROJECT_WORKSPACE = /^\/projects\/[^/?#]+\/workspace(?:[/?#]|$)/;
 
+/** `/projects/<id>/design` and beneath it: the project's Design builds, the list and a build's viewer (P77). */
+const PROJECT_DESIGN = /^\/projects\/[^/?#]+\/design(?:[/?#]|$)/;
+
 /** The path without its query or hash. */
 const pathOf = (pathname: string) => pathname.split(/[?#]/, 1)[0];
 
@@ -146,8 +150,8 @@ export function projectSwitchHref(pathname: string, projectId: string): string {
 
 /**
  * The rail a path shows. On `/projects/<id>` and beneath it, the project form: Overview (the project's
- * home), Workspace (the project's Agenda, where the Workspace opens: job 02, F41 and F74), Library and
- * Feedback.
+ * home), Workspace (the project's Agenda, where the Workspace opens: job 02, F41 and F74), Library,
+ * Feedback and Design (the project's design builds, `/projects/<id>/design`: P77).
  * Elsewhere the org form: Overview (org home), Library, Feedback (F320: no Documents). Then the rule and
  * Review. The current item follows the path; an address the rail does not name has none (F25: `none`).
  *
@@ -156,7 +160,8 @@ export function projectSwitchHref(pathname: string, projectId: string): string {
  * The project form's Library is the project's library (`/projects/<id>/library`, job 03 round 02,
  * F321), current there (Overview is then not); its Feedback is the project's Feedback,
  * `/projects/<id>/feedback` (`feedbackHref`, P65), current on that list and on an item opened from
- * it, `/projects/<id>/feedback/<feedbackId>` (Overview is then not). The org's Feedback, `/feedback`,
+ * it, `/projects/<id>/feedback/<feedbackId>` (Overview is then not); its Design is current on the list and
+ * on a build's viewer, `/projects/<id>/design/<build>` (Overview is then not). The org's Feedback, `/feedback`,
  * is current on its list (filtered to a project or not) and on an item opened from it: those keep
  * the org form. The org form's Library is also current on an org's public library, `/@<org>` (P63).
  *
@@ -176,13 +181,14 @@ export function railFor(pathname: string, known = true): Rail {
     const library = PROJECT_LIBRARY.test(pathOf(pathname));
     const feedback = PROJECT_FEEDBACK.test(pathOf(pathname));
     const workspace = PROJECT_WORKSPACE.test(pathOf(pathname));
+    const design = PROJECT_DESIGN.test(pathOf(pathname));
     return {
       form: "project",
       items: [
         {
           key: "overview",
           href: home,
-          current: !library && !feedback && !workspace,
+          current: !library && !feedback && !workspace && !design,
         },
         {
           key: "workspace",
@@ -195,6 +201,7 @@ export function railFor(pathname: string, known = true): Rail {
           href: feedbackHref(projectId),
           current: feedback,
         },
+        { key: "design", href: `${home}/design`, current: design },
       ],
       review,
     };

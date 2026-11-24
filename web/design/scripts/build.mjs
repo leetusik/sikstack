@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // Build the design folder: `next build design` (a static export to `design/out/`), then
-// `design/out/manifest.json` (the pages, their entry paths, the recording each reads, the source commit),
+// `design/out/manifest.json` (the pages and their states, from `lib/pages.ts` as the front page lists them, their
+// entry paths, the recording each reads, the source commit, and the options page's entry and directions when there
+// is one),
 // then a link check: every in-site link the pages draw must have a file in `out/`, so nothing the design
 // links to 404s on a static server.
 //
 //   node design/scripts/build.mjs [--data sample | --data local/<name>]     (pnpm --dir web design:build)
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,20 +34,35 @@ if (!existsSync(recordingPath)) die(`no recording at design/${recordingRel} (rec
 const recording = JSON.parse(readFileSync(recordingPath, "utf8"));
 if (recording.$design !== MARK) die(`design/${recordingRel} is not a design recording`);
 
+// The source, read before the build: the front page names the build by its commit (`lib/pages.ts`, `buildSource`).
+const git = (...args) => {
+  const r = spawnSync("git", args, { cwd: WEB, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+};
+const source = {
+  repo: "platform",
+  commit: git("rev-parse", "HEAD"),
+  branch: git("rev-parse", "--abbrev-ref", "HEAD"),
+  dirty: (git("status", "--porcelain", "--", ".") ?? "") !== "",
+};
+
 const next = path.join(WEB, "node_modules", ".bin", "next");
 const built = spawnSync(next, ["build", "design"], {
   cwd: WEB,
   stdio: "inherit",
-  env: { ...process.env, DESIGN_RECORDING: recordingRel, NEXT_TELEMETRY_DISABLED: "1" },
+  env: {
+    ...process.env,
+    DESIGN_RECORDING: recordingRel,
+    DESIGN_COMMIT: source.commit ?? "",
+    DESIGN_BRANCH: source.branch ?? "",
+    DESIGN_DIRTY: source.dirty ? "1" : "",
+    NEXT_TELEMETRY_DISABLED: "1",
+  },
 });
 if (built.status !== 0) die("next build failed");
 
 // -- the manifest -------------------------------------------------------------------------------
 
-const git = (...args) => {
-  const r = spawnSync("git", args, { cwd: WEB, encoding: "utf8" });
-  return r.status === 0 ? r.stdout.trim() : null;
-};
 const project = recording.workspace.project;
 const ws = `/projects/${encodeURIComponent(project)}/workspace/`;
 const itemDir = path.join(OUT, "projects", project, "workspace", "agenda");
@@ -58,55 +75,76 @@ const STATES = path.join(DESIGN, "data", "sample", "states");
 const stateFiles = existsSync(STATES) ? readdirSync(STATES).filter((f) => f.endsWith(".json")).sort() : [];
 const stateIds = new Set();
 for (const f of stateFiles)
-  for (const a of JSON.parse(readFileSync(path.join(STATES, f), "utf8")).workspace.agenda ?? [])
+  for (const a of JSON.parse(readFileSync(path.join(STATES, f), "utf8")).workspace?.agenda ?? [])
     if (!recordedSet.has(a.id)) stateIds.add(a.id);
 const presetItems = itemIds.filter((id) => stateIds.has(id)).sort((a, b) => num(a) - num(b));
 const minted = itemIds
   .filter((id) => !recordedSet.has(id) && !stateIds.has(id))
   .sort((a, b) => num(a) - num(b));
 const recordingRef = `design/${recordingRel}`;
+// The pages, from the list the front page draws (`lib/pages.ts`, written to `out/pages.json` by its route): each
+// with its states; the recording's file named where a page reads it, and the item page's other paths found in out/.
+const PAGES_JSON = path.join(OUT, "pages.json");
+if (!existsSync(PAGES_JSON)) die("out/pages.json is missing (app/pages.json/route.ts)");
+const ITEM_ROUTE = "/projects/[projectId]/workspace/agenda/[item]";
+const pages = JSON.parse(readFileSync(PAGES_JSON, "utf8")).pages.map(({ recording: readsRecording, ...p }) => ({
+  ...p,
+  ...(readsRecording ? { recording: recordingRef } : {}),
+  ...(p.route === ITEM_ROUTE
+    ? { presetItems: presetItems.map((id) => `${ws}agenda/${id}/`), browserAdded: minted.map((id) => `${ws}agenda/${id}/`) }
+    : {}),
+}));
+rmSync(PAGES_JSON);
 
 const manifest = {
   $design: MARK,
   built_at: new Date().toISOString(),
-  source: {
-    repo: "platform",
-    commit: git("rev-parse", "HEAD"),
-    branch: git("rev-parse", "--abbrev-ref", "HEAD"),
-    dirty: (git("status", "--porcelain", "--", ".") ?? "") !== "",
-  },
+  source,
   recording: { file: recordingRef, name: recording.name, now: recording.now, project },
-  // Each page lists its states on the state widget (`lib/states.tsx`); `?state=<key>` opens one.
+  // Each page's states (`pages[].states`, `lib/page-states.ts`) are its state widget's; `?state=<key>` opens one.
   states: stateFiles.map((f) => `design/data/sample/states/${f}`),
-  pages: [
-    {
-      name: "Workspace · Agenda",
-      route: "/projects/[projectId]/workspace",
-      production: "src/app/(app)/projects/[projectId]/workspace/page.tsx",
-      entry: ws,
-      recording: recordingRef,
-      reads: ["workspace"],
-    },
-    {
-      name: "Agenda item",
-      route: "/projects/[projectId]/workspace/agenda/[item]",
-      production: "src/app/(app)/projects/[projectId]/workspace/agenda/[item]/page.tsx",
-      entry: `${ws}agenda/${recorded[0]}/`,
-      entries: recorded.map((id) => `${ws}agenda/${id}/`),
-      presetItems: presetItems.map((id) => `${ws}agenda/${id}/`),
-      browserAdded: minted.map((id) => `${ws}agenda/${id}/`),
-      recording: recordingRef,
-      reads: ["workspace", "items"],
-    },
-    {
-      name: "System",
-      route: "/system",
-      production: null,
-      entry: "/system/",
-      reads: ["src/sikstack/styles/tokens.css", "@/sikstack/ui", "@/sikstack/frame", "@/sikstack/states", "@/sikstack/shell"],
-    },
-  ],
+  pages,
 };
+// The options page, when the build has one (`templates/design/options.html`, copied into the design folder for
+// a named decision): its entry and each direction's key and label, read from the page's `DIRECTIONS`, so a
+// viewer can put the directions side by side, `?direction=<key>` opening each.
+function* pageFiles(dir) {
+  for (const name of readdirSync(dir)) {
+    const p = path.join(dir, name);
+    if (statSync(p).isDirectory()) {
+      if (name !== "_next") yield* pageFiles(p);
+    } else if (name.endsWith(".html")) yield p;
+  }
+}
+const quoted = (body, field) => {
+  const m = new RegExp(`\\b${field}\\s*:\\s*(["'\`])((?:\\\\.|(?!\\1)[^\\\\])*)\\1`).exec(body);
+  return m ? m[2].replace(/\\(.)/g, "$1") : null;
+};
+const optionPages = [];
+for (const file of pageFiles(OUT)) {
+  const html = readFileSync(file, "utf8");
+  const at = html.search(/\bconst\s+DIRECTIONS\s*=\s*\[/);
+  if (at < 0) continue;
+  const list = html.slice(at, html.indexOf("];", at) + 1);
+  const directions = [];
+  for (const [object] of list.matchAll(/\{[^{}]*\}/g)) {
+    const key = quoted(object, "key");
+    const label = quoted(object, "label");
+    if (key && label) directions.push({ key, label });
+  }
+  const rel = path.relative(OUT, file).split(path.sep).join("/");
+  if (directions.length === 0) die(`${rel} has a DIRECTIONS list with no { key, label } entries`);
+  const entry = rel.endsWith("/index.html") || rel === "index.html" ? `/${rel.slice(0, -"index.html".length)}` : `/${rel}`;
+  const title = /<title>([^<]*)<\/title>/.exec(html)?.[1]?.trim() || null;
+  optionPages.push({
+    name: title,
+    entry,
+    directions: directions.map((d) => ({ ...d, entry: `${entry}?direction=${encodeURIComponent(d.key)}` })),
+  });
+}
+if (optionPages.length > 1) die(`more than one options page (${optionPages.map((o) => o.entry).join(", ")}): keep one`);
+if (optionPages.length === 1) manifest.options = optionPages[0];
+
 writeFileSync(path.join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 // -- the link check -----------------------------------------------------------------------------
@@ -173,5 +211,5 @@ console.log(
   `design:build: /system/ holds ${fileTokens.size} tokens and ${drawn.size + listed.size} shared exports`,
 );
 console.log(
-  `design:build: out/ (${manifest.pages.length} pages, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
+  `design:build: out/ (${manifest.pages.length} pages${manifest.options ? `, an options page of ${manifest.options.directions.length} directions` : ""}, ${recorded.length} recorded, ${presetItems.length} preset and ${minted.length} browser-added item pages) and out/manifest.json from ${recordingRef}`,
 );

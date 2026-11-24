@@ -57,7 +57,7 @@ The layout check, `${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs`, drives `pl
 is not the folder's production-exclusion check (platform's `design:check`), which measures no page:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs" --base http://127.0.0.1:<port> --manifest <folder>/out/manifest.json --out <evidence folder>
+node "${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs" --base http://127.0.0.1:<port> --manifest <folder>/out/manifest.json --out <evidence folder> [--shots <dir>]
 ```
 
 It walks every page of the manifest (or the URLs given) and each state its widget lists, at 1440 and 390 px, and
@@ -66,7 +66,9 @@ clipped text, overlapping or covered controls, targets under 24 px. Every run (a
 opens in a fresh browser context, so no state a run stores reaches the next, and a page with a state widget must
 show the state its run names, else `FAIL state` and that run is not measured. A clean build prints one `ok` line;
 exit 1 is layout failures, exit 2 a usage or driver error (`driver error: …`: no server, a `playwright-cli`
-failure), where nothing was checked. A product may copy it into its folder. The drafter answers every failure
+failure), where nothing was checked. `--shots <dir>` also saves every measured run as viewport-height tiles, what a
+person sees, for the critic to open (it runs `--shots <slice folder>/shots`); a tile's name can start with `-`, so
+pass `--` before it in a shell command. A product may copy it into its folder. The drafter answers every failure
 before it returns; you run it again before a stop.
 
 ## Options
