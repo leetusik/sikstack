@@ -15,8 +15,7 @@ The sikstack workspace is `.sikstack/`, its own git repo, hidden from this repo'
 - `.sikstack/backlog.md`: generated human dashboard
 - `.sikstack/works/state.json`: current/next pointer; `.sikstack/works/index.json`: generated machine index
 - `.sikstack/works/phases/active/` and `.sikstack/works/phases/archived/`: phase folders
-- `.sikstack/works/deferred/`: deferred job folders
-- `.sikstack/works/agenda/`: agenda item folders; `.sikstack/works/agenda.md` is the generated list
+- `.sikstack/works/agenda/`: agenda item folders, each `agenda.json` and its thread, one file per entry under `entries/`; `.sikstack/works/agenda.md` is the generated list
 
 ## System Shape
 

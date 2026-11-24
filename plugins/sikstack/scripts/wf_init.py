@@ -4,7 +4,7 @@ exists, so it imports no other engine module (wf_store finds the state at import
 What it makes, never overwriting a file that is already there (a second run repairs what is missing and changes
 nothing else):
 - `.sikstack/`, its own git repo, as the old `workflow/` was, so the workflow-state commit is `git -C .sikstack ...`;
-- `works/` (the phase, deferred and agenda folders and the event log) and `docs/current/` from the plugin's doc bodies;
+- `works/` (the phase and agenda folders and the event log) and `docs/current/` from the plugin's doc bodies;
 - `config.toml`, the operator's settings: the executor route rows, all commented at their defaults;
 - `.agentic-nested.json`, the marker that says the state is nested in the folder above (`host_root: ".."`);
 - `.gitattributes` (the event log merges by union);
@@ -25,8 +25,7 @@ STATE_DIR = ".sikstack"
 MARKER = ".agentic-nested.json"
 OLD_MARKER = Path("workflow") / ".agentic-nested.json"
 DOC_TYPES = ("product", "architecture", "operations", "qa", "decisions")
-WORKS_DIRS = ("works/phases/active", "works/phases/archived", "works/deferred/open", "works/deferred/promoted",
-              "works/deferred/dropped", "works/agenda", "docs/current")
+WORKS_DIRS = ("works/phases/active", "works/phases/archived", "works/agenda", "docs/current")
 CONFIG_SEED = PLUGIN_ROOT / "templates" / "config.toml"
 
 

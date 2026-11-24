@@ -6,7 +6,8 @@ The engine is flat modules beside this file, each importing only the ones listed
 - wf_store.py: where the state is (the finder), paths, ids, events, phases, slices, the notebook, next, review,
   the acceptance gate, check and archive;
 - wf_git.py: pull requests, the parallel worktrees, the repo registry and phase scope;
-- wf_design.py (design-sign), wf_agenda.py (agenda and deferred jobs), wf_cloud.py: the named parts, each its own file.
+- wf_design.py (design-sign), wf_agenda.py (the agenda, its threads and agenda-fold), wf_cloud.py: the named parts,
+  each its own file.
 wf_store imports none of the others: it calls them through its SEAMS, bound at the end of this file. The Claude
 Code side (executor routes, the meter, the compaction hook) is not here: it is the adapter folder,
 adapters/claude_code/ (`sikstack-adapter`), which imports this file and calls run(); nothing here imports it."""
@@ -78,6 +79,20 @@ def with_offer(entry, tokens: list) -> int:
     return code
 
 
+# The verbs 3.0.0 retired with deferred jobs: each refuses in one line naming the agenda's way, exit 1, in any folder
+# (before the finder) and with no friction offer (the refusal is the design, not a fault).
+RETIRED_VERBS = {
+    "defer-job": "fix it now, drop it with a reason, or (the exception) add an entry that says what would make it "
+                 "actionable: sikstack agenda-entry <item> --kind issue --author agent:<name> --source slice:<P.S> "
+                 "--body \"...\" (a new item: agenda-add --author agent:<name>, which waits as Proposed)",
+    "deferred": "list the agenda: sikstack agenda (an older install's jobs arrive under Proposed after sikstack agenda-fold)",
+    "promote-deferred": "start the work from its agenda item: /create-phase <item> (sikstack phase new --agenda <item>)",
+    "drop-deferred": "drop the agenda item: sikstack agenda-drop <item> --reason \"...\"",
+}
+if __name__ == "__main__" and sys.argv[1:2] and sys.argv[1] in RETIRED_VERBS:
+    print(f"sikstack {sys.argv[1]} is retired (3.0.0: deferred jobs are agenda items now): {RETIRED_VERBS[sys.argv[1]]}",
+          file=sys.stderr)
+    raise SystemExit(1)
 if __name__ == "__main__" and sys.argv[1:2] == ["init"]:  # before the finder: there is no workspace yet
     import wf_init  # noqa: E402
     raise SystemExit(with_offer(lambda: wf_init.init_main(sys.argv[2:]), sys.argv[1:]))
@@ -109,7 +124,7 @@ from wf_git import (  # noqa: E402
     parallel_start, parallel_status, parallel_teardown, phase_scope, PR_OWNERSHIP_MODES, PR_RULE_CHOICES,
 )
 from wf_agenda import (  # noqa: E402
-    add_agenda_parsers, AGENDA_ID_HELP, cmd_deferred,
+    add_agenda_parsers, AGENDA_ID_HELP,
 )
 from wf_design import (  # noqa: E402
     DESIGN_API_COMMANDS, add_design_parsers,
@@ -151,9 +166,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("next", help="Print the current phase/slice selection (plus explain_unit=<document|book|chapter> on an explain phase, and on the default stream merge_ready=<P>:<branch> for a parallel phase done with a passing review on its branch but not merged yet); when the phase's notebook is over 40,960 B, also notebook_over_budget= with up to 3 notebook_move= commands to run before the next dispatch (the moves form), or none when nothing can move (the advisory form); for a phase with a pr block, one pr_branch=<repo|host|root>:<branch> base=<base> url=<url|none> per recorded branch, pr_waived=<note> when waived, and pr_draft=due while the phase is at its review (its REVIEW slice in_progress, in_review or pending, the phase in_review, or its acceptance gate open) with a branch unopened: the drafts open when the review would pass. In a linked checkout it first applies the web's pending agenda changes (one inbox <entry>: line each) and prints store=cloud server=<server> project=<id> after the nested lines, then commits_waiting=<ids|none>: the done slices whose commit mark-committed has not recorded, in finish order")
     p.add_argument("--card", action="store_true", help="print the resume card instead: the pointer, the next action or the typed stop, the open gates and the slice's file paths, computed from state, at most 2,048 bytes (after a compaction, Claude Code's hook prints it with the running spans)")
     p.set_defaults(func=cmd_next)
-
-    p = sub.add_parser("deferred", help="Rebuild and print deferred jobs dashboard summary")
-    p.set_defaults(func=cmd_deferred)
 
     phase = verbs("phase", "Make, move, archive or read a phase: new, status, archive, rotate, reopen, scope, rounds")
     p = phase("new", help="Create a new phase with DECOMP and REVIEW slices")
@@ -283,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = worktree("status", help="Read-only cross-stream view: this checkout's pointer plus every parallel phase's branch-side slice state (never writes anything)")
     p.set_defaults(func=parallel_status)
 
-    p = worktree("gate", help="Advice, read-only: is this parallel phase's branch mergeable now (branch done+pass, default stream quiet -- or, v86, exemption=phase-folder-only: its diff since the merge-base touches only its phase folder, the generated works/ files and added works/deferred/open/ and works/agenda/ paths)? Prints GATE OPEN, or GATE CLOSED reason=<reasons>; exits 0 either way")
+    p = worktree("gate", help="Advice, read-only: is this parallel phase's branch mergeable now (branch done+pass, default stream quiet -- or, v86, exemption=phase-folder-only: its diff since the merge-base touches only its phase folder, the generated works/ files and added works/agenda/ paths: a new item or entry)? Prints GATE OPEN, or GATE CLOSED reason=<reasons>; exits 0 either way")
     p.add_argument("phase", help=PHASE_ARG_HELP)
     p.add_argument("--branch-ref", default=None, help="git ref holding the phase branch's state (default: the phase's stamped execution.branch; e.g. HEAD or origin/phase/P2-x in CI)")
     p.add_argument("--main-ref", default=None, help="git ref holding the default stream's state (default: this working tree; e.g. origin/main when running from a PR checkout)")
@@ -376,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--replace", action="store_true", help="replace the section's body (the heading and the rest of the file are kept byte-identical); a heading the notebook lacks is created")
     p.add_argument("--append", action="store_true", help="add text at the end of the section; a heading the notebook lacks is created")
     p.add_argument("--resolve", metavar="OQ<n>", help="collapse that Operator Questions entry to one line")
-    p.add_argument("--pointer", help="with --resolve: where the answer landed (a Decisions line, a deferred job, a slice)")
+    p.add_argument("--pointer", help="with --resolve: where the answer landed (a Decisions line, an agenda item, a slice)")
     p.add_argument("--file", help="read the new text from this file (default: stdin)")
     p.add_argument("--list", action="store_true", help="with a section name: one line per entry (position, own label, bytes, flags long/nested/pointer, its lead cut at 80 characters)")
     p.add_argument("--entry", metavar="K", help="one entry of the section: its position (1-based), OQ<n>, or a unique case-insensitive piece of its first line; alone it prints that entry, with --replace / --remove it writes only it, with --to-topic it may also be ranges and lists (1-8,10)")
@@ -390,7 +402,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_design_parsers(sub)  # design-sign, design-publish, design-builds, design-delete
 
-    add_agenda_parsers(sub)  # defer-job, promote-deferred, drop-deferred, agenda, agenda-*
+    add_agenda_parsers(sub)  # agenda, agenda-*
 
     add_cloud_parsers(sub)  # link, sign-in, unlink, sync
     return parser
@@ -418,7 +430,7 @@ def run(args: argparse.Namespace, tokens: list) -> int:
                          f"{'; '.join(NESTED_PROBLEMS)} -- fix the file (run: {WORKFLOW_CMD} check --no-rebuild)")
     if not cloud_linked() or args.cmd in CLOUD_OWN or args.cmd in DESIGN_API_COMMANDS:
         # local mode: no link, so the command runs exactly as before; link, unlink and sync each take the lock
-        # themselves and never run the begin step; the design API verbs touch no workspace truth, so they need neither. Every typed phase / deferred-id / slice argument becomes its
+        # themselves and never run the begin step; the design API verbs touch no workspace truth, so they need neither. Every typed phase / agenda / slice argument becomes its
         # stored id here, once.
         normalize_id_args(args)
         result = args.func(args)

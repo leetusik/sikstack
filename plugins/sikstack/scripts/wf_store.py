@@ -29,7 +29,7 @@ SEAMS = {
     ),
     "wf_agenda": (
         'agenda_index', 'agenda_links', 'agenda_read_all', 'agenda_require_item', 'rebuild_agenda_dashboard',
-        'rebuild_deferred_dashboard', 'validate_agenda',
+        'validate_agenda',
     ),
     "wf_cloud": (
         'cloud_commits_waiting_line', 'cloud_linked', 'cloud_store_line', 'COMMITTED_AT',
@@ -394,11 +394,9 @@ def shown_rel(rel: str) -> str:
 WORKS = ROOT / "works"
 ACTIVE = WORKS / "phases" / "active"
 ARCHIVED = WORKS / "phases" / "archived"
-DEFERRED_OPEN = WORKS / "deferred" / "open"
-DEFERRED_PROMOTED = WORKS / "deferred" / "promoted"
-DEFERRED_DROPPED = WORKS / "deferred" / "dropped"
 # The agenda (P66): one folder per item, `works/agenda/<AID>/agenda.json`, rewritten in place on every
-# change and never moved -- a status is a field, not a folder (unlike deferred jobs).
+# change and never moved -- a status is a field, not a folder. Its thread (3.0.0) is one file per entry under
+# `works/agenda/<AID>/entries/`, written once and never rewritten (wf_agenda).
 AGENDA = WORKS / "agenda"
 PHASE_STATUSES = {"planned", "in_progress", "in_review", "pending", "blocked", "done"}
 SLICE_STATUSES = {"todo", "ready", "in_progress", "in_review", "changes_requested", "pending", "blocked", "done"}
@@ -414,18 +412,20 @@ SLICE_STOP_KINDS = {
 }
 # A kind a retired flow typed (2.0.0 retired the in-product mockup): an older pending record still validates.
 RETIRED_STOP_KINDS = ("mockup",)
-DEFERRED_STATUSES = {"deferred", "ready", "promoted", "done", "dropped"}
-# An agenda item's STORED status. In progress is never stored: it is derived (an Open item with a linked
-# phase not done), so a listing shows five statuses. AGENDA_SHOWN is the one table of their signed words.
+# An agenda item's STORED status. Proposed and In progress are never stored: both are derived from an item
+# stored `open` (Proposed: it carries the optional `proposed` key, an agent opened it and no one accepted it
+# yet; In progress: a linked phase is not done), so a listing shows six statuses. AGENDA_SHOWN is the one
+# table of their signed words, in the order the views list them. The four stored statuses never grow: an
+# older engine refuses a fifth (P72).
 AGENDA_STATUSES = {"open", "deferred", "solved", "dropped"}
-AGENDA_SHOWN = {"open": "Open", "in_progress": "In progress", "deferred": "Deferred", "solved": "Solved",
-                "dropped": "Dropped"}
+AGENDA_SHOWN = {"proposed": "Proposed", "open": "Open", "in_progress": "In progress", "deferred": "Deferred",
+                "solved": "Solved", "dropped": "Dropped"}
 # agenda.json's keys, in the order every write gives them (any other key is kept, after these).
 AGENDA_KEYS = ("id", "title", "note", "status", "order", "created_at", "changed_at", "outcome", "reason")
 AGENDA_TITLE_MAX = 200
 AGENDA_TITLE_REFUSAL = "Enter a title of 1–200 characters."  # the signed design's field error, word for word
 REVIEW_VERDICTS = {"pass", "changes_requested", "blocked"}
-# Ids (readable ids, after v83): an id the operator can say. New phase and deferred ids are the next
+# Ids (readable ids, after v83): an id the operator can say. New phase ids are the next
 # NUMBER plus a two-symbol random tail -- `P46-k2`, `D92-x4`, slices `P46-k2.S1` -- the number one more than the highest
 # numbered id of that kind the workspace can see (old `P45` and tailed `P45-m9` alike, archived included),
 # the tail drawn with `secrets` from v73's alphabet (Crockford base32 in lowercase without the look-alikes
@@ -446,15 +446,14 @@ ID_TAIL_LETTERS = "abcdefghjkmnpqrstvwxyz"
 ID_TAIL_PATTERN = "(?:[a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]|[0-9][a-hjkmnp-tv-z])"
 ID_MODE_WORDS = frozenset({"gate", "plan"})  # `auto` and `only` cannot be drawn: u, o and l are not in the alphabet
 PHASE_ID_PATTERN = rf"P(?:[0-9]+(?:-{ID_TAIL_PATTERN})?|-{ID_TOKEN_PATTERN})"
-DEFERRED_ID_PATTERN = rf"D(?:[0-9]+(?:-{ID_TAIL_PATTERN})?|-{ID_TOKEN_PATTERN})"
 # An agenda item's id is always a number and a tail (`A7-m3`): it was born after v83, so no untailed `A7`
 # and no v73 `A-<token>` shape exists for it. Its numbers are a sequence of their own.
 AGENDA_ID_PATTERN = rf"A[0-9]+-{ID_TAIL_PATTERN}"
-# A numbered id, tailed or not, any prefix: group 1 the number, group 2 the tail (None when untailed).
+# A numbered id, tailed or not, any prefix (`D`: a deferred job's, read only by agenda-fold now): group 1 the
+# number, group 2 the tail (None when untailed).
 NUMBERED_ID_RE = re.compile(rf"[PDA]([0-9]+)(?:-({ID_TAIL_PATTERN}))?")
 SLICE_SUFFIX_PATTERN = "[A-Z][A-Z0-9]*"
 PHASE_ID_RE = re.compile(PHASE_ID_PATTERN)
-DEFERRED_ID_RE = re.compile(DEFERRED_ID_PATTERN)
 AGENDA_ID_RE = re.compile(AGENDA_ID_PATTERN)
 SLICE_ID_RE = re.compile(rf"({PHASE_ID_PATTERN})\.({SLICE_SUFFIX_PATTERN})")
 # An archive folder is `<yyyymmdd>_<hhmmss>_<phase id>_<slug>` (`_archive_one`); the slug is lowercase.
@@ -462,8 +461,7 @@ ARCHIVE_FOLDER_ID_RE = re.compile(rf"_({PHASE_ID_PATTERN})_")
 # The slice kinds (workspace v34). `kind` routes real behavior -- `co-work` in particular means
 # orchestrator-inline (the round's lifecycle and the operator's words stay on the main thread), so a
 # typo like `cowork` reads as ordinary work. `slice new` makes an unknown kind with one advice: line
-# (it routes on the high row, the safe direction), `validate()` warns of it, and `promote-deferred`
-# still refuses one before it mints a phase. `--risk` is not checked either: unrecognized values route
+# (it routes on the high row, the safe direction) and `validate()` warns of it. `--risk` is not checked either: unrecognized values route
 # high. A kind routes before `risk` is read (`slice_route`): decomposition, review and co-work to the high
 # row, research (findings-only: no product code) to the research row, never the mid row.
 SLICE_KINDS = {"implementation", "review", "decomposition", "research", "fix", "docs", "qa", "co-work"}
@@ -514,14 +512,13 @@ PINNED_MODE = "default"
 WORKTREES_DIR = ".claude/worktrees"
 # What the stamp commit carries besides the phase folder: the generated works/ files that
 # `rebuild_index_and_state` rewrites, plus the event log. Nothing else on the tree enters it.
-STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/deferred.md", "works/agenda.md",
-                     "works/events.jsonl")
+STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/agenda.md", "works/events.jsonl")
 # A default-stream phase in any of these states means main is mid-flight, so a phase
 # branch may not be merged into it yet (the quiet-point gate, `worktree gate`).
 BUSY_PHASE_STATUSES = ("in_progress", "in_review", "pending", "blocked")
 # The quiet point's checked exemption (v86, §9.2): a branch whose diff since its merge-base with the
 # default side touches only its own phase folder, the STAMP_WORKS_FILES, or paths ADDED under one of
-# these folders (a deferred job filed, or an agenda item added, on the branch: a new minted-id folder
+# these folders (an agenda item or an entry added on the branch: a new minted-id folder or entry file
 # cannot conflict) cannot collide with in-flight default-stream work, so `worktree gate` drops the
 # busy-default-stream reason for it.
 # The agenda across streams (P66): item folders are real truth, merged by git; a phase worktree may add,
@@ -532,14 +529,14 @@ BUSY_PHASE_STATUSES = ("in_progress", "in_review", "pending", "blocked")
 # agenda-move renumbers). Links are written only into this stream's own phases (`agenda_phase_elsewhere`):
 # this checkout's copy of another stream's phase.json is frozen at the stamp, and rewriting it would collide
 # with that stream's own writes; agenda-delete leaves such a link (validate then warns of it, dangling).
-GATE_EXEMPT_ADDED_PREFIXES = ("works/deferred/open/", "works/agenda/")
+GATE_EXEMPT_ADDED_PREFIXES = ("works/agenda/",)
 # An explain phase's publishable unit (`- unit:` in intent.md's `## Explain`); absent reads `book`,
 # the only unit before v86.
 EXPLAIN_UNITS = ("document", "book", "chapter")
 EXPLAIN_UNIT_DEFAULT = "book"
 # Regenerated from works/phases/** by `worktree merge-finish`; never merged by hand (see .gitattributes).
 # docs/current/*.md are plain files agents edit, so they are not among them.
-GENERATED_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/deferred.md", "works/agenda.md")
+GENERATED_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/agenda.md")
 
 
 def _main_host_checkout(host: Path) -> Path:
@@ -782,7 +779,7 @@ def _created_sort_stamp(created_at) -> str:
 
 
 def id_sort_key(value, created_at=None) -> tuple:
-    """The ONE order of phase and deferred ids in a listing: numbered ids first, tailed or not, by number
+    """The ONE order of phase (and, for agenda-fold, deferred) ids in a listing: numbered ids first, tailed or not, by number
     and then tail -- `(0, n, tail or "")`, so `P46` before `P46-k2` before `P46-x4` and an all-numeric
     list sorts exactly as v72 sorted it -- then v73's minted tokens, by creation time and then token --
     `(1, created_at, token)`; an id of neither shape sorts last, as written. Deterministic: a numbered
@@ -840,23 +837,6 @@ def all_active_phases() -> list:
             data["slices"].append(sdata)
         phases.append(data)
     return phases
-
-
-def deferred_jobs() -> dict:
-    groups = {"open": [], "promoted": [], "dropped": []}
-    for label, base in [("open", DEFERRED_OPEN), ("promoted", DEFERRED_PROMOTED), ("dropped", DEFERRED_DROPPED)]:
-        if not base.exists():
-            continue
-        for ddir in sorted([p for p in base.iterdir() if p.is_dir()]):
-            djson = ddir / "deferred.json"
-            if not djson.exists():
-                continue
-            data = read_json(djson)
-            data["path"] = str(ddir.relative_to(ROOT))
-            groups[label].append(data)
-        # In id order (D2 before D10 before D10-x4, then v73's minted D- tokens by creation), not folder-name order.
-        groups[label].sort(key=lambda d: id_sort_key(Path(d["path"]).name, d.get("created_at")))
-    return groups
 
 
 def clean_cell(value: object) -> str:
@@ -1076,12 +1056,6 @@ def archived_phase_ids() -> set:
     return ids
 
 
-def deferred_folder_ids() -> set:
-    """Every deferred id with a folder in open/, promoted/ or dropped/ (the folder name is the id)."""
-    return {d.name for base in (DEFERRED_OPEN, DEFERRED_PROMOTED, DEFERRED_DROPPED) if base.is_dir()
-            for d in base.iterdir() if d.is_dir()}
-
-
 def _id_token(value):
     """The lowercase token of a v73 `P-`/`D-` id, any case, or None for any other shape (a numbered id,
     tailed or not, has no token)."""
@@ -1110,23 +1084,21 @@ def agenda_folder_ids() -> set:
 
 
 def visible_ids(prefix: str) -> set:
-    """The ids of one kind this workspace can see: phases (`P`, `visible_phase_ids`), deferred jobs (`D`,
-    every folder in open/, promoted/ and dropped/) or agenda items (`A`, every folder under works/agenda/)."""
-    if prefix == "P":
-        return visible_phase_ids()
-    return agenda_folder_ids() if prefix == "A" else deferred_folder_ids()
+    """The ids of one kind this workspace can see: phases (`P`, `visible_phase_ids`) or agenda items (`A`, every
+    folder under works/agenda/)."""
+    return visible_phase_ids() if prefix == "P" else agenda_folder_ids()
 
 
 def visible_id_tokens() -> set:
-    """The v73 tokens of every phase and deferred id this workspace can see -- ONE pool for both kinds.
-    It now guards only an explicit v73-shape id (`--phase P-7kq2`, `--id D-m3xa`): the mint draws no token."""
-    return {tok for tok in (_id_token(i) for i in visible_phase_ids() | deferred_folder_ids()) if tok}
+    """The v73 tokens of every phase id this workspace can see. It guards only an explicit v73-shape id
+    (`--phase P-7kq2`): the mint draws no token."""
+    return {tok for tok in (_id_token(i) for i in visible_phase_ids()) if tok}
 
 
 def id_token_refusal(token: str, taken=None):
     """Why `token` cannot be an explicit v73-shape id's token, or None: all digits (it would read as a
     number), a mode word (`gate`, `plan`), a `p`/`d` and three digits (typed bare it would read as the old
-    `P123` / `D123`), or a token some visible phase or deferred id already has."""
+    `P123` / `D123`), or a token some visible phase id already has."""
     token = token.lower()
     if token.isdigit():
         return f"its token {token} is all digits, which reads as a number"
@@ -1135,7 +1107,7 @@ def id_token_refusal(token: str, taken=None):
     if re.fullmatch(r"[pd][0-9]{3}", token):
         return f"its token {token}, typed bare, would read as the old id {token.upper()}"
     if token in (visible_id_tokens() if taken is None else taken):
-        return f"its token {token} is already the token of a phase or deferred id this workspace holds (one pool for both kinds)"
+        return f"its token {token} is already the token of a phase id this workspace holds"
     return None
 
 
@@ -1148,7 +1120,7 @@ def id_number(value):
 
 def next_id_number(prefix: str, visible=None) -> int:
     """1 + the highest number of every visible numbered id of this kind, untailed (`P45`) and tailed
-    (`P45-m9`) alike (`visible_ids`: phases active and archived, deferred jobs open, promoted and dropped);
+    (`P45-m9`) alike (`visible_ids`: phases active and archived, or agenda items);
     v73 tokens carry no number and are ignored. An empty workspace gives 1."""
     numbers = [id_number(i)[0] for i in (visible_ids(prefix) if visible is None else visible)
                if str(i).startswith(prefix) and id_number(i)]
@@ -1164,8 +1136,8 @@ def draw_id_tail() -> str:
 
 
 def mint_id(prefix: str) -> str:
-    """A new `<prefix><n>-<tail>` id (prefix `P`, `D` or `A`): `next_id_number` and a tail re-drawn while the
-    full id is visible. Nothing else allocates a phase, deferred or agenda id. Two branches that each mint draw
+    """A new `<prefix><n>-<tail>` id (prefix `P` or `A`): `next_id_number` and a tail re-drawn while the
+    full id is visible. Nothing else allocates a phase or agenda id. Two branches that each mint draw
     the same number; the tail keeps them apart, and a same-tail pair (1 in 924) is a git add/add conflict at
     merge. An agenda number is spent by nothing: a deleted item's folder is gone, so its number may be drawn
     again, with a new tail (delete the highest item and the next mint reuses its number). No tombstone is
@@ -1180,8 +1152,7 @@ def mint_id(prefix: str) -> str:
 
 
 def mint_phase_id() -> str:
-    """`P<n>-<tail>`: `phase new` without `--phase`, `promote-deferred --create-phase` without `--phase`, and
-    phase rotate's docs-phase proposal. It supersedes v73's `P-<token>`, which no one could say."""
+    """`P<n>-<tail>`: `phase new` without `--phase`, and phase rotate's docs-phase proposal. It supersedes v73's `P-<token>`, which no one could say."""
     return mint_id("P")
 
 
@@ -1190,19 +1161,18 @@ def mint_phase_id() -> str:
 # 46 (an exact stored `P46` always wins), and `46-k2`, `p46-K2` name it always -- the tail is needed only when
 # two branches each made a P46. v73's minted ids keep their brief forms: `7kq2`, `P-7kq2`, `p-7KQ2` are
 # `P-7kq2` (a token needs a letter, is never a mode word, and keeps its dash once the prefix is written:
-# `P7kq2` names nothing; `46k2` is the token `P-46k2`, never a tailed id). A deferred job likewise (`92`,
-# `d92-X4`, `m3xa`, `D-m3xa`). Two contexts, both in `normalize_id_args`, the ONE choke point after argparse:
-# CREATING an id (`phase new --phase`, `defer-job --id`) reads the form statically (`brief_id`: `46` is `P46`);
+# `P7kq2` names nothing; `46k2` is the token `P-46k2`, never a tailed id). An agenda item is a number and a tail
+# (`7`, `A7-m3`). Two contexts, both in `normalize_id_args`, the ONE choke point after argparse:
+# CREATING an id (`phase new --phase`, `agenda-add --id`) reads the form statically (`brief_id`: `46` is `P46`);
 # REFERENCING one (every other argument) looks a number up among the stored ids (`resolve_id_ref`).
-ID_ARG_KINDS = {"P": "phase", "D": "deferred job", "A": "agenda item"}
+ID_ARG_KINDS = {"P": "phase", "A": "agenda item"}
 PHASE_ARG_HELP = ("the phase, in any brief form: 46 or P46 (numbered; type the tail, 46-k2, only when two phases share"
                   " the number), 7kq2 or P-7kq2 (a v73 id), any case")
-ID_ARG_EXAMPLES = {"P": ("P46-k2", "46", "P12", "P-7kq2", "7kq2"), "D": ("D92-x4", "92", "D12", "D-m3xa", "m3xa"),
-                   "A": ("A7-m3", "7")}  # an agenda id has no old or minted-token shape
+ID_ARG_EXAMPLES = {"P": ("P46-k2", "46", "P12", "P-7kq2", "7kq2"), "A": ("A7-m3", "7")}  # an agenda id has no old or minted-token shape
 
 
 def brief_id(prefix: str, raw) -> "str | None":
-    """The id `raw` names read STATICALLY (prefix `P` for a phase, `D` for a deferred job), or None when it is
+    """The id `raw` names read STATICALLY (prefix `P` for a phase, `A` for an agenda item), or None when it is
     no brief form: the optional `P`/`p` and digits (`P46`; leading zeros dropped),
     the same plus a dash and a valid tail (`P46-k2`, the tail lowercased), or the optional `P-`/`p-` and four
     v73 token symbols with a letter and no mode word (`P-7kq2`). A number is not looked up here."""
@@ -1222,7 +1192,7 @@ def brief_id(prefix: str, raw) -> "str | None":
 
 
 def id_arg_refusal(prefix: str, raw) -> str:
-    """Why `raw` is not a phase (`P`) or deferred job (`D`) id, with the three shapes that are; an agenda item
+    """Why `raw` is not a phase (`P`) id, with the three shapes that are; an agenda item
     (`A`) has one shape, a number and a tail."""
     text = str(raw).strip()
     if prefix == "A":
@@ -1262,28 +1232,25 @@ def id_number_refusal(prefix: str, raw, number: int, tailed: list) -> str:
                 f" (e.g. {tailed[0]} or {tailed[0][1:]})")
     if prefix == "A":  # an agenda id is never untailed
         return f"{str(raw).strip()!r} names no {kind}: none is {prefix}{number}-<tail> in the agenda"
-    where = "active or archived" if prefix == "P" else "open, promoted or dropped"
-    return f"{str(raw).strip()!r} names no {kind}: none is {prefix}{number} or {prefix}{number}-<tail>, {where}"
+    return f"{str(raw).strip()!r} names no {kind}: none is {prefix}{number} or {prefix}{number}-<tail>, active or archived"
 
 
 def _stored_id_named(prefix: str, text: str) -> bool:
     """True when an id of a shape `brief_id` does not know is held exactly as typed (an old install's folder is
-    never made unreachable): an active or archived phase, a deferred job, or an agenda item."""
+    never made unreachable): an active or archived phase, or an agenda item."""
     if not re.fullmatch(r"[A-Za-z0-9._-]+", text) or text in (".", ".."):
         return False
-    if prefix == "D":
-        return text in deferred_folder_ids()
     if prefix == "A":
         return text in agenda_folder_ids()
     return (ACTIVE / text).is_dir() or text in archived_phase_ids()
 
 
 def resolve_id_arg(prefix: str, raw) -> str:
-    """A phase (`P`), deferred job (`D`) or agenda item (`A`) id as typed when CREATING one -> the id as stored,
-    read statically (`46` is `P46`); SystemExit with the shapes when it is no id. An id already in a stored
-    shape (`PHASE_ID_RE` / `DEFERRED_ID_RE` / `AGENDA_ID_RE`) is returned untouched."""
+    """A phase (`P`) or agenda item (`A`) id as typed when CREATING one -> the id as stored, read statically
+    (`46` is `P46`); SystemExit with the shapes when it is no id. An id already in a stored shape (`PHASE_ID_RE` /
+    `AGENDA_ID_RE`) is returned untouched."""
     text = str(raw).strip()
-    if {"P": PHASE_ID_RE, "D": DEFERRED_ID_RE, "A": AGENDA_ID_RE}[prefix].fullmatch(text):
+    if {"P": PHASE_ID_RE, "A": AGENDA_ID_RE}[prefix].fullmatch(text):
         return text
     stored = brief_id(prefix, text)
     if stored is not None:
@@ -1294,7 +1261,7 @@ def resolve_id_arg(prefix: str, raw) -> str:
 
 
 def resolve_id_ref(prefix: str, raw, stored=None) -> str:
-    """A phase (`P`) or deferred job (`D`) id as typed when REFERENCING one -> the stored id: a bare number
+    """A phase (`P`) or agenda item (`A`) id as typed when REFERENCING one -> the stored id: a bare number
     (`46`, `p46`, `P46`) is looked up (`lookup_id_number`: an exact `P46` wins, else the one `P46-<tail>`), and
     refused when it names none or several (the several listed); every other form reads as `resolve_id_arg`."""
     number = re.fullmatch(rf"{prefix}?([0-9]+)", str(raw).strip(), re.I)
@@ -1326,29 +1293,14 @@ def _resolve_slice_arg(raw: str) -> str:
 def normalize_id_args(args: argparse.Namespace) -> None:
     """The ONE choke point for an id typed on a command line, run once after argparse (in a linked checkout,
     once after the begin step's pull, so an id reads the tree sikstack holds: `cloud_boundary`): every `phase` /
-    `--phase` argument is a phase id, every `deferred_id` and `defer-job --id` a deferred job's, and the `slice` attribute (positional `slice` and `--slice`) a
-    slice whose phase part may be brief (`46.S1`). CREATING an id (`phase new --phase`, `defer-job --id`) reads
-    it statically; `promote-deferred --create-phase --phase` references an existing phase when the number names
-    one and otherwise creates statically; every other argument REFERENCES a stored id (`resolve_id_ref`). `--depends-on` stays full-form.
+    `--phase` argument is a phase id, and the `slice` attribute (positional `slice` and `--slice`) a slice whose
+    phase part may be brief (`46.S1`). CREATING an id (`phase new --phase`, `agenda-add --id`) reads it
+    statically; every other argument REFERENCES a stored id (`resolve_id_ref`). `--depends-on` stays full-form.
     A command then only ever sees the stored shape."""
     cmd = getattr(args, "cmd", None)
     phase = getattr(args, "phase", None)
     if isinstance(phase, str):
-        if cmd == "phase new":
-            args.phase = resolve_id_arg("P", phase)
-        elif cmd == "promote-deferred" and getattr(args, "create_phase", False):
-            number = re.fullmatch(r"[Pp]?([0-9]+)", phase.strip())
-            found, tailed = lookup_id_number("P", int(number.group(1))) if number else (None, [])
-            if len(tailed) > 1 and found is None:
-                raise SystemExit(id_number_refusal("P", phase, int(number.group(1)), tailed))
-            args.phase = found or resolve_id_arg("P", phase)
-        else:
-            args.phase = resolve_id_ref("P", phase)
-    deferred = getattr(args, "deferred_id", None)
-    if isinstance(deferred, str):
-        args.deferred_id = resolve_id_ref("D", deferred)
-    if cmd == "defer-job" and isinstance(getattr(args, "id", None), str) and args.id:
-        args.id = resolve_id_arg("D", args.id)
+        args.phase = resolve_id_arg("P", phase) if cmd == "phase new" else resolve_id_ref("P", phase)
     # The agenda (P66): `agenda_ids` (every item command's positional ids, a list) and agenda-move's
     # `--before`/`--after` REFERENCE stored items, in the order typed, so a bulk call is refused at its first bad
     # id; `agenda-add --id` CREATES one, read statically (`13-N1` is `A13-n1`) and checked by agenda_add.
@@ -1361,9 +1313,9 @@ def normalize_id_args(args: argparse.Namespace) -> None:
     if cmd == "agenda-add" and isinstance(getattr(args, "id", None), str):
         args.id_typed = args.id
         args.id = brief_id("A", args.id) or args.id.strip()
-    # `phase new --agenda` / `defer-job --agenda` REFERENCE an item (S2 links); the command then refuses an id of
-    # a stored shape that names no item (`A99-zz`), before anything is written.
-    if cmd in ("phase new", "defer-job") and isinstance(getattr(args, "agenda", None), str):
+    # `phase new --agenda` REFERENCES an item (S2 links); the command then refuses an id of a stored shape that
+    # names no item (`A99-zz`), before anything is written.
+    if cmd == "phase new" and isinstance(getattr(args, "agenda", None), str):
         args.agenda = resolve_id_ref("A", args.agenda)
     slice_arg = getattr(args, "slice", None)
     if isinstance(slice_arg, str):
@@ -1685,7 +1637,7 @@ def declared_dependencies(phase_id: str, slice_id: str, order, values):
 
 
 def declared_slice_lines(kind: str, deps) -> list:
-    """slice new / promote-deferred's lines for a declared slice (none for an undeclared one)."""
+    """slice new's lines for a declared slice (none for an undeclared one)."""
     if deps is None:
         return []
     lines = [f"depends_on={','.join(deps)} (declared: binding; /do-whole-phase starts it once these are done)" if deps else
@@ -1702,7 +1654,7 @@ def declaration_checks(phase: dict, s: dict, errors: list, warnings: list) -> No
         return
     if s.get(DEPENDS_DECLARED) is not True:
         errors.append(f"slice {s['id']} has invalid {DEPENDS_DECLARED} {s.get(DEPENDS_DECLARED)!r}; expected true "
-                      "(written by slice new or promote-deferred --depends-on) or no key at all")
+                      "(written by slice new --depends-on) or no key at all")
         return
     if s.get("kind") in BARRIER_KINDS:
         warnings.append(f"slice {s['id']} declares its dependencies, but kind {s.get('kind')} is a barrier that runs alone: "
@@ -2635,7 +2587,7 @@ def phase_section(args: argparse.Namespace) -> None:
         if name and name.lower() != "operator questions":
             raise SystemExit("--resolve works on `Operator Questions` only; omit the section name")
         if not args.pointer:
-            raise SystemExit("--resolve needs --pointer <ref> (where the answer landed: a Decisions line, a deferred job, a slice)")
+            raise SystemExit("--resolve needs --pointer <ref> (where the answer landed: a Decisions line, an agenda item, a slice)")
         heading, i, e = find("Operator Questions")
         want = re.fullmatch(r"OQ(\d+)", args.resolve.strip(), re.I)
         if not want:
@@ -2713,8 +2665,7 @@ def rebuild_index_and_state() -> None:
     selectable = stream_phases(phases, stream)
     current_phase, current_slice, next_slice = resolve_current(selectable)
     waiting_on = operator_wait_target(selectable, current_phase, current_slice)
-    deferred = deferred_jobs()
-    agenda_links_now = agenda_links()  # read once per rebuild: every item's phases and jobs
+    agenda_links_now = agenda_links()  # read once per rebuild: every item's phases
     agenda_counts, agenda_rows = agenda_index(agenda_read_all()[0], agenda_links_now)  # lenient: one bad item never stops it
     rebuilt_at = now_iso()
     index = {
@@ -2730,9 +2681,6 @@ def rebuild_index_and_state() -> None:
                 **({"pinned": True} if phase_pinned(p) else {}),
             } for p in phases
         ],
-        "deferred_open_count": len(deferred.get("open", [])),
-        "deferred_promoted_count": len(deferred.get("promoted", [])),
-        "deferred_dropped_count": len(deferred.get("dropped", [])),
         "agenda_counts": agenda_counts,
         "agenda": agenda_rows,
         "last_rebuilt_at": rebuilt_at,
@@ -2744,7 +2692,6 @@ def rebuild_index_and_state() -> None:
         state["stream"] = stream
     write_json_stamped(WORKS / "state.json", state, "updated_at", rebuilt_at)
     rebuild_backlog(phases, state, index)
-    rebuild_deferred_dashboard(deferred)
     rebuild_agenda_dashboard(agenda_counts, agenda_rows, agenda_links_now)
     for p in phases:  # only the marker-delimited ## Slices block; archived phases are never touched
         refresh_phase_md_slices(ROOT / p["path"], p)
@@ -2929,7 +2876,7 @@ def installed_workspace_version():
 
 def rebuild_backlog(phases: list, state: dict, index: dict) -> None:
     lines = [
-        "# Backlog", "", "> Generated dashboard. Do not put detailed task context here; edit phase/slice/deferred folders instead.",
+        "# Backlog", "", "> Generated dashboard. Do not put detailed task context here; edit phase/slice/agenda folders instead.",
         "> Status box: `[x]` done · `[~]` pending — waiting on operator · `[r]` ready — plan approved, awaiting execution · `[ ]` open/in progress.", "",
         "## Pointer", "",
         f"- Current phase: `{state.get('current_phase') or 'none'}`",
@@ -2942,7 +2889,7 @@ def rebuild_backlog(phases: list, state: dict, index: dict) -> None:
     live = {}  # phase id -> (phase data, slices, where) for every phase streams_section read from elsewhere
     version = installed_workspace_version()
     lines += [
-        f"- Open deferred jobs: `{index.get('deferred_open_count', 0)}`",
+        f"- Proposed agenda items: `{(index.get('agenda_counts') or {}).get('proposed', 0)}`",
         f"- Open agenda items: `{sum((index.get('agenda_counts') or {}).get(key, 0) for key in ('open', 'in_progress'))}`",
         f"- sikstack version: `{'unknown' if version is None else version}`", "",
         *streams_section(phases, state, live),
@@ -3126,24 +3073,7 @@ def validate() -> int:
         errors.append(f"state current_phase does not exist: {state['current_phase']}")
     if state.get("current_slice") and state["current_slice"] not in seen_slices:
         errors.append(f"state current_slice does not exist: {state['current_slice']}")
-    for base, allowed in [(DEFERRED_OPEN, {"deferred", "ready"}), (DEFERRED_PROMOTED, {"promoted", "done"}), (DEFERRED_DROPPED, {"dropped"})]:
-        if not base.exists():
-            continue
-        for ddir in base.iterdir():
-            if not ddir.is_dir():
-                continue
-            djson = ddir / "deferred.json"
-            if not djson.exists():
-                errors.append(f"missing deferred.json: {shown(ddir)}")
-                continue
-            data = read_json(djson)
-            if not DEFERRED_ID_RE.fullmatch(ddir.name):
-                warnings.append(f"deferred id {ddir.name!r} has an unknown shape; expected D<n>-<tail> (D92-x4), D<n> (D12) or a minted D-<token> (D-m3xa) -- nothing renames it")
-            if data.get("status") not in DEFERRED_STATUSES:
-                errors.append(f"invalid deferred status {data.get('id')}: {data.get('status')}")
-            if data.get("status") not in allowed:
-                errors.append(f"deferred job in wrong folder: {data.get('id')} status {data.get('status')} under {shown(base)}")
-    validate_agenda(errors, warnings)
+    validate_agenda(errors, warnings)  # the agenda, its threads, and an unfolded works/deferred/ (agenda-fold)
     # Nested personal install (P28): a malformed marker is an ERROR, so a broken nested install is
     # never mistaken for at-root mode; the host must be a git work tree (phase scope and the
     # product commits read it). Silent at root -- no marker, nothing checked.
@@ -3194,7 +3124,7 @@ def require_slice(slice_id: str) -> Path:
 
 
 def load_template(name: str) -> str:
-    """A phase or deferred seed: the workspace's own `works/templates/<name>` when it keeps one (an operator's edit, a
+    """A phase seed: the workspace's own `works/templates/<name>` when it keeps one (an operator's edit, a
     migrated install), else the plugin's `templates/works/<name>`, which updates with the plugin."""
     own = WORKS / "templates" / name
     return (own if own.is_file() else PLUGIN_ROOT / "templates" / "works" / name).read_text(encoding="utf-8")
@@ -3209,14 +3139,6 @@ def render_template(text: str, **values: str) -> str:
 def phase_md_template() -> str:
     """The phase-notebook seed (`load_template`; the plugin always ships one)."""
     return load_template("phase.md")
-
-
-def require_slice_kind(kind: str) -> str:
-    """promote-deferred's refusal of an unknown slice kind, at its very top: its --create-phase branch creates
-    the phase BEFORE the slice, so a bad kind is caught before anything is written. `slice new` advises instead."""
-    if kind not in SLICE_KINDS:
-        raise SystemExit(f"invalid slice kind: {kind}; expected one of {sorted(SLICE_KINDS)}")
-    return kind
 
 
 def create_slice(phase_id: str, slice_id: str, name: str, kind: str, order, risk: str, source: dict, depends_on=None, declared=False) -> Path:
@@ -4078,7 +4000,7 @@ def cmd_next(args: argparse.Namespace) -> None:
                 print(line)
             print("no open slice in the current phase; review/archive it or create a new phase")
         else:
-            print("no active slice; create a phase or promote deferred work")
+            print("no active slice; create a phase (from an agenda item or a new request)")
         return
     sdir = require_slice(current_slice)
     print(f"current_phase={current_slice.split('.', 1)[0]}")
@@ -4203,7 +4125,7 @@ def resume_card(spans=None, read_spans: bool = False) -> str:
         pr_stack = None
     if not phase_id:
         lines.append("pointer: no active phase")
-        lines.append("next action: create a phase (/create-phase) or promote deferred work")
+        lines.append("next action: create a phase (/create-phase), from an agenda item or a new request")
         if pr_open:
             lines.append(pr_open)
         if pr_stack:

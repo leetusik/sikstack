@@ -5,9 +5,9 @@
 works/events.jsonl merge=union
 
 # The files below are GENERATED -- never hand-authored -- from the folders that
-# hold the real truth (works/phases/**, works/deferred/**, works/agenda/**):
+# hold the real truth (works/phases/**, works/agenda/**):
 #
-#   works/state.json   works/index.json   works/deferred.md   works/agenda.md
+#   works/state.json   works/index.json   works/agenda.md
 #   backlog.md
 #
 # They deliberately get NO custom merge driver. A driver (merge=ours and friends)

@@ -122,19 +122,23 @@ printf '%s\n' "$seed_er" | grep -qE '^mid +sikstack:slice-executor +opus +medium
   && ok "review --verdict pass refuses an undeclared acceptance gate" || bad "an undeclared acceptance gate did not refuse the pass"
 ( cd "$F" && python3 "$ENG" gate P1 waive >/dev/null 2>&1 ) && bad "gate waive should require --note" || ok "gate waive without --note is rejected"
 # The v34 kind set, probed against the same throwaway engine. slice new makes an unknown kind with one
-# advice: line naming the set (exit 0); validate() only WARNS of it; promote-deferred still refuses one.
+# advice: line naming the set (exit 0); validate() only WARNS of it.
 uk=$( cd "$F" && python3 "$ENG" slice new --phase P1 --slice P1.S9 --name "typo" --kind cowork 2>&1 ); uk_rc=$?
 [ "$uk_rc" -eq 0 ] && [ -d "$F/works/phases/active/P1/slices/P1.S9" ] \
   && [ "$(printf '%s\n' "$uk" | grep -c '^advice: kind cowork is not one of co-work, decomposition, docs, fix, implementation, qa, research, review; it routes on the high row$')" -eq 1 ] \
   && ok "slice new makes an unknown --kind with one advice: line naming the set, research included (exit 0)" || bad "slice new on an unknown --kind (rc $uk_rc) -- $uk"
 rm -r "$F/works/phases/active/P1/slices/P1.S9" && ( cd "$F" && python3 "$ENG" check >/dev/null 2>&1 )
-# promote-deferred --create-phase creates the phase BEFORE the slice, so the kind must be
-# rejected before that happens -- otherwise a typo leaves a half-created phase behind.
-( cd "$F" && python3 "$ENG" defer-job --id D1 --title "kind probe" --reason r --trigger t --source manual >/dev/null 2>&1 ) || bad "defer-job probe failed"
-( cd "$F" && python3 "$ENG" promote-deferred D1 --phase P8 --slice P8.S1 --name x --kind cowork --create-phase 2>&1 | grep -q "invalid slice kind: cowork" ) \
-  && [ ! -d "$F/works/phases/active/P8" ] \
-  && ok "promote-deferred rejects an unknown --kind before --create-phase creates the phase" \
-  || bad "promote-deferred left a half-created phase behind on an unknown --kind"
+# 3.0.0 retired deferred jobs: defer-job, deferred, promote-deferred and drop-deferred each refuse in one line,
+# exit 1, naming the agenda's way, and write nothing (here with the old verbs' own arguments).
+rv_tree() { ( cd "$F" && find works -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
+rv_t0=$(rv_tree); rv_bad=""
+for rv_cmd in "defer-job --title x --reason r --trigger t --source manual" "deferred" "promote-deferred D1 --phase P8 --slice P8.S1 --create-phase" "drop-deferred D1 --reason x"; do
+  rv=$( cd "$F" && python3 "$ENG" $rv_cmd 2>&1 ); rv_rc=$?; rv_v=${rv_cmd%% *}  # shellcheck disable=SC2086
+  { [ "$rv_rc" -eq 1 ] && [ "$(printf '%s\n' "$rv" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$rv" | grep -qE "^sikstack $rv_v is retired \(3\.0\.0: .*agenda"; } || rv_bad="$rv_bad [$rv_v rc=$rv_rc: $rv]"
+done
+[ -z "$rv_bad" ] && [ "$rv_t0" = "$(rv_tree)" ] && [ ! -d "$F/works/phases/active/P8" ] \
+  && ok "defer-job, deferred, promote-deferred and drop-deferred each refuse in one line, exit 1, pointing at the agenda; nothing written" \
+  || bad "a retired deferred verb is not a one-line refusal --$rv_bad"
 ( cd "$F" && python3 "$ENG" slice new --phase P1 --slice P1.S1 --name "design round" --kind co-work >/dev/null 2>&1 ) \
   && ok "slice new accepts --kind co-work (absent from history, present in the set)" || bad "slice new rejected --kind co-work"
 # v36 research kind: in the set (the advice above names it) and creatable.
@@ -519,19 +523,20 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 39 in all, and no
+# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 40 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
 design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
-agenda = {"deferred", "defer-job", "promote-deferred", "drop-deferred", "agenda", "agenda-add", "agenda-edit", "agenda-move",
-          "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink"}
+agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-entry", "agenda-show", "agenda-merge", "agenda-fold", "agenda-edit",
+          "agenda-move", "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link",
+          "agenda-unlink"}  # 3.0.0: the four deferred-job verbs retired
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 39 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 39 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda and cloud parts' own, no adapter command" \
+assert len(names) == 40 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 40 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda and cloud parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -622,16 +627,16 @@ printf '%s\n' "$out" | grep -q '^phase.md: .* bytes (budget 40960 bytes)' && pri
   && ok "slice finish prints the notebook size and flags it over budget" || bad "slice finish notebook size print missing -- $out"
 printf '%s\n' "$out" | grep -q 'biggest sections: ## Filler ' && printf '%s\n' "$out" | grep -q 'topics/<slug>.md' \
   && ok "slice finish names the biggest sections and suggests topics/ when over budget" || bad "over-budget size line does not name the largest section -- $out"
-grep -q 'Rebuilt at' "$F/backlog.md" "$F/works/deferred.md" "$F/works/agenda.md" \
-  && bad "a markdown dashboard still carries a Rebuilt at timestamp" || ok "no Rebuilt at timestamp in any markdown dashboard (backlog, deferred, agenda)"
+grep -q 'Rebuilt at' "$F/backlog.md" "$F/works/agenda.md" \
+  && bad "a markdown dashboard still carries a Rebuilt at timestamp" || ok "no Rebuilt at timestamp in any markdown dashboard (backlog, agenda)"
 # The churn this removes: repeated `next` calls must not dirty the three dashboards.
 ( cd "$F" && git init -q . >/dev/null 2>&1 && git add -A >/dev/null 2>&1 \
     && git -c user.email=smoke@example.invalid -c user.name=smoke commit -qm "smoke baseline" >/dev/null 2>&1 )
 ( cd "$F" && python3 "$ENG" next >/dev/null 2>&1; python3 "$ENG" next >/dev/null 2>&1 )
-tracked=$( cd "$F" && git ls-files backlog.md works/deferred.md works/agenda.md | wc -l | tr -d ' ' )
-dirty=$( cd "$F" && git status --short -- backlog.md works/deferred.md works/agenda.md )
-[ "$tracked" = "3" ] && [ -z "$dirty" ] \
-  && ok "two next calls leave the dashboards byte-identical (no timestamp churn)" || bad "next dirtied the dashboards (tracked=$tracked) -- $dirty"
+tracked=$( cd "$F" && git ls-files backlog.md works/agenda.md | wc -l | tr -d ' ' )
+dirty=$( cd "$F" && git status --short -- backlog.md works/agenda.md )
+[ "$tracked" = "2" ] && [ -z "$dirty" ] && [ ! -e "$F/works/deferred.md" ] && [ ! -e "$F/works/deferred" ] \
+  && ok "two next calls leave the dashboards byte-identical (no timestamp churn), and no works/deferred.md or works/deferred/ is written" || bad "next dirtied the dashboards (tracked=$tracked) or wrote the deferred dashboard -- $dirty"
 
 # ---------------------------------------------------------------------------
 echo "== Test 10b: v61 section -- phase.md is an index, read and written one section at a time =="
@@ -880,85 +885,75 @@ rs slice finish P4.DECOMP --outcome cut >/dev/null 2>&1; fe_rc=$?
   || bad "declaration advice wrong (advice rc=$fr_rc, pass rc=$fp_rc, explain rc=$fe_rc) -- $fr / $fp"
 
 # ---------------------------------------------------------------------------
-echo "== Test 10e: ids -- P<n>-/D<n>-<tail> minted with the next number beside P<n>/D<n> and v73's P-/D- tokens, one listing order, an archived id is spent, two branches mint the same number and merge clean =="
-# On a copy of $F emptied of its phases, deferred jobs and git history. Explicit P<n>/D<n>, tailed and v73 token ids keep working.
-newtmp MIW; cp -R "$F/.." "$MIW/ws"; MW="$MIW/ws/.sikstack"; rm -rf "$MW/.git" "$MW/works/phases/active/"* "$MW/works/phases/archived/"* "$MW/works/deferred/"*/*
+echo "== Test 10e: ids -- P<n>-<tail> minted with the next number beside P<n> and v73's P- tokens, an archived id is spent, two branches mint the same number and merge clean =="
+# On a copy of $F emptied of its phases and git history. Explicit P<n>, tailed and v73 token ids keep working.
+newtmp MIW; cp -R "$F/.." "$MIW/ws"; MW="$MIW/ws/.sikstack"; rm -rf "$MW/.git" "$MW/works/phases/active/"* "$MW/works/phases/archived/"*
 mi() { ( cd "$MW" && python3 "$ENG" "$@" ); }
 tail_re='([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]|[0-9][a-hjkmnp-tv-z])'  # two Crockford symbols, a letter among them
 m1=$(mi phase new --name "Minted" --objective "mint probe" 2>&1); mp=$(printf '%s\n' "$m1" | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
-md=$(mi defer-job --title "minted" --reason r --trigger t --source manual 2>&1); mdid=$(printf '%s\n' "$md" | sed -n 's/^created deferred job \(D[^:]*\):.*/\1/p')
 printf '%s\n' "$mp" | grep -qxE "P1-$tail_re" && [ -d "$MW/works/phases/active/$mp/slices/$mp.DECOMP" ] && [ -d "$MW/works/phases/active/$mp/slices/$mp.REVIEW" ] \
-  && printf '%s\n' "$mdid" | grep -qxE "D1-$tail_re" && [ -f "$MW/works/deferred/open/$mdid/deferred.json" ] \
-  && ok "phase new without --phase mints P1-<tail> on an empty workspace (two Crockford symbols, a letter among them) with its DECOMP and REVIEW; defer-job without --id mints D1-<tail>" \
-  || bad "minted ids wrong -- $m1 / $md"
-pm=$(mi defer-job --id D5 --title "to promote" --reason r --trigger t --source manual >/dev/null 2>&1 && mi promote-deferred D5 --create-phase --slice S1 --name "promoted" 2>&1)
-pp=$(printf '%s\n' "$pm" | sed -n 's/^promoted D5 -> \(P[^.]*\)\.S1: .*/\1/p')
-printf '%s\n' "$pp" | grep -qxE "P2-$tail_re" && [ -f "$MW/works/phases/active/$pp/slices/$pp.S1/slice.json" ] && [ -d "$MW/works/deferred/promoted/D5" ] \
-  && ok "promote-deferred --create-phase without --phase mints the next number (P2-<tail> after P1-<tail>) and takes a bare --slice S1" || bad "promote-deferred did not mint (or refused the bare suffix) -- $pm"
+  && ok "phase new without --phase mints P1-<tail> on an empty workspace (two Crockford symbols, a letter among them) with its DECOMP and REVIEW" \
+  || bad "minted ids wrong -- $m1"
+pm=$(mi phase new --name "to promote" --objective probe 2>&1); pp=$(printf '%s\n' "$pm" | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
+printf '%s\n' "$pp" | grep -qxE "P2-$tail_re" && ok "the next phase new mints the next number (P2-<tail> after P1-<tail>)" || bad "phase new did not mint the next number -- $pm"
 mi phase archive "$pp" --force >/dev/null 2>&1; arch=$(ls "$MW/works/phases/archived")
 re_tok=$(mi phase new --phase "$pp" --name again --objective again 2>&1); re_act=$(mi phase new --phase "$mp" --name again --objective again 2>&1)
 nact=$(ls "$MW/works/phases/active" | wc -l | tr -d ' ')
 p3=$(mi phase new --name "After archive" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
-d6=$(mi defer-job --title "after promote" --reason r --trigger t --source manual 2>&1 | sed -n 's/^created deferred job \(D[^:]*\):.*/\1/p')
 printf '%s\n' "$arch" | grep -qE "^[0-9]{8}_[0-9]{6}_${pp}_to_promote$" && printf '%s\n' "$re_tok" | grep -q "phase already exists (archived): $pp" \
   && printf '%s\n' "$re_act" | grep -q "phase already exists: $mp" && [ "$nact" = 1 ] \
-  && printf '%s\n' "$p3" | grep -qxE "P3-$tail_re" && printf '%s\n' "$d6" | grep -qxE "D6-$tail_re" \
-  && ok "a tailed phase archives as <stamp>_P2-<tail>_<slug>; phase new refuses an explicit id that exists active or archived (an archived id is spent); the next mint counts the archived P2 (P3-<tail>) and the promoted D5 (D6-<tail>)" \
-  || bad "archived tailed id not spent, or the next number missed it -- $arch / $re_tok / $re_act / $nact / $p3 / $d6"
+  && printf '%s\n' "$p3" | grep -qxE "P3-$tail_re" \
+  && ok "a tailed phase archives as <stamp>_P2-<tail>_<slug>; phase new refuses an explicit id that exists active or archived (an archived id is spent); the next mint counts the archived P2 (P3-<tail>)" \
+  || bad "archived tailed id not spent, or the next number missed it -- $arch / $re_tok / $re_act / $nact / $p3"
 ( for n in 9 10; do mi phase new --phase "P$n" --name "Numeric $n" --objective probe || exit 1; done \
-  && for d in D10 D2; do mi defer-job --id "$d" --title "$d" --reason r --trigger t --source manual || exit 1; done \
   && mi phase new --phase P11-ab --name "Tailed 11" --objective probe ) >/dev/null 2>&1 || bad "mixed-id probe: setup failed"
 p12=$(mi phase new --name "After P11-ab" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
 printf '%s\n' "$p12" | grep -qxE "P12-$tail_re" \
   && ok "an explicit tailed id counts toward the next number (after P9, P10 and P11-ab a mint draws P12-<tail>)" || bad "the mint missed the tailed P11-ab -- $p12"
-( mi phase new --phase P46-k2 --name "Tailed 46" --objective probe && mi phase new --phase P-7kq2 --name "Token" --objective probe \
-  && mi defer-job --id D-m3xa --title token --reason r --trigger t --source manual ) >/dev/null 2>&1 || bad "mixed-id probe: could not add P46-k2, P-7kq2 or D-m3xa"
+( mi phase new --phase P46-k2 --name "Tailed 46" --objective probe && mi phase new --phase P-7kq2 --name "Token" --objective probe ) >/dev/null 2>&1 \
+  || bad "mixed-id probe: could not add P46-k2 or P-7kq2"
 val_mix=$(mi check --no-rebuild 2>&1); val_rc=$?
-dlist=$(sed -n '/^## Open/,/^## Promoted/p' "$MW/works/deferred.md" | sed -n 's/^| `\([^`]*\)` |.*/\1/p' | tr '\n' ' ')
-[ "$dlist" = "$mdid D2 $d6 D10 D-m3xa " ] && [ "$val_rc" -eq 0 ] && printf '%s\n' "$val_mix" | grep -q '^Workflow validation passed' \
-  && ok "mixed ids (D1-<tail>, D2, D10, D-m3xa) list numbered ids by number, then v73 tokens (the deferred dashboard: $dlist), and validate passes" \
-  || bad "mixed ids out of order or invalid -- deferred: $dlist / $val_mix"
-# Two branches of one repo each mint a phase and a deferred job unseen by the other, so both draw number 1: the
-# merge conflicts in generated files only, and taking either side then `check` (payload/gitattributes) leaves
-# both phases and both jobs, valid, and the shared number is refused until the tail is typed.
-newtmp TBW; cp -R "$F/.." "$TBW/ws"; TW="$TBW/ws/.sikstack"; rm -rf "$TW/.git" "$TW/works/phases/active/"* "$TW/works/phases/archived/"* "$TW/works/deferred/"*/*; : > "$TW/works/events.jsonl"
+[ "$val_rc" -eq 0 ] && printf '%s\n' "$val_mix" | grep -q '^Workflow validation passed' \
+  && ok "mixed phase ids (P9, P10, P11-ab, P12-<tail>, P46-k2, P-7kq2) validate" || bad "mixed phase ids invalid -- $val_mix"
+# Two branches of one repo each mint a phase unseen by the other, so both draw number 1: the merge conflicts in
+# generated files only, and taking either side then `check` (payload/gitattributes) leaves both phases, valid,
+# and the shared number is refused until the tail is typed.
+newtmp TBW; cp -R "$F/.." "$TBW/ws"; TW="$TBW/ws/.sikstack"; rm -rf "$TW/.git" "$TW/works/phases/active/"* "$TW/works/phases/archived/"*; : > "$TW/works/events.jsonl"
 tw() { ( cd "$TW" && python3 "$ENG" "$@" ); }
 tg() { git -C "$TW" -c user.email=smoke@example.invalid -c user.name=smoke "$@"; }
 ( tw check && tg init -q && tg add -A && tg commit -q --allow-empty -m base \
-  && tg checkout -q -b one && tw phase new --name "Branch one" --objective one && tw defer-job --title one --reason r --trigger t --source manual && tg add -A && tg commit -qm one \
-  && tg checkout -q - && tg checkout -q -b two && tw phase new --name "Branch two" --objective two && tw defer-job --title two --reason r --trigger t --source manual ) >/dev/null 2>&1 \
+  && tg checkout -q -b one && tw phase new --name "Branch one" --objective one && tg add -A && tg commit -qm one \
+  && tg checkout -q - && tg checkout -q -b two && tw phase new --name "Branch two" --objective two ) >/dev/null 2>&1 \
   || bad "two-branch probe: setup failed"
-tb_p1=$(tg show --name-only --format= one | sed -n 's|^works/phases/active/\([^/]*\)/phase.json$|\1|p'); tb_d1=$(tg show --name-only --format= one | sed -n 's|^works/deferred/open/\([^/]*\)/deferred.json$|\1|p')
-# Deterministic: a same-tail draw (1 in 924 per kind) is the add/add conflict the engine documents, never a silent
-# mix -- so when branch two drew branch one's tail, it redoes its side with explicit, distinct tails.
-if [ -d "$TW/works/phases/active/$tb_p1" ] || [ -d "$TW/works/deferred/open/$tb_d1" ]; then
-  tb_t=ab; [ "$tb_p1" = P1-ab ] && tb_t=ac; tb_u=ab; [ "$tb_d1" = D1-ab ] && tb_u=ac
-  ( tg reset -q --hard && tg clean -qfd && tw phase new --phase "P1-$tb_t" --name "Branch two" --objective two \
-    && tw defer-job --id "D1-$tb_u" --title two --reason r --trigger t --source manual ) >/dev/null 2>&1 || bad "two-branch probe: the same-tail redo failed"
+tb_p1=$(tg show --name-only --format= one | sed -n 's|^works/phases/active/\([^/]*\)/phase.json$|\1|p')
+# Deterministic: a same-tail draw (1 in 924) is the add/add conflict the engine documents, never a silent mix -- so
+# when branch two drew branch one's tail, it redoes its side with an explicit, distinct tail.
+if [ -d "$TW/works/phases/active/$tb_p1" ]; then
+  tb_t=ab; [ "$tb_p1" = P1-ab ] && tb_t=ac
+  ( tg reset -q --hard && tg clean -qfd && tw phase new --phase "P1-$tb_t" --name "Branch two" --objective two ) >/dev/null 2>&1 || bad "two-branch probe: the same-tail redo failed"
 fi
 ( tg add -A && tg commit -qm two ) >/dev/null 2>&1 || bad "two-branch probe: branch two did not commit"
 tg merge -q --no-edit one >/dev/null 2>&1; conflicted=$(tg diff --name-only --diff-filter=U | tr '\n' ' ')
-outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json|deferred\.md|agenda\.md)|backlog\.md')
+outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
 ( for f in $conflicted; do tg checkout --theirs -- "$f" || exit 1; done; tw check && tg add -A && tg commit -qm merge ) >/dev/null 2>&1
 tb_val=$(tw check --no-rebuild 2>&1); tb_rc=$?; tb_run=$(tw gate 1 2>&1); tb_run_rc=$?
-[ -z "$outside" ] && [ "$(ls "$TW/works/phases/active" | grep -cE "^P1-$tail_re$")" = 2 ] && [ "$(ls "$TW/works/deferred/open" | grep -cE "^D1-$tail_re$")" = 2 ] \
+[ -z "$outside" ] && [ "$(ls "$TW/works/phases/active" | grep -cE "^P1-$tail_re$")" = 2 ] \
   && [ "$tb_rc" -eq 0 ] && [ -z "$(tg status --porcelain)" ] && [ "$(grep -c '"type": "phase_created"' "$TW/works/events.jsonl")" = 2 ] \
   && [ "$tb_run_rc" -ne 0 ] && printf '%s\n' "$tb_run" | grep -qE "names 2 phases numbered 1: .*P1-$tail_re.*P1-$tail_re.*type the tail" \
-  && ok "two branches each mint a phase and a deferred job with the same number (P1-, D1-) and merge with conflicts only in generated files (${conflicted:-none}); either side + rebuild validates, and gate 1 then lists both" \
+  && ok "two branches each mint a phase with the same number (P1-) and merge with conflicts only in generated files (${conflicted:-none}); either side + rebuild validates, and gate 1 then lists both" \
   || bad "two-branch mint did not merge clean -- conflicted: $conflicted / outside: $outside / $tb_val / $tb_run"
 
 # ---------------------------------------------------------------------------
 echo "== Test 10f: brief names -- 13 / P13 name the one P13-<tail>, a shared number is refused and listed, an exact P12 wins, 7kq2 / P-7kq2 still name a v73 id =="
 # A copy of $F emptied of its phases: a v73 token phase beside P12 and P12-ab. Brief names go through one choke point after argparse.
-newtmp BNW; cp -R "$F/.." "$BNW/ws"; BN="$BNW/ws/.sikstack"; rm -rf "$BN/.git" "$BN/works/phases/active/"* "$BN/works/phases/archived/"* "$BN/works/deferred/"*/*; bn() { ( cd "$BN" && python3 "$ENG" "$@" ); }
+newtmp BNW; cp -R "$F/.." "$BNW/ws"; BN="$BNW/ws/.sikstack"; rm -rf "$BN/.git" "$BN/works/phases/active/"* "$BN/works/phases/archived/"*; bn() { ( cd "$BN" && python3 "$ENG" "$@" ); }
 bn_pid=7kq2; bn_up=7KQ2
 ( bn phase new --phase "P-$bn_pid" --name "Brief" --objective probe && bn phase new --phase 12 --name "Numbered" --objective probe \
   && bn phase new --phase P12-ab --name "Twelve tailed" --objective probe ) >/dev/null 2>&1 || bad "brief-name probe: setup failed"
 bn_gate=$(bn gate "$bn_pid" waive --note probe 2>&1); bn_show=$(bn gate "p-$bn_up" 2>&1); bn_old=$(bn gate 12 2>&1); bn_bad=$(bn gate "P$bn_pid" 2>&1); bn_bad_rc=$?
-bn_did=$(bn defer-job --title brief --reason r --trigger t --source manual 2>&1 | sed -n 's/^created deferred job \(D[^:]*\):.*/\1/p'); bn_drop=$(bn drop-deferred 1 --reason x 2>&1)
 printf '%s\n' "$bn_gate" | grep -qx "phase P-$bn_pid: operator acceptance WAIVED -- probe" && printf '%s\n' "$bn_show" | grep -qx "phase=P-$bn_pid" && printf '%s\n' "$bn_old" | grep -qx 'phase=P12' \
-  && [ "$bn_bad_rc" -ne 0 ] && printf '%s\n' "$bn_bad" | grep -q "not a phase id" && printf '%s\n' "$bn_did" | grep -qxE "D1-$tail_re" && printf '%s\n' "$bn_drop" | grep -q "^dropped $bn_did:" \
-  && ok "a phase or deferred-id argument takes the brief name (gate 7kq2, p-7KQ2, 12; drop-deferred 1 names the one D1-<tail>) and refuses P7kq2 with the shapes" || bad "brief names on commands wrong -- $bn_gate / $bn_show / $bn_old / $bn_bad / $bn_did / $bn_drop"
+  && [ "$bn_bad_rc" -ne 0 ] && printf '%s\n' "$bn_bad" | grep -q "not a phase id" \
+  && ok "a phase argument takes the brief name (gate 7kq2, p-7KQ2, 12) and refuses P7kq2 with the shapes" || bad "brief names on commands wrong -- $bn_gate / $bn_show / $bn_old / $bn_bad"
 bn_t=$(bn phase new --name "Tailed" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p'); bn_tu=$(printf '%s' "${bn_t#P13-}" | tr '[:lower:]' '[:upper:]')
 bn_ag=$(bn gate p13 2>&1); bn_agt=$(bn gate "p13-$bn_tu" 2>&1)
 bn_sl=$(bn slice new --phase 13 --slice 13.S1 --name brief --kind implementation --risk low --depends-on none 2>&1)
@@ -991,18 +986,17 @@ ag_idx() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit
   && ok "a fresh install has works/agenda.md with no item, byte-identical across rebuilds; index.json has agenda_counts and agenda; backlog.md says Open agenda items: 0" \
   || bad "the empty agenda page or index keys missing -- [$pg0] [$pg1] $(grep -F 'agenda' "$AG/backlog.md")"
 # (b) ids: A1-<tail> first, its own number sequence, an explicit tailed id once, brief forms.
-a1=$(ag agenda-add --title "first" 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
-a2=$(ag agenda-add --title "second" 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+a1=$(ag agenda-add --title "first" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+a2=$(ag agenda-add --title "second" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 p1=$(ag phase new --name "Plain" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
-d1=$(ag defer-job --title plain --reason r --trigger t --source manual 2>&1 | sed -n 's/^created deferred job \(D[^:]*\):.*/\1/p')
-ex1=$(ag agenda-add --id A13-n1 --title "thirteen" 2>&1); ex2=$(ag agenda-add --id A13-n1 --title "again" 2>&1); ex2_rc=$?
+ex1=$(ag agenda-add --id A13-n1 --title "thirteen" --author person:smoke 2>&1); ex2=$(ag agenda-add --id A13-n1 --title "again" --author person:smoke 2>&1); ex2_rc=$?
 ag agenda-edit 1 --title "first, by 1" >/dev/null 2>&1; ag agenda-edit A2 --title "second, by A2" >/dev/null 2>&1
 printf '%s\n' "$a1" | grep -qxE "A1-$tail_re" && printf '%s\n' "$a2" | grep -qxE "A2-$tail_re" \
-  && printf '%s\n' "$p1" | grep -qxE "P1-$tail_re" && printf '%s\n' "$d1" | grep -qxE "D1-$tail_re" \
+  && printf '%s\n' "$p1" | grep -qxE "P1-$tail_re" \
   && [ "$ex1" = "added A13-n1: thirteen" ] && [ "$ex2_rc" -ne 0 ] && [ "$(printf '%s\n' "$ex2" | wc -l | tr -d ' ')" = 1 ] \
   && [ "$(ag_key "$a1" title)" = "first, by 1" ] && [ "$(ag_key "$a2" title)" = "second, by A2" ] \
-  && ok "agenda-add mints A1-<tail> then A2-<tail> and spends no phase or deferred number (P1-, D1- next); --id A13-n1 is taken once and refused in one line after; 1 and A2 name their items" \
-  || bad "agenda ids wrong -- $a1 / $a2 / $p1 / $d1 / $ex1 / $ex2"
+  && ok "agenda-add mints A1-<tail> then A2-<tail> and spends no phase number (P1- next); --id A13-n1 is taken once and refused in one line after; 1 and A2 name their items" \
+  || bad "agenda ids wrong -- $a1 / $a2 / $p1 / $ex1 / $ex2"
 # (c) transitions: defer, solve with an outcome, reopen, drop with a reason, reopen (both cleared);
 # a refused transition is one line and non-zero; a bulk call with one bad id writes nothing.
 st=""
@@ -1017,7 +1011,7 @@ tr0=$(ag_tree); bk=$(ag agenda-defer A13 A99-zz 2>&1); bk_rc=$?; tr1=$(ag_tree)
   && [ "$bk_rc" -ne 0 ] && [ "$tr0" = "$tr1" ] && [ "$(ag_key A13-n1 status)" = open ] \
   && ok "defer, solve --outcome, reopen, drop --reason, reopen (outcome and reason cleared); reopening an Open item is refused in one line; agenda-defer A13 A99-zz changes nothing" \
   || bad "agenda transitions wrong -- $st / $rf / $bk"
-uo=$(ag agenda-add --title x --bogus 2>&1); uo_rc=$?; tr2=$(ag_tree)
+uo=$(ag agenda-add --title x --author person:smoke --bogus 2>&1); uo_rc=$?; tr2=$(ag_tree)
 [ "$uo_rc" -eq 2 ] && [ "$(printf '%s\n' "$uo" | wc -l | tr -d ' ')" = 1 ] && [ "$tr1" = "$tr2" ] \
   && ok "an unknown option on an agenda command (agenda-add --bogus) is one line, exit 2, nothing written" \
   || bad "an unknown agenda option is not one line and exit 2 (rc=$uo_rc) -- $uo"
@@ -1032,7 +1026,7 @@ moved=$(diff <(printf '%s\n' "$it0") <(printf '%s\n' "$it1") | sed -n 's/^> \([^
 p2=$(ag phase new --name "Linked" --objective probe --agenda 1 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
 nx1=$(ag next 2>&1); lk=$(ag agenda-link 2 --phase "$p2" 2>&1); lk_rc=$?
 shown=$(ag agenda 2>&1 | grep "^$a1 ")
-ag agenda-add --title "noise" >/dev/null 2>&1; ag agenda-defer 14 >/dev/null 2>&1; ag agenda-move A13 --first >/dev/null 2>&1; nx2=$(ag next 2>&1)
+ag agenda-add --title "noise" --author person:smoke >/dev/null 2>&1; ag agenda-defer 14 >/dev/null 2>&1; ag agenda-move A13 --first >/dev/null 2>&1; nx2=$(ag next 2>&1)
 dl=$(ag agenda-delete "$a1" 2>&1); dl_rc=$?; nx3=$(ag next 2>&1)
 pj="$AG/works/phases/active/$p2/phase.json"
 [ -n "$p2" ] && [ "$lk_rc" -ne 0 ] && printf '%s\n' "$shown" | grep -q 'In progress' \
@@ -1082,17 +1076,184 @@ newtmp AGB; AB="$AGB/ws"; mkws AB >/dev/null 2>&1 || bad "agenda probe: second i
 ab() { ( cd "$AB" && python3 "$ENG" "$@" ); }
 abg() { git -C "$AB" -c user.email=smoke@example.invalid -c user.name=smoke "$@"; }
 ( abg init -q && abg add -A && abg commit -q --allow-empty -m base \
-  && abg checkout -q -b one && ab agenda-add --id A1-ab --title one && abg add -A && abg commit -qm one \
-  && abg checkout -q - && abg checkout -q -b two && ab agenda-add --id A1-ac --title two && abg add -A && abg commit -qm two ) >/dev/null 2>&1 \
+  && abg checkout -q -b one && ab agenda-add --id A1-ab --title one --author person:smoke && abg add -A && abg commit -qm one \
+  && abg checkout -q - && abg checkout -q -b two && ab agenda-add --id A1-ac --title two --author person:smoke && abg add -A && abg commit -qm two ) >/dev/null 2>&1 \
   || bad "agenda two-branch probe: setup failed"
 abg merge -q --no-edit one >/dev/null 2>&1; ab_conf=$(abg diff --name-only --diff-filter=U | tr '\n' ' ')
-ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json|deferred\.md|agenda\.md)|backlog\.md')
+ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
 ( for f in $ab_conf; do abg checkout --theirs -- "$f" || exit 1; done; ab check && abg add -A && abg commit -qm merge ) >/dev/null 2>&1
 ab_val=$(ab check --no-rebuild 2>&1); ab_rc=$?
 [ -n "$ab_conf" ] && [ -z "$ab_out" ] && [ "$ab_rc" -eq 0 ] && [ -z "$(abg status --porcelain)" ] \
   && [ "$(ab agenda 2>&1 | grep -cE '^A1-a[bc] ')" = 2 ] && grep -q 'A1-ab' "$AB/works/agenda.md" && grep -q 'A1-ac' "$AB/works/agenda.md" \
   && ok "two branches each add an item (A1-ab, A1-ac) and merge with conflicts only in generated files ($ab_conf); either side + rebuild lists both, valid and clean" \
   || bad "agenda two-branch merge wrong -- conflicted: $ab_conf / outside: $ab_out / $ab_val"
+
+# ---------------------------------------------------------------------------
+echo "== Test 10j: agenda threads (3.0.0) -- an entry is one new file and never rewrites agenda.json, an item takes two phases, an agent's item waits as Proposed until agenda-accept, agenda-merge is all or none, check names each malformed entry, agenda-fold carries every open deferred job once, two clones' entries merge with no truth-file conflict =="
+newtmp THW; TH="$THW/ws"; mkws TH >/dev/null 2>&1 || bad "thread probe: fresh install failed"
+th() { ( cd "$TH" && python3 "$ENG" "$@" ); }
+th_tree() { ( cd "$TH" && find works -type f ! -name '*.md' ! -name index.json ! -name state.json ! -name events.jsonl | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
+th_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], "<absent>"))' "$TH/works/agenda/$1/agenda.json" "$2"; }
+# (a) a person's note and an agent's issue on one item: one new file each, agenda.json byte-identical, both shown in
+# time order with kind, author, source and date; the item stays Open.
+ta=$(th agenda-add --title "threaded" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+ta_sha=$(sha "$TH/works/agenda/$ta/agenda.json")
+te1=$(th agenda-entry 1 --kind note --author person:smoke --source phase:P1 --body "a person's note" 2>&1); te1_n=$(ls "$TH/works/agenda/$ta/entries" 2>/dev/null | wc -l | tr -d ' ')
+te2=$(th agenda-entry "$ta" --kind issue --author agent:claude-opus-5-5 --source slice:P1.S1 --body "an agent's issue" 2>&1); te2_n=$(ls "$TH/works/agenda/$ta/entries" 2>/dev/null | wc -l | tr -d ' ')
+tshow=$(th agenda-show 1 2>&1)
+tlines=$(printf '%s\n' "$tshow" | grep -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2} ' | sed 's/ \[.*//')
+[ -n "$ta" ] && [ "$te1_n" = 1 ] && [ "$te2_n" = 2 ] && [ "$(sha "$TH/works/agenda/$ta/agenda.json")" = "$ta_sha" ] \
+  && printf '%s\n' "$te1" | grep -qE "^added entry $ta/[0-9]{8}T[0-9]{6}\.[0-9]{6}Z-[0-9a-z]{4}\.json: note by person:smoke \(phase:P1\)$" \
+  && printf '%s\n' "$te2" | grep -qE "^added entry $ta/.*: issue by agent:claude-opus-5-5 \(slice:P1\.S1\)$" \
+  && [ "$(printf '%s\n' "$tlines" | sed 's/^- [0-9-]* //')" = "$(printf 'note by person:smoke (phase:P1)\nissue by agent:claude-opus-5-5 (slice:P1.S1)')" ] \
+  && printf '%s\n' "$tshow" | grep -qx "$ta  Open  threaded" && printf '%s\n' "$tshow" | grep -qx 'entries: 2' \
+  && ok "agenda-entry writes exactly one new file under works/agenda/$ta/entries/ per entry and leaves agenda.json byte-identical; agenda-show prints both in time order with date, kind, author and source; the item stays Open" \
+  || bad "agenda entries wrong -- $te1 / $te2 / n=$te1_n,$te2_n / $tshow"
+th_bad=""; for tb in "--kind memo --author person:x --source phase:P1 --body b" "--kind note --author someone --source phase:P1 --body b" \
+    "--kind note --author person:x --source P1 --body b" "--kind note --author person:x --source phase:P1 --body ' '"; do
+  tt0=$(th_tree); eval "th agenda-entry $ta $tb" > "$THW/tb.txt" 2>&1; tb_rc=$?
+  { [ "$tb_rc" -ne 0 ] && [ "$(grep -c '' "$THW/tb.txt")" = 1 ] && [ "$(th_tree)" = "$tt0" ]; } || th_bad="$th_bad [$tb: rc=$tb_rc $(head -2 "$THW/tb.txt")]"
+done
+[ -z "$th_bad" ] && ok "agenda-entry refuses a bad kind, author, source or an empty body in one line, nothing written" || bad "a bad agenda-entry was not refused in one line --$th_bad"
+# (b) one item carries two phases: the listing counts both, agenda-show names both.
+tp1=$(th phase new --name "First" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
+tp2=$(th phase new --name "Second" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
+th agenda-link 1 --phase "$tp1" >/dev/null 2>&1; th agenda-link "$ta" --phase "$tp2" >/dev/null 2>&1
+tl=$(th agenda 2>&1 | grep "^$ta "); ts=$(th agenda-show 1 2>&1 | grep '^phases: ')
+printf '%s\n' "$tl" | grep -q 'In progress' && printf '%s\n' "$tl" | grep -qF '(0 of 2 phases done, 2 entries)' \
+  && printf '%s\n' "$ts" | grep -q "$tp1" && printf '%s\n' "$ts" | grep -q "$tp2" \
+  && ok "agenda-link takes two phases onto one item: agenda shows 0 of 2 phases done (and its 2 entries), agenda-show names both" \
+  || bad "two phases on one item wrong -- $tl / $ts"
+# (c) who opens an item: no --author is refused; an agent's item is Proposed, outside the open order, shown apart in
+# agenda, works/agenda.md, index.json and backlog.md; it does not move; agenda-accept makes it Open, first.
+tn=$(th agenda-add --title "anonymous" 2>&1); tn_rc=$?
+tq=$(th agenda-add --title "an agent's idea" --author agent:claude-opus-5-5 2>&1); tq_id=$(printf '%s\n' "$tq" | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+tq2=$(th agenda-add --title "a stale idea" --author agent:claude-opus-5-5 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+tlist=$(th agenda 2>&1); tmv=$(th agenda-move "$tq_id" --first 2>&1); tmv_rc=$?
+tmd=$(sed -n '/^## Proposed/,/^## Open/p' "$TH/works/agenda.md"); tmd_open=$(sed -n '/^## Open/,/^## Deferred/p' "$TH/works/agenda.md")
+tix=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r={x["id"]: x for x in d["agenda"]}; a=r[sys.argv[2]]; t=r[sys.argv[3]]; print(d["agenda_counts"]["proposed"], a["shown_status"], a["proposed"]["by"], t["entries"], t["latest_entry"] is not None)' "$TH/works/index.json" "$tq_id" "$ta")
+[ "$tn_rc" -eq 2 ] && [ "$(printf '%s\n' "$tn" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$tn" | grep -q -- '--author' \
+  && printf '%s\n' "$tq" | grep -qx "added $tq_id: an agent's idea (Proposed: agenda-accept or agenda-drop it)" \
+  && [ "$(printf '%s\n' "$tlist" | head -2 | awk '{print $2}' | tr '\n' ' ')" = "Proposed Proposed " ] \
+  && [ "$tmv_rc" -ne 0 ] && printf '%s\n' "$tmv" | grep -q "is Proposed" \
+  && printf '%s\n' "$tmd" | grep -qF "| \`$tq_id\` | an agent's idea | agent:claude-opus-5-5 | - |" && ! printf '%s\n' "$tmd_open" | grep -qF "$tq_id" \
+  && printf '%s\n' "$tmd_open" | grep -qE "\| \`$ta\` \| In progress \| threaded \| 0 of 2 phases done \| 2 \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|" \
+  && [ "$tix" = "2 Proposed agent:claude-opus-5-5 2 True" ] && grep -qxF -e '- Proposed agenda items: `2`' "$TH/backlog.md" \
+  && ! grep -q 'deferred' "$TH/backlog.md" \
+  && ok "agenda-add without --author is refused in one line; an agent's item is Proposed: first in agenda, under ## Proposed in works/agenda.md (not in the open order), shown_status Proposed in index.json, counted in backlog.md; it does not move; the threaded item's row shows its entry count and latest date" \
+  || bad "Proposed wrong -- $tn / $tq / $(printf '%s\n' "$tlist" | head -3) / $tmv / $tix / $(grep -F 'agenda items' "$TH/backlog.md")"
+tac=$(th agenda-accept "$tq_id" 2>&1); tac_rc=$?; tdr=$(th agenda-drop "$tq2" --reason "a duplicate" 2>&1)
+tac2=$(th agenda-accept "$ta" 2>&1); tac2_rc=$?
+[ "$tac_rc" -eq 0 ] && printf '%s\n' "$tac" | grep -qx "accepted $tq_id: Open, 1 in the open order" && [ "$(th_key "$tq_id" proposed)" = "<absent>" ] \
+  && th agenda 2>&1 | grep -qE "^$tq_id +Open " && [ "$(th agenda --json | python3 -c 'import json,sys; print([i["id"] for i in json.load(sys.stdin) if i["shown_status"] in ("Open", "In progress")][0])')" = "$tq_id" ] \
+  && [ "$(th_key "$tq2" status)" = dropped ] && [ "$(th_key "$tq2" reason)" = "a duplicate" ] && [ "$(th_key "$tq2" proposed)" = "<absent>" ] \
+  && [ "$tac2_rc" -ne 0 ] && printf '%s\n' "$tac2" | grep -q "only a Proposed item is accepted" \
+  && ok "agenda-accept makes a Proposed item Open, first in the open order; agenda-drop --reason drops another; accepting an Open item is refused" \
+  || bad "accept or drop of a Proposed item wrong -- $tac / $tdr / $tac2"
+# (d) merge: every entry and phase link moves onto the target, each from-item Dropped `merged into`; a bad id changes nothing.
+tm=$(th agenda-add --title "merge target" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+tt0=$(th_tree); tmb=$(th agenda-merge "$tm" "$ta" A99-zz 2>&1); tmb_rc=$?; tt1=$(th_tree)
+tmg=$(th agenda-merge "$tm" "$ta" "$tq_id" 2>&1); tmg_rc=$?
+tmn=$(ls "$TH/works/agenda/$tm/entries" 2>/dev/null | wc -l | tr -d ' ')
+[ "$tmb_rc" -ne 0 ] && [ "$tt0" = "$tt1" ] && [ "$tmg_rc" -eq 0 ] && [ "$tmn" = 2 ] && [ ! -e "$TH/works/agenda/$ta/entries" ] \
+  && [ "$(th_key "$ta" status)" = dropped ] && [ "$(th_key "$ta" reason)" = "merged into $tm" ] && [ "$(th_key "$tq_id" reason)" = "merged into $tm" ] \
+  && grep -q "\"agenda\": \"$tm\"" "$TH/works/phases/active/$tp1/phase.json" && grep -q "\"agenda\": \"$tm\"" "$TH/works/phases/active/$tp2/phase.json" \
+  && printf '%s\n' "$tmg" | grep -qx "merged $ta into $tm: 2 entries and 2 phase links moved; $ta is Dropped (merged into $tm)" \
+  && th check >/dev/null 2>&1 \
+  && ok "agenda-merge moves every entry and phase link onto the target and drops each from-item (merged into $tm); with a bad id it changes nothing" \
+  || bad "agenda-merge wrong -- rc=$tmb_rc/$tmg_rc n=$tmn / $tmb / $tmg"
+# (e) check names each malformed entry in one line: a bad kind, author, source, stamp, file name, empty body.
+tv=$(cd "$TH/works/agenda/$tm/entries" && ls | head -1); tvd="$TH/works/agenda/$tm/entries"
+python3 - "$tvd/$tv" <<'PY'
+import json, sys, os
+src = sys.argv[1]; d = json.load(open(src)); folder = os.path.dirname(src); name = os.path.basename(src)
+second = name.split(".")[0]
+def put(n, **change):
+    open(os.path.join(folder, n), "w").write(json.dumps({**d, **change}) + "\n")
+put(second + ".000001Z-aaa1.json", kind="memo")
+put(second + ".000002Z-aaa2.json", author="nobody")
+put(second + ".000003Z-aaa3.json", source="P1")
+put(second + ".000004Z-aaa4.json", created_at="2026-11-24 10:00")
+put("entry-five.json")
+put(second + ".000006Z-aaa6.json", body="   ")
+PY
+tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: entry ")
+for f in "$tvd"/*aaa* "$tvd/entry-five.json"; do rm -f "$f"; done; tvc2=$(th check --no-rebuild 2>&1); tvc2_rc=$?
+[ "$tvc_rc" -ne 0 ] && [ "$tvl" = 6 ] && printf '%s\n' "$tvc" | grep -q "aaa1.json: kind 'memo' is not one of" && printf '%s\n' "$tvc" | grep -q "aaa2.json: author must be" \
+  && printf '%s\n' "$tvc" | grep -q "aaa3.json: source must be" && printf '%s\n' "$tvc" | grep -q "aaa4.json: created_at must be" \
+  && printf '%s\n' "$tvc" | grep -q "entry-five.json: its file name is not" && printf '%s\n' "$tvc" | grep -q "aaa6.json: body must be" \
+  && [ "$tvc2_rc" -eq 0 ] \
+  && ok "check fails on a malformed entry with one line each (kind, author, source, stamp, file name, empty body) and passes on valid ones" \
+  || bad "entry validation wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl -- $(printf '%s\n' "$tvc" | grep 'entry ' | head -6)"
+# (f) agenda-fold on an install with open, promoted and dropped jobs as an older engine wrote them: check names the
+# fold first; then one Proposed item per open job (an entry on its linked item for a linked one) whose first entry
+# carries the job, one deferred_folded event per job, works/deferred/ and deferred.md gone; a second run folds nothing.
+newtmp FDW; FD="$FDW/ws"; mkws FD >/dev/null 2>&1 || bad "fold probe: fresh install failed"
+fd() { ( cd "$FD" && python3 "$ENG" "$@" ); }
+fl=$(fd agenda-add --title "linked before" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
+python3 - "$FD/works" "$fl" <<'PY'
+import json, os, sys
+works, linked = sys.argv[1], sys.argv[2]
+T = "# Deferred: __DEFERRED_ID__ __TITLE__\n\n## Context\n\n## Why Deferred\n\n## Trigger to Promote\n\n## Notes\n\n"
+def job(place, did, title, source, extra=None, note=""):
+    d = os.path.join(works, "deferred", place, did); os.makedirs(d)
+    data = {"id": did, "title": title, "status": {"open": "deferred"}.get(place, place), "source": source, "reason": f"why {did}",
+            "trigger": f"when {did}", "created_at": "2026-10-01T09:00:00+09:00", "promoted_to": None, "dropped_reason": None, **(extra or {})}
+    json.dump(data, open(os.path.join(d, "deferred.json"), "w"), indent=2)
+    brief = T.replace("__DEFERRED_ID__", did).replace("__TITLE__", title).replace("## Why Deferred\n", f"## Why Deferred\n\n{data['reason']}\n")
+    open(os.path.join(d, "brief.md"), "w").write(brief.replace("## Trigger to Promote\n", f"## Trigger to Promote\n\n{data['trigger']}\n") + note)
+job("open", "D1-ab", "edited job", "P3.REVIEW", note="a hand-written note\n")
+job("open", "D2", "plain job", "operator, by hand")
+job("open", "D-m3xa", "linked job", "P4", {"agenda": linked})
+job("promoted", "D4-cd", "promoted job", "P3.S1", {"status": "promoted", "promoted_to": {"phase_id": "P5", "slice_id": "P5.S1", "path": "x"}})
+job("dropped", "D5-ef", "dropped job", "P3.S2", {"status": "dropped", "dropped_reason": "stale"})
+open(os.path.join(works, "deferred.md"), "w").write("# Deferred Jobs\n")
+PY
+fc=$(fd check 2>&1); fc_rc=$?
+ff=$(fd agenda-fold 2>&1); ff_rc=$?; ff2=$(fd agenda-fold 2>&1); ff2_rc=$?; fc2=$(fd check 2>&1); fc2_rc=$?
+fr=$(python3 - "$FD/works" "$fl" <<'PY'
+import json, os, sys, glob
+works, linked = sys.argv[1], sys.argv[2]
+entries = {}
+for f in glob.glob(os.path.join(works, "agenda", "*", "entries", "*.json")):
+    e = json.load(open(f)); entries[e["job"]["id"]] = (os.path.basename(os.path.dirname(os.path.dirname(f))), e)
+ok = sorted(entries) == ["D-m3xa", "D1-ab", "D2"]
+for did, (aid, e) in entries.items():
+    item = json.load(open(os.path.join(works, "agenda", aid, "agenda.json")))
+    ok = ok and e["kind"] == "issue" and e["author"] == "agent:fold" and all(e["job"][k] for k in ("title", "reason", "trigger", "source", "created_at"))
+    ok = ok and all(s in e["body"] for s in (did, e["job"]["title"], f"why {did}", f"when {did}", e["job"]["source"], "2026-10-01"))
+    ok = ok and ((aid == linked and "proposed" not in item) if did == "D-m3xa" else (item["proposed"]["by"] == "agent:fold" and item["title"] == e["job"]["title"]))
+ok = ok and "a hand-written note" in entries["D1-ab"][1]["body"] and "Brief:" not in entries["D2"][1]["body"]
+ok = ok and entries["D1-ab"][1]["source"] == "slice:P3.REVIEW" and entries["D2"][1]["source"] == "deferred:D2" and entries["D-m3xa"][1]["source"] == "phase:P4"
+ev = [json.loads(l) for l in open(os.path.join(works, "events.jsonl")) if '"deferred_folded"' in l]
+ok = ok and sorted(e["deferred"] for e in ev) == ["D-m3xa", "D1-ab", "D2", "D4-cd", "D5-ef"]
+ok = ok and {e["deferred"]: e["end"] for e in ev}["D4-cd"] == "promoted" and {e["deferred"]: e.get("reason") for e in ev}["D5-ef"] == "stale"
+print("ok" if ok else f"bad: {sorted(entries)} {[(e['deferred'], e['end']) for e in ev]}")
+PY
+)
+[ "$fc_rc" -eq 1 ] && [ "$(printf '%s\n' "$fc" | grep -c 'agenda-fold')" = 1 ] && printf '%s\n' "$fc" | grep -q 'works/deferred/ holds 3 open deferred jobs' \
+  && [ "$ff_rc" -eq 0 ] && printf '%s\n' "$ff" | head -1 | grep -qx 'folded 3 open jobs into the agenda (2 new Proposed items, 1 entry on linked items); 2 closed jobs left with a deferred_folded event; works/deferred/ removed' \
+  && [ "$fr" = ok ] && [ ! -e "$FD/works/deferred" ] && [ ! -e "$FD/works/deferred.md" ] \
+  && [ "$ff2_rc" -eq 0 ] && [ "$ff2" = "nothing to fold: works/deferred/ is gone" ] && [ "$fc2_rc" -eq 0 ] \
+  && [ "$(fd agenda 2>&1 | grep -c ' Proposed ')" = 2 ] \
+  && ok "before the fold check fails naming agenda-fold (3 open jobs); agenda-fold makes one Proposed item per open job (the linked one an entry on its item), each first entry carrying the job's id, title, reason, trigger, source, created date and its brief when edited; 5 deferred_folded events; works/deferred/ and deferred.md gone; a second run folds nothing" \
+  || bad "agenda-fold wrong -- rc=$fc_rc/$ff_rc/$ff2_rc/$fc2_rc $fr / $(printf '%s\n' "$fc" | grep -i defer) / $(printf '%s\n' "$ff" | head -1) / $ff2"
+# (g) two clones each add an entry to one item: no truth file conflicts (each entry is its own new file), the
+# generated files are regenerated by check, and both entries are on the merged item.
+newtmp TGW; TG="$TGW/ws"; mkws TG >/dev/null 2>&1 || bad "two-clone probe: fresh install failed"
+tgc() { git -C "$TG" -c user.email=smoke@example.invalid -c user.name=smoke "$@"; }
+tge() { ( cd "$TG" && python3 "$ENG" "$@" ); }
+( tge agenda-add --id A1-k2 --title one --author person:smoke && tgc init -q && tgc add -A && tgc commit -qm base \
+  && tgc checkout -q -b one && tge agenda-entry A1-k2 --kind note --author person:smoke --source phase:P1 --body one && tgc add -A && tgc commit -qm one \
+  && tgc checkout -q - && tgc checkout -q -b two && tge agenda-entry A1-k2 --kind issue --author agent:smoke --source phase:P1 --body two && tgc add -A && tgc commit -qm two ) >/dev/null 2>&1 \
+  || bad "two-clone probe: setup failed"
+tgc merge -q --no-edit one >/dev/null 2>&1; tg_conf=$(tgc diff --name-only --diff-filter=U | tr '\n' ' ')
+tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
+( for f in $tg_conf; do tgc checkout --theirs -- "$f" || exit 1; done; tge check && tgc add -A && tgc commit -qm merge ) >/dev/null 2>&1
+[ -z "$tg_truth" ] && [ "$(ls "$TG/works/agenda/A1-k2/entries" | wc -l | tr -d ' ')" = 2 ] && tge check --no-rebuild >/dev/null 2>&1 \
+  && [ -z "$(tgc status --porcelain)" ] && tge agenda-show A1-k2 | grep -qx 'entries: 2' \
+  && ok "two clones each add an entry to A1-k2 and merge with no truth-file conflict (only generated files: ${tg_conf:-none}); after check both entries are on the item, valid and clean" \
+  || bad "two clones' entries did not merge clean -- conflicted: $tg_conf / truth: $tg_truth"
 
 # ---------------------------------------------------------------------------
 echo "== Test 10h: v74 a read leaves the tree clean -- next, rebuild and validate on a committed install change no tracked file; a real change still moves the stamps =="
@@ -2038,12 +2199,12 @@ PY
 # (a) local mode: no link file, so no command opens a socket or writes .hi2vi/ (byte-equal: the whole suite).
 cl_in=""
 for c in "next" "phase new --phase P1 --name One --objective toy" "phase new --phase P2 --name Two --objective toy" \
-    "defer-job --title a --reason r --trigger t --source manual" "agenda-add --title x" "check" "check --no-rebuild" "next --card"; do
+    "agenda-add --title a --author person:smoke" "agenda-add --title x --author agent:smoke" "check" "check --no-rebuild" "next --card"; do
   # shellcheck disable=SC2086
   cl_nosock $c > "$CLW/nosock.txt" 2>&1; [ "$?" = 97 ] && cl_in="$cl_in [$c: $(tail -1 "$CLW/nosock.txt")]"
 done
 [ -z "$cl_in" ] && [ ! -e "$CL/.sikstack/.hi2vi" ] && [ -d "$CL/.sikstack/works/phases/active/P2" ] \
-  && ok "local mode: with no [cloud] link, next, phase new, defer-job, agenda-add, check, check --no-rebuild and next --card open no socket and write no .hi2vi/" \
+  && ok "local mode: with no [cloud] link, next, phase new, agenda-add (a person's and an agent's), check, check --no-rebuild and next --card open no socket and write no .hi2vi/" \
   || bad "local mode reached the network or wrote .hi2vi/ --$cl_in $(ls -a "$CL/.sikstack/.hi2vi" 2>/dev/null)"
 # (b) link the checkout by hand to a fake sikstack on a free port (the link command itself is not part of this check).
 CLK="cloud-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
@@ -2100,12 +2261,12 @@ if check == "first":
     need(C[0]["batch"]["derived"] == ["works/index.json", "works/state.json"], f"the P9 records: {C[0]['batch']['derived']}")
     need(base.get("head") == S["head"] == 1 and set(base.get("files", {})) == set(live), "base.json does not match the cloud")
 elif check == "carried":
-    need(len(C) == 1 and C[0]["status"] == 200 and C[0]["batch"]["command"].startswith("defer-job "), "one defer-job batch expected")
+    need(len(C) == 1 and C[0]["status"] == 200 and C[0]["batch"]["command"].startswith("agenda-add "), "one agenda-add batch expected")
     by = {(op["op"], op.get("path")): op for op in ops}
     res = by.get(("put", "works/phases/active/P1/slices/P1.DECOMP/result.md"))
     need(res is not None and res["origin"] == "carried" and res["base_rev"] is None, f"result.md: {res}")
-    dj = [op for op in ops if op.get("path", "").endswith("/deferred.json")]
-    need(dj and all(op["op"] == "put" and op["origin"] == "command" for op in dj), f"deferred.json: {dj}")
+    dj = [op for op in ops if op.get("path", "").endswith("/agenda.json")]
+    need(dj and all(op["op"] == "put" and op["origin"] == "command" for op in dj), f"agenda.json: {dj}")
     ev = by.get(("append", "works/events.jsonl"))
     need(ev is not None and ev["origin"] == "command" and ev["lines"] >= 1, f"events: {ev}")
     need(C[0]["batch"]["derived"] == ["works/index.json", "works/state.json"], "the P9 records")
@@ -2133,8 +2294,8 @@ cl_m=$(cl_mark); cl next >/dev/null; cl_r=$(cl_check "$cl_m" first)
   || bad "linked first batch wrong -- $cl_r"
 # (c) an agent writes result.md with plain file I/O; the next command's batch carries it.
 printf 'an agent wrote this\n' > "$CL/.sikstack/works/phases/active/P1/slices/P1.DECOMP/result.md"
-cl_m=$(cl_mark); cl defer-job --title b --reason r --trigger t --source manual >/dev/null; cl_r=$(cl_check "$cl_m" carried)
-[ "$cl_r" = ok ] && ok "an agent-written result.md rides defer-job's one batch with origin carried, beside the command's deferred.json (origin command) and its events.jsonl lines (an append), and base.json takes the revisions on 200" \
+cl_m=$(cl_mark); cl agenda-add --title b --author person:smoke >/dev/null; cl_r=$(cl_check "$cl_m" carried)
+[ "$cl_r" = ok ] && ok "an agent-written result.md rides agenda-add's one batch with origin carried, beside the command's agenda.json (origin command) and its events.jsonl lines (an append), and base.json takes the revisions on 200" \
   || bad "the carried batch wrong -- $cl_r"
 # (d) equal content: the same bytes rewritten, then a rebuild and a read: no batch, base.json unchanged.
 cl_b0=$(sha "$CL/.sikstack/.hi2vi/base.json"); sleep 1
@@ -2176,7 +2337,7 @@ echo "== Test 22: cloud mode's safety half, against the local fake sikstack -- o
 sf_t0=$(date +%s)
 newtmp SFW; SF="$SFW/host"; SFX="$SFW/xdg"; SF_OUT="$SFW/out.txt"; : > "$SF_OUT"
 sf() { ( cd "$SF" && XDG_CONFIG_HOME="$SFX" python3 "$(wf_entry "$1")" "$@" ) 2>&1 | tee -a "$SF_OUT"; return "${PIPESTATUS[0]}"; }
-# sf_crash kill|raise|pull <args>: the command, with defer-job made to die after it wrote its files (os._exit, or a
+# sf_crash kill|raise|pull <args>: the command, with agenda-add made to die after it wrote its files (os._exit, or a
 # raise), or (pull) the process killed when a pull has written its files but not yet base.json.
 sf_crash() { _m=$1; shift; ( cd "$SF" && XDG_CONFIG_HOME="$SFX" python3 - "$_m" "$@" <<'PY'
 import importlib.util, os, sys
@@ -2185,13 +2346,13 @@ mod = importlib.util.module_from_spec(spec)
 sys.modules["workflow_engine"] = mod
 spec.loader.exec_module(mod)
 agenda, cloud = sys.modules["wf_agenda"], sys.modules["wf_cloud"]  # the parts the engine imported
-mode, real = sys.argv[1], agenda.defer_job
+mode, real = sys.argv[1], agenda.agenda_add
 def crash(args):
     real(args)
     if mode == "kill":
         os._exit(9)
     raise RuntimeError("a crash in the middle of the command")
-agenda.defer_job = crash
+agenda.agenda_add = crash
 if mode == "pull":
     cloud.CloudSession.save_base = lambda self: os._exit(9)
 sys.exit(mod.main(sys.argv[2:]))
@@ -2302,8 +2463,8 @@ elif check == "resent":  # extra: the batch id, revisions after it landed (or be
     need((S["revisions"] == revs) if replay else (S["revisions"] > revs), f"the batch landed twice or never: {S['revisions']} vs {revs}")
     synced()
 elif check == "interrupted":  # extra: the crash's class or -
-    need(journal is not None and journal.get("state") == "running" and journal.get("command", "").startswith("defer-job"),
-         f"the journal is not running defer-job: {journal}")
+    need(journal is not None and journal.get("state") == "running" and journal.get("command", "").startswith("agenda-add"),
+         f"the journal is not running agenda-add: {journal}")
     need((journal.get("crashed") == extra[0]) if extra[0] != "-" else "crashed" not in journal, f"crashed: {journal.get('crashed')}")
     need(not C, "a crashed command sent a batch")
 elif check == "stale":  # extra: the path, revisions and head before, the cloud's content
@@ -2319,8 +2480,8 @@ elif check == "serialized":
     need(len(C) == 2 and all(c["status"] == 200 and not c["batch"]["replay"] for c in C), f"two landed batches expected: {[(c['status'], c['batch']['replay']) for c in C]}")
     heads = [r for r in R if r["path"].endswith("/head")]
     need(len(heads) == 2, f"each process asks head once: {len(heads)}")
-    dj = sorted(p for p in live if p.endswith("/deferred.json"))
-    need(dj == sorted(str(p.relative_to(root)) for p in (root / "works/deferred/open").glob("*/deferred.json")), "sikstack lacks a deferred job")
+    dj = sorted(p for p in live if p.endswith("/agenda.json"))
+    need(dj == sorted(str(p.relative_to(root)) for p in (root / "works/agenda").glob("*/agenda.json")), "sikstack lacks an agenda item")
     synced()
 elif check == "split":  # extra: the number of big files
     need(len(C) >= 2 and all(c["status"] == 200 for c in C), f"several landed batches expected: {[(c['status'], c.get('bytes')) for c in C]}")
@@ -2363,10 +2524,10 @@ sf_m=$(sf_mark); sf next >/dev/null; sf_r=$(sf_check "$sf_m" first)
 [ "$sf_r" = ok ] || bad "cloud safety probe: the first sync failed -- $sf_r"
 # (a) offline: the begin step's P1 fails, so the command never runs: exit 1, one line, the tree unchanged.
 sf_ctl '{"offline": true}'
-sf_t1=$(sf_tree); sf defer-job --title off --reason r --trigger t --source manual > "$SFW/a.txt"; sf_rc=$?; sf_t2=$(sf_tree)
+sf_t1=$(sf_tree); sf agenda-add --title off --author person:smoke > "$SFW/a.txt"; sf_rc=$?; sf_t2=$(sf_tree)
 [ "$sf_rc" = 1 ] && [ "$(grep -c '' "$SFW/a.txt")" = 1 ] && [ "$sf_t1" = "$sf_t2" ] \
   && grep -qE '^sikstack is not reachable at http://127\.0\.0\.1:[0-9]+ \(.+\): in cloud mode nothing runs offline, and nothing was changed\.$' "$SFW/a.txt" \
-  && ok "offline: defer-job is refused before it runs with exit 1 and P8's one line, and the workflow tree's sha list is equal before and after" \
+  && ok "offline: agenda-add is refused before it runs with exit 1 and P8's one line, and the workflow tree's sha list is equal before and after" \
   || bad "offline refusal wrong -- rc=$sf_rc $(head -3 "$SFW/a.txt") $(diff <(echo "$sf_t1") <(echo "$sf_t2") | head -3)"
 echo '{}' | sf compact-resume > "$SFW/a2.txt"; sf_rc=$?
 [ "$sf_rc" = 0 ] && grep -q '^compaction=done' "$SFW/a2.txt" && grep -qE '^note: sikstack is not reachable at ' "$SFW/a2.txt" \
@@ -2376,7 +2537,7 @@ sf_ctl '{"offline": false}'
 # (b) a crash after the push landed and before the base was updated (the answer lost): the next command resends the
 # same batch_id first, sikstack answers it once (a replay), and base.json, sikstack and the disk agree.
 sf_ctl '{"commit": "drop-after"}'; sf_v=$(sf_revs revisions); sf_m=$(sf_mark)
-sf defer-job --title lost --reason r --trigger t --source manual > "$SFW/b.txt"; sf_rc=$?
+sf agenda-add --title lost --author person:smoke > "$SFW/b.txt"; sf_rc=$?
 sf_r=$(sf_check "$sf_m" lost "$sf_v"); sf_bid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["batches"][0])' "$SF/.sikstack/.hi2vi/journal.json" 2>/dev/null)
 sf_v=$(sf_revs revisions); sf_m=$(sf_mark); sf next > "$SFW/b2.txt"; sf_rc2=$?; sf_r2=$(sf_check "$sf_m" resent "$sf_bid" "$sf_v" replay)
 [ "$sf_rc" = 1 ] && tail -1 "$SFW/b.txt" | grep -q '^this change is on disk but not in sikstack (sikstack unreachable: .*): run sync$' \
@@ -2385,7 +2546,7 @@ sf_v=$(sf_revs revisions); sf_m=$(sf_mark); sf next > "$SFW/b2.txt"; sf_rc2=$?; 
   || bad "the lost-answer row wrong -- rc=$sf_rc/$sf_rc2 $sf_r / $sf_r2 / $(tail -1 "$SFW/b.txt")"
 # (c) a crash before the push landed (the batch never applied): the next command sends it, and it lands now.
 sf_ctl '{"commit": "drop-before"}'; sf_v=$(sf_revs revisions); sf_m=$(sf_mark)
-sf defer-job --title unsent --reason r --trigger t --source manual > "$SFW/c.txt"; sf_rc=$?
+sf agenda-add --title unsent --author person:smoke > "$SFW/c.txt"; sf_rc=$?
 sf_r=$(sf_check "$sf_m" unsent "$sf_v"); sf_bid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["batches"][0])' "$SF/.sikstack/.hi2vi/journal.json" 2>/dev/null)
 sf_m=$(sf_mark); sf next > "$SFW/c2.txt"; sf_rc2=$?; sf_r2=$(sf_check "$sf_m" resent "$sf_bid" "$sf_v" first)
 [ "$sf_rc" = 1 ] && [ "$sf_r" = ok ] && [ "$sf_rc2" = 0 ] && [ "$sf_r2" = ok ] \
@@ -2393,15 +2554,15 @@ sf_m=$(sf_mark); sf next > "$SFW/c2.txt"; sf_rc2=$?; sf_r2=$(sf_check "$sf_m" re
   || bad "the unsent row wrong -- rc=$sf_rc/$sf_rc2 $sf_r / $sf_r2"
 # (d) a crash during the command (a hard exit, then a raise): the journal stays running, and the next command refuses
 # with one line naming sync and changes nothing. (sync is the way out; here the journal is removed by hand instead.)
-sf_m=$(sf_mark); sf_crash kill defer-job --title killed --reason r --trigger t --source manual; sf_rc=$?
+sf_m=$(sf_mark); sf_crash kill agenda-add --title killed --author person:smoke; sf_rc=$?
 sf_r=$(sf_check "$sf_m" interrupted -)
 sf_t1=$(sf_tree); sf next > "$SFW/d.txt"; sf_rc2=$?; sf_t2=$(sf_tree)
 [ "$sf_rc" = 9 ] && [ "$sf_r" = ok ] && [ "$sf_rc2" = 1 ] && [ "$(grep -c '' "$SFW/d.txt")" = 1 ] && [ "$sf_t1" = "$sf_t2" ] \
-  && grep -qE '^the last command here \(defer-job --title killed .*\) stopped before it finished: [0-9]+ file\(s\) changed by it are on disk but not in sikstack \(interrupted\): run sync to see them \(nothing was changed\)$' "$SFW/d.txt" \
+  && grep -qE '^the last command here \(agenda-add --title killed .*\) stopped before it finished: [0-9]+ file\(s\) changed by it are on disk but not in sikstack \(interrupted\): run sync to see them \(nothing was changed\)$' "$SFW/d.txt" \
   && ok "a command killed midway leaves the journal running; the next command is refused with one line naming sync, and the tree is unchanged" \
   || bad "the interrupted row (kill) wrong -- rc=$sf_rc/$sf_rc2 $sf_r / $(head -2 "$SFW/d.txt")"
 rm -f "$SF/.sikstack/.hi2vi/journal.json"; sf next >/dev/null
-sf_m=$(sf_mark); sf_crash raise defer-job --title raised --reason r --trigger t --source manual; sf_rc=$?
+sf_m=$(sf_mark); sf_crash raise agenda-add --title raised --author person:smoke; sf_rc=$?
 sf_r=$(sf_check "$sf_m" interrupted RuntimeError); sf next > "$SFW/d2.txt"; sf_rc2=$?
 [ "$sf_rc" = 1 ] && [ "$sf_r" = ok ] && [ "$sf_rc2" = 1 ] && grep -qF 'stopped before it finished, RuntimeError: ' "$SFW/d2.txt" \
   && ok "a command that raises (not a refusal) sends nothing, its journal names the crash, and the next command refuses naming it and sync" \
@@ -2523,12 +2684,12 @@ sf_m=$(sf_mark); sf next >/dev/null; sf_rc=$?; sf_r=$(sf_check "$sf_m" synced)
 # 3 s pass), so without the lock both would begin at the same head and base and race (a double push of the event
 # lines, a lost base). The lock serializes them: each batch lands once and base.json, sikstack and the disk agree.
 sf_ctl '{"gate": {"route": "head", "count": 2, "timeout": 3}}'; sf_m=$(sf_mark)
-sf defer-job --title one --reason r --trigger t --source manual > "$SFW/f1.txt" & sf_p1=$!
-sf defer-job --title two --reason r --trigger t --source manual > "$SFW/f2.txt" & sf_p2=$!
+sf agenda-add --title one --author person:smoke > "$SFW/f1.txt" & sf_p1=$!
+sf agenda-add --title two --author person:smoke > "$SFW/f2.txt" & sf_p2=$!
 wait "$sf_p1"; sf_rc=$?; wait "$sf_p2"; sf_rc2=$?
 sf_ctl '{"gate": null}'; sf_r=$(sf_check "$sf_m" serialized)
 [ "$sf_rc" = 0 ] && [ "$sf_rc2" = 0 ] && [ "$sf_r" = ok ] \
-  && ok "two defer-job processes at once in one checkout are serialized by .hi2vi/lock: two batches, none resent, both jobs in sikstack, and the event log, every rev and base.json's head agree" \
+  && ok "two agenda-add processes at once in one checkout are serialized by .hi2vi/lock: two batches, none resent, both items in sikstack, and the event log, every rev and base.json's head agree" \
   || bad "two engine processes were not serialized -- rc=$sf_rc/$sf_rc2 $sf_r / $(tail -1 "$SFW/f1.txt") / $(tail -1 "$SFW/f2.txt")"
 # compact-resume while another process holds the lock: it waits a bounded time, then fails open with the line as a note.
 python3 -c 'import fcntl, os, sys, time
@@ -2583,7 +2744,7 @@ done
 [ -z "$sf_bad" ] && ok "a 502 from a proxy and a body that is not JSON still end in their one line, exit 1" || bad "a 502 or a non-JSON answer --$sf_bad"
 # A commit answer cut mid-body is a lost answer: one line, the journal keeps the batch, the next command resends it.
 sf_ctl '{"break": {"route": "commit", "how": "truncate"}}'
-sf defer-job --title cut --reason r --trigger t --source manual > "$SFW/i3.txt"; sf_rc=$?
+sf agenda-add --title cut --author person:smoke > "$SFW/i3.txt"; sf_rc=$?
 sf_ctl '{"break": null}'; sf_m=$(sf_mark); sf next >/dev/null; sf_rc2=$?; sf_r=$(sf_check "$sf_m" synced)
 [ "$sf_rc" = 1 ] && sf_no_tb "$SFW/i3.txt" && [ "$(tail -1 "$SFW/i3.txt")" != "" ] \
   && tail -1 "$SFW/i3.txt" | grep -q '^this change is on disk but not in sikstack (sikstack unreachable: IncompleteRead(.*)): run sync$' \
@@ -2944,7 +3105,7 @@ PY
 ) 2>&1 | tee -a "$SF_OUT"; return "${PIPESTATUS[0]}"; }
 sf_t1=$(sf_tree); sf_boom begin next > "$SFW/j.txt"; sf_rc=$?; sf_t2=$(sf_tree)
 echo '{}' | sf_boom begin compact-resume > "$SFW/j2.txt"; sf_rc2=$?
-sf_boom commit defer-job --title boom --reason r --trigger t --source manual > "$SFW/j3.txt"; sf_rc3=$?
+sf_boom commit agenda-add --title boom --author person:smoke > "$SFW/j3.txt"; sf_rc3=$?
 sf next > "$SFW/j4.txt"; sf_rc4=$?
 [ "$sf_rc" = 1 ] && [ "$(cat "$SFW/j.txt")" = "the step before the command stopped (RuntimeError: a failure inside the step), so the command did not run: run sync to see this checkout against sikstack" ] \
   && [ "$sf_t1" = "$sf_t2" ] && [ "$sf_rc2" = 0 ] && grep -q '^compaction=done' "$SFW/j2.txt" && grep -q '^note: the step before the command stopped (RuntimeError' "$SFW/j2.txt" \
@@ -3240,10 +3401,9 @@ lk_brief() {  # lk_brief <A's command> <B's command> <B's expected line ERE>
 }
 lk_brief "phase new --phase 7-ab --name Brief --objective toy" "section 7" '^ +[0-9]+  Objective$'
 lk_brief "slice new --phase P7-ab --slice P7-ab.S1 --name s" "route 7.S1" '^slice=P7-ab\.S1$'
-lk_brief "defer-job --id 7-cd --title brief --reason r --trigger t --source manual" "drop-deferred 7 --reason r" '^dropped D7-cd: '
-lk_brief "agenda-add --id 7-ef --title brief" "agenda-solve 7 --outcome done" '^solved A7-ef'
+lk_brief "agenda-add --id 7-ef --title brief --author person:smoke" "agenda-solve 7 --outcome done" '^solved A7-ef'
 [ -z "$lk_bad" ] \
-  && ok "in a linked checkout a brief id names what another checkout made since the last pull, on the first try: a phase number (section 7), a slice's brief phase part (route 7.S1), a deferred job's number (drop-deferred 7) and an agenda item's (agenda-solve 7)" \
+  && ok "in a linked checkout a brief id names what another checkout made since the last pull, on the first try: a phase number (section 7), a slice's brief phase part (route 7.S1) and an agenda item's (agenda-solve 7)" \
   || bad "a brief id was resolved against the stale disk, before the pull --$lk_bad"
 # A number unique on B's stale disk but shared once the pull lands is refused with the list, one line; the
 # refusal still runs the commit step (no journal left, the pull recorded, nothing sent), and the full id runs.
@@ -3311,30 +3471,30 @@ lk_m=$(lk_mark); lk "$LKA" next >/dev/null; lk_rc2=$?; lk_r2=$(lk_check "$LKA/.s
   && ok "sync --keep cloud <path> writes sikstack's copy over the disk, and the next command runs synced" \
   || bad "sync --keep cloud wrong -- rc=$lk_rc/$lk_rc2 $lk_r / $lk_r2 $(tail -2 "$LKW/d8.txt")"
 # An interrupted command: sync lists its files as interrupted and pushes none of them until --keep.
-( cd "$LKA" && XDG_CONFIG_HOME="$LKX" python3 - defer-job --title killed --reason r --trigger t --source manual <<'PY'
+( cd "$LKA" && XDG_CONFIG_HOME="$LKX" python3 - agenda-add --title killed --author person:smoke <<'PY'
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("workflow_engine", __import__("os").environ["ENG"])
 mod = importlib.util.module_from_spec(spec)
 sys.modules["workflow_engine"] = mod
 spec.loader.exec_module(mod)
 agenda = sys.modules["wf_agenda"]  # the agenda part the engine imported
-real = agenda.defer_job
+real = agenda.agenda_add
 def crash(args):
     real(args)
     os._exit(9)
-agenda.defer_job = crash
+agenda.agenda_add = crash
 sys.exit(mod.main(sys.argv[1:]))
 PY
 ) >> "$LK_OUT" 2>&1
 lk_v=$(lk_revs); lk_m=$(lk_mark); lk "$LKA" sync > "$LKW/e.txt"; lk_rc=$?; lk_r=$(lk_check "$LKA/.sikstack" "$lk_m" interrupted "$lk_v")
 lk_ip=$(grep '^interrupted  ' "$LKW/e.txt" | awk '{print $2}' | tr '\n' ' ')
-[ "$lk_rc" = 1 ] && [ "$lk_r" = ok ] && echo "$lk_ip" | grep -q 'works/deferred/open/.*/deferred.json' \
+[ "$lk_rc" = 1 ] && [ "$lk_r" = ok ] && echo "$lk_ip" | grep -q 'works/agenda/.*/agenda.json' \
   && ok "after a command killed midway, sync lists its files as interrupted and pushes none of them (the journal stays running)" \
   || bad "sync did not hold the interrupted files -- rc=$lk_rc $lk_r $(head -3 "$LKW/e.txt")"
 # shellcheck disable=SC2086
 lk_m=$(lk_mark); lk "$LKA" sync --keep local $lk_ip > "$LKW/e2.txt"; lk_rc=$?; lk_r0=$(lk_check "$LKA/.sikstack" "$lk_m" kept-append)
 lk_m=$(lk_mark); lk "$LKA" next >/dev/null; lk_rc2=$?; lk_r=$(lk_check "$LKA/.sikstack" "$lk_m" synced)
-[ "$lk_rc" = 0 ] && [ "$lk_rc2" = 0 ] && [ "$lk_r0" = ok ] && [ "$lk_r" = ok ] && grep -q '^the interrupted command (defer-job --title killed' "$LKW/e2.txt" \
+[ "$lk_rc" = 0 ] && [ "$lk_rc2" = 0 ] && [ "$lk_r0" = ok ] && [ "$lk_r" = ok ] && grep -q '^the interrupted command (agenda-add --title killed' "$LKW/e2.txt" \
   && ok "sync --keep local on the interrupted files pushes them (works/events.jsonl as its new lines, never a put), clears the journal, and the next command runs synced" \
   || bad "resolving the interrupted state wrong -- rc=$lk_rc/$lk_rc2 $lk_r0 / $lk_r $(head -3 "$LKW/e2.txt")"
 # (e) unlink: refused on a mismatch (still linked), then the way back to local mode.
@@ -3346,7 +3506,7 @@ lk "$LKA" unlink > "$LKW/g.txt"; lk_rc=$?
 lk "$LKA" sync --keep local "$lk_p" >/dev/null
 lk_m=$(lk_mark); lk "$LKA" unlink > "$LKW/g2.txt"; lk_rc=$?
 lk "$LKA" check --no-rebuild > "$LKW/g3.txt"; lk_rc2=$?
-lk_in=""; for c in "next" "phase new --phase P2 --name Two --objective toy" "defer-job --title local --reason r --trigger t --source manual" "check"; do
+lk_in=""; for c in "next" "phase new --phase P2 --name Two --objective toy" "agenda-add --title local --author person:smoke" "check"; do
   # shellcheck disable=SC2086
   lk_nosock "$LKA/.sikstack/scripts/workflow.py" $c > "$LKW/g4.txt"; [ "$?" = 97 ] && lk_in="$lk_in [$c]"
 done
@@ -3384,10 +3544,11 @@ ib_install() { { mkhost "$1" \
   && git -C "$1/.sikstack" config user.email smoke@example.invalid && git -C "$1/.sikstack" config user.name smoke \
   && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m install; } > "$1.setup.txt" 2>&1 || bad "inbox probe: the install of $1 failed -- $(tail -3 "$1.setup.txt")"; }
 ib_install "$IBA"; ib_install "$IBL"
-# A's workspace before the link: a phase and a deferred job, both linked to A1-k2; an Open A2-m3 and A4-n5.
-{ ib "$IBA" phase new --phase P1 --name One --objective toy && ib "$IBA" agenda-add --id A1-k2 --title one \
-  && ib "$IBA" agenda-add --id A2-m3 --title two && ib "$IBA" agenda-add --id A4-n5 --title four \
-  && ib "$IBA" agenda-link A1-k2 --phase P1 && ib "$IBA" defer-job --title job --reason r --trigger t --source manual --agenda A1-k2 \
+# A's workspace before the link: two phases, both linked to A1-k2; an Open A2-m3 and A4-n5; a Proposed A5-p1.
+{ ib "$IBA" phase new --phase P1 --name One --objective toy && ib "$IBA" agenda-add --id A1-k2 --title one --author person:smoke \
+  && ib "$IBA" agenda-add --id A2-m3 --title two --author person:smoke && ib "$IBA" agenda-add --id A4-n5 --title four --author person:smoke \
+  && ib "$IBA" agenda-add --id A5-p1 --title five --author agent:smoke \
+  && ib "$IBA" agenda-link A1-k2 --phase P1 && ib "$IBA" phase new --phase P2 --name Two --objective toy --agenda A1-k2 \
   && git -C "$IBA/.sikstack" add -A && git -C "$IBA/.sikstack" commit -qm seed; } > "$IBW/seed.txt" 2>&1 || bad "inbox probe: the seed failed -- $(tail -3 "$IBW/seed.txt")"
 IBK="inbox-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s\n' "$IBK" > "$IBW/key"; chmod 600 "$IBW/key"
@@ -3473,6 +3634,14 @@ if check == "applied":  # extra: the entry ids, oldest first; each applied, alon
     need(json.loads((root / "works/agenda/A3-x2/agenda.json").read_text())["title"] == "from the web", "A3-x2 is not on disk")
     need(json.loads((root / "works/agenda/A2-m3/agenda.json").read_text())["status"] == "deferred", "A2-m3 is not deferred")
     synced()
+elif check == "thread":  # extra: the entry ids, oldest first: a web entry on A3-x2 and the web's accept of A5-p1
+    for eid, c in zip(extra, [c for c in C if c["batch"]["inbox"]]):
+        need(c["status"] == 200 and c["batch"]["inbox"][0] == {"id": eid, "state": "applied", "exit": 0, "reason": None}, f"{eid}: {c['batch']['inbox']}")
+        need(all(op["path"].startswith("works/agenda/") or op["path"] == "works/events.jsonl" for op in c["batch"]["ops"]), f"{eid}: {c['batch']['ops']}")
+    web = [json.loads(p.read_text()) for p in (root / "works/agenda/A3-x2/entries").glob("*.json")]
+    need(any(e["author"] == "person:web" and e["source"] == "web:inbox" and e["kind"] == "note" for e in web), f"no web entry: {web}")
+    need("proposed" not in json.loads((root / "works/agenda/A5-p1/agenda.json").read_text()), "A5-p1 is still Proposed")
+    synced()
 elif check == "refused":  # extra: <entry id> <exit> <reason>; the result alone in a batch with no file
     eid, code, reason = extra[0], int(extra[1]), extra[2]
     c = with_result(eid)
@@ -3498,10 +3667,10 @@ elif check == "delete":  # extra: <entry id>: one batch holds the delete, the cl
     c = with_result(eid)
     need(len(c) == 1 and c[0]["status"] == 200, f"{eid}: batches {[x['status'] for x in c]}")
     ops = {(op["op"], op["path"]) for op in c[0]["batch"]["ops"]}
-    jobs = [p for o, p in ops if p.startswith("works/deferred/open/") and p.endswith("/deferred.json")]
-    need(("delete", "works/agenda/A1-k2/agenda.json") in ops and ("put", "works/phases/active/P1/phase.json") in ops
-         and len(jobs) == 1, f"{eid}: the batch holds {sorted(ops)}")
-    for p in ["works/phases/active/P1/phase.json"] + jobs:
+    phases = ["works/phases/active/P1/phase.json", "works/phases/active/P2/phase.json"]
+    need(("delete", "works/agenda/A1-k2/agenda.json") in ops and all(("put", p) in ops for p in phases),
+         f"{eid}: the batch holds {sorted(ops)}")
+    for p in phases:
         need("agenda" not in json.loads((root / p).read_text()) and "agenda" not in json.loads(cloud(p)), f"{p} keeps its link")
     need(not (root / "works/agenda/A1-k2").exists() and "works/agenda/A1-k2/agenda.json" not in live, "A1-k2 is still there")
     synced()
@@ -3569,8 +3738,27 @@ chmod 755 "$IBA/.sikstack/works/agenda/A1-k2"; ib_r=$(ib_check "$ib_m" pending "
 # (f) at the next next the delete applies: its links cleared in the same batch as the item's removal and its result.
 ib_m=$(ib_mark); ib "$IBA" next > "$IBW/f.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m" delete "$ib_e7")
 [ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && grep -q "^inbox $ib_e7: applied (agenda-delete A1-k2): deleted A1-k2: 2 links cleared" "$IBW/f.txt" \
-  && ok "next applies a web delete: the item's removal, its cleared links (a phase and a deferred job) and the result land in one batch" \
+  && ok "next applies a web delete: the item's removal, its cleared links (two phases) and the result land in one batch" \
   || bad "a web delete did not clear its links in one batch -- rc=$ib_rc $ib_r $(head -3 "$IBW/f.txt")"
+# (g) the web's entry and accept (P72): mapped to agenda-entry (the web's writer, person:web) and agenda-accept.
+ib_e8=$(ib_web '{"kind": "entry", "items": ["A3-x2"], "fields": {"kind": "note", "body": "a note from the web"}}')
+ib_e9=$(ib_web '{"kind": "accept", "items": ["A5-p1"]}')
+ib_m=$(ib_mark); ib "$IBA" next > "$IBW/g.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m" thread "$ib_e8" "$ib_e9")
+[ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && grep -qE "^inbox $ib_e8: applied \(agenda-entry A3-x2\): added entry A3-x2/.*: note by person:web \(web:inbox\)$" "$IBW/g.txt" \
+  && grep -qx "inbox $ib_e9: applied (agenda-accept A5-p1): accepted A5-p1: Open, 1 in the open order" "$IBW/g.txt" \
+  && ok "next applies the web's entry (agenda-entry as person:web) and accept (agenda-accept), each alone in its landed batch" \
+  || bad "the web's entry or accept was not applied -- rc=$ib_rc $ib_r $(head -3 "$IBW/g.txt")"
+# (h) two writers on one item: another writer's entry lands in sikstack just before this checkout's own entry is
+# committed; both land, and the next sync pulls the other's with no differs line.
+ib_other=$(python3 -c 'import datetime, json; t = datetime.datetime.now(datetime.timezone.utc); print(json.dumps({"path": "works/agenda/A3-x2/entries/" + t.strftime("%Y%m%dT%H%M%S") + ".000001Z-wb2k.json", "content": json.dumps({"kind": "feedback", "author": "person:web", "source": "web:other", "created_at": t.strftime("%Y-%m-%dT%H:%M:%SZ"), "body": "from another writer"}) + "\n"}))')
+ib_post /_fake/control "$(python3 -c 'import json, sys; print(json.dumps({"race": json.loads(sys.argv[1])}))' "$ib_other")" > /dev/null
+ib "$IBA" agenda-entry A3-x2 --kind issue --author agent:smoke --source slice:P1.S1 --body "from this checkout" > "$IBW/h.txt"; ib_rc=$?
+ib "$IBA" sync > "$IBW/h2.txt"; ib_rc2=$?
+ib_n=$(ls "$IBA/.sikstack/works/agenda/A3-x2/entries" | wc -l | tr -d ' ')
+[ "$ib_rc" = 0 ] && [ "$ib_rc2" = 0 ] && ! grep -qi 'differ' "$IBW/h.txt" "$IBW/h2.txt" && [ "$ib_n" = 3 ] \
+  && ls "$IBA/.sikstack/works/agenda/A3-x2/entries" | grep -q 'wb2k' && ib "$IBA" check --no-rebuild >/dev/null 2>&1 \
+  && ok "another writer's entry and this checkout's entry on one item both land: the command and the next sync exit 0 with no differs line, all three entries on disk" \
+  || bad "two writers' entries conflicted -- rc=$ib_rc/$ib_rc2 n=$ib_n $(tail -2 "$IBW/h.txt") / $(tail -2 "$IBW/h2.txt")"
 if grep -rqF "$IBK" "$IBA" "$IBW"/*.txt "$IBW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
 kill "$IB_PID" 2>/dev/null; wait "$IB_PID" 2>/dev/null
 echo "inbox test runtime: $(( $(date +%s) - ib_t0 ))s"

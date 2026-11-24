@@ -1481,8 +1481,8 @@ def parallel_gate(args: argparse.Namespace) -> None:
     * **main side** -- the default stream is quiet: every non-parallel active phase is `planned` or
       `done`. Merging into a live phase is what this gate exists to prevent. v86: a busy default
       stream is skipped when the branch's diff since its merge-base with the default side touches
-      only its own phase folder, the generated works/ files, added deferred jobs and added agenda
-      items (`_gate_exemption`, printed as `exemption=`): such a merge cannot collide with live work.
+      only its own phase folder, the generated works/ files and added agenda items and entries
+      (`_gate_exemption`, printed as `exemption=`): such a merge cannot collide with live work.
 
     Read-only advice (decision 2): `GATE OPEN`, or `GATE CLOSED reason=<reasons>`; exit 0 either way.
     In a nested install (P35) both sides are read in the nested repo, which owns the state.
@@ -1579,7 +1579,7 @@ def parallel_merge_finish(args: argparse.Namespace) -> None:
     """Run on the default stream right after a phase branch's merge: regenerate, then report what is left.
 
     The generated files (`works/state.json`, `works/index.json`, `backlog.md`,
-    `works/deferred.md`, `works/agenda.md`) are derived, never authored, so a merge conflict in
+    `works/agenda.md`) are derived, never authored, so a merge conflict in
     them is resolved by taking either side and regenerating here -- which is why parallel mode
     needs no custom git merge driver (a driver would need per-clone `git config` and would not
     travel with the repo). `docs/current/*.md` are authored: a conflict there is resolved by hand,

@@ -651,8 +651,7 @@ def apply_root(plan: dict) -> bool:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(str(src), str(dst), symlinks=True) if src.is_dir() else shutil.copy2(str(src), str(dst))
     (state / "docs" / "current").mkdir(parents=True, exist_ok=True)
-    for rel in ("works/phases/active", "works/phases/archived", "works/deferred/open", "works/deferred/promoted",
-                "works/deferred/dropped", "works/agenda"):
+    for rel in ("works/phases/active", "works/phases/archived", "works/agenda"):
         (state / rel).mkdir(parents=True, exist_ok=True)
     (state / "config.toml").write_text(config_text(plan["routes"], None), encoding="utf-8")
     (state / ".gitattributes").write_text((PLUGIN_ROOT / "templates" / "gitattributes").read_text(encoding="utf-8"), encoding="utf-8")
