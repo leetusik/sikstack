@@ -79,7 +79,7 @@ def with_offer(entry, tokens: list) -> int:
     return code
 
 
-# The verbs 3.0.0 retired with deferred jobs: each refuses in one line naming the agenda's way, exit 1, in any folder
+# The verbs retired with deferred jobs in 0.3.0: each refuses in one line naming the agenda's way, exit 1, in any folder
 # (before the finder) and with no friction offer (the refusal is the design, not a fault).
 RETIRED_VERBS = {
     "defer-job": "fix it now, drop it with a reason, or (the exception) add an entry that says what would make it "
@@ -90,7 +90,7 @@ RETIRED_VERBS = {
     "drop-deferred": "drop the agenda item: sikstack agenda-drop <item> --reason \"...\"",
 }
 if __name__ == "__main__" and sys.argv[1:2] and sys.argv[1] in RETIRED_VERBS:
-    print(f"sikstack {sys.argv[1]} is retired (3.0.0: deferred jobs are agenda items now): {RETIRED_VERBS[sys.argv[1]]}",
+    print(f"sikstack {sys.argv[1]} is retired (deferred jobs are agenda items now, since 0.3.0): {RETIRED_VERBS[sys.argv[1]]}",
           file=sys.stderr)
     raise SystemExit(1)
 if __name__ == "__main__" and sys.argv[1:2] == ["init"]:  # before the finder: there is no workspace yet

@@ -27,7 +27,7 @@ def _pay(rel):  # an old payload/ path, mapped into the plugin
     return root / rel
 root = Path(sys.argv[1])
 skills = {p.parent.name for p in (root / "skills").glob("*/SKILL.md")}
-assert len(skills) == 17, len(skills)  # 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 3.0.0: defer-job, deferred and promote-deferred retired with deferred jobs
+assert len(skills) == 17, len(skills)  # 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
 assert not skills & {"defer-job", "deferred", "promote-deferred"}, skills
 def engine_src():  # the engine's source: every module, payload/scripts/*.py (the shell's engine_src)
     return "".join(f.read_text(encoding="utf-8") for f in sorted((root / "scripts").glob("*.py")))
@@ -557,7 +557,7 @@ for rel, n in (("commit/SKILL.md", 1), ("rotate-backlog/SKILL.md", 1),
     assert (root / "skills" / rel).read_text().count(cloud_waits) == n, f"{rel}: the linked waiting-commit sentence x{n}"
 assert "A linked checkout (`next` prints `store=cloud`) refuses `worktree start`" in (root / "skills/parallel-phase/SKILL.md").read_text()
 assert "In a linked checkout, changes made on the web arrive as inbox entries" in (root / "skills/agenda/SKILL.md").read_text()
-# 3.0.0: deferred jobs are retired, so nothing is filed: every loose end is fixed now, dropped with a reason, or
+# 0.3.0: deferred jobs are retired, so nothing is filed: every loose end is fixed now, dropped with a reason, or
 # (the exception) an agenda entry that says what would make it actionable. The line, word for word, in each place
 # that routes one; no shipped text but the CHANGELOG and the old installer's manifest names defer-job.
 FILING = "fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable"

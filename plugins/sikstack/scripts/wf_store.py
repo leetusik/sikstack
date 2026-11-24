@@ -395,7 +395,7 @@ WORKS = ROOT / "works"
 ACTIVE = WORKS / "phases" / "active"
 ARCHIVED = WORKS / "phases" / "archived"
 # The agenda (P66): one folder per item, `works/agenda/<AID>/agenda.json`, rewritten in place on every
-# change and never moved -- a status is a field, not a folder. Its thread (3.0.0) is one file per entry under
+# change and never moved -- a status is a field, not a folder. Its thread (0.3.0) is one file per entry under
 # `works/agenda/<AID>/entries/`, written once and never rewritten (wf_agenda).
 AGENDA = WORKS / "agenda"
 PHASE_STATUSES = {"planned", "in_progress", "in_review", "pending", "blocked", "done"}

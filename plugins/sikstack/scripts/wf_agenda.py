@@ -1,5 +1,5 @@
 """The agenda (agenda, agenda-*): items, each item's thread of entries, Proposed, the merge, and agenda-fold, the
-one carry of an older install's deferred jobs onto the agenda (3.0.0 retired them). Imports only wf_store."""
+one carry of an older install's deferred jobs onto the agenda (retired in 0.3.0). Imports only wf_store."""
 from __future__ import annotations
 
 import argparse
@@ -1018,8 +1018,8 @@ def agenda_merge(args: argparse.Namespace) -> None:
               f"{_plural(phases, 'phase link')} moved; {item['id']} is Dropped (merged into {into['id']})")
 
 
-# The fold (P72): 3.0.0 retired deferred jobs, so an older install's works/deferred/ is carried onto the agenda once,
-# by agenda-fold, for any install. Each open job lands where the operator triages it, exactly once: linked to an
+# The fold (P72): 0.3.0 retired deferred jobs, so an install's leftover works/deferred/ is carried onto the agenda
+# once, by agenda-fold, for any install. Each open job lands where the operator triages it, exactly once: linked to an
 # item still in an active view (Open, In progress, Proposed, or Deferred, which `agenda` lists and which the operator
 # chose to defer) it is an entry on that item; otherwise (no link, or a link to a Solved, Dropped or missing item) it
 # becomes its own Proposed item, its entry naming the old link. The first entry (kind issue, author agent:fold)
@@ -1158,7 +1158,7 @@ def _fold_elsewhere():
 
 
 def _validate_unfolded(errors: list, warnings: list) -> None:
-    """An install from before 3.0.0 holding works/deferred/: an ERROR while it holds an open job (3.0.0 reads none,
+    """An install that still holds works/deferred/: an ERROR while it holds an open job (this engine reads none,
     so the work would be lost from every view until the fold), a WARNING when only closed jobs or the old
     works/deferred.md are left. Both name the fold. Off the default checkout (`_fold_elsewhere`) it is one WARNING
     naming where the fold runs: the default checkout holds the same jobs and fails there, and this checkout drops
@@ -1173,9 +1173,9 @@ def _validate_unfolded(errors: list, warnings: list) -> None:
                         f"{ENTRY_UNFOLDED} once, on {elsewhere[1]}, never here ({elsewhere[0]}); this checkout drops "
                         f"works/deferred/ when it merges the default branch")
     elif count:
-        errors.append(f"works/deferred/ holds {count} open deferred job{'s' if count != 1 else ''}, which 3.0.0 no longer "
-                      f"reads: run {WORKFLOW_CMD} {ENTRY_UNFOLDED} once, on this default checkout (each becomes a Proposed "
-                      f"agenda item, or an entry on the open or deferred item it was linked to, whose first entry carries it)")
+        errors.append(f"works/deferred/ holds {count} open deferred job{'s' if count != 1 else ''}, which this engine "
+                      f"no longer reads (deferred jobs are retired): run {WORKFLOW_CMD} {ENTRY_UNFOLDED} once, on this "
+                      f"default checkout (each becomes a Proposed agenda item, or an entry on the open or deferred item it was linked to, whose first entry carries it)")
     else:
         warnings.append(f"works/deferred/ or works/deferred.md is left from deferred jobs, with no open job: run "
                         f"{WORKFLOW_CMD} {ENTRY_UNFOLDED} on this default checkout to record the closed jobs as events and remove it")

@@ -128,13 +128,13 @@ uk=$( cd "$F" && python3 "$ENG" slice new --phase P1 --slice P1.S9 --name "typo"
   && [ "$(printf '%s\n' "$uk" | grep -c '^advice: kind cowork is not one of co-work, decomposition, docs, fix, implementation, qa, research, review; it routes on the high row$')" -eq 1 ] \
   && ok "slice new makes an unknown --kind with one advice: line naming the set, research included (exit 0)" || bad "slice new on an unknown --kind (rc $uk_rc) -- $uk"
 rm -r "$F/works/phases/active/P1/slices/P1.S9" && ( cd "$F" && python3 "$ENG" check >/dev/null 2>&1 )
-# 3.0.0 retired deferred jobs: defer-job, deferred, promote-deferred and drop-deferred each refuse in one line,
+# 0.3.0 retired deferred jobs: defer-job, deferred, promote-deferred and drop-deferred each refuse in one line,
 # exit 1, naming the agenda's way, and write nothing (here with the old verbs' own arguments).
 rv_tree() { ( cd "$F" && find works -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
 rv_t0=$(rv_tree); rv_bad=""
 for rv_cmd in "defer-job --title x --reason r --trigger t --source manual" "deferred" "promote-deferred D1 --phase P8 --slice P8.S1 --create-phase" "drop-deferred D1 --reason x"; do
   rv=$( cd "$F" && python3 "$ENG" $rv_cmd 2>&1 ); rv_rc=$?; rv_v=${rv_cmd%% *}  # shellcheck disable=SC2086
-  { [ "$rv_rc" -eq 1 ] && [ "$(printf '%s\n' "$rv" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$rv" | grep -qE "^sikstack $rv_v is retired \(3\.0\.0: .*agenda"; } || rv_bad="$rv_bad [$rv_v rc=$rv_rc: $rv]"
+  { [ "$rv_rc" -eq 1 ] && [ "$(printf '%s\n' "$rv" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$rv" | grep -qE "^sikstack $rv_v is retired \(deferred jobs are agenda items now, since 0\.3\.0\): .*agenda"; } || rv_bad="$rv_bad [$rv_v rc=$rv_rc: $rv]"
 done
 [ -z "$rv_bad" ] && [ "$rv_t0" = "$(rv_tree)" ] && [ ! -d "$F/works/phases/active/P8" ] \
   && ok "defer-job, deferred, promote-deferred and drop-deferred each refuse in one line, exit 1, pointing at the agenda; nothing written" \
@@ -532,7 +532,7 @@ verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "w
 design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
 agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-entry", "agenda-show", "agenda-merge", "agenda-fold", "agenda-edit",
           "agenda-move", "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link",
-          "agenda-unlink"}  # 3.0.0: the four deferred-job verbs retired
+          "agenda-unlink"}  # 0.3.0: the four deferred-job verbs retired
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
 assert len(names) == 40 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
@@ -1089,7 +1089,7 @@ ab_val=$(ab check --no-rebuild 2>&1); ab_rc=$?
   || bad "agenda two-branch merge wrong -- conflicted: $ab_conf / outside: $ab_out / $ab_val"
 
 # ---------------------------------------------------------------------------
-echo "== Test 10j: agenda threads (3.0.0) -- an entry is one new file and never rewrites agenda.json, an item takes two phases, an agent's item waits as Proposed until agenda-accept, agenda-merge is all or none, check names each malformed entry, agenda-fold carries every open deferred job once, two clones' entries merge with no truth-file conflict =="
+echo "== Test 10j: agenda threads (0.3.0) -- an entry is one new file and never rewrites agenda.json, an item takes two phases, an agent's item waits as Proposed until agenda-accept, agenda-merge is all or none, check names each malformed entry, agenda-fold carries every open deferred job once, two clones' entries merge with no truth-file conflict =="
 newtmp THW; TH="$THW/ws"; mkws TH >/dev/null 2>&1 || bad "thread probe: fresh install failed"
 th() { ( cd "$TH" && python3 "$ENG" "$@" ); }
 th_tree() { ( cd "$TH" && find works -type f ! -name '*.md' ! -name index.json ! -name state.json ! -name events.jsonl | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }

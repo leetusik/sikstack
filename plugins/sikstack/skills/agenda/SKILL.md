@@ -13,7 +13,7 @@ An item is a thread: each entry is one file with its kind, author (`person:` or 
 
 Who opens an item decides where it lands: a person's is Open at once; an agent's is **Proposed**, outside the open order, until the operator's `accept` (Open) or `drop --reason`. An agent's entry on an item that exists is free. `merge` moves every entry and phase link onto the first item and drops the rest as `merged into <it>`.
 
-A loose end is never parked: fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable. An install from before 3.0.0 runs `sikstack agenda-fold` once, on the default checkout: each open deferred job becomes a Proposed item whose first entry carries it.
+A loose end is never parked: fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable. An install that still holds `works/deferred/` runs `sikstack agenda-fold` once, on the default checkout: each open deferred job becomes a Proposed item whose first entry carries it.
 
 In a linked checkout, changes made on the web arrive as inbox entries that `sync` and `next` apply as these commands; a refused one shows the command's line on the web.
 

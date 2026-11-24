@@ -7,7 +7,10 @@ Each entry says what changed and, when an install needs a manual step, a **Migra
 Before 1.0.0 the same engine shipped as the agentic workspace's installer (`bootstrap_agentic_workspace.sh`), one
 integer version per release, `## v<N>` below; that history continues here.
 
-## 3.0.0 — 2026-11-24
+The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
+install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
+
+## 0.3.0 — 2026-11-24
 
 - **The agenda is the one home for work not being done now; deferred jobs are retired.** An item is a thread of
   entries: `agenda-entry <item> --kind note|issue|feedback|question|decision --author person:<name>|agent:<name>
@@ -42,7 +45,7 @@ integer version per release, `## v<N>` below; that history continues here.
   and the phase template.
 - The web inbox maps `entry` and `accept` (dormant until the server sends them); its `add` passes the web's writer
   (`person:web`), so a web add stays Open at once.
-- **Migration notes:** install 3.0.0, run `sikstack agenda-fold` in each workspace once, on the default checkout (on
+- **Migration notes:** install 0.3.0, run `sikstack agenda-fold` in each workspace once, on the default checkout (on
   the default branch, not in a phase's worktree or on its branch; until then `check` fails there while open
   deferred jobs remain; a phase branch drops `works/deferred/` when it merges the default branch), then triage the
   Proposed items: `agenda-accept`, `agenda-merge` or `agenda-drop --reason`. A job that was linked to a Deferred
