@@ -306,6 +306,14 @@ export interface KbAsset {
   still?: string;
 }
 
+/** A workspace phase a document was explained from (`KbDocument.phases`). */
+export interface KbExplainedPhase {
+  /** The phase's full id (`P10-x1`): the Workspace's phase page takes it. */
+  id: string;
+  name: string | null;
+  role: "explain" | "source";
+}
+
 /** `GET /app/documents/{id}` — a list item PLUS the rendered-from `markdown` body. */
 export interface KbDocument extends KbDocumentListItem {
   /** The document body WITHOUT frontmatter (starts at the H1). */
@@ -355,6 +363,14 @@ export interface KbDocument extends KbDocumentListItem {
   published?: string | null;
   /** True when `published` is a one-time best-effort fill, not the server's own stamp. */
   published_best_effort?: boolean;
+  /**
+   * The workspace phases this document was explained from (P61-e9), on the two detail reads, for a
+   * member of its org only: the explain phase that published it (`role: "explain"`) and each phase
+   * its `## Explain` `phases:` line names (`role: "source"`), derived from the linked workspace of
+   * the document's own project. `[]` for a visitor, a project with no linked workspace, or none.
+   * Optional so an older backend still type-checks.
+   */
+  phases?: KbExplainedPhase[];
   /**
    * The owning org as the org library names it (P63, `KbOrgLibrary.org`'s `slug` and `name`), on the
    * two detail reads, past their visibility gate: a visitor's way back reads its name. Null in legacy

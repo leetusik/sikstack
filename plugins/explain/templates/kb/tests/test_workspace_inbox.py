@@ -191,6 +191,12 @@ def _pending(client, project_id, key) -> list[dict]:
     return res.json()["entries"]
 
 
+def _author(owner: dict) -> str:
+    """The author the server writes for this account: ``person:`` and its email's handle."""
+
+    return "person:" + owner["user"]["email"].split("@")[0]
+
+
 def _inbox_count(client, project_id, key) -> int:
     res = client.get(f"/api/workspace/{project_id}/head", headers=key)
     assert res.status_code == 200, res.text
@@ -269,7 +275,7 @@ def test_the_web_mints_the_next_number_with_a_valid_tail(store):
     assert second.json()["item"].startswith("A4-")  # the pending add counts
     entry = second.json()["entry"]
     assert entry["kind"] == "add" and entry["state"] == "pending"
-    assert entry["fields"] == {"title": "Import is slow"}
+    assert entry["fields"] == {"title": "Import is slow", "author": _author(owner)}
     assert entry["created_at"].endswith("Z")
 
 
@@ -304,7 +310,9 @@ def test_the_overlay_waits_hides_and_shows_a_refusal(store):
 
     deleted = _change(client, owner, project_id, "delete", ["A1-h7"]).json()["entry"]
     assert "A1-h7" not in _sync_of(client, owner, project_id)  # hidden at once
-    assert client.get(f"{base}/agenda/A1-h7", headers=_session(owner)).status_code == 404
+    waiting = client.get(f"{base}/agenda/A1-h7", headers=_session(owner))  # D309-zp
+    assert waiting.status_code == 200, waiting.text
+    assert waiting.json()["deleting"] is True and waiting.json()["sync"] == "waiting"
 
     solved = _change(client, owner, project_id, "solve", ["A2-k5"],
                      {"outcome": "Fixed the retry."}).json()["entry"]
@@ -670,3 +678,272 @@ def test_an_up_to_date_head_probe_counts_as_a_sync(store):
     assert res.status_code == 200
     assert last() > old + timedelta(hours=29)
     assert client.get(_base(project_id), headers=_session(owner)).json()["sync"]["state"] == "fresh"
+
+
+# -- thread entries, accepts, authors and feedback on the agenda (P61-e9) ---------------
+
+
+def test_a_note_is_one_entry_with_the_sessions_author_and_the_webs_source(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    base = _base(project_id)
+
+    res = _change(client, owner, project_id, "entry", ["A2-k5"],
+                  {"kind": "note", "body": "  Seen twice on 3G.  "})
+    assert res.status_code == 201, res.text
+    entry = res.json()["entry"]
+    assert entry["kind"] == "entry" and entry["items"] == ["A2-k5"]
+    assert entry["fields"] == {"kind": "note", "body": "Seen twice on 3G.",
+                               "author": _author(owner), "source": "web:agenda"}
+    assert "@" not in entry["fields"]["author"]
+    [pending] = _pending(client, project_id, key)
+    assert pending["kind"] == "entry" and pending["fields"] == entry["fields"]
+
+    # an author or a source from the client is refused, never kept
+    for extra in ({"author": "person:someone-else"}, {"source": "feedback:x"}):
+        res = _change(client, owner, project_id, "entry", ["A2-k5"],
+                      {"kind": "note", "body": "Mine.", **extra})
+        assert res.status_code == 422, res.text
+    assert _inbox_count(client, project_id, key) == 1
+
+    # the thread shows it at once, waiting, and the item reads waiting
+    item = client.get(f"{base}/agenda/A2-k5", headers=_session(owner)).json()
+    assert item["sync"] == "waiting"
+    [shown] = item["entries"]
+    assert shown == {"id": entry["id"], "kind": "note", "author": _author(owner),
+                     "by": "person", "name": _author(owner).split(":", 1)[1],
+                     "source": "web:agenda", "created": entry["created_at"],
+                     "body": "Seen twice on 3G.", "job": None, "sync": "waiting"}
+
+
+def test_an_entry_refuses_a_bad_kind_an_empty_body_and_a_long_one(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+
+    for items, fields in (
+        (["A2-k5"], {"kind": "rumor", "body": "x"}),
+        (["A2-k5"], {"body": "no kind"}),
+        (["A2-k5"], {"kind": "note", "body": ""}),
+        (["A2-k5"], {"kind": "note", "body": "   \n "}),
+        (["A2-k5"], {"kind": "note"}),
+        (["A2-k5"], {"kind": "note", "body": "x" * 20_001}),
+        (["A2-k5"], {"kind": "note", "body": 7}),
+        (["A2-k5", "A1-h7"], {"kind": "note", "body": "two items"}),
+        (["A99-zz"], {"kind": "note", "body": "no such item"}),
+    ):
+        res = _change(client, owner, project_id, "entry", items, fields)
+        assert res.status_code == 422, (items, fields, res.text)
+    assert _inbox_count(client, project_id, key) == 0
+    for kind in ("note", "issue", "feedback", "question", "decision"):
+        assert _change(client, owner, project_id, "entry", ["A2-k5"],
+                       {"kind": kind, "body": "x" * 20_000}).status_code == 201
+    assert _inbox_count(client, project_id, key) == 5
+
+
+def _proposed_item(client, project_id, key, aid="A3-p7") -> None:
+    data = {"id": aid, "title": "Retry storms", "note": None, "status": "open", "order": 3.0,
+            "created_at": "2026-11-20T09:00:00+09:00", "changed_at": "2026-11-20T09:00:00+09:00",
+            "outcome": None, "reason": None,
+            "proposed": {"by": "agent:claude-opus-5-5", "at": "2026-11-20T09:00:00+09:00"}}
+    res = _commit(client, project_id, key,
+                  ops=[_put(f"works/agenda/{aid}/agenda.json", json.dumps(data) + "\n")])
+    assert res.status_code == 200, res.text
+
+
+def test_accept_is_one_entry_for_a_proposed_item_and_refused_otherwise(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    _proposed_item(client, project_id, key)
+
+    res = _change(client, owner, project_id, "accept", ["A3-p7"])
+    assert res.status_code == 201, res.text
+    entry = res.json()["entry"]
+    assert entry["kind"] == "accept" and entry["items"] == ["A3-p7"] and entry["fields"] == {}
+    assert _sync_of(client, owner, project_id)["A3-p7"] == "waiting"
+
+    # not Proposed: refused up front in the engine's own words (agenda-accept)
+    res = _change(client, owner, project_id, "accept", ["A2-k5"])
+    assert res.status_code == 422
+    assert res.json()["detail"] == "A2-k5 is In progress: only a Proposed item is accepted"
+    res = _change(client, owner, project_id, "accept", ["A3-p7", "A1-h7"])
+    assert res.json()["detail"] == "A1-h7 is Solved: only a Proposed item is accepted"
+    minted = _add(client, owner, project_id, "A web add is Open").json()["item"]
+    res = _change(client, owner, project_id, "accept", [minted])
+    assert res.json()["detail"] == f"{minted} is Open: only a Proposed item is accepted"
+    assert _change(client, owner, project_id, "accept", ["A99-zz"]).json()["detail"] == (
+        "A99-zz names no agenda item")
+    assert _change(client, owner, project_id, "accept", ["A3-p7"],
+                   {"first": True}).status_code == 422
+    assert _inbox_count(client, project_id, key) == 2  # the accept and the add
+
+    # another account is refused by the same rule as a move
+    stranger = _signup(client)
+    for kind in ("accept", "move"):
+        fields = {"first": True} if kind == "move" else None
+        body = {"kind": kind, "items": ["A3-p7"], **({"fields": fields} if fields else {})}
+        res = client.post(f"{_base(project_id)}/agenda/changes", json=body,
+                          headers=_session(stranger))
+        assert res.status_code == 404, (kind, res.text)
+    assert _inbox_count(client, project_id, key) == 2
+
+
+def test_the_inbox_kinds_are_pinned_to_the_routes_fields():
+    from server.workspace.types import INBOX_KINDS
+    from server.workspace_web_api import _KIND_FIELDS
+
+    assert set(INBOX_KINDS) == set(_KIND_FIELDS) | {"add"}
+    assert {"entry", "accept"} <= set(INBOX_KINDS)
+    assert _KIND_FIELDS["entry"] == ("kind", "body") and _KIND_FIELDS["accept"] == ()
+
+
+def test_the_author_is_the_accounts_handle_and_never_its_email():
+    from server.workspace.types import ENTRY_AUTHOR_PATTERN, ENTRY_SOURCE_PATTERN, WEB_NOTE_SOURCE
+    from server.workspace_web_api import person_author
+
+    author_re = re.compile(ENTRY_AUTHOR_PATTERN, re.DOTALL)
+    cases = {
+        "june@example.com": "person:june",
+        "June.Kim+kb@example.com": "person:June.Kim+kb",
+        '"a@b"@example.com': 'person:"ab"',
+        ":june@example.com": "person:june",
+        "ju ne x@example.com": "person:junex",
+        "@example.com": "person:web",
+        ":::@example.com": "person:web",
+        "": "person:web",
+        None: "person:web",
+        "no-at-sign": "person:no-at-sign",
+    }
+    for email, author in cases.items():
+        assert person_author(email) == author, email
+    long = person_author("x" * 300 + "@example.com")
+    assert len(long) == 120 and long.startswith("person:x")
+    for email in [*cases, "x" * 300 + "@example.com", "\n\n@x", "a\tb@x"]:
+        written = person_author(email)
+        assert "@" not in written and author_re.fullmatch(written), email
+    assert re.fullmatch(ENTRY_SOURCE_PATTERN, WEB_NOTE_SOURCE)
+
+
+def test_the_entry_rules_are_the_engines_word_for_word():
+    """The server's copies of the engine's entry rules match its source, line for line."""
+
+    source = Path(__file__).resolve().parent.parent / "plugins/sikstack/scripts/wf_agenda.py"
+    if not source.is_file():
+        pytest.skip("the sikstack engine's source is not in this tree")
+    text = source.read_text(encoding="utf-8")
+    from server.workspace import types
+
+    kinds = ", ".join(f'"{kind}"' for kind in types.ENTRY_KINDS)
+    assert f"ENTRY_KINDS = ({kinds})" in text
+    assert f'ENTRY_ONE_LINE = r"{types.ENTRY_ONE_LINE}"' in text
+    assert ('ENTRY_AUTHOR_RE = re.compile(rf"(?=.{{1,120}}\\Z)(?:person|agent):[^\\s:]'
+            '{ENTRY_ONE_LINE}*", re.DOTALL)') in text
+    assert ('ENTRY_SOURCE_RE = re.compile(rf"[a-z][a-z0-9-]{{0,19}}:[^\\s]'
+            '{ENTRY_ONE_LINE}{{0,298}}")') in text
+    assert types.ENTRY_AUTHOR_PATTERN == (
+        r"(?=.{1,120}\Z)(?:person|agent):[^\s:]" + types.ENTRY_ONE_LINE + "*")
+    assert types.ENTRY_SOURCE_PATTERN == (
+        r"[a-z][a-z0-9-]{0,19}:[^\s]" + types.ENTRY_ONE_LINE + "{0,298}")
+
+
+def _feedback(client, owner, message: str) -> str:
+    res = client.post(f"/app/projects/{owner['project']['id']}/credentials",
+                      json={"scope": "capture"}, headers=_session(owner))
+    assert res.status_code == 201, res.text
+    capture = {"Authorization": f"Bearer {res.json()['key']}"}
+    res = client.post("/api/feedback", headers=capture,
+                      json={"message": message, "source": {"product": "app-x"}})
+    assert res.status_code == 202, res.text
+    return res.json()["request_id"]
+
+
+def _file(client, owner, feedback_id, **body):
+    return client.post(f"/app/feedback/{feedback_id}/agenda", json=body or None,
+                       headers=_session(owner))
+
+
+def _became(client, owner, feedback_id) -> dict:
+    res = client.get(f"/app/feedback/{feedback_id}/agenda", headers=_session(owner))
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def test_feedback_files_onto_a_new_item_or_an_existing_one(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    first = _feedback(client, owner, "Export hangs at 99%\nOn a 2 GB file.")
+    second = _feedback(client, owner, "Export never finishes")
+
+    res = _file(client, owner, first)
+    assert res.status_code == 201, res.text
+    minted = res.json()["item"]
+    add, entry = res.json()["entries"]
+    assert add["kind"] == "add" and add["minted_id"] == minted
+    assert add["fields"] == {"title": "Export hangs at 99%", "author": _author(owner)}
+    assert entry["kind"] == "entry" and entry["items"] == [minted]
+    assert entry["fields"] == {
+        "kind": "feedback", "author": _author(owner), "source": f"feedback:{first}",
+        "body": f"Export hangs at 99%\nOn a 2 GB file.\n\n/feedback/{first}"}
+    # the engine reads the add first, then the entry on its minted id
+    assert [e["id"] for e in _pending(client, project_id, key)] == [add["id"], entry["id"]]
+    rows = _agenda(client, owner, project_id)
+    assert rows[0]["id"] == minted and rows[0]["sync"] == "waiting"
+
+    # onto the item that exists: the entry alone, no new item
+    res = _file(client, owner, second, item=minted)
+    assert res.status_code == 201, res.text
+    [only] = res.json()["entries"]
+    assert only["kind"] == "entry" and only["items"] == [minted]
+    assert only["fields"]["source"] == f"feedback:{second}"
+    assert len(_agenda(client, owner, project_id)) == 3  # the two stored and the one add
+    assert _file(client, owner, second, item=minted).status_code == 409  # already on it
+    assert _file(client, owner, second, item="A99-zz").json()["detail"] == (
+        "A99-zz names no agenda item")
+    assert _file(client, owner, second, item="A2-k5", note="x").status_code == 422
+    assert _inbox_count(client, project_id, key) == 3
+
+    # another org's feedback, or one whose project has no linked workspace, is refused
+    stranger = _signup(client)
+    assert _file(client, stranger, first).status_code == 404
+    assert client.get(f"/app/feedback/{first}/agenda",
+                      headers=_session(stranger)).status_code == 404
+    theirs = _feedback(client, stranger, "Their own feedback")
+    res = _file(client, stranger, theirs)
+    assert res.status_code == 404 and res.json()["detail"] == "workspace not found"
+    assert _became(client, stranger, theirs)["linked"] is False
+    assert _inbox_count(client, project_id, key) == 3
+
+
+def test_what_a_piece_of_feedback_became_reads_from_the_entries(store):
+    client, _engine = store
+    owner, project_id, key, answer = _linked(client)
+    first = _feedback(client, owner, "Export hangs")
+    second = _feedback(client, owner, "Export is slow")
+    assert _became(client, owner, first) == {"project": project_id, "linked": True, "items": []}
+
+    filed = _file(client, owner, first).json()
+    minted = filed["item"]
+    assert _file(client, owner, second, item="A2-k5").status_code == 201
+    became = _became(client, owner, first)
+    assert [(i["id"], i["state"], i["sync"]) for i in became["items"]] == [(minted, "open", "waiting")]
+    assert [i["id"] for i in _became(client, owner, second)["items"]] == ["A2-k5"]
+
+    # the engine applies all three: the items now hold the entries, stored
+    item = {"id": minted, "title": "Export hangs", "note": None, "status": "open", "order": 1.0,
+            "created_at": "2026-11-24T10:00:00+09:00", "changed_at": "2026-11-24T10:00:00+09:00",
+            "outcome": None, "reason": None}
+    def entry_file(aid, name, feedback_id):
+        data = {"kind": "feedback", "author": _author(owner), "source": f"feedback:{feedback_id}",
+                "created_at": "2026-11-24T10:00:00+09:00", "body": f"x\n\n/feedback/{feedback_id}"}
+        return _put(f"works/agenda/{aid}/entries/{name}.json", json.dumps(data) + "\n")
+    pending = _pending(client, project_id, key)
+    res = _commit(client, project_id, key, ops=[
+        _put(f"works/agenda/{minted}/agenda.json", json.dumps(item) + "\n"),
+        entry_file(minted, "20261124T010000.000001Z-aaaa", first),
+        entry_file("A2-k5", "20261124T010000.000002Z-bbbb", second),
+    ], inbox=[{"id": e["id"], "state": "applied", "exit": 0} for e in pending])
+    assert res.status_code == 200, res.text
+    assert [(i["id"], i["sync"]) for i in _became(client, owner, first)["items"]] == [(minted, None)]
+    assert [(i["id"], i["sync"]) for i in _became(client, owner, second)["items"]] == [("A2-k5", None)]
+    thread = client.get(f"{_base(project_id)}/agenda/{minted}", headers=_session(owner)).json()
+    assert [(e["kind"], e["source"], e["sync"]) for e in thread["entries"]] == [
+        ("feedback", f"feedback:{first}", None)]

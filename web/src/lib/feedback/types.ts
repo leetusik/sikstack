@@ -110,3 +110,45 @@ export interface FeedbackQuery {
   /** A numbered page, 1-based, `limit` a page; page 1 when absent. */
   page?: number;
 }
+
+/**
+ * `GET /app/feedback/{id}/agenda`: the agenda items a piece of feedback is on (P61-e9), derived by
+ * the server from the entries, stored or still pending, whose source is `feedback:<id>` (never
+ * stored on the feedback). `linked` false, with no items, when its project has no linked workspace.
+ */
+export interface FeedbackAgenda {
+  /** The feedback's project id, or `null` when it is in none. */
+  project: string | null;
+  linked: boolean;
+  /** In the Agenda's order, each as the Agenda shows it now (a pending add included). */
+  items: FeedbackAgendaItem[];
+}
+
+export interface FeedbackAgendaItem {
+  /** The full agenda id (`A13-n1`). */
+  id: string;
+  title: string | null;
+  lang: "en" | "ko";
+  /** The Workspace's agenda state (`ItemState`): `proposed`, `open`, `in_progress`, … */
+  state: string | null;
+  /** `waiting` until the workspace takes the change, a refusal, or `null`. */
+  sync: null | "waiting" | { refused: string; entry: string; kind?: string };
+}
+
+/**
+ * `POST /app/feedback/{id}/agenda {item?}` → 201: the item the feedback was filed on (a new one
+ * minted, or the one named) and the inbox entries written (an add and an entry, or the entry alone).
+ */
+export interface FeedbackFiled {
+  item: string;
+  entries: {
+    id: string;
+    kind: string;
+    items: string[];
+    fields: Record<string, unknown>;
+    minted_id: string | null;
+    state: "pending" | "applied" | "refused" | "discarded";
+    reason: string | null;
+    created_at: string;
+  }[];
+}

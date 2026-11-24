@@ -55,9 +55,11 @@
   ],
   "agenda": [
    {"id": "A2-k5", "title": "Uploads that fail", "lang": "en", "note": "Seen twice last week.", "state": "in_progress", "created": "2026-11-09",
-    "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "", "sync": null},
+    "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "",
+    "proposed": null, "entryCount": 0, "latest": "2026-11-11", "sync": null},
    {"id": "A1-h7", "title": "검색이 느려요", "lang": "ko", "note": "", "state": "solved", "created": "2026-10-01",
-    "changed": "2026-10-20", "phases": [], "deferred": [], "outcome": "Indexed.", "reason": "", "sync": null}
+    "changed": "2026-10-20", "phases": [], "deferred": [], "outcome": "Indexed.", "reason": "",
+    "proposed": null, "entryCount": 0, "latest": "2026-10-20", "sync": null}
   ],
   "unplaced": []
  },
@@ -97,7 +99,8 @@
      {"repo": "bootstrap_agentic_workspace", "branch": "feat/retry-queue", "pr": null}
     ],
   "agenda": "A2-k5",
-  "explain": null
+  "explain": null,
+  "explainedIn": []
  },
  "slice": {
   "id": "S1", "full": "P8-q4.S1", "phase": "P8-q4", "name": "Server endpoint", "kind": "implementation", "status": "done", "risk": "low",
@@ -131,6 +134,7 @@
  },
  "item": {
   "id": "A2-k5", "title": "Uploads that fail", "lang": "en", "note": "Seen twice last week.", "state": "in_progress", "created": "2026-11-09",
-  "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "", "sync": null
+  "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "",
+  "proposed": null, "entryCount": 0, "latest": "2026-11-11", "sync": null, "entries": [], "deleting": false
  }
 }

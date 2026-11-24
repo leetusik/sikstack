@@ -11,10 +11,18 @@ memoized per head, with the open inbox entries laid over the agenda per request)
   "unlinked"}}``).
 - ``GET …/workspace/phases/{phase}``: a phase by full or short id.
 - ``GET …/workspace/slices/{full}``: a slice by full id, with its plan and result.
-- ``GET …/workspace/deferred/{id}``: a deferred job with its brief.
+- ``GET …/workspace/deferred/{id}``: a deferred job with its brief, and ``agenda``: the
+  item a fold entry carrying the job landed on (``agenda-fold``), else its own link. A
+  job the fold removed reads from that entry; a job no store or entry names is a 404
+  that still answers ``{detail, agenda: null}``, so an old link can land on the Agenda.
 - ``GET …/workspace/docs/{doc}[?version=]``: a doc (current or retired) with its
   sections, at its latest version or the one named.
-- ``GET …/workspace/agenda/{item}``: an agenda item.
+- ``GET …/workspace/agenda/{item}``: an agenda item, with its thread (``entries``); an
+  item a pending delete hides from the list still reads, ``deleting`` true.
+
+A phase read adds its explain links, derived from the store and resolved in the Library
+per request (``server.workspace_read.project_explain_links``): an explain phase's
+``explain.documents`` and every phase's ``explainedIn``.
 
 Each item route adds ``workspace {version, sync}``, the Workspace's own sync facts read
 per request, so an item page draws its sync line from one read.
@@ -32,7 +40,24 @@ and whose result comes back in that sync's batch. Until then the item reads
   entry for the change, all its items together (the engine's commands are all or
   none). ``kind`` is ``edit`` ``{title?, note?}``, ``move`` (one of ``first``, ``last``:
   ``true``, or ``before``, ``after``: an id), ``defer``, ``solve`` ``{outcome?}``,
-  ``drop`` ``{reason?}``, ``reopen`` or ``delete``; ``edit`` and ``move`` take one item.
+  ``drop`` ``{reason?}``, ``reopen``, ``delete``, ``entry`` ``{kind, body}`` (one entry
+  on an item's thread: ``kind`` one of the engine's ``ENTRY_KINDS``, the web's ``note``)
+  or ``accept`` (Proposed items made Open; any other is refused in the engine's words);
+  ``edit``, ``move`` and ``entry`` take one item.
+- ``POST /app/feedback/{feedback}/agenda {item?}`` → 201 ``{item, entries}``: files a
+  piece of the org's feedback on its project's agenda as a ``feedback`` entry (source
+  ``feedback:<id>``, its body the message and ``/feedback/<id>``): on ``item``, an item
+  the workspace holds, or on a new one (an add titled from the message's first line,
+  then the entry on its minted id, in one transaction). The same feedback twice on one
+  item is a 409.
+- ``GET /app/feedback/{feedback}/agenda`` → ``{project, linked, items}``: the items a
+  piece of feedback is on, derived from the entries (stored or pending) whose source
+  names it.
+
+**Authors.** Every add and entry the web writes carries ``author: person:<handle>``,
+the session's account handle (:func:`person_author`); the client never sends an author
+or a source (an ``entry`` naming either is a 422), and a note's source is
+``web:agenda``.
 - ``POST …/workspace/inbox/{entry}/discard`` → 200 ``{entry}``: closes a pending or a
   refused entry; any other is a 409.
 - ``POST …/workspace/inbox/{entry}/retry`` → 201 ``{entry, item?}``: Try again on a
@@ -57,9 +82,12 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from server.accounts.auth import AuthContext, require_user
+from server.accounts.service import AccountsReadError, get_accounts_service
 from server.app_api import _load_scoped_project
+from server.feedback.service import FeedbackReadError, get_feedback_service
 from server.workspace import (
     WorkspaceInputError,
     WorkspacePersistenceError,
@@ -71,14 +99,26 @@ from server.workspace.types import (
     AGENDA_ID_PATTERN,
     AGENDA_TITLE_MAX,
     AGENDA_TITLE_REFUSAL,
+    ENTRY_AUTHOR_PATTERN,
+    ENTRY_KINDS,
+    ENTRY_SOURCE_PATTERN,
     ID_TAIL_ALPHABET,
     ID_TAIL_LETTERS,
+    INBOX_ACCEPT,
     INBOX_ADD,
+    INBOX_ENTRY,
     INBOX_KINDS,
     INBOX_REFUSED,
+    WEB_AUTHOR,
+    WEB_NOTE_SOURCE,
     InboxEntry,
 )
-from server.workspace_read import WorkspaceReader, open_reader
+from server.workspace_read import (
+    AGENDA_WORDS,
+    WorkspaceReader,
+    open_reader,
+    project_explain_links,
+)
 
 router = APIRouter()
 
@@ -106,6 +146,19 @@ async def _linked(project_id: UUID, ctx: AuthContext) -> WorkspaceReader:
     return reader
 
 
+async def _linked_project(project_id: UUID, ctx: AuthContext):
+    """``(reader, project)``: :func:`_linked`, with the project record it resolved."""
+
+    project = await _load_scoped_project(project_id, ctx)
+    try:
+        reader = await open_reader(project.id)
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    if not reader.linked:
+        raise _not_found("workspace")
+    return reader, project
+
+
 def _found(reader: WorkspaceReader, value: dict[str, Any] | None, what: str) -> dict[str, Any]:
     """The record with this request's sync facts beside it (a copy: the memo's stays)."""
 
@@ -129,11 +182,17 @@ async def get_workspace(
 async def get_workspace_phase(
     project_id: UUID, phase_id: str, ctx: AuthContext = Depends(require_user)
 ) -> dict[str, Any]:
-    reader = await _linked(project_id, ctx)
+    reader, project = await _linked_project(project_id, ctx)
     try:
-        return _found(reader, await reader.phase(phase_id), "phase")
+        out = _found(reader, await reader.phase(phase_id), "phase")
+        links = await project_explain_links(reader, project.tenant_id, project.name)
     except WorkspaceReadError as exc:
         raise _unavailable() from exc
+    pid = out["id"]
+    if out.get("explain") is not None:
+        out["explain"] = {**out["explain"], "documents": links["documents"].get(pid, [])}
+    out["explainedIn"] = links["explainedIn"].get(pid, [])
+    return out
 
 
 @router.get("/app/projects/{project_id}/workspace/slices/{slice_id}")
@@ -153,9 +212,15 @@ async def get_workspace_job(
 ) -> dict[str, Any]:
     reader = await _linked(project_id, ctx)
     try:
-        return _found(reader, await reader.job(job_id), "deferred job")
+        job = await reader.job(job_id)
     except WorkspaceReadError as exc:
         raise _unavailable() from exc
+    if job is None:
+        # no store or fold entry names it: still a 404 (the job page reads Not found),
+        # and the folded-job lookup's answer, so an old link can land on the Agenda
+        return JSONResponse({"detail": "deferred job not found", "agenda": None},
+                            status_code=404)
+    return _found(reader, job, "deferred job")
 
 
 @router.get("/app/projects/{project_id}/workspace/docs/{doc_id}")
@@ -190,7 +255,8 @@ _NUMBER = re.compile(r"A([0-9]+)-")
 #: An entry's bounds: items per change, and characters per note, outcome or reason.
 _MAX_ITEMS = 1000
 _MAX_TEXT = 20_000
-#: The fields each kind takes (``add`` has its own route).
+#: The fields each kind takes from the client (``add`` has its own route; an ``entry``'s
+#: ``author`` and ``source`` are the server's, never the client's).
 _KIND_FIELDS: dict[str, tuple[str, ...]] = {
     "edit": ("title", "note"),
     "move": ("first", "last", "before", "after"),
@@ -199,8 +265,31 @@ _KIND_FIELDS: dict[str, tuple[str, ...]] = {
     "drop": ("reason",),
     "reopen": (),
     "delete": (),
+    INBOX_ENTRY: ("kind", "body"),
+    INBOX_ACCEPT: (),
 }
 assert set(_KIND_FIELDS) | {INBOX_ADD} == set(INBOX_KINDS)
+_ENTRY_AUTHOR = re.compile(ENTRY_AUTHOR_PATTERN, re.DOTALL)
+_ENTRY_SOURCE = re.compile(ENTRY_SOURCE_PATTERN)
+#: What a handle keeps: no whitespace or line break of any kind, no ``@``.
+_HANDLE_DROP = re.compile(r"[\s@\x00-\x1f\x7f\x85\u2028\u2029]")
+assert _ENTRY_AUTHOR.fullmatch(WEB_AUTHOR) and _ENTRY_SOURCE.fullmatch(WEB_NOTE_SOURCE)
+
+
+def person_author(email: str | None) -> str:
+    """The author every web add and entry carries: ``person:<handle>``.
+
+    The account's handle is the part of its email before the ``@`` (the users table
+    holds no display name; a later one changes this function alone), cleaned to fit the
+    engine's ``ENTRY_AUTHOR_RE``: whitespace, line breaks and ``@`` dropped, no leading
+    ``:``, the whole at most 120 characters. The full email never reaches an entry.
+    When nothing is left the author is ``person:web``, the engine's own default.
+    """
+
+    local = (email or "").rpartition("@")[0] if "@" in (email or "") else (email or "")
+    handle = _HANDLE_DROP.sub("", local).lstrip(":")
+    author = f"person:{handle}"[:120]
+    return author if handle and _ENTRY_AUTHOR.fullmatch(author) else WEB_AUTHOR
 
 
 def mint_agenda_id(known: Collection[str]) -> str:
@@ -245,6 +334,17 @@ def _text(raw: Any, name: str) -> str:
     return raw
 
 
+def _body_text(raw: Any) -> str:
+    """An entry's body as the engine stores it (stripped), non-empty and bounded."""
+
+    body = raw.strip() if isinstance(raw, str) else ""
+    if not body:
+        raise _field_error("an entry needs a body of text")
+    if len(body) > _MAX_TEXT:
+        raise _field_error(f"body must be text of at most {_MAX_TEXT} characters")
+    return body
+
+
 def _full_id(raw: Any) -> str:
     if not isinstance(raw, str) or not _AGENDA_ID.fullmatch(raw):
         shown = raw if isinstance(raw, str) and len(raw) <= 40 else "that value"
@@ -271,10 +371,15 @@ def _fields(kind: str, items: list[str], raw: Any) -> dict[str, Any]:
     for name in raw:
         if name not in allowed:
             raise _field_error(f"{kind} takes no {name}")
-    if kind in ("edit", "move") and len(items) != 1:
+    if kind in ("edit", "move", INBOX_ENTRY) and len(items) != 1:
         raise _field_error(f"{kind} takes exactly one item")
     fields: dict[str, Any] = {}
-    if kind == "edit":
+    if kind == INBOX_ENTRY:
+        if raw.get("kind") not in ENTRY_KINDS:
+            raise _field_error(f"an entry's kind must be one of {', '.join(ENTRY_KINDS)}")
+        fields["kind"] = raw["kind"]
+        fields["body"] = _body_text(raw.get("body"))
+    elif kind == "edit":
         if "title" not in raw and "note" not in raw:
             raise _field_error("edit takes a title, a note or both")
         if "title" in raw:
@@ -344,15 +449,35 @@ async def _write(
         raise _unavailable() from exc
 
 
-async def _add(reader: WorkspaceReader, ctx: AuthContext, fields: dict[str, Any],
-               replaces: UUID | None = None) -> dict[str, Any]:
+async def _mint(reader: WorkspaceReader) -> str:
     try:
-        minted = mint_agenda_id(await reader.agenda_ids())
+        return mint_agenda_id(await reader.agenda_ids())
     except WorkspaceReadError as exc:
         raise _unavailable() from exc
+
+
+async def _add(reader: WorkspaceReader, ctx: AuthContext, fields: dict[str, Any],
+               replaces: UUID | None = None) -> dict[str, Any]:
+    minted = await _mint(reader)
+    fields = {**fields, "author": person_author(ctx.user.email)}
     entry = await _write(reader.project_id, ctx, kind=INBOX_ADD, items=[minted],
                          fields=fields, minted_id=minted, replaces=replaces)
     return {"entry": _serialize(entry), "item": minted}
+
+
+async def _proposed(reader: WorkspaceReader, ids: list[str]) -> None:
+    """A 422 in the engine's own words (``agenda-accept``) for the first item that is
+    not Proposed: an accept on any other is refused at apply time anyway."""
+
+    try:
+        states = {row["id"]: row["state"] for row in await reader.agenda()}
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    for aid in ids:
+        state = states.get(aid, "open")  # a pending add is Open
+        if state != "proposed":
+            word = AGENDA_WORDS.get(state, state)
+            raise _field_error(f"{aid} is {word}: only a Proposed item is accepted")
 
 
 async def _held(reader: WorkspaceReader, ids: list[str]) -> None:
@@ -406,6 +531,10 @@ async def change_agenda_items(
     items = _items(body.get("items"))
     fields = _fields(kind, items, body.get("fields"))
     await _held(reader, [*items, *(fields[p] for p in ("before", "after") if p in fields)])
+    if kind == INBOX_ACCEPT:
+        await _proposed(reader, items)
+    if kind == INBOX_ENTRY:
+        fields = {**fields, "author": person_author(ctx.user.email), "source": WEB_NOTE_SOURCE}
     entry = await _write(reader.project_id, ctx, kind=kind, items=items, fields=fields)
     return {"entry": _serialize(entry)}
 
@@ -449,6 +578,117 @@ async def retry_inbox_entry(
         raise HTTPException(status_code=409, detail=f"this change is {entry.state}, not refused")
     if entry.kind == INBOX_ADD:
         return await _add(reader, ctx, dict(entry.fields), replaces=entry.id)
+    fields = dict(entry.fields)
+    if entry.kind == INBOX_ENTRY:  # whoever tries again writes it
+        fields["author"] = person_author(ctx.user.email)
     again = await _write(reader.project_id, ctx, kind=entry.kind, items=list(entry.items),
-                         fields=dict(entry.fields), replaces=entry.id)
+                         fields=fields, replaces=entry.id)
     return {"entry": _serialize(again)}
+
+
+# -- feedback on the agenda ---------------------------------------------------------------
+
+
+async def _feedback(feedback_id: UUID, ctx: AuthContext):
+    """The org's own piece of feedback, or a 404 (another org's never leaks)."""
+
+    try:
+        projects = await get_accounts_service().list_projects_for_tenant(ctx.tenant.id)
+        owned = tuple(project.id for project in projects)
+        record = (await get_feedback_service().get_scoped_feedback_event(feedback_id, owned)
+                  if owned else None)
+    except (AccountsReadError, FeedbackReadError) as exc:
+        raise _unavailable() from exc
+    if record is None:
+        raise _not_found("feedback")
+    return record
+
+
+def feedback_title(message: str) -> str:
+    """An agenda item's title from a piece of feedback (the web's ``itemTitle``): the
+    message's first line with text, whole when it fits in 200 characters, else cut at
+    the last word before the limit (or at the limit when no word ends past its first
+    120 characters), trailing spaces and ``,.;:`` dropped, with ``…``."""
+
+    lines = str(message or "").strip().splitlines()
+    line = lines[0].strip() if lines else ""
+    if len(line) <= AGENDA_TITLE_MAX:
+        return line
+    cut = line[: AGENDA_TITLE_MAX - 1]
+    at = cut.rfind(" ")
+    return re.sub(r"[\s,.;:]+$", "", cut[:at] if at > 120 else cut) + "…"
+
+
+def _feedback_entry(record, ctx: AuthContext) -> dict[str, Any]:
+    """The entry a piece of feedback is filed as: kind ``feedback``, source
+    ``feedback:<id>``, its body the message (cut to the entry bound) and the way back."""
+
+    link = f"/feedback/{record.id}"
+    message = str(record.message or "").strip()
+    room = _MAX_TEXT - len(link) - 2
+    if len(message) > room:
+        message = message[: room - 1] + "…"
+    return {"kind": "feedback", "body": f"{message}\n\n{link}" if message else link,
+            "author": person_author(ctx.user.email), "source": f"feedback:{record.id}"}
+
+
+@router.post("/app/feedback/{feedback_id}/agenda", status_code=201)
+async def file_feedback(
+    feedback_id: UUID,
+    payload: Any = Body(default=None),
+    ctx: AuthContext = Depends(require_user),
+) -> dict[str, Any]:
+    record = await _feedback(feedback_id, ctx)
+    if record.project_id is None:
+        raise _field_error("this feedback is in no project, so it has no agenda")
+    reader = await _linked(record.project_id, ctx)
+    body = {} if payload is None else _body(payload)
+    for name in body:
+        if name != "item":
+            raise _field_error(f"filing feedback takes no {name}")
+    entry_fields = _feedback_entry(record, ctx)
+    if body.get("item") is None:
+        minted = await _mint(reader)
+        add_fields = {"title": _title(feedback_title(record.message)),
+                      "author": entry_fields["author"]}
+        try:
+            written = await get_workspace_service().add_inbox_many(
+                reader.project_id,
+                [{"kind": INBOX_ADD, "items": [minted], "fields": add_fields,
+                  "minted_id": minted},
+                 {"kind": INBOX_ENTRY, "items": [minted], "fields": entry_fields}],
+                user_id=ctx.user.id,
+            )
+        except WorkspaceInputError as exc:
+            raise _field_error(str(exc)) from exc
+        except WorkspacePersistenceError as exc:
+            raise _unavailable() from exc
+        return {"item": minted, "entries": [_serialize(entry) for entry in written]}
+    aid = _full_id(body["item"])
+    await _held(reader, [aid])
+    try:
+        already = {item["id"] for item in await reader.feedback_items(str(feedback_id))}
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    if aid in already:
+        raise HTTPException(status_code=409, detail=f"this feedback is already on {aid}")
+    entry = await _write(reader.project_id, ctx, kind=INBOX_ENTRY, items=[aid],
+                         fields=entry_fields)
+    return {"item": aid, "entries": [_serialize(entry)]}
+
+
+@router.get("/app/feedback/{feedback_id}/agenda")
+async def get_feedback_agenda(
+    feedback_id: UUID, ctx: AuthContext = Depends(require_user)
+) -> dict[str, Any]:
+    record = await _feedback(feedback_id, ctx)
+    if record.project_id is None:
+        return {"project": None, "linked": False, "items": []}
+    reader = await _reader(record.project_id, ctx)
+    if not reader.linked:
+        return {"project": str(record.project_id), "linked": False, "items": []}
+    try:
+        items = await reader.feedback_items(str(feedback_id))
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    return {"project": str(record.project_id), "linked": True, "items": items}
