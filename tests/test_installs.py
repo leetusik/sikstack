@@ -537,6 +537,148 @@ def test_a_signed_out_read_shows_the_setup_email_and_is_rate_limited_per_address
     assert client.get(f"/app/connect/{started['code']}", headers={"X-Real-IP": "198.51.100.5"}).status_code == 200
 
 
+# --- release: `sikstack sign-in --release` moves an install to another account ------
+
+
+_FIVE_KEYS = {"code", "url", "poll_token", "expires_in", "interval"}
+
+
+def _start_with(client: TestClient, install_id: str, **extra):
+    body = {"install_id": install_id, "repo": "platform", "plugin_version": "1.0.0", **extra}
+    return client.post("/api/installs/sign-in", json=body)
+
+
+def _sign_in_rows(engine, install_id: str) -> dict[str, dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT s.* FROM install_sign_ins s JOIN installs i ON i.id = s.install_id "
+                "WHERE i.install_id = :i"
+            ),
+            {"i": install_id},
+        ).mappings().all()
+    return {row["code"]: dict(row) for row in rows}
+
+
+def _table(engine, name: str) -> list[dict]:
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(text(f"SELECT * FROM {name} ORDER BY id")).mappings().all()]
+
+
+def test_release_frees_a_claimed_install_keeps_its_projects_and_keys_and_ends_its_older_codes(db):
+    client, engine = db
+    sent = _register(client)
+    alice, bob = _signup(client), _signup(client)
+    approved = _start(client, sent["install_id"], repo="platform")
+    project = _approve(client, approved, alice)
+    _key_opens(client, approved, project["id"])
+    declined = _start(client, sent["install_id"], repo="declined-repo")
+    assert client.post(f"/app/connect/{declined['code']}/decline", headers=alice["session"]).status_code == 200
+    older = _start(client, sent["install_id"], repo="platform")
+    assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == alice["user"]["id"]
+
+    install_before = _install_row(engine, sent["install_id"])
+    rows_before = _sign_in_rows(engine, sent["install_id"])
+    projects_before = _table(engine, "projects")
+    keys_before = _table(engine, "project_credentials")
+
+    res = _start_with(client, sent["install_id"], release=True)
+    assert res.status_code == 200, res.text
+    answer = res.json()
+    assert set(answer) == _FIVE_KEYS | {"released"} and answer["released"] is True
+    assert alice["user"]["email"] not in res.text and alice["user"]["id"] not in res.text
+
+    install = _install_row(engine, sent["install_id"])
+    assert install["claimed_by"] is None and install["claimed_at"] is None
+    for column in ("id", "install_id", "email", "created_at"):
+        assert install[column] == install_before[column], column
+    assert _table(engine, "projects") == projects_before
+    assert _table(engine, "project_credentials") == keys_before
+
+    rows = _sign_in_rows(engine, sent["install_id"])
+    new_code = answer["code"].replace("-", "")
+    assert set(rows) == set(rows_before) | {new_code}
+    for code, before in rows_before.items():
+        after = rows[code]
+        if before["state"] == "pending":
+            assert after["expires_at"] <= rows[new_code]["created_at"]
+            assert {k: v for k, v in after.items() if k != "expires_at"} == {
+                k: v for k, v in before.items() if k != "expires_at"
+            }
+        else:
+            assert after == before, code
+    # The older code is ended: expired to read (either account, or none) and to poll.
+    for headers in (bob["session"], alice["session"], {}):
+        assert client.get(f"/app/connect/{older['code']}", headers=headers).json() == {
+            "state": "expired", "code": older["code"],
+        }
+    assert _poll(client, older).json() == {"status": "expired"}
+    assert client.post(f"/app/connect/{older['code']}/approve", json={}, headers=alice["session"]).status_code == 410
+    assert _install_row(engine, sent["install_id"])["claimed_by"] is None
+    # The approved and declined codes read as before.
+    assert _poll(client, approved).json()["status"] == "approved"
+    assert _poll(client, declined).json() == {"status": "denied"}
+
+    # The released code is Bob's to Connect: it claims the install for him.
+    assert _poll(client, answer).json() == {"status": "pending"}
+    ready = client.get(f"/app/connect/{answer['code']}", headers=bob["session"]).json()
+    assert ready["state"] == "ready" and ready["account"]["email"] == bob["user"]["email"]
+    bobs = _approve(client, answer, bob)
+    _key_opens(client, answer, bobs["id"])
+    assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == bob["user"]["id"]
+    assert _project_names(client, bob) == ["default", "platform"]
+    assert _project_names(client, alice) == ["default", "platform"]
+    assert _workspace_keys(engine, project["id"]) == 1
+
+
+def test_release_on_an_unclaimed_install_answers_false_and_still_ends_its_older_codes(db):
+    client, engine = db
+    sent = _register(client)
+    older = _start(client, sent["install_id"])
+    res = _start_with(client, sent["install_id"], release=True)
+    assert res.status_code == 200, res.text
+    answer = res.json()
+    assert set(answer) == _FIVE_KEYS | {"released"} and answer["released"] is False
+    assert _install_row(engine, sent["install_id"])["claimed_by"] is None
+    assert _poll(client, older).json() == {"status": "expired"}
+    assert _poll(client, answer).json() == {"status": "pending"}
+    # An unregistered install releases nothing: today's 404.
+    missing = _start_with(client, str(uuid4()), release=True)
+    assert missing.status_code == 404 and "/sikstack:setup" in missing.json()["detail"]
+
+
+def test_a_start_without_release_answers_todays_five_keys_and_keeps_the_claim(db):
+    client, engine = db
+    sent = _register(client)
+    owner = _signup(client)
+    _approve(client, _start(client, sent["install_id"]), owner)
+    older = _start(client, sent["install_id"])
+    for extra in ({}, {"release": False}):
+        res = _start_with(client, sent["install_id"], **extra)
+        assert res.status_code == 200, res.text
+        assert set(res.json()) == _FIVE_KEYS, extra
+    assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == owner["user"]["id"]
+    assert _poll(client, older).json() == {"status": "pending"}
+
+
+def test_a_release_that_is_not_a_boolean_is_refused_and_changes_nothing(db):
+    client, engine = db
+    sent = _register(client)
+    owner = _signup(client)
+    _approve(client, _start(client, sent["install_id"]), owner)
+    older = _start(client, sent["install_id"])
+    install_before = _install_row(engine, sent["install_id"])
+    rows_before = _sign_in_rows(engine, sent["install_id"])
+    for bad in ("true", "yes", 1, 0, None, [], [True], {}):
+        for install_id in (sent["install_id"], str(uuid4())):
+            res = _start_with(client, install_id, release=bad)
+            assert res.status_code == 400, (bad, res.text)
+            assert res.json() == {"detail": "release is not valid"}, bad
+    assert _install_row(engine, sent["install_id"]) == install_before
+    assert _sign_in_rows(engine, sent["install_id"]) == rows_before
+    assert _poll(client, older).json() == {"status": "pending"}
+
+
 # --- an install's Feedback ----------------------------------------------------------
 
 

@@ -36,8 +36,10 @@ export const CONNECT_COPY = {
     pluginValue: (version: string) => `sikstack ${version}`,
     setUp: "Set up",
     setupEmail: "Setup email",
-    signedInAs: "Signed in as",
   },
+  /** Signed in: the account a Connect uses, right under the action pair, and the way to switch. */
+  signedInAs: "Signed in as",
+  useAnotherAccount: "Use another account",
   org: "Org",
   createAccount: "Create account",
   signIn: "Sign in",
@@ -49,6 +51,8 @@ export const CONNECT_COPY = {
   openProject: (project: string) => `Open ${project} on the web`,
   /** The sign-in command, named in a sentence (`.cmd-inline`). */
   command: "/sikstack:sign-in",
+  /** The sign-in that frees an install from the account it is connected to (`.cmd-inline`). */
+  releaseCommand: "/sikstack:sign-in release",
   outcomes: {
     waitlisted: {
       /** "Your account is still on the waitlist. We will email <address> when sikstack opens. Then run <command> in Claude Code again." */
@@ -61,8 +65,11 @@ export const CONNECT_COPY = {
     declined: "Nothing changed. This install keeps working in Claude Code as before.",
     already: (project: string) =>
       `This install is already connected to this account. Its work shows in ${project} on the web.`,
-    other:
-      "This install is connected to another account, so this one can’t connect it. To see its work, sign in with that account.",
+    /** "This install is connected to another account. To connect it to this one, run <release command> in Claude Code on the install’s machine, then Connect the new code." */
+    other: {
+      before: "This install is connected to another account. To connect it to this one, run ",
+      after: " in Claude Code on the install’s machine, then Connect the new code.",
+    },
     /** "Run <command> in Claude Code again." */
     expired: { before: "Run ", after: " in Claude Code again." },
   },

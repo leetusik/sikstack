@@ -8,13 +8,20 @@ code the person confirms on the web, in the shape of a device authorization (RFC
 - ``POST /api/installs {install_id, email, plugin_version}`` (no auth): the pre-user
   row. Idempotent per install id: a second call updates the email and version and
   the last-seen time; nothing else is stored. ``200 {"status": "registered"}``.
-- ``POST /api/installs/sign-in {install_id, repo, plugin_version}`` (no auth): start.
-  Refused (404) for an install id never registered. Answers ``{code, url,
-  poll_token, expires_in, interval}``: the code is 8 characters in two groups of four
-  (``KQ4M-7TZP``) from an alphabet without look-alikes, the url is the web's
+- ``POST /api/installs/sign-in {install_id, repo, plugin_version, release?}`` (no
+  auth): start. Refused (404) for an install id never registered. Answers ``{code,
+  url, poll_token, expires_in, interval}``: the code is 8 characters in two groups of
+  four (``KQ4M-7TZP``) from an alphabet without look-alikes, the url is the web's
   ``/connect?code=…`` (``KB_PUBLIC_BASE_URL``), the poll token is the plugin's to
   keep (only its sha256 is stored), the code lives ``CODE_TTL`` (15 minutes) and the
-  plugin polls every ``POLL_INTERVAL_S`` seconds.
+  plugin polls every ``POLL_INTERVAL_S`` seconds. ``release: true``
+  (``/sikstack:sign-in release``) also frees the install, in the transaction that
+  makes the code: its claim (``claimed_by``, ``claimed_at``) is cleared and its other
+  pending codes end (they read ``expired``), so the next Connect claims it for the
+  account that approves; projects, keys and decided codes stay. The answer then
+  carries ``released`` (whether a claim was cleared) and never names the previous
+  account: the install id is the only credential, the trust a start already gives
+  it. ``release`` absent or ``false`` is a plain start; any other value is a 400.
 - ``POST /api/installs/sign-in/poll {poll_token}`` (the token is the auth):
   ``{"status": "pending" | "denied" | "expired" | "approved"}``. A poll sooner than
   the interval after the last one is a 429 (``slow_down``). The first poll after an
@@ -290,14 +297,42 @@ async def start_sign_in(request: Request) -> dict[str, object]:
     install_id = _text(body, "install_id", _INSTALL_ID, 100)
     repo = _text(body, "repo", max_len=200)
     version = _text(body, "plugin_version", _VERSION, 50)
+    release = body.get("release", False)
+    if not isinstance(release, bool):
+        raise _bad("release is not valid")
     poll_token = generate_opaque_token()
     now = utc_now()
+    released: bool | None = None
     async with get_session_maker()() as session, session.begin():
         install = (
             await session.execute(select(InstallModel).where(InstallModel.install_id == install_id))
         ).scalar_one_or_none()
         if install is None:
             raise HTTPException(status_code=404, detail=_NOT_REGISTERED)
+        if release:
+            # Lock in an approval's order (its code, then the install), so the two never deadlock:
+            # an approval that commits first is cleared here; one that waits finds its code ended.
+            pending = (
+                await session.execute(
+                    select(InstallSignInModel)
+                    .where(InstallSignInModel.install_id == install.id, InstallSignInModel.state == STATE_PENDING)
+                    .with_for_update()
+                )
+            ).scalars()
+            for row in pending:
+                if row.expires_at > now:
+                    row.expires_at = now
+            install = (
+                await session.execute(
+                    select(InstallModel)
+                    .where(InstallModel.id == install.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one()
+            released = install.claimed_by is not None
+            install.claimed_by = None
+            install.claimed_at = None
         install.last_seen_at = now
         install.plugin_version = version
         for _ in range(8):
@@ -321,13 +356,16 @@ async def start_sign_in(request: Request) -> dict[str, object]:
                 expires_at=now + CODE_TTL,
             )
         )
-    return {
+    answer: dict[str, object] = {
         "code": shown_code(code),
         "url": _web_url(f"/connect?code={shown_code(code)}"),
         "poll_token": poll_token,
         "expires_in": int(CODE_TTL.total_seconds()),
         "interval": POLL_INTERVAL_S,
     }
+    if released is not None:
+        answer["released"] = released
+    return answer
 
 
 @router.post("/api/installs/sign-in/poll")

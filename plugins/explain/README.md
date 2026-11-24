@@ -207,7 +207,9 @@ Release checklist — before pushing a release:
    scaffold's install approval always makes a project of its own. 0.19.2: the scaffold's
    server carries the design-build service, dormant without `DATABASE_URL` (the scaffold's
    default), as Feedback is. 0.19.5: the hosted address is sikstack.com in setup and in the
-   explain resolver, and a saved address on the old domain's hosts resolves to it.)
+   explain resolver, and a saved address on the old domain's hosts resolves to it.
+   0.19.6: the scaffold's sign-in start takes `release`, which frees an install claimed
+   by another account and ends its older codes.)
 2. `python3 scripts/plugin_parity.py` — templates in parity with the repo.
 3. `claude plugin validate .`, `claude plugin validate ./plugins/explain` and
    `claude plugin validate ./plugins/sikstack` — all pass
