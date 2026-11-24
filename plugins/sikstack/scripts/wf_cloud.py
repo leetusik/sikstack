@@ -1638,7 +1638,9 @@ def cloud_commit_hint() -> str:
 
 def cloud_exclude() -> None:
     """Hide `.hi2vi/` and the cold reads' `cache/` in the workflow repo's common info/exclude (init does too; this
-    covers an install made before either). Never .gitignore, which is tracked."""
+    covers an install made before either). `link` calls it, and so does a process's first cache write
+    (`wf_cold.keep`), so a checkout linked before the cache existed hides it before git can see it. Never
+    .gitignore, which is tracked."""
     exclude = _git_dir(common=True) / "info" / "exclude"
     existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
     have = {l.strip() for l in existing.splitlines()}

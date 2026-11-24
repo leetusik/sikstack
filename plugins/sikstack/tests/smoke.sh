@@ -4109,6 +4109,17 @@ CR_PID=$!
 for _ in $(seq 1 100); do [ -s "$CRW/port" ] && break; sleep 0.1; done
 CRS_="http://127.0.0.1:$(cat "$CRW/port" 2>/dev/null)"
 cr_mark() { if [ -f "$CRW/fake/requests.jsonl" ]; then grep -c '' "$CRW/fake/requests.jsonl"; else echo 0; fi; }
+# cr_unexclude: the exclude a checkout linked before 0.4.0 holds (link wrote /.hi2vi/ only): its /cache/ line removed.
+# cr_excl: the exclude's /cache/ and /.hi2vi/ line counts and its sha256.
+CR_EXCL="$CRA/.git/info/exclude"
+cr_unexclude() { python3 - "$CR_EXCL" <<'PY'
+import sys
+p = sys.argv[1]
+kept = [l for l in open(p).read().splitlines(True) if l.strip() not in ("/cache/", "cache/", "/cache", "cache")]
+open(p, "w").write("".join(kept))
+PY
+}
+cr_excl() { printf '%s %s %s' "$(grep -cxF '/cache/' "$CR_EXCL")" "$(grep -cxF '/.hi2vi/' "$CR_EXCL")" "$(sha "$CR_EXCL")"; }
 # cr_py <check> [args]: one named assertion over the fake (its records and the requests since a mark) and the checkout.
 cr_py() { python3 - "$CRW/fake/requests.jsonl" "$CRS_" "$CRA" "$@" <<'PY'
 import base64, hashlib, http.client, json, os, stat, sys
@@ -4208,7 +4219,16 @@ cr cold search "a" > "$CRW/s2.txt" 2>&1; cr_rc=$?; cr cold search "phase" --limi
   && ok "cold search refuses a one-character text in one line, and a cut answer ends with its truncated line" \
   || bad "cold search's refusal or truncated line wrong -- rc=$cr_rc/$cr_rc2 $(cat "$CRW/s2.txt" "$CRW/s3.txt")"
 # C5: cold fetch, status and clear.
-cr cold clear > /dev/null; cr cold fetch 2 > "$CRW/f1.txt"; cr_rc=$?; cr_r=$(cr_py folder "$(head -1 "$CRW/f1.txt")" P2)
+cr cold clear > /dev/null; cr_unexclude; cr_x0="$(grep -cxF '/cache/' "$CR_EXCL") $(grep -cxF '/.hi2vi/' "$CR_EXCL")"
+cr cold fetch 2 > "$CRW/f1.txt"; cr_rc=$?; cr_r=$(cr_py folder "$(head -1 "$CRW/f1.txt")" P2)
+cr_x1=$(cr_excl); cr_st=$(git -C "$CRA" status --porcelain --untracked-files=all | grep 'cache')
+[ "$cr_x0" = "0 1" ] && [ "${cr_x1%% *}" = 1 ] && [ "$(echo "$cr_x1" | cut -d' ' -f2)" = 1 ] && [ -z "$cr_st" ] && [ -n "$(find "$CRA/cache" -type f 2>/dev/null)" ] \
+  && ok "a checkout linked before the exclude named /cache/ (link wrote /.hi2vi/ only): its first cold fetch writes the cache and the exclude's one /cache/ line with it, so git status --untracked-files=all shows no cache path" \
+  || bad "cold fetch left the cache visible to git on a pre-0.4.0 link -- before=$cr_x0 after=[$cr_x1] status=[$(echo "$cr_st" | head -3 | tr '\n' ' ')]"
+cr cold fetch 2 > /dev/null; cr_x2=$(cr_excl); cr init > "$CRW/reinit.txt"; cr_rc4=$?; cr_x3=$(cr_excl)
+[ "$cr_x2" = "$cr_x1" ] && [ "$cr_x3" = "$cr_x1" ] && [ "$cr_rc4" = 0 ] \
+  && ok "idempotent: a second cold fetch and a fresh init leave the exclude byte-equal, one /cache/ and one /.hi2vi/ line" \
+  || bad "the exclude changed on a second command or init -- [$cr_x1] [$cr_x2] [$cr_x3] rc=$cr_rc4 $(tail -2 "$CRW/reinit.txt")"
 cr cold fetch product@v0001 > "$CRW/f2.txt"; cr_rc2=$?; cr_r2=$(cr_py file "$(head -1 "$CRW/f2.txt")" docs/versions/product/v0001_first.md)
 cr cold fetch product > "$CRW/f3.txt"; cr_rc3=$?; cr_r3=$(cr_py file "$(head -1 "$CRW/f3.txt")" docs/versions/product/v0002_cold.md)
 [ "$cr_rc" = 0 ] && [ "${cr_r%% *}" = ok ] && grep -q '^cold fetch: [0-9]* file(s) under .sikstack/cache/, read-only' "$CRW/f1.txt" && [ "$cr_rc2" = 0 ] && [ "$cr_r2" = ok ] \
@@ -4267,6 +4287,14 @@ cr phase new --name Three --objective third > "$CRW/n.txt"; cr_rc=$?
 [ "$cr_rc" = 0 ] && grep -qE 'P3-[0-9a-z]{2}' "$CRW/n.txt" \
   && ok "with P2 (the highest number) archived and evicted, phase new mints P3, never an evicted phase's number ($(grep -oE 'P[0-9]+-[0-9a-z]{2}' "$CRW/n.txt" | head -1))" \
   || bad "phase new reused an evicted number -- rc=$cr_rc $(cat "$CRW/n.txt")"
+# The eviction's cache copy, alone: on a pre-0.4.0 link with an empty cache, archiving P3 moves it in sikstack and the
+# eviction keeps its phase.json in the cache; git never sees it, and the exclude gains its one /cache/ line.
+cr cold clear > /dev/null; cr_unexclude
+cr phase archive P3 --force > "$CRW/a3.txt"; cr_rc=$?; cr_x=$(cr_excl); cr_st=$(git -C "$CRA" status --porcelain --untracked-files=all | grep 'cache')
+cr_kept=$(ls "$CRA"/cache/works/phases/archived/*_P3-*/phase.json 2>/dev/null | head -1)
+[ "$cr_rc" = 0 ] && [ -n "$cr_kept" ] && [ -z "$(ls -d "$CRA"/works/phases/archived/*_P3-* 2>/dev/null)" ] && [ "${cr_x%% *}" = 1 ] && [ -z "$cr_st" ] \
+  && ok "a pre-0.4.0 link's first eviction: archiving P3 takes it off the disk, keeps its phase.json in the cache, and writes the exclude's one /cache/ line, so git status shows no cache path" \
+  || bad "the eviction's cache copy is visible to git on a pre-0.4.0 link -- rc=$cr_rc kept=[$cr_kept] exclude=[$cr_x] status=[$(echo "$cr_st" | head -3 | tr '\n' ' ')] $(tail -2 "$CRW/a3.txt")"
 # C4: agenda-delete of an item an evicted phase links: that phase.json is rewritten in sikstack, then off the disk.
 cr_rev=$(cr_py rev P2); cr_m=$(cr_mark); cr agenda-delete A2 > "$CRW/del.txt"; cr_rc=$?; cr_r=$(cr_py deleted "$cr_rev" "$cr_m")
 [ "$cr_rc" = 0 ] && grep -q '^deleted A2-bb: 1 link cleared' "$CRW/del.txt" && [ "$cr_r" = ok ] \
@@ -4322,7 +4350,7 @@ docs = {"product": {"latest": "v0001_one", "versions": [{"id": "v0001_one", "pat
 open(sys.argv[1], "w").write(json.dumps({"docs": docs}) + "\n")
 PY
   git -C "$CLA" add -A && git -C "$CLA" commit -qm setup; } > "$CRW/l.setup.txt" 2>&1 || bad "cold fetch containment probe: the setup failed -- $(tail -3 "$CRW/l.setup.txt")"
-cl_d=""; cl_i=0
+cl_x0=$(sha "$CLA/.git/info/exclude"); cl_d=""; cl_i=0
 for t in evil evil@v1 walk abs abs@v1 cur cur@v1 lnk link far docs/versions/link/v0001_out.md docs/reference/out docs/reference docs/versions/far/v0001_far.md; do
   cl_i=$((cl_i + 1)); cl cold fetch "$t" > "$CRW/lesc.$cl_i.txt"; cl_rc=$?
   { [ "$cl_rc" = 1 ] && [ "$(grep -c '' "$CRW/lesc.$cl_i.txt")" = 1 ] && grep -q 'refused, nothing was read' "$CRW/lesc.$cl_i.txt" \
@@ -4335,8 +4363,8 @@ for t in "product@v0001:docs/versions/product/v0001_one.md" "product:docs/versio
   { [ "$cl_rc" = 0 ] && grep -q '^cold fetch: on disk' "$CRW/lok.txt" && case "$cl_p" in "$(cd "$CLA" && pwd -P)"/docs/*) true ;; *) false ;; esac \
     && { [ -z "$cl_want" ] || cmp -s "$cl_p" "$CLA/$cl_want"; }; } || cl_ok="$cl_ok [${t%%:*}: rc=$cl_rc $(tr '\n' '|' < "$CRW/lok.txt")]"
 done
-[ -z "$cl_d" ] && [ -z "$cl_ok" ] && [ ! -e "$CLA/cache" ] && [ -z "$(git -C "$CLA" status --porcelain)" ] \
-  && ok "local mode: cold fetch refuses, in one line with exit 1 and no path, every docs/index.json version path that leaves the workspace (../../, a docs/versions/../ walk, an absolute path) or docs/versions/ (docs/current/x.md), and every version file, doc folder or docs/ folder that is or holds a symlink out of the workspace; a good version, a symlink inside docs/ and docs/current/x.md by path still print their disk path, byte-equal; nothing was written" \
+[ -z "$cl_d" ] && [ -z "$cl_ok" ] && [ ! -e "$CLA/cache" ] && [ -z "$(git -C "$CLA" status --porcelain)" ] && [ "$(sha "$CLA/.git/info/exclude")" = "$cl_x0" ] \
+  && ok "local mode: cold fetch refuses, in one line with exit 1 and no path, every docs/index.json version path that leaves the workspace (../../, a docs/versions/../ walk, an absolute path) or docs/versions/ (docs/current/x.md), and every version file, doc folder or docs/ folder that is or holds a symlink out of the workspace; a good version, a symlink inside docs/ and docs/current/x.md by path still print their disk path, byte-equal; nothing was written, the exclude included" \
   || bad "cold fetch in local mode led out of the workspace --$cl_d$cl_ok cache=$([ -e "$CLA/cache" ] && echo yes) $(git -C "$CLA" status --porcelain | head -3 | tr '\n' ' ')"
 echo "cold reads test runtime: $(( $(date +%s) - cr_t0 ))s"
 

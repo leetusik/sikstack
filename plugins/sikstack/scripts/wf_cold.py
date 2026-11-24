@@ -33,7 +33,8 @@ from wf_store import (  # noqa: E402
 SEAMS = {
     "wf_cloud": (
         '_cloud_ignored_dir', 'CLOUD_COLD_FILES', 'CLOUD_COLD_PREFIXES', 'CLOUD_DIR', 'cloud_cold', 'cloud_cold_top',
-        'cloud_kind', 'cloud_linked', 'cloud_stop_line', 'cloud_truth_rel', 'CloudError', 'CloudLock', 'CloudSession',
+        'cloud_exclude', 'cloud_kind', 'cloud_linked', 'cloud_stop_line', 'cloud_truth_rel', 'CloudError', 'CloudLock',
+        'CloudSession',
     ),
 }
 
@@ -49,6 +50,7 @@ SEARCH_PROBE = 8192  # a NUL in the first 8 KB: binary, never searched
 # is not valid is then read as absent, and nothing is fetched (the hook never waits on the network twice).
 LENIENT = False
 _BASE_MEMO: dict = {}
+_EXCLUDED = False  # this process has made sure the workflow repo's exclude hides the cache (keep's first write)
 
 
 def linked() -> bool:
@@ -111,7 +113,16 @@ def truth_rel(path: Path) -> str:
 
 def keep(rel: str, data: bytes) -> Path:
     """Write sikstack's bytes of `rel` into the cache, read-only (0444). The eviction calls it for an archived
-    phase.json it takes off the disk (its bytes were checked against the base at that moment)."""
+    phase.json it takes off the disk (its bytes were checked against the base at that moment).
+    Every cache write comes here, so its first one in a process makes sure git never sees the cache: a checkout
+    linked before the exclude named `/cache/` gets the line here (one read of the exclude; no write when present)."""
+    global _EXCLUDED
+    if not _EXCLUDED:
+        try:
+            cloud_exclude()
+        except (OSError, SystemExit):  # best effort (no git, an unwritable exclude): the copy itself still counts
+            pass
+        _EXCLUDED = True
     path = CACHE / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix=path.name)
