@@ -112,3 +112,35 @@ export async function discardChange(): Promise<WriteAnswer> {
 export async function retryChange(): Promise<WriteAnswer> {
   return { ok: false, reason: "not-found", message: null };
 }
+
+// -- P61-e9: an item's thread and Proposed (the design's; production's actions add these two) -------------------
+
+/** The server's bound on an entry's body (`_MAX_TEXT` in server/workspace_web_api.py). */
+const BODY_MAX = 20_000;
+
+/**
+ * A note on an item's thread: `POST …/workspace/agenda/changes {kind: "entry", items: [AID], fields: {kind: "note",
+ * body}}`. Its author is the server's (the signed-in account, `person:<handle>`), never the page's.
+ */
+export async function noteAgendaItem(
+  _project: string,
+  item: string,
+  body: string,
+): Promise<WriteAnswer> {
+  const text = body.trim();
+  if (!text) return refused("an entry needs a body of text");
+  if (text.length > BODY_MAX) return refused(`body must be text of at most ${BODY_MAX} characters`);
+  const out = apply({ kind: "entry", items: [item], fields: { kind: "note", body: text } });
+  if (!out.ok) return refused(out.refused);
+  return { ok: true, entry: out.entry, item: null };
+}
+
+/** Accept Proposed items: `POST …/workspace/agenda/changes {kind: "accept", items}`. */
+export async function acceptAgendaItems(
+  _project: string,
+  items: string[],
+): Promise<WriteAnswer> {
+  const out = apply({ kind: "accept", items, fields: {} });
+  if (!out.ok) return refused(out.refused);
+  return { ok: true, entry: out.entry, item: null };
+}

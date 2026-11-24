@@ -18,6 +18,12 @@
 // synced (its agenda then absent or empty), and an item its own route does not hold yet (an add that
 // waits for the sync) is kept as its row alone.
 //
+// `--feedback <id>` (repeatable) also records each piece of feedback the pages draw: `GET /app/feedback/{id}` (its
+// record) and `GET /app/feedback/{id}/agenda` (the agenda items it is on), as the recording's `feedback` part keyed by
+// a fixed sample id (`f1`, `f2`, … as `SAMPLE_FEEDBACK`), each real id replaced wherever it appears (an entry's
+// `source: feedback:<id>`, its body's `/feedback/<id>`); the account's user id and every email become sample ones.
+// Without `--state`, a recording to `sample` keeps the file's `design` part as it is (`--design` writes it).
+//
 // `--design` records the Design service's answers instead of the Workspace's: `GET /app/projects/{id}/design/builds`,
 // each `GET …/design/builds/{build}`, and, for each private build, the one line `POST …/{build}/share {on: true}`
 // answers (a 409: nothing changes). `--gone <build>` adds the 404 a deleted build's address answers. Without
@@ -38,6 +44,12 @@ const DAY = 86_400_000;
 const SHARE_TOKEN = "sampleshareTOKEN";
 /** What a build's `published_from` (the publishing machine's name) becomes: never the account's machine. */
 const SAMPLE_CHECKOUT = "sample-checkout";
+/** The n-th recorded piece of feedback's id (1-based). */
+const SAMPLE_FEEDBACK = (n) => `00000000-0000-4000-8000-0000000000f${n}`;
+/** What the account's user id becomes. */
+const SAMPLE_USER = "00000000-0000-4000-8000-0000000000b1";
+/** What every email becomes: a recording never holds an account's address. */
+const SAMPLE_EMAIL = "design@example.invalid";
 
 function args(argv) {
   const out = {
@@ -53,6 +65,7 @@ function args(argv) {
     else if (k === "--project-name") out.projectName = v;
     else if (k === "--time-zone") out.timeZone = v;
     else if (k === "--state") out.state = v;
+    else if (k === "--feedback") (out.feedback ??= []).push(v);
     else if (k === "--design") {
       out.design = true;
       i--;
@@ -120,8 +133,9 @@ function dayIn(ms, timeZone) {
 const CAL = /^\d{4}-\d{2}-\d{2}$/;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
 
-/** Every date moved by the same offset, the real project id replaced, in every string. */
-function normalizer(projectId, takenAt, timeZone) {
+/** Every date moved by the same offset, the real project id replaced, in every string; `ids` maps other real ids
+ * (a piece of feedback's, the account's) to sample ones, and every email becomes `SAMPLE_EMAIL`. */
+function normalizer(projectId, takenAt, timeZone, ids = {}) {
   const shift = ANCHOR - takenAt;
   const days = Math.round(
     (Date.parse(dayIn(ANCHOR, timeZone)) - Date.parse(dayIn(takenAt, timeZone))) / DAY,
@@ -131,7 +145,9 @@ function normalizer(projectId, takenAt, timeZone) {
       if (CAL.test(v))
         return new Date(Date.parse(`${v}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
       if (INSTANT.test(v)) return new Date(Date.parse(v) + shift).toISOString().replace(/\.\d+Z$/, "Z");
-      return v.split(projectId).join(SAMPLE_PROJECT);
+      let out = v.split(projectId).join(SAMPLE_PROJECT);
+      for (const [real, sample] of Object.entries(ids)) out = out.split(real).join(sample);
+      return out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, SAMPLE_EMAIL);
     }
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
@@ -231,21 +247,34 @@ async function main() {
     const own = o.state === undefined ? await get(o.api, route, bearer) : await getOrNull(o.api, route, bearer);
     if (own) items[row.id] = own;
   }
+  // Each piece of feedback the pages draw: its record and the agenda items it is on.
+  const feedback = {};
+  const ids = {};
+  for (const [i, id] of (o.feedback ?? []).entries()) {
+    const route = `/app/feedback/${encodeURIComponent(id)}`;
+    const { record } = await get(o.api, route, bearer);
+    const agenda = await get(o.api, `${route}/agenda`, bearer);
+    ids[id] = SAMPLE_FEEDBACK(i + 1);
+    if (record.user_id) ids[record.user_id] = SAMPLE_USER;
+    feedback[ids[id]] = { record, agenda };
+  }
   let project = { name: o.projectName ?? null, visibility: "private", created_at: new Date(takenAt).toISOString() };
   if (!o.projectName) {
     const p = await get(o.api, base, bearer);
     const one = p.project ?? p;
     project = { name: one.name, visibility: one.visibility ?? "private", created_at: one.created_at ?? project.created_at };
   }
-  const norm = normalizer(o.project, takenAt, o.timeZone);
+  const norm = normalizer(o.project, takenAt, o.timeZone, ids);
+  const routes = ["GET /app/projects/{project}/workspace", "GET /app/projects/{project}/workspace/agenda/{item}"];
+  if (o.feedback?.length) routes.push("GET /app/feedback/{feedback}", "GET /app/feedback/{feedback}/agenda");
   const recording = {
     $design: MARK,
     name: o.state ?? (o.to === "sample" ? "sample" : o.to.slice("local/".length)),
     now: new Date(ANCHOR).toISOString().replace(/\.\d+Z$/, "Z"),
     timeZone: o.timeZone,
     source: {
-      routes: ["GET /app/projects/{project}/workspace", "GET /app/projects/{project}/workspace/agenda/{item}"],
-      note: "project id and dates normalized; the Shell's names are fixed",
+      routes,
+      note: "project id, feedback ids, the account's id, emails and dates normalized; the Shell's names are fixed",
     },
     shell: norm({
       org: { id: SAMPLE_ORG, name: "Sample org" },
@@ -255,15 +284,30 @@ async function main() {
     workspace: norm(workspace),
     items: norm(items),
   };
-  const text = `${JSON.stringify(recording, null, 2)}\n`;
-  if (text.includes(o.project)) throw new Error("the real project id survived normalization: nothing written");
-  if (text.includes(bearer)) throw new Error("the token appears in the recording: nothing written");
+  if (o.feedback?.length) recording.feedback = norm(feedback);
   const file =
     o.state !== undefined
       ? path.join(DESIGN, "data", "sample", "states", `${o.state}.json`)
       : o.to === "sample"
         ? path.join(DESIGN, "data", "sample", "recording.json")
         : path.join(DESIGN, "data", "local", `${recording.name}.json`);
+  // The Design service's part is its own recording (`--design`): a Workspace recording keeps it.
+  if (o.state === undefined) {
+    try {
+      const was = JSON.parse(readFileSync(file, "utf8"));
+      if (was.$design === MARK && was.design) {
+        recording.design = was.design;
+        recording.source.routes = [...new Set([...recording.source.routes, ...(was.source?.routes ?? []).filter((r) => r.includes("/design/"))])];
+      }
+    } catch {
+      // no recording there yet
+    }
+  }
+  const text = `${JSON.stringify(recording, null, 2)}\n`;
+  if (text.includes(o.project)) throw new Error("the real project id survived normalization: nothing written");
+  if (text.includes(bearer)) throw new Error("the token appears in the recording: nothing written");
+  for (const real of Object.keys(ids))
+    if (text.includes(real)) throw new Error("a real feedback or account id survived normalization: nothing written");
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, text);
   console.log(

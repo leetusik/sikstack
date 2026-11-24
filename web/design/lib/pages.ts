@@ -6,6 +6,8 @@ import {
   AGENDA_STATES,
   DESIGN_BUILD_STATES,
   DESIGN_LIST_STATES,
+  FEEDBACK_FILED_STATES,
+  FEEDBACK_STATES,
   ITEM_STATES,
   type PageStates,
 } from "./page-states";
@@ -36,6 +38,13 @@ export interface BuildPage {
 const ws = `/projects/${encodeURIComponent(PROJECT)}/workspace/`;
 const design = `/projects/${encodeURIComponent(PROJECT)}/design/`;
 const recorded = RECORDING.workspace.agenda.map((a) => a.id);
+// The item page opens on the item with the longest thread (P61-e9: A3-1z, agents' and people's entries).
+const threaded =
+  [...RECORDING.workspace.agenda].sort((a, b) => (b.entryCount ?? 0) - (a.entryCount ?? 0))[0]?.id ?? recorded[0];
+const fb = `/projects/${encodeURIComponent(PROJECT)}/feedback/`;
+const feedback = Object.entries(RECORDING.feedback ?? {});
+const fbFiled = feedback.filter(([, f]) => f.agenda.items.length > 0).map(([id]) => id);
+const fbFree = feedback.filter(([, f]) => f.agenda.items.length === 0).map(([id]) => id);
 const builds = buildPageIds();
 // The viewer's entry is a build in its first state (no options: not private, not shared, no options page), so the
 // page with no `state` shows the first state its widget lists; every other build page shows its own.
@@ -55,12 +64,40 @@ export const PAGES: readonly BuildPage[] = [
     name: "Agenda item",
     route: "/projects/[projectId]/workspace/agenda/[item]",
     production: "src/app/(app)/projects/[projectId]/workspace/agenda/[item]/page.tsx",
-    entry: `${ws}agenda/${recorded[0]}/`,
+    entry: `${ws}agenda/${threaded}/`,
     entries: recorded.map((id) => `${ws}agenda/${id}/`),
     recording: true,
     reads: ["workspace", "items"],
     states: ITEM_STATES,
   },
+  ...(fbFree.length > 0
+    ? [
+        {
+          name: "Feedback item",
+          route: "/projects/[projectId]/feedback/[feedbackId]",
+          production: "src/app/(app)/projects/[projectId]/feedback/[feedbackId]/page.tsx",
+          entry: `${fb}${fbFree[0]}/`,
+          entries: fbFree.map((id) => `${fb}${id}/`),
+          recording: true as const,
+          reads: ["feedback", "workspace", "items"],
+          states: FEEDBACK_STATES,
+        },
+      ]
+    : []),
+  ...(fbFiled.length > 0
+    ? [
+        {
+          name: "Feedback item on the agenda",
+          route: "/projects/[projectId]/feedback/[feedbackId]",
+          production: "src/app/(app)/projects/[projectId]/feedback/[feedbackId]/page.tsx",
+          entry: `${fb}${fbFiled[0]}/`,
+          entries: fbFiled.map((id) => `${fb}${id}/`),
+          recording: true as const,
+          reads: ["feedback", "workspace", "items"],
+          states: FEEDBACK_FILED_STATES,
+        },
+      ]
+    : []),
   {
     name: "Design",
     route: "/projects/[projectId]/design",

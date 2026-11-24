@@ -3,8 +3,10 @@ import manyRaw from "../data/sample/states/many.json";
 import neverRaw from "../data/sample/states/never.json";
 import unlinkedRaw from "../data/sample/states/unlinked.json";
 import waitingRaw from "../data/sample/states/waiting.json";
+import webWaitingRaw from "../data/sample/states/web-waiting.json";
 
-import type { Unplaced, Workspace, WorkspaceHead } from "@/lib/workspace/types";
+import type { FeedbackAgendaItem } from "@/lib/feedback/types";
+import type { AgendaItem, Unplaced, Workspace, WorkspaceHead } from "@/lib/workspace/types";
 
 import { mintPool } from "./ids";
 import { NOW, RECORDING, type Recording } from "./recording";
@@ -16,7 +18,14 @@ import { NOW, RECORDING, type Recording } from "./recording";
  *
  * - `unlinked`: a project with no linked workspace; `never`: a workspace key that probed the head, no batch;
  * - `empty`: a linked, synced workspace with no agenda item; `many`: 46 items (23 open, 14 deferred, 9 ended);
- * - `waiting`: three web changes the engine has not taken yet (an add, a defer, an edit: rows marked waiting).
+ * - `waiting`: three web changes the engine has not taken yet (an add, a defer, an edit: rows marked waiting);
+ * - `web-waiting` (P61-e9): the recording's project after three web writes the engine has not taken yet: a note on
+ *   A3-1z's thread (its entry last, waiting), the third piece of feedback filed on a new item (A11-vz, waiting) and
+ *   an accept of A9-hb (the read keeps it Proposed, marked waiting, until the sync).
+ *
+ * The recording itself (P61-e9) holds two Proposed items (A8-sf, folded from a deferred job by `agent:fold`; A9-hb,
+ * opened by `agent:claude-opus-5-5`), A3-1z's thread of agents' and people's entries, and three pieces of feedback:
+ * f1 filed on a new item (A10-3n) and on A3-1z, f2 on A3-1z, f3 on none.
  *
  * Two are made here, because no API answer holds them on demand: `behind` (a sync older than the server's 24
  * hours, which only time makes) and `waiting`'s one open change that no row carries (the engine applies the
@@ -58,6 +67,7 @@ const UNPLACED: Unplaced = {
 };
 
 const waiting = asSet(waitingRaw);
+const webWaiting = asSet(webWaitingRaw);
 
 /** The data sets the Agenda's presets put in the store, by preset name. */
 export const DATA_SETS = {
@@ -75,6 +85,7 @@ export const DATA_SETS = {
     } satisfies Workspace,
     items: RECORDING.items,
   },
+  "web-waiting": webWaiting,
 } satisfies Record<string, DataSet>;
 
 export type DataName = keyof typeof DATA_SETS;
@@ -91,3 +102,52 @@ export function itemPageIds(): string[] {
   }
   return [...out];
 }
+
+// -- P61-e9: who writes, and the feedback on the agenda -----------------------------------------------------------
+
+/**
+ * The signed-in account as the server writes it on an entry (`person_author`): `person:<handle>`, the handle its
+ * email's part before `@`. The design's account is the Shell's (`design@example.invalid`), so a note written in the
+ * browser reads `design`; the recorded web notes are the local stack's test account's (`you`).
+ */
+export const ME = `person:${RECORDING.shell.email.split("@")[0]}`;
+
+/** The recorded pieces of feedback, by sample id (`record.mjs --feedback`). */
+export const FEEDBACK = RECORDING.feedback ?? {};
+
+/**
+ * The items a piece of feedback is on, as `GET /app/feedback/{id}/agenda` answers them (`feedback_items`): each
+ * item whose thread holds an entry with `source: feedback:<id>`, in the Agenda's order. Read from the store's
+ * workspace, so an add made in the browser shows; the recorded answers are checked against it below.
+ */
+export function feedbackItemsIn(
+  agenda: readonly AgendaItem[],
+  feedbackId: string,
+): FeedbackAgendaItem[] {
+  const source = `feedback:${feedbackId}`;
+  return agenda
+    .filter((a) => (a.entries ?? []).some((e) => e.source === source))
+    .map((a) => ({
+      id: a.id,
+      title: a.title,
+      lang: a.lang,
+      state: a.state,
+      sync: (a.sync ?? null) as FeedbackAgendaItem["sync"],
+    }));
+}
+
+/** Each recorded answer, as the store's rows would give it: the recording's and `web-waiting`'s. */
+function checkFeedback(set: DataSet & { feedback?: Recording["feedback"] }, name: string) {
+  const rows = set.workspace.agenda.map((r) => ({ ...r, ...(set.items[r.id] ?? {}) }));
+  for (const [id, { agenda }] of Object.entries(set.feedback ?? {})) {
+    const derived = JSON.stringify(feedbackItemsIn(rows, id));
+    if (derived !== JSON.stringify(agenda.items))
+      throw new Error(`${name}: feedback ${id}'s recorded agenda is not what its entries say`);
+  }
+}
+checkFeedback(RECORDING, "recording.json");
+checkFeedback(webWaiting as DataSet & { feedback?: Recording["feedback"] }, "states/web-waiting.json");
+
+/** Made from `web-waiting`'s answer: the note it holds waiting on A3-1z, put on any item for its Note waiting state. */
+export const WAITING_NOTE: string =
+  webWaiting.items["A3-1z"]?.entries?.find((e) => e.sync === "waiting")?.body ?? "";
