@@ -1,6 +1,6 @@
 // ── sikstack's org surfaces (P78-s2.S2's design) ─────────────────────────────────────────────
 // The words of the org switcher's New org, New org (`/orgs/new`), Members (`/members`) and an invite's link
-// (`/invite?code=…`). Applied, this file is `src/content/org.ts`. English chrome in sentence case; an org's name
+// (`/invite?code=…`). English chrome in sentence case; an org's name
 // and an address are data, set at weight 500 where a sentence names them.
 
 export const ORG_SHELL = {
@@ -23,6 +23,21 @@ export const NEW_ORG = {
   failed: "Could not create the org. Try again.",
   /** The toast on the new org's home, where a create lands. */
   created: (name: string) => `Org ${name} created.`,
+} as const;
+
+/**
+ * The org home's Org name panel (F15's rename, P78-s2.S4: no design round, built in the Public URL panel's
+ * in-place pattern, its words taken from that panel and New org's; the operator meets it at the gate).
+ */
+export const ORG_NAME = {
+  heading: "Org name",
+  change: "Change",
+  label: NEW_ORG.nameLabel,
+  cancel: "Cancel",
+  save: "Save",
+  saving: "Saving…",
+  errors: NEW_ORG.errors,
+  saveFailed: "Could not save the org's name. Try again.",
 } as const;
 
 export const MEMBERS = {

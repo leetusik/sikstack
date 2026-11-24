@@ -127,6 +127,9 @@ const LIBRARY_PARTS = [
   // sikstack's connect page (job 09): its board draws `button.link link-row` (another account's Sign out, F532),
   // and it is a page of its own in the sign-in frame, never a page from before the Library.
   "/app/(auth)/connect/",
+  // The invite link's column (P78-s2.S2's signed design), drawn as the connect page's: another account's Sign out
+  // and Already a member's Open <org> are `button.link link-row`, on a page of its own in the sign-in frame.
+  "/sikstack/org/invite.tsx",
 ];
 
 describe("the Library's sheets", () => {

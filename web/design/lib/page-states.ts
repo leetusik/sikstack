@@ -112,48 +112,48 @@ export const FEEDBACK_FILED_STATES = pageStates("Feedback item on the agenda", [
   { key: "no-workspace", label: "No workspace linked", from: `${FB}/item/body.tsx not offered · lib/feedback/agenda.ts canAdd: linked false, sent() none` },
 ]);
 
-// ── The org surfaces (P78-s2.S2's design): new components in `next/`, so each `from` names the design's own file
+// ── The org surfaces (P78-s2.S2's design): applied by P78-s2.S4, so each `from` names production's file
 // and line (applied: `src/sikstack/shell/shell.tsx`, `src/sikstack/org/`). Their data is made (`org-data.ts`).
-const SHELL_NEXT = "next/shell/shell.tsx";
-const ORG = "next/org";
+const SHELL_NEXT = "src/sikstack/shell/shell.tsx";
+const ORG = "src/sikstack/org";
 
 /** The org switcher, in the top bar of every app page (drawn here over org home's address). */
 export const ORG_SWITCHER_STATES = pageStates("Org switcher", [
-  { key: "several", label: "Several orgs, menu open", from: `${SHELL_NEXT}:170 open === "org", :189 aria-current · org-data.ts OTHER_ORGS (made)` },
-  { key: "one", label: "One org, menu open", from: `${SHELL_NEXT}:170 the menu for one org too, :207 New org · recording shell.org` },
-  { key: "closed", label: "Menu closed", from: `${SHELL_NEXT}:164 the crumb's button, its chevron` },
+  { key: "several", label: "Several orgs, menu open", from: `${SHELL_NEXT}:169 open === "org", :188 aria-current · org-data.ts OTHER_ORGS (made)` },
+  { key: "one", label: "One org, menu open", from: `${SHELL_NEXT}:169 the menu for one org too, :206 New org · recording shell.org` },
+  { key: "closed", label: "Menu closed", from: `${SHELL_NEXT}:163 the crumb's button, its chevron` },
 ]);
 
 /** New org (`/orgs/new`). */
 export const NEW_ORG_STATES = pageStates("New org", [
-  { key: "ready", label: "Ready", from: `${ORG}/new-org.tsx:101 phase ready` },
-  { key: "empty", label: "No name", from: `${ORG}/new-org.tsx:62 phase empty (checkOrgName)` },
-  { key: "taken", label: "Name taken", from: `${ORG}/new-org.tsx:62 phase taken (the API's answer; made: org-data.ts designCreate)` },
-  { key: "creating", label: "Creating", from: `${ORG}/new-org.tsx:139 busy, Creating…` },
-  { key: "failed", label: "Create failed", from: `${ORG}/new-org.tsx:102 the notice (no answer)` },
+  { key: "ready", label: "Ready", from: `${ORG}/new-org.tsx:100 phase ready` },
+  { key: "empty", label: "No name", from: `${ORG}/new-org.tsx:61 phase empty (checkOrgName)` },
+  { key: "taken", label: "Name taken", from: `${ORG}/new-org.tsx:61 phase taken (the API's answer; made: org-data.ts designCreate)` },
+  { key: "creating", label: "Creating", from: `${ORG}/new-org.tsx:138 busy, Creating…` },
+  { key: "failed", label: "Create failed", from: `${ORG}/new-org.tsx:101 the notice (no answer)` },
 ]);
 
 /** Members (`/members`): the owner's view in each phase of the invite form, then a member's view. */
 export const MEMBERS_STATES = pageStates("Members", [
-  { key: "members", label: "Members and invites", from: `${ORG}/members.tsx:180 members, :290 invites · org-data.ts (made)` },
-  { key: "owner-only", label: "Only the owner", from: `${ORG}/members.tsx:313 no invites, Invite primary · org-data.ts OWNER (made)` },
-  { key: "open", label: "Invite form open", from: `${ORG}/members.tsx:225 phase open` },
-  { key: "sending", label: "Sending", from: `${ORG}/members.tsx:270 busy, Sending…` },
-  { key: "sent", label: "Invite sent", from: `${ORG}/members.tsx:128 the row first, the toast` },
-  { key: "not-address", label: "Not an address", from: `${ORG}/members.tsx:103 phase address (looksLikeEmail)` },
-  { key: "already-member", label: "Already a member", from: `${ORG}/members.tsx:103 phase member (the API's refusal; made)` },
-  { key: "already-invited", label: "Already invited", from: `${ORG}/members.tsx:103 phase invited (the API's refusal; made)` },
-  { key: "send-failed", label: "Send failed", from: `${ORG}/members.tsx:227 the notice (no answer)` },
-  { key: "member-view", label: "A member's view", from: `${ORG}/members.tsx:201 owner false: no Invites panel` },
+  { key: "members", label: "Members and invites", from: `${ORG}/members.tsx:179 members, :289 invites · org-data.ts (made)` },
+  { key: "owner-only", label: "Only the owner", from: `${ORG}/members.tsx:312 no invites, Invite primary · org-data.ts OWNER (made)` },
+  { key: "open", label: "Invite form open", from: `${ORG}/members.tsx:224 phase open` },
+  { key: "sending", label: "Sending", from: `${ORG}/members.tsx:269 busy, Sending…` },
+  { key: "sent", label: "Invite sent", from: `${ORG}/members.tsx:127 the row first, the toast` },
+  { key: "not-address", label: "Not an address", from: `${ORG}/members.tsx:102 phase address (looksLikeEmail)` },
+  { key: "already-member", label: "Already a member", from: `${ORG}/members.tsx:102 phase member (the API's refusal; made)` },
+  { key: "already-invited", label: "Already invited", from: `${ORG}/members.tsx:102 phase invited (the API's refusal; made)` },
+  { key: "send-failed", label: "Send failed", from: `${ORG}/members.tsx:226 the notice (no answer)` },
+  { key: "member-view", label: "A member's view", from: `${ORG}/members.tsx:200 owner false: no Invites panel` },
 ]);
 
 /** The invite link (`/invite?code=…`), in the sign-in frame. */
 export const INVITE_STATES = pageStates("Invite", [
-  { key: "out", label: "Signed out", from: `${ORG}/invite.tsx:103 phase out, the sign-in pair` },
-  { key: "ready", label: "Signed in, invited address", from: `${ORG}/invite.tsx:149 phase ready, Join` },
-  { key: "joining", label: "Joining", from: `${ORG}/invite.tsx:149 phase joining, Joining…` },
-  { key: "failed", label: "Join failed", from: `${ORG}/invite.tsx:96 phase failed, the notice` },
-  { key: "other", label: "Another account", from: `${ORG}/invite.tsx:164 phase other (model.ts invitePhase)` },
-  { key: "member", label: "Already a member", from: `${ORG}/invite.tsx:182 phase member` },
-  { key: "expired", label: "Expired, revoked or used", from: `${ORG}/invite.tsx:194 phase expired (one state for the three)` },
+  { key: "out", label: "Signed out", from: `${ORG}/invite.tsx:102 phase out, the sign-in pair` },
+  { key: "ready", label: "Signed in, invited address", from: `${ORG}/invite.tsx:148 phase ready, Join` },
+  { key: "joining", label: "Joining", from: `${ORG}/invite.tsx:148 phase joining, Joining…` },
+  { key: "failed", label: "Join failed", from: `${ORG}/invite.tsx:95 phase failed, the notice` },
+  { key: "other", label: "Another account", from: `${ORG}/invite.tsx:163 phase other (model.ts invitePhase)` },
+  { key: "member", label: "Already a member", from: `${ORG}/invite.tsx:181 phase member` },
+  { key: "expired", label: "Expired, revoked or used", from: `${ORG}/invite.tsx:193 phase expired (one state for the three)` },
 ]);

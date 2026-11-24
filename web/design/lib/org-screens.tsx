@@ -8,14 +8,13 @@ import { StateBlock } from "@/sikstack/states";
 import { Legacy } from "@/sikstack/ui/boundary";
 import { UiRoot } from "@/sikstack/ui/root";
 
-// The design build swaps this import for the next version (`next/shell/shell.tsx`, `next.config.ts`).
 import { Shell } from "@/sikstack/shell/shell";
 
-import { MEMBERS as MEMBERS_WORDS } from "../next/content/org";
-import { InviteColumn } from "../next/org/invite";
-import { MembersView } from "../next/org/members";
-import type { InvitePagePhase, InvitePhase, InviteRow, MemberRow, OrgRole } from "../next/org/model";
-import { NewOrgForm } from "../next/org/new-org";
+import { MEMBERS as MEMBERS_WORDS } from "@/content/org";
+import { InviteColumn } from "@/sikstack/org/invite";
+import { MembersView } from "@/sikstack/org/members";
+import type { InvitePagePhase, InvitePhase, InviteRow, MemberRow, OrgRole } from "@/sikstack/org/model";
+import { NewOrgForm } from "@/sikstack/org/new-org";
 import { DESIGN_MARK } from "./mark";
 import {
   CURRENT_ORG,
@@ -39,8 +38,8 @@ import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
 import { StatePage } from "./states";
 
 /**
- * The org surfaces' screens (P78-s2.S2's design): the next Shell (the org menu for every account, New org at its
- * foot, Members in the org rail) and the new components (`next/org/`), on made data (`org-data.ts`). The page's
+ * The org surfaces' screens (P78-s2.S2's design): production's Shell (the org menu for every account, New org at its
+ * foot, Members in the org rail) and the org components (`src/sikstack/org/`), on made data (`org-data.ts`). The page's
  * state widget sets each component's first phase; the components then run as production would, their actions
  * answered in the browser.
  */

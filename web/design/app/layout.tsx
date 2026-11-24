@@ -13,8 +13,6 @@ import {
 import "../../src/app/globals.css";
 import "@/sikstack/styles/index.css";
 import "@/sikstack/shell/shell.css";
-// P78-s2.S2's new sheet (applied: `src/sikstack/styles/org.css`, imported by `index.css`).
-import "../next/styles/org.css";
 
 // The design build's root: production's root layout (`src/app/layout.tsx`) as it draws a signed-in page,
 // its sheets, faces and body classes, without the request-bound parts (Listen, the zone cookie).

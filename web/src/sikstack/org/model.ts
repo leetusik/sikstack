@@ -1,6 +1,6 @@
 // The org surfaces' rules as pure functions (P78-s2.S2's design): New org's form, Members' invite form, and the
 // invite link's view. No React and no I/O, so they are tested on their own; `new-org.tsx`, `members.tsx` and
-// `invite.tsx` render what these return. Applied, this file is `src/sikstack/org/model.ts`.
+// `invite.tsx` render what these return.
 
 // ── New org ───────────────────────────────────────────────────────────────────────────────────
 
@@ -120,4 +120,52 @@ export function isInviteConfirm(phase: InvitePagePhase): boolean {
 /** The invite's own address: `/invite?code=…`, the `next` the sign-in pair carries. */
 export function invitePath(code: string): string {
   return `/invite?code=${encodeURIComponent(code)}`;
+}
+
+/** The code as the address carries it, trimmed; anything that is not one string is no code. */
+export function inviteCode(raw: string | string[] | undefined | null): string | null {
+  if (typeof raw !== "string") return null;
+  const code = raw.trim();
+  return code.length > 0 && code.length <= 200 ? code : null;
+}
+
+/** The invite code a sign-in's `next` carries (`/invite?code=…`, the invite page's pair), or `null`. */
+export function inviteCodeOf(next: string): string | null {
+  const base = "https://next.invalid";
+  let url: URL;
+  try {
+    url = new URL(next, base);
+  } catch {
+    return null;
+  }
+  if (url.origin !== base || url.pathname !== "/invite") return null;
+  return inviteCode(url.searchParams.get("code"));
+}
+
+const text = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * The page's first view from the API's read of the code (`GET /app/invite/{code}`, `server/orgs_api.py`) and the
+ * signed-in account's address (`null` signed out). `valid` is the one usable state; `expired`, `revoked` and `used`
+ * are the one `expired` page. Signed in, the read says whether the account is a member (and then the org's id, which
+ * Already a member's way on posts).
+ */
+export function inviteViewFromServer(body: unknown, code: string, account: string | null): InviteView {
+  const raw = body !== null && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const org = raw.org !== null && typeof raw.org === "object" ? (raw.org as Record<string, unknown>) : {};
+  const email = text(raw.email);
+  const id = text(org.id);
+  return {
+    code,
+    org: { id, name: text(org.name) },
+    email,
+    invitedBy: text(raw.invited_by),
+    account,
+    phase: invitePhase({
+      usable: raw.state === "valid" && email !== "",
+      signedIn: account,
+      invited: email,
+      member: raw.member === true && id !== "",
+    }),
+  };
 }

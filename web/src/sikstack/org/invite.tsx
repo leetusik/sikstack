@@ -8,8 +8,7 @@ import { publishToast } from "@/sikstack/shell";
 import { buttonClass, Swap } from "@/sikstack/ui";
 import { splitEmail } from "@/lib/connect/model";
 
-// Applied: `@/content/org` (this design keeps the new words at `next/content/org.ts`).
-import { INVITE } from "../content/org";
+import { INVITE } from "@/content/org";
 import { invitePath, isInviteConfirm, type InvitePagePhase, type InviteView } from "./model";
 
 const ORG_HOME = "/dashboard";

@@ -127,11 +127,12 @@ describe("the sikstack sheets", () => {
     );
   });
 
-  it("load the system, then each job's sheets as one run: the Library's (its boundary after Listen's, Review's and the Workspace's), then Feedback's, then Design's", () => {
+  it("load the system, then each job's sheets as one run: the Library's (its boundary after Listen's, Review's and the Workspace's), then Feedback's, then Design's, then the org surfaces'", () => {
     const imports = [
       ...read(join(styles, "index.css")).matchAll(/@import "([^"]+)";/g),
     ].map((m) => m[1]);
-    const group = (i: string) => /^\.\/([a-z-]+)\//.exec(i)?.[1] ?? "system";
+    const group = (i: string) =>
+      /^\.\/([a-z-]+)\//.exec(i)?.[1] ?? (i === "./org.css" ? "org" : "system");
     const runs = imports
       .map(group)
       .filter((g, i, all) => i === 0 || all[i - 1] !== g);
@@ -144,6 +145,7 @@ describe("the sikstack sheets", () => {
       "library",
       "feedback",
       "design",
+      "org",
     ]);
   });
 });

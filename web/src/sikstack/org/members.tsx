@@ -20,8 +20,7 @@ import {
 } from "@/sikstack/ui";
 import { date, plural, type FormatOptions } from "@/lib/format";
 
-// Applied: `@/content/org` (this design keeps the new words at `next/content/org.ts`).
-import { MEMBERS } from "../content/org";
+import { MEMBERS } from "@/content/org";
 import {
   inviteFieldError,
   inviteFormOpen,
@@ -167,7 +166,7 @@ export function MembersView({
         </div>
       </header>
 
-      <Panel aria-label={M.heading}>
+      <Panel className="org-members" aria-label={M.heading}>
         <StackTable>
           <thead>
             <tr>

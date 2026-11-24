@@ -1,5 +1,6 @@
 // The Shell's rules as pure functions (the signed Shell: job 01 round 03-instrument, frame.md F9, with
-// the org rail revised by job 03 round 02-one-library, F320, and the project rail's Design entry, P77). No
+// the org rail revised by job 03 round 02-one-library, F320, and the project rail's Design entry, P77; the org
+// menu for every account and the org rail's Members, P78-s2.S2's design). No
 // React and no I/O, so the rules are tested on their own (tests/sikstack-shell-*.test.ts); `shell.tsx`
 // renders what these return.
 
@@ -23,11 +24,6 @@ export interface ShellProject {
   name: string;
   visibility: "public" | "private";
   created_at: string;
-}
-
-/** The org switcher is a menu only for a user in two or more orgs; one org is its plain name. */
-export function orgSwitcherKind(orgCount: number): "menu" | "plain" {
-  return orgCount >= 2 ? "menu" : "plain";
 }
 
 /** The project switcher is absent while the org has no project. */
@@ -83,7 +79,7 @@ export function projectIdOf(pathname: string): string | null {
 }
 
 export type RailKey =
-  "overview" | "workspace" | "library" | "feedback" | "design" | "review";
+  "overview" | "workspace" | "library" | "feedback" | "design" | "members" | "review";
 
 export interface RailItem {
   key: RailKey;
@@ -104,6 +100,8 @@ const ORG_HOME = "/dashboard";
 const LIBRARY = "/library";
 const FEEDBACK = feedbackHref();
 const REVIEW = "/review";
+/** The org's people and its pending invites (P78-s2.S2's design). */
+const MEMBERS = "/members";
 
 const under = (pathname: string, base: string) =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -152,7 +150,8 @@ export function projectSwitchHref(pathname: string, projectId: string): string {
  * The rail a path shows. On `/projects/<id>` and beneath it, the project form: Overview (the project's
  * home), Workspace (the project's Agenda, where the Workspace opens: job 02, F41 and F74), Library,
  * Feedback and Design (the project's design builds, `/projects/<id>/design`: P77).
- * Elsewhere the org form: Overview (org home), Library, Feedback (F320: no Documents). Then the rule and
+ * Elsewhere the org form: Overview (org home), Library, Feedback (F320: no Documents), Members (the org's people
+ * and invites, `/members`: P78-s2.S2's design). Then the rule and
  * Review. The current item follows the path; an address the rail does not name has none (F25: `none`).
  *
  * The project form's Workspace is current on every page under `/projects/<id>/workspace` (the Agenda,
@@ -221,6 +220,7 @@ export function railFor(pathname: string, known = true): Rail {
         href: FEEDBACK,
         current: under(pathOf(pathname), FEEDBACK),
       },
+      { key: "members", href: MEMBERS, current: under(pathOf(pathname), MEMBERS) },
     ],
     review,
   };

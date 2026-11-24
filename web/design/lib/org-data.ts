@@ -1,11 +1,12 @@
 import type { ShellOrg } from "@/sikstack/shell";
 
-import type { CreateOrgResult, InviteResult, InviteRow, InviteView, MemberRow } from "../next/org/model";
+import type { CreateOrgResult, InviteResult, InviteRow, InviteView, MemberRow } from "@/sikstack/org/model";
 import { NOW, RECORDING } from "./recording";
 
 /**
- * The org surfaces' data (P78-s2.S2's design). **Synthesized, every line:** no API answers org creation, members
- * or invites yet (the brief), so nothing here was recorded. The account, its active org and the clock are the
+ * The org surfaces' data (P78-s2.S2's design). **Synthesized, every line:** no API answered org creation, members
+ * or invites when it was drawn (the brief), so nothing here was recorded; the recording's sample project has none
+ * since (`server/orgs_api.py`, P78-s2.S3). The account, its active org and the clock are the
  * recording's (`RECORDING.shell`, `NOW`); the other orgs, the members, the invites and the invite link's code are
  * made here, with reserved addresses (`example.com`, `example.invalid`). A Korean org name is data, as TASTE says.
  * The design's actions answer in the browser after a short wait, as the store's do (`actions.ts`).

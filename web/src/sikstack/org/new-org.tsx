@@ -16,8 +16,7 @@ import {
   Panel,
 } from "@/sikstack/ui";
 
-// Applied: `@/content/org` (this design keeps the new words at `next/content/org.ts`).
-import { NEW_ORG } from "../content/org";
+import { NEW_ORG } from "@/content/org";
 import {
   checkOrgName,
   phaseAfterCreate,

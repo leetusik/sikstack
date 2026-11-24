@@ -6,10 +6,12 @@ import { z } from "zod";
 import { clientIp } from "./client-ip";
 import { checkRateLimit } from "./rate-limit";
 import {
+  asOrgId,
   assertSameOrigin,
   clearedOrgCookieOptions,
   clearLegacyCookies,
   ORG_COOKIE,
+  orgCookieOptions,
   sealSession,
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -35,7 +37,8 @@ import { ApiError } from "./knowledge/client";
 // `knowledge/auth.ts`) answers `200 {ok: false, waitlisted: true}` and sets NO cookie,
 // session or org: it has no token to seal. The client shows the waitlist state.
 //
-// The response body is only ever `{ok}` (plus `waitlisted`) — the client keys off the STATUS CODE, so
+// The response body is only ever `{ok}` (plus `waitlisted`, or `joined`: the name of the org an
+// invite code joined, P78) — the client keys off the STATUS CODE, so
 // knowledge's `detail` (and its unknown-email/bad-password indistinguishability)
 // never leaks through this boundary. Passwords are never logged, in any branch.
 
@@ -56,6 +59,8 @@ export function json(status: number, body: Record<string, unknown>): NextRespons
 const credentialsSchema = z.object({
   email: z.string().min(1).max(320),
   password: z.string().min(1).max(1024),
+  /** An org invite's code (P78: the `/invite` page's sign-in pair sends it); the API decides what it does. */
+  invite: z.string().min(1).max(200).optional(),
 });
 
 export interface CredentialRouteOptions {
@@ -69,7 +74,7 @@ export interface CredentialRouteOptions {
    */
   bucket: string;
   /** The knowledge call — `signup` or `login` from `@/lib/knowledge/auth`. */
-  call: (email: string, password: string) => Promise<KbAuthAnswer>;
+  call: (email: string, password: string, invite?: string) => Promise<KbAuthAnswer>;
   /**
    * knowledge statuses that are meaningful to the client and pass through verbatim
    * (login: 401, 400, 422; signup: 409, 400, 422). Any OTHER error becomes a 502 — an
@@ -119,7 +124,7 @@ export async function handleCredentialRoute(
     return json(422, { ok: false });
   }
   const email = parsed.data.email.trim();
-  const { password } = parsed.data;
+  const { password, invite } = parsed.data;
   if (email === "") {
     return json(422, { ok: false });
   }
@@ -128,7 +133,9 @@ export async function handleCredentialRoute(
   //    meaningful status passes through bare, anything else is an upstream fault.
   let answer: KbAuthAnswer;
   try {
-    answer = await options.call(email, password);
+    answer = invite
+      ? await options.call(email, password, invite)
+      : await options.call(email, password);
   } catch (error) {
     if (error instanceof ApiError) {
       if (options.passThroughStatuses.includes(error.status)) {
@@ -155,11 +162,22 @@ export async function handleCredentialRoute(
     // SESSION_SECRET unset/unreadable → clean 500, never a leak.
     return json(500, { ok: false });
   }
-  const res = json(200, { ok: true });
+  // P78: an invite code that joined the account to its org starts the session in that
+  // org (the API just made the account a member of it) and names it for the client's
+  // toast; the body still carries nothing of knowledge's own text.
+  const joined = answer.joined ? asOrgId(answer.joined.id) : null;
+  const res = json(
+    200,
+    joined && answer.joined ? { ok: true, joined: answer.joined.name } : { ok: true },
+  );
   res.cookies.set(SESSION_COOKIE, sealed, sessionCookieOptions());
-  // A new session starts in its first org: the previous session's choice (perhaps
-  // another user's) never follows it.
-  res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  if (joined) {
+    res.cookies.set(ORG_COOKIE, joined, orgCookieOptions());
+  } else {
+    // A new session starts in its first org: the previous session's choice (perhaps
+    // another user's) never follows it.
+    res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  }
   clearLegacyCookies(res);
   return res;
 }

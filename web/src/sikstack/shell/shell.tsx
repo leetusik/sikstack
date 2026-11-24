@@ -11,6 +11,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { SHELL } from "@/content/app";
+import { ORG_SHELL } from "@/content/org";
 import { plural } from "@/lib/format";
 
 import {
@@ -18,7 +19,6 @@ import {
   filterProjects,
   hasProjectSwitcher,
   initialOf,
-  orgSwitcherKind,
   projectCountText,
   projectIdOf,
   projectSwitchHref,
@@ -47,6 +47,10 @@ export interface ShellProps {
 type MenuKey = "org" | "project" | "account";
 
 const ORG_HOME = "/dashboard";
+/** New org (P78-s2.S2's design): the org menu's foot leads there. */
+const NEW_ORG = "/orgs/new";
+/** The rail's words, the org form's Members with them. */
+const RAIL_WORDS = { ...SHELL.rail, members: ORG_SHELL.members };
 
 /**
  * The Shell (frame.md F9; `Shell.dc.html`): the top bar (wordmark, org switcher, project switcher,
@@ -57,6 +61,9 @@ const ORG_HOME = "/dashboard";
  * layout and stays right across client navigation. Menus: one open at a time; Escape closes and puts
  * focus back on the trigger; a click outside, or focus leaving the menu, closes it; every arrival
  * closes what was open (the flow: "nothing that was open on it is still open").
+ *
+ * The org switcher is a menu for every account, one org too (P78-s2.S2's design): its orgs, the current
+ * one checked, then a rule and New org, the way to make another.
  */
 export function Shell({
   org,
@@ -147,38 +154,30 @@ export function Shell({
             {SHELL.wordmark}
           </Link>
           <div className="crumbs">
-            {orgSwitcherKind(orgs.length) === "plain" ? (
-              <Link
+            <div {...anchorProps("org")}>
+              <button
+                type="button"
                 className="switch"
-                href={ORG_HOME}
-                aria-label={SHELL.orgPlainLabel(org.name)}
+                aria-haspopup="true"
+                aria-expanded={open === "org"}
+                aria-label={SHELL.orgLabel(org.name)}
+                onClick={toggle("org")}
               >
                 <span className="switch-label">{org.name}</span>
-              </Link>
-            ) : (
-              <div {...anchorProps("org")}>
-                <button
-                  type="button"
-                  className="switch"
-                  aria-haspopup="true"
-                  aria-expanded={open === "org"}
-                  aria-label={SHELL.orgLabel(org.name)}
-                  onClick={toggle("org")}
+                <span className="chev" aria-hidden="true" />
+              </button>
+              {open === "org" ? (
+                // A plain form post: the org switch route confirms the membership and lands on
+                // org home (the current org too, F9). New org is a link, after the rule.
+                <form
+                  className="menu"
+                  role="group"
+                  aria-label={SHELL.switchOrg}
+                  method="post"
+                  action={orgRoute}
                 >
-                  <span className="switch-label">{org.name}</span>
-                  <span className="chev" aria-hidden="true" />
-                </button>
-                {open === "org" ? (
-                  // A plain form post: the org switch route confirms the membership and lands on
-                  // org home (the current org too, F9).
-                  <form
-                    className="menu"
-                    role="group"
-                    aria-label={SHELL.switchOrg}
-                    method="post"
-                    action={orgRoute}
-                  >
-                    <p className="menu-title">{SHELL.switchOrg}</p>
+                  <p className="menu-title">{SHELL.switchOrg}</p>
+                  <div className="menu-list">
                     {orgs.map((o) => (
                       <button
                         key={o.id}
@@ -200,10 +199,18 @@ export function Shell({
                         </span>
                       </button>
                     ))}
-                  </form>
-                ) : null}
-              </div>
-            )}
+                  </div>
+                  <span className="menu-rule" aria-hidden="true" />
+                  <Link
+                    className="menu-item is-plain"
+                    href={NEW_ORG}
+                    onClick={() => set(null)}
+                  >
+                    {ORG_SHELL.newOrg}
+                  </Link>
+                </form>
+              ) : null}
+            </div>
             {hasProjectSwitcher(projects) ? (
               <>
                 <span className="crumb-sep" aria-hidden="true">
@@ -360,7 +367,7 @@ export function Shell({
 
 /** A rail item: a link, the current one `aria-current="page"`. */
 function RailEntry({ item }: { item: RailItem }) {
-  const label = SHELL.rail[item.key];
+  const label = RAIL_WORDS[item.key];
   return (
     <Link
       className="nav-item"

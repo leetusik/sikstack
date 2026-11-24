@@ -53,6 +53,11 @@ export interface KbSession {
   token: string;
   user: KbUser;
   tenant: KbTenant | null;
+  /**
+   * The org an invite code (`invite` on the sign-in or sign-up body) joined the account to, when it did
+   * (`server/auth_api.py`'s additive `joined`); absent otherwise.
+   */
+  joined?: KbTenant;
 }
 
 /**
