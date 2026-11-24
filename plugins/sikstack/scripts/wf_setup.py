@@ -53,6 +53,12 @@ def plugin_version() -> str:
     return version if isinstance(version, str) and version.strip() else "unknown"
 
 
+def user_agent() -> str:
+    """The User-Agent of every request the engine makes: sikstack/<plugin version>. urllib's own (Python-urllib/<ver>)
+    is blocked by the network in front of sikstack (a text 403, `error code: 1010`)."""
+    return f"sikstack/{plugin_version()}"
+
+
 def _write_json(path: Path, data: dict, mode: int = 0o600) -> None:
     """Write whole or not at all: a temp file beside it, then a rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +119,7 @@ def register(server: str, install: str, email: str, version: str, timeout: float
     body = json.dumps({"install_id": install, "email": email, "plugin_version": version}).encode("utf-8")
     request = urllib.request.Request(f"{server}/api/installs", data=body, method="POST",
                                      headers={"Content-Type": "application/json", "Accept": "application/json",
-                                              "User-Agent": f"sikstack/{version}"})
+                                              "User-Agent": user_agent()})
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=timeout) as answer:
             status, raw = answer.status, answer.read(65536)
@@ -167,7 +173,7 @@ def post_json(server: str, path: str, body: dict, timeout: float) -> tuple:
 
     request = urllib.request.Request(f"{server}{path}", data=json.dumps(body).encode("utf-8"), method="POST",
                                      headers={"Content-Type": "application/json", "Accept": "application/json",
-                                              "User-Agent": f"sikstack/{plugin_version()}"})
+                                              "User-Agent": user_agent()})
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=timeout) as answer:
             status, raw = answer.status, answer.read(1 << 20)

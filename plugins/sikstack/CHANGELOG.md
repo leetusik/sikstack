@@ -10,6 +10,21 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.5.1 — 2026-11-25
+
+- **Every request now names the plugin: `User-Agent: sikstack/<version>`.** The network in front of sikstack.com
+  blocked the engine's requests that carried Python's own agent, so `link`, a linked checkout's commands, sign-in's
+  link step and the design verbs stopped with a 403. Setup's registration and sign-in already sent it; now one helper
+  sets it everywhere, and a text pin holds every request in the engine to it.
+- **A 403 that is not sikstack's own reads as a block.** When a 403's body is not the API's JSON (a text
+  `error code: 1010`, an HTML page, an empty body), `link`, `sign-in`, a linked command's stop line and the design
+  verbs say the request was blocked before it reached sikstack, with HTTP 403 and the body's first line, instead of
+  calling the key "not a workspace key". The API's own 403 reads as before.
+- **`sikstack sign-in --release`** (`/sikstack:sign-in release`) frees an install that a wrong account claimed: it
+  always starts a new code (a pending one is dropped), asks the server to release the install, prints whether it was
+  released or was not connected, then waits for Connect as before. A server without release support is refused in one
+  line, and nothing is kept. Without `--release`, sign-in sends exactly what it sent before.
+
 ## 0.5.0 — 2026-11-24
 
 - **The `/` menu holds only the skills a person types.** Nine stay: `do-whole-phase`, `do-next-slice`,

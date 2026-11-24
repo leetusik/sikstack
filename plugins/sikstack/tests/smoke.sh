@@ -16,7 +16,8 @@
 #   tests/static_pins.py, less the installer's own; Test 29 is new (the finder, init, the hooks, the shipped text), and
 #   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
-#   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34).
+#   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
+#   and Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -5662,6 +5663,122 @@ if grep -rqF "$DPK" "$DPH" "$DPW"/*.txt "$DPW/fake" 2>/dev/null || printf '%s\n'
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$DP_PID" 2>/dev/null; wait "$DP_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 36: the engine's agent, the block reading and sign-in --release, against the local fake sikstack behind its Cloudflare gate -- a request without a sikstack/ agent is the gate's text 403 (the gate is not vacuous) and the engine's are let through; a non-JSON 403 reads as a block (never as not a workspace key) at link, the cloud session's stop line, a commit and design-builds, and a JSON 403 reads as before; sign-in without --release sends exactly its three fields; --release sends release: true, drops the pending code for a new one, prints the released or the not-connected line, and a server that answers no released is refused with nothing kept; a release that is not a boolean is the fake's 400 =="
+newtmp RLW; RLK="release-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"; printf '%s\n' "$RLK" > "$RLW/key"; chmod 600 "$RLW/key"
+python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$RLW/fake" --port-file "$RLW/port" --key-file "$RLW/key" --project p-rl --org o-rl \
+  --lifetime 300 > "$RLW/fake.txt" 2>&1 &
+RL_PID=$!
+for _ in $(seq 1 100); do [ -s "$RLW/port" ] && break; sleep 0.1; done
+RLS="http://127.0.0.1:$(cat "$RLW/port" 2>/dev/null)"; RLL="$RLW/fake/requests.jsonl"
+rl_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$RLS/_fake/control" >/dev/null; }
+rl() { _h=$1; shift; ( cd "$RLW/$_h" && XDG_CONFIG_HOME="$RLW/xdg" python3 "$ENG" "$@" ) 2>&1; }
+rl_code() { sed -n 's/^code: \([A-Z0-9-]*\) .*/\1/p' "$1" | head -1; }
+# (a) the gate: urllib's own agent is the block, a sikstack/ agent reaches the API (its 401 here, no key sent).
+rl_gate=$(python3 - "$RLS" <<'PY'
+import sys, urllib.error, urllib.request
+for agent in (None, "sikstack/0.0.0"):
+    headers = {"User-Agent": agent} if agent else {}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(sys.argv[1] + "/api/workspace/p-rl/head", headers=headers)) as r:
+            print(r.status)
+    except urllib.error.HTTPError as e:
+        print(e.code, e.headers.get("Content-Type"), e.read().decode())
+PY
+)
+rl_blocked=$(grep -c '"route": "blocked"' "$RLL" 2>/dev/null)
+[ "$(printf '%s\n' "$rl_gate" | sed -n 1p)" = "403 text/plain; charset=UTF-8 error code: 1010" ] \
+  && printf '%s\n' "$rl_gate" | sed -n 2p | grep -q '^401 application/json' && [ "$rl_blocked" = 1 ] \
+  && grep '"route": "blocked"' "$RLL" | grep -q '"agent": "Python-urllib/' \
+  && ok "the fake's gate answers urllib's own agent with the text 403 'error code: 1010' (logged as blocked) and lets a sikstack/ agent through to the API" \
+  || bad "the fake's gate -- [$rl_gate] blocked=$rl_blocked"
+# (b) link: a block, then the API's JSON 403, each one line with nothing written; then the link lands.
+{ mkhost "$RLW/repo" && git -C "$RLW/repo/.sikstack" add -A && git -C "$RLW/repo/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
+rl_ctl '{"block": "head"}'
+rl_l1=$(printf '%s\n' "$RLK" | rl repo link "$RLS/projects/p-rl"); rl_lrc1=$?
+rl_ctl '{"workspace_answer": {"status": 403, "detail": "a member key cannot reach a workspace", "route": "head"}}'
+rl_l2=$(printf '%s\n' "$RLK" | rl repo link "$RLS/projects/p-rl"); rl_lrc2=$?
+rl_cloud0=$(grep -c '^\[cloud\]' "$RLW/repo/.sikstack/config.toml")
+rl_l3=$(printf '%s\n' "$RLK" | rl repo link "$RLS/projects/p-rl"); rl_lrc3=$?
+[ "$rl_lrc1" = 1 ] && printf '%s\n' "$rl_l1" | grep -q "the request to $RLS was blocked before it reached sikstack (HTTP 403: error code: 1010), by something in front of it: nothing was written" \
+  && ! printf '%s\n' "$rl_l1" | grep -q 'not a workspace key' \
+  && [ "$rl_lrc2" = 1 ] && printf '%s\n' "$rl_l2" | grep -q 'this key cannot reach a workspace (HTTP 403: it is not a workspace key)' \
+  && ! printf '%s\n' "$rl_l2" | grep -q 'blocked before' && [ "$rl_cloud0" = 0 ] && [ "$rl_lrc3" = 0 ] \
+  && ok "link reads a non-JSON 403 as a block (HTTP 403 and the body's line, never 'not a workspace key') and the API's JSON 403 as before, each with nothing written; then it links" \
+  || bad "link's 403 split -- rc=$rl_lrc1/$rl_lrc2/$rl_lrc3 [$rl_l1] [$rl_l2] cloud=$rl_cloud0 [$(printf '%s\n' "$rl_l3" | tail -2)]"
+# (c) a linked command: a block at the begin step's head is the stop line; a block on the commit is its unsent line.
+rl_ctl '{"block": "head"}'
+rl_n1=$(rl repo next); rl_nrc1=$?
+rl_ctl '{"block": "commit"}'
+rl_n2=$(rl repo agenda-add --title "blocked commit" --author person:smoke); rl_nrc2=$?
+rl_n3=$(rl repo sync); rl_nrc3=$?
+[ "$rl_nrc1" != 0 ] && printf '%s\n' "$rl_n1" | grep -q "sikstack is not reachable at $RLS: the request was blocked before it reached sikstack (HTTP 403: error code: 1010), by something in front of it; in cloud mode nothing runs offline, and nothing was changed." \
+  && ! printf '%s\n' "$rl_n1" | grep -q 'not a workspace key' \
+  && [ "$rl_nrc2" = 1 ] && printf '%s\n' "$rl_n2" | grep -q '^this change is on disk but not in sikstack (the request was blocked before it reached sikstack (HTTP 403: error code: 1010)): run sync$' \
+  && [ "$rl_nrc3" = 0 ] \
+  && ok "in a linked checkout a block at the begin step stops the command with the block's line, and a block on the commit leaves the change on disk with it (sync then sends it)" \
+  || bad "the session's block lines -- rc=$rl_nrc1/$rl_nrc2/$rl_nrc3 [$rl_n1] [$rl_n2] [$rl_n3]"
+# (d) design: a block, then the API's JSON 403.
+rl_ctl '{"block": "builds"}'
+rl_d1=$(rl repo design-builds); rl_drc1=$?
+rl_ctl '{"design_answer": {"status": 403, "detail": "this key cannot reach a workspace"}}'
+rl_d2=$(rl repo design-builds); rl_drc2=$?
+[ "$rl_drc1" = 1 ] && [ "$rl_d1" = "design-builds: the request to $RLS was blocked before it reached sikstack (HTTP 403: error code: 1010), by something in front of it (nothing was read)" ] \
+  && [ "$rl_drc2" = 1 ] && [ "$rl_d2" = "design-builds: sikstack refused (HTTP 403): this key cannot reach a workspace; this is not a workspace key: make one under Keys on the project's page (nothing was read)" ] \
+  && ok "design-builds reads a non-JSON 403 as a block and the API's JSON 403 as before, one line each" \
+  || bad "design's 403 split -- rc=$rl_drc1/$rl_drc2 [$rl_d1] [$rl_d2]"
+# (e) sign-in --release on a second checkout.
+{ mkhost "$RLW/rel" && git -C "$RLW/rel/.sikstack" add -A && git -C "$RLW/rel/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
+( cd "$RLW/rel" && CLAUDE_CONFIG_DIR="$RLW/cfg" SIKSTACK_SERVER="$RLS" python3 "$ENG" setup --email r@example.com --data-dir "$RLW/data" ) >/dev/null 2>&1
+rl_si() { rl rel sign-in --data-dir "$RLW/data" --no-browser --wait 1 "$@"; echo "rc=$?"; }
+rl_si > "$RLW/s1.txt"                          # plain: three fields, a pending code
+rl_si --release > "$RLW/s2.txt"                # not claimed yet: a new code, the not-connected line
+curl -s -X POST "$RLS/_fake/sign-in" -d "{\"code\":\"$(rl_code "$RLW/s2.txt")\",\"state\":\"approved\"}" >/dev/null   # another account claims it
+rl_si --release > "$RLW/s3.txt"                # claimed: released, a new code
+rl_ctl '{"no_release": true}'
+rl_si --release > "$RLW/s4.txt"                # a server from before release
+rl_ctl '{"no_release": false}'
+rl_left=$(ls "$RLW/data/sign-in" 2>/dev/null)
+rl_bodies=$(python3 - "$RLL" <<'PY'
+import json, sys
+for line in open(sys.argv[1]):
+    e = json.loads(line)
+    if e.get("route") == "sign-in":
+        b = e["body"]
+        print(",".join(sorted(b)) + ("" if "release" not in b else f" release={json.dumps(b['release'])}"))
+PY
+)
+rl_bad=$(python3 - "$RLS" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["install_id"])' "$RLW/data/install.json")" <<'PY'
+import json, sys, urllib.error, urllib.request
+for value in ("yes", None, 1):
+    body = json.dumps({"install_id": sys.argv[2], "repo": "rel", "plugin_version": "x", "release": value}).encode()
+    req = urllib.request.Request(sys.argv[1] + "/api/installs/sign-in", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "sikstack/0.0.0"})
+    try:
+        urllib.request.urlopen(req)
+        print("200")
+    except urllib.error.HTTPError as e:
+        print(e.code, json.loads(e.read())["detail"])
+PY
+)
+c1=$(rl_code "$RLW/s1.txt"); c2=$(rl_code "$RLW/s2.txt"); c3=$(rl_code "$RLW/s3.txt")
+grep -q '^rc=3' "$RLW/s1.txt" && grep -q '^rc=3' "$RLW/s2.txt" && grep -q '^rc=3' "$RLW/s3.txt" \
+  && [ -n "$c1" ] && [ -n "$c2" ] && [ -n "$c3" ] && [ "$c1" != "$c2" ] && [ "$c2" != "$c3" ] \
+  && ! grep -q '^release' "$RLW/s1.txt" \
+  && grep -qx 'release: this install was not connected to an account, so nothing was released' "$RLW/s2.txt" \
+  && grep -qx 'released: this install no longer belongs to its previous account; the next Connect claims it' "$RLW/s3.txt" \
+  && ! grep -q 'waiting for the connect page again' "$RLW/s2.txt" "$RLW/s3.txt" \
+  && grep -q '^rc=1' "$RLW/s4.txt" && grep -qx "sikstack sign-in: $RLS does not support --release yet: nothing was released" "$RLW/s4.txt" \
+  && [ -z "$rl_left" ] \
+  && [ "$rl_bodies" = "$(printf 'install_id,plugin_version,repo\ninstall_id,plugin_version,release,repo release=true\ninstall_id,plugin_version,release,repo release=true\ninstall_id,plugin_version,release,repo release=true')" ] \
+  && [ "$rl_bad" = "$(printf '400 release is not valid\n400 release is not valid\n400 release is not valid')" ] \
+  && ok "sign-in sends exactly its three fields; --release sends release: true, drops the pending code for a new one and prints the not-connected or the released line; a server that answers no released is refused in one line with no pending code kept; the fake's start refuses a release that is not a boolean" \
+  || bad "sign-in --release -- codes=$c1/$c2/$c3 left=[$rl_left] bodies=[$rl_bodies] bad=[$rl_bad] [$(cat "$RLW/s1.txt")] [$(cat "$RLW/s2.txt")] [$(cat "$RLW/s3.txt")] [$(cat "$RLW/s4.txt")]"
+if grep -rqF "$RLK" "$RLW"/*.txt "$RLW/fake" "$RLW/repo" 2>/dev/null || printf '%s\n' "$rl_l1$rl_l2$rl_n1$rl_n2$rl_d1$rl_d2" | grep -qF "$RLK"; then
+  bad "the workspace key leaked into the tree, the output or the request log"
+fi
+kill "$RL_PID" 2>/dev/null; wait "$RL_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo

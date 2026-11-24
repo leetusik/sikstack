@@ -769,14 +769,18 @@ class CloudLink:
                              "control characters, so it is not a key (run link again): nothing was changed")
         return key.strip()
 
+    blocked = None  # the last call's block line (a 403 whose body is not a JSON object), else None
+
     def call(self, method: str, route: str, body=None, extra=None) -> tuple:
         """(status, payload) of one request. Any failure to get a whole answer raises CloudUnreachable: a
         network error, a timeout, a cut or malformed answer (http.client's HTTPException), anything else the
         client raises; a 3xx is never followed (the key stays with the host it was meant for); a request fails
         when it stalls (_CloudWire), never while its bytes still move, and the session hook's request also when
-        its `deadline` passes. An answer that is not JSON reads as {}. `extra` adds headers (P1's X-Sikstack-Base)."""
+        its `deadline` passes. An answer that is not JSON reads as {}; a 403 whose body is not a JSON object leaves its
+        block line in `self.blocked` (else None). `extra` adds headers (P1's X-Sikstack-Base)."""
         import urllib.request
         from urllib.parse import quote
+        import wf_setup
 
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *a, **k):
@@ -785,7 +789,8 @@ class CloudLink:
         url = f"{self.server}/api/workspace/{quote(self.project, safe='')}/{route}"
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers = {"Authorization": "Bearer " + self._key, "Accept": "application/json",
-                   "X-Sikstack-Checkout": self.checkout, "X-Sikstack-Engine": self.engine}
+                   "X-Sikstack-Checkout": self.checkout, "X-Sikstack-Engine": self.engine,
+                   "User-Agent": wf_setup.user_agent()}
         if data is not None:
             headers["Content-Type"] = "application/json"
         headers.update(extra or {})
@@ -793,7 +798,9 @@ class CloudLink:
         handlers = [NoRedirect()] + _cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if self.local else [])
         opener = urllib.request.build_opener(*handlers)
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
+        self.blocked = None
         status, raw = self._exchange(opener, request, wire)
+        self.blocked = cloud_block_line(status, raw, self._key)
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else {}
         except (UnicodeDecodeError, ValueError):
@@ -901,6 +908,9 @@ class CloudSession:
             status, payload = self.link.call(method, route, body, extra)
         except CloudUnreachable as exc:
             raise self._unreachable(str(exc))
+        if status != 200 and self.link.blocked:
+            raise CloudError(f"sikstack is not reachable at {self.link.server}: the request was {self.link.blocked}, by "
+                             "something in front of it; in cloud mode nothing runs offline, and nothing was changed.")
         if status != 200:
             raise self._unreachable(f"HTTP {status} on {route.split('?')[0]}")
         return payload
@@ -1409,6 +1419,8 @@ class CloudSession:
             if status == 409:
                 self._end_push()
                 raise CloudConflict(str(unsent(f"{len(answer.get('conflicts') or [])} conflict(s)")), answer.get("conflicts"))
+            if status != 200 and self.link.blocked:
+                raise unsent(f"the request was {self.link.blocked}")
             if status != 200 or not isinstance(answer.get("head"), int):
                 raise unsent(f"sikstack answered HTTP {status}")
             self._landed(answer, item.get("updates") or [])
@@ -1756,6 +1768,25 @@ def cloud_save_key(server: str, project: str, org, key: str) -> None:
         raise
 
 
+def cloud_block_line(status, raw, key: str = "") -> "str | None":
+    """A 403 is sikstack's own only when its body is a JSON object (the API's {"detail": ...}); any other 403 (a text
+    `error code: 1010`, an HTML page, an empty body) was blocked in front of it. The block's words, with the body's
+    first line (at most 80 characters, never the key), or None when the answer is not a block."""
+    if status != 403:
+        return None
+    try:
+        parsed = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return None
+    text = (raw or b"").decode("utf-8", "replace")
+    first = next((" ".join(line.split()) for line in text.splitlines() if line.strip()), "")[:80].strip()
+    if key and first:
+        first = first.replace(key, "<key>")
+    return "blocked before it reached sikstack (HTTP 403" + (f": {first})" if first else ")")
+
+
 def cloud_probe(link: CloudLink, route: str) -> dict:
     """One of link's requests before anything is written; any answer but a 200 refuses with one line."""
     try:
@@ -1764,6 +1795,9 @@ def cloud_probe(link: CloudLink, route: str) -> dict:
         raise CloudError(f"sikstack is not reachable at {link.server} ({exc}): nothing was written")
     if status == 200:
         return payload
+    if link.blocked:
+        raise CloudError(f"the request to {link.server} was {link.blocked}, by something in front of it: "
+                         "nothing was written")
     why = {401: "sikstack refused this key (HTTP 401): make a workspace key under Keys on the project's page",
            403: "this key cannot reach a workspace (HTTP 403: it is not a workspace key); make one under Keys on the "
                 "project's page",
@@ -1910,6 +1944,8 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
         raise SystemExit(f"{prog}: {exc}")
     pending = _signin_file(data_dir)
     started = None
+    if args.release:  # a release always starts a new code: a pending one could still claim for the old account
+        pending.unlink(missing_ok=True)
     try:
         started = read_json(pending)
     except (OSError, ValueError):
@@ -1921,11 +1957,19 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
     else:
         install = wf_setup.registered_install(data_dir, prog)
         repo = (HOST_ROOT or ROOT.parent).name
-        status, answer = wf_setup.post_json(server, "/api/installs/sign-in", {
-            "install_id": install, "repo": repo, "plugin_version": wf_setup.plugin_version()}, wf_setup.SETUP_TIMEOUT)
+        body = {"install_id": install, "repo": repo, "plugin_version": wf_setup.plugin_version()}
+        if args.release:
+            body["release"] = True
+        status, answer = wf_setup.post_json(server, "/api/installs/sign-in", body, wf_setup.SETUP_TIMEOUT)
         if status != 200 or not isinstance(answer.get("code"), str) or not isinstance(answer.get("poll_token"), str):
             why = answer if status is None else (answer.get("detail") or f"HTTP {status}")
             raise SystemExit(f"{prog}: {server} did not start a sign-in ({why}): nothing was written")
+        if args.release:
+            released = answer.get("released")
+            if not isinstance(released, bool):
+                raise SystemExit(f"{prog}: {server} does not support --release yet: nothing was released")
+            print("released: this install no longer belongs to its previous account; the next Connect claims it"
+                  if released else "release: this install was not connected to an account, so nothing was released")
         started = {"server": server, "code": answer["code"], "url": str(answer.get("url") or ""),
                    "poll_token": answer["poll_token"], "interval": max(1, int(answer.get("interval") or 5)),
                    "until": time.time() + int(answer.get("expires_in") or 900), "repo": repo}
@@ -2600,6 +2644,9 @@ def add_cloud_parsers(sub) -> None:
     p.add_argument("--data-dir", required=True, dest="data_dir", help="the plugin's data folder (${CLAUDE_PLUGIN_DATA}, as the skill substitutes it)")
     p.add_argument("--no-browser", action="store_true", dest="no_browser", help="print the address without opening it")
     p.add_argument("--wait", type=int, default=SIGNIN_WAIT, help=f"seconds to wait in this run (default {SIGNIN_WAIT})")
+    p.add_argument("--release", action="store_true", dest="release",
+                   help="first release this install from the account that claimed it (a wrong account), then sign in "
+                        "again: always a new code, never a pending one")
     p.set_defaults(func=cloud_sign_in)
     _one_line_usage_errors(p)
 

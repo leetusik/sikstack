@@ -41,7 +41,18 @@ install routes sign-in and feedback use, each logged whole (the poll token and k
 - POST /api/installs/feedback {install_id, message, plugin_version} -> 202 {request_id, accepted_at, status}, 404
   for an install never registered, 429 past `feedback_limit` reports per install (control, default 2) (route
   "feedback"); GET /_fake/reports lists what landed.
-- Test-only POST /_fake/sign-in {code, state: approved|denied|expired} decides a code as the connect page would.
+- Test-only POST /_fake/sign-in {code, state: approved|denied|expired} decides a code as the connect page would;
+  an approval claims the install.
+- A sign-in start with `release`: JSON true releases the install (its claim cleared, its other pending codes expired)
+  and answers `released` (whether it was claimed); false is today's; any other value is 400 `release is not valid`,
+  checked before the install. `released` is answered only when release: true was sent. control no_release: true
+  ignores the field (a server from before release).
+
+The Cloudflare gate: every /api/ request whose User-Agent does not start with `sikstack/` is answered 403 text/plain
+`error code: 1010` and logged as route "blocked" (/_fake/ is never gated). control block: true | <route> answers the
+next /api/ request (true) or the next one whose last path segment is <route> with that block; one-shot.
+control workspace_answer: {status, detail, route?} answers the next workspace request (of that route) with that status
+and {detail} (the API's own JSON 403, ...); one-shot.
 
 The design API (S1's, P77): POST /api/design/<project>/builds (the raw tar.gz of a build folder; a marked
 manifest.json at its root, else 400; a recording under design/data/local/ is private) -> 201 {build, viewer, url}
@@ -118,12 +129,14 @@ class Store:
         self.lock = threading.Lock()
         self.installs = {}  # POST /api/installs: install_id -> the last body (setup's registration, S4's pre-user row)
         self.sign_ins = {}  # code -> {token, install_id, repo, state, delivered}
+        self.claimed = set()  # install ids an approval claimed; a sign-in start with release: true clears its own
         self.reports = []   # POST /api/installs/feedback bodies that landed
         self.inbox = []     # the web's agenda changes: {id, created_at, kind, items, fields, minted_id, state, ...}
         self.builds = []    # the design API's builds, newest first: {id, url, commit, branch, private, size, files, ...}
         self.control = {"offline": False, "commit": None, "race": None, "gate": None, "fetch_page": None,
                         "inbox_race": None, "break": None, "slow": 0, "drip": 0, "drip_route": None,
-                        "rate": 0, "feedback_limit": 2, "design_answer": None}
+                        "rate": 0, "feedback_limit": 2, "design_answer": None,
+                        "block": None, "workspace_answer": None, "no_release": False}
         self.gate = threading.Condition()
         self.gate_seen = 0
 
@@ -438,21 +451,67 @@ def make_handler(store: Store, key: str, log_path: str):
             except OSError:  # the client gave up: nothing more to send
                 self.close_connection = True
 
+        def _send_text(self, status: int, text: str) -> None:
+            data = text.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=UTF-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _blocked(self, method: str, url, parts: list) -> bool:
+            """The Cloudflare gate in front of the API: an /api/ request whose User-Agent does not start with
+            sikstack/ (or the one the `block` control names) is answered 403 text/plain `error code: 1010`, logged as
+            route "blocked"; /_fake/ is never gated."""
+            if not url.path.startswith("/api/"):
+                return False
+            agent = self.headers.get("User-Agent") or ""
+            with store.lock:
+                block = store.control.get("block")
+                forced = block is True or (isinstance(block, str) and parts and block == parts[-1])
+                if forced:
+                    store.control["block"] = None
+            if agent.startswith("sikstack/") and not forced:
+                return False
+            length = int(self.headers.get("Content-Length") or 0)
+            if 0 < length <= 8_388_608:
+                self.rfile.read(length)  # read, so the client sees the answer and not a reset
+            elif length:
+                self.close_connection = True
+            with store.lock:
+                self._log({"method": method, "path": url.path, "route": "blocked", "agent": agent, "forced": bool(forced),
+                           "status": 403})
+            self._send_text(403, "error code: 1010")
+            return True
+
         def _install_route(self, path: str, body: dict) -> tuple:
             """The sign-in and feedback routes (under the store's lock): (status, payload)."""
             import secrets
             install = str(body.get("install_id") or "")
             if path.endswith("/sign-in"):
+                release = body.get("release", False) if not store.control.get("no_release") else False
+                if not isinstance(release, bool):  # like the server: checked with the body, before the install
+                    return 400, {"detail": "release is not valid"}
                 if install not in store.installs:
                     return 404, {"detail": "this install is not registered: run /sikstack:setup"}
+                released = None
+                if release:
+                    released = install in store.claimed
+                    store.claimed.discard(install)
+                    for other in store.sign_ins.values():
+                        if other["install_id"] == install and other["state"] == "pending":
+                            other["state"] = "expired"
                 code = "".join(secrets.choice("ABCDEFGHJKMNPQRSTWXYZ23456789") for _ in range(8))
                 code = f"{code[:4]}-{code[4:]}"
                 token = secrets.token_urlsafe(24)
                 store.sign_ins[code] = {"token": token, "install_id": install, "repo": body.get("repo"),
                                         "state": "pending", "delivered": False}
                 host = self.headers.get("Host") or "127.0.0.1"
-                return 200, {"code": code, "url": f"http://{host}/connect?code={code}", "poll_token": token,
-                             "expires_in": 900, "interval": 1}
+                answer = {"code": code, "url": f"http://{host}/connect?code={code}", "poll_token": token,
+                          "expires_in": 900, "interval": 1}
+                if released is not None:
+                    answer["released"] = released
+                return 200, answer
             if path.endswith("/poll"):
                 found = next((s for s in store.sign_ins.values() if s["token"] == body.get("poll_token")), None)
                 if found is None:
@@ -559,6 +618,8 @@ def make_handler(store: Store, key: str, log_path: str):
             url = urlparse(self.path)
             parts = url.path.strip("/").split("/")
             self.broken, self.drip, self.rate, self.raw = None, 0, 0, None
+            if self._blocked(method, url, parts):
+                return
             if url.path == "/api/installs" and method == "POST":  # setup's registration: no key, logged whole
                 try:
                     body = self._body()
@@ -648,6 +709,8 @@ def make_handler(store: Store, key: str, log_path: str):
                         if found is None:
                             return self._send(404, {"error": "no such code"})
                         found["state"] = decided.get("state") or "approved"
+                        if found["state"] == "approved":
+                            store.claimed.add(found["install_id"])
                         return self._send(200, {"state": found["state"]})
                     if parts[1:] == ["reports"] and method == "GET":
                         return self._send(200, {"reports": store.reports})
@@ -679,6 +742,13 @@ def make_handler(store: Store, key: str, log_path: str):
                     self._log(entry)
                     return self._send(400, {"error": "X-Sikstack-Checkout and X-Sikstack-Engine are required"})
                 route = parts[3]
+                canned = store.control.get("workspace_answer")
+                if isinstance(canned, dict) and canned.get("route") in (None, route):
+                    store.control["workspace_answer"] = None
+                    entry["status"] = int(canned.get("status", 403))
+                    self._log(entry)
+                    self.reply = (entry["status"], {"detail": canned.get("detail")})
+                    return
                 if route == "head" and method == "GET":
                     entry["base"] = self.headers.get("X-Sikstack-Base")
                     status, payload = 200, {"head": store.head, "org_id": store.org_id, "project_id": store.project_id,

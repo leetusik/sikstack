@@ -15,6 +15,8 @@ It claims this machine's install for the account you confirm on the web, and lin
    sikstack sign-in --data-dir "${CLAUDE_PLUGIN_DATA}"
    ```
 
+   Add `--release` when the user's arguments hold the word `release`, when the user says this install belongs to the wrong account, or when the connect page said "Connected to another account": it first releases the install from the account that claimed it (one `released:` or `release:` line), then goes on with a new code. A server that cannot release says so in one line and nothing changes.
+
    It prints a short code and the connect page's address and opens the page in the browser. As soon as those two lines appear, tell the user: open the page (if it did not open), check it shows the same code, sign in or create an account there, and press **Connect**.
 2. **Wait for it.** It ends by itself once the page is answered:
    - `linked:` and `on the web:` lines: the install is connected; the repo's earlier work was uploaded. Relay the web address.
