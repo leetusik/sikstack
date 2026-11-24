@@ -15,7 +15,8 @@
 #   and the install/--update/--to-multi-repo parts of 5, 17, 19, 23 and 25. Test 0's pins moved to
 #   tests/static_pins.py, less the installer's own; Test 29 is new (the finder, init, the hooks, the shipped text), and
 #   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
-#   (sign-in and feedback against the fake server) and Test 33 (the design publish verbs against it).
+#   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
+#   Test 34 (the cold set in cloud mode, run after Test 23).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -2596,14 +2597,18 @@ def need(cond, why):
         print(why)
         sys.exit(1)
 def synced():
-    """base.json, sikstack and the disk agree: the head, every record's rev, every file's sha, the event log's bytes."""
+    """base.json, sikstack and the disk agree: the head, every record's rev, every file's sha; the event log is cold
+    (0.4.0): once a push lands its sent lines leave the disk, so the file there is empty."""
     outbox = root / ".hi2vi/outbox"
     need(journal is None and (not outbox.exists() or not any(outbox.iterdir())), f"the journal or the outbox is left: {journal}")
     need(base.get("head") == S["head"], f"base head {base.get('head')} != sikstack head {S['head']}")
     need(set(base["files"]) == set(live), f"base and sikstack hold different paths: {sorted(set(base['files']) ^ set(live))[:4]}")
     for p, f in live.items():
         need(base["files"][p]["rev"] == f["rev"], f"{p}: base rev {base['files'][p]['rev']} != sikstack rev {f['rev']}")
-        need((root / p).is_file() and sha(p) == f["sha256"], f"{p}: the disk differs from sikstack")
+        if p == "works/events.jsonl":
+            need(not (root / p).exists() or (root / p).read_bytes() == b"", f"{p}: the disk still holds sent lines")
+        else:
+            need((root / p).is_file() and sha(p) == f["sha256"], f"{p}: the disk differs from sikstack")
 if check == "first":
     need(len(C) == 1 and C[0]["status"] == 200, f"one first batch expected: {[c['status'] for c in C]}")
     synced()
@@ -2655,6 +2660,8 @@ elif check == "toobig":
     need(journal is None, f"the journal is left: {journal}")
 elif check == "synced":
     synced()
+elif check == "nofetch":  # extra: a path no fetch since the mark asked for
+    need(not [r for r in R if r["path"].endswith("/fetch") and extra[0] in (r.get("paths") or [])], f"{extra[0]} was fetched")
 elif check == "once":  # extra: the append-only paths (comma-separated), then marks each once in sikstack
     import collections
     need(journal is None and base.get("head") == S["head"], f"not settled: journal {journal}, base head {base.get('head')} vs {S['head']}")
@@ -2664,7 +2671,7 @@ elif check == "once":  # extra: the append-only paths (comma-separated), then ma
         d = (root / p).read_text().splitlines()
         twice = sorted(l for l, n in collections.Counter(c).items() if n > 1)
         need(not twice, f"{p}: sikstack holds {len(twice)} line(s) twice, first {twice[:1]}")
-        need(collections.Counter(c) == collections.Counter(d), f"{p}: the disk's lines and sikstack's differ")
+        need(not d, f"{p}: the disk's log still holds {len(d)} line(s) once the push landed (sent lines leave the disk)")
         cloud_lines += c
     for mark in extra[1:]:
         n = sum(mark in l for l in cloud_lines)
@@ -2738,12 +2745,12 @@ sf_m=$(sf_mark); sf next > "$SFW/d3.txt"; sf_rc2=$?; sf_r=$(sf_check "$sf_m" syn
 [ "$sf_rc" = 9 ] && [ "$sf_w" = 0 ] && [ "$sf_rc2" = 0 ] && [ "$sf_r" = ok ] \
   && ok "a pull killed after its write and before base.json: the next command reads the file as the same (no mismatch) and the base catches up" \
   || bad "the pull-crash row wrong -- rc=$sf_rc/$sf_rc2 written=$sf_w $sf_r / $(tail -1 "$SFW/d3.txt")"
-# The crash table's append rows. A pull merges another checkout's new lines into an append-only file (the event log)
-# around the lines this checkout has not sent yet, so the merged file differs from
-# sikstack's and never reads as the same. Killed at any step of that pull, the next command sends only this checkout's own
-# lines: sikstack holds each line exactly once.
-# sf_kill fetch|write|wrote|base <path> <args>: the command, killed (os._exit) once the pull has fetched <path>, just
-# before or just after the pull writes it, or once base.json is saved (before the generated files are rebuilt).
+# The crash table's append rows. The event log is cold (0.4.0): a pull never writes another checkout's lines here
+# (sikstack keeps them), and once a push lands the log's sent lines leave the disk, so the file holds only the lines
+# not yet sent. Killed at any step, the next command sends only this checkout's own lines: sikstack holds each once.
+# sf_kill fetch|write|wrote|base <path> <args>: the command, killed (os._exit) once a fetch has returned <path>, just
+# before or just after <path> is written (the eviction's rewrite of the log), or once the generated files are rebuilt
+# after a pull.
 sf_kill() { _s=$1; _f=$2; shift 2; ( cd "$SF" && XDG_CONFIG_HOME="$SFX" python3 - "$_s" "$_f" "$@" <<'PY'
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("workflow_engine", __import__("os").environ["ENG"])
@@ -2781,48 +2788,37 @@ conn.request("POST", "/_fake/write", json.dumps({"path": sys.argv[2], "lines": s
 assert conn.getresponse().status == 200
 PY
 }
-sf_ev=works/events.jsonl; sf_bad=""
-for sf_step in fetch write wrote base; do
+sf_ev=works/events.jsonl
+# Another checkout's line and a local one: the pull records the log's rev and fetches nothing of it; only the local
+# line is sent, and the disk's log is empty after the push.
+printf '{"type": "smoke_local", "mark": "local-pull"}\n' >> "$SF/.sikstack/$sf_ev"
+sf_add "$sf_ev" '{"type": "agenda_added", "agenda": "cloud-pull"}'
+sf_m=$(sf_mark); sf next >/dev/null; sf_rc=$?; sf_r=$(sf_check "$sf_m" once "$sf_ev" '"local-pull"' '"cloud-pull"')
+sf_f=$(sf_check "$sf_m" nofetch "$sf_ev")
+[ "$sf_rc" = 0 ] && [ "$sf_r" = ok ] && [ "$sf_f" = ok ] \
+  && ok "a pull never takes another checkout's event lines (the log's rev recorded, nothing fetched or written): the local line is sent once, sikstack holds each line once, and the disk's log is empty after" \
+  || bad "an append pull wrote sikstack's lines here or sent them back -- rc=$sf_rc $sf_r / $sf_f"
+# Killed when the push has landed and the eviction is about to rewrite the log to its unsent tail (write), or has
+# rewritten it but not yet base.json (wrote); then, from that second state, killed again once the next command's
+# settle has fetched sikstack's copy (fetch). The next command sends only what sikstack lacks.
+sf_bad=""
+for sf_step in write wrote fetch; do
   printf '{"type": "smoke_local", "mark": "local-%s"}\n' "$sf_step" >> "$SF/.sikstack/$sf_ev"
   sf_add "$sf_ev" "{\"type\": \"agenda_added\", \"agenda\": \"cloud-$sf_step\"}"
+  if [ "$sf_step" = fetch ]; then sf_kill wrote "$sf_ev" next; printf '{"type": "smoke_local", "mark": "local-fetch2"}\n' >> "$SF/.sikstack/$sf_ev"; fi
   sf_kill "$sf_step" "$sf_ev" next; sf_rc=$?
   sf_m=$(sf_mark); sf next >/dev/null; sf_rc2=$?; sf_r=$(sf_check "$sf_m" once "$sf_ev" "\"local-$sf_step\"" "\"cloud-$sf_step\"")
+  [ "$sf_step" = fetch ] && [ "$sf_r" = ok ] && sf_r=$(sf_check "$sf_m" once "$sf_ev" '"local-fetch2"')
   { [ "$sf_rc" = 9 ] && [ "$sf_rc2" = 0 ] && [ "$sf_r" = ok ]; } || sf_bad="$sf_bad [$sf_step: rc=$sf_rc/$sf_rc2 $sf_r]"
 done
 [ -z "$sf_bad" ] \
-  && ok "a pull merging another checkout's event line around a local one, killed after the fetch, before the write, after the write (before base.json) or after base.json: the next command sends only the local line, and sikstack holds each line once" \
-  || bad "an append pull killed midway re-sent sikstack's own lines --$sf_bad"
-sf_add "$sf_ev" '{"type": "agenda_added", "agenda": "cloud-alone"}'
-sf_kill wrote "$sf_ev" next; sf_rc=$?
-sf_m=$(sf_mark); sf next >/dev/null; sf_rc2=$?; sf_r=$(sf_check "$sf_m" once "$sf_ev" '"cloud-alone"'); sf_r2=$(sf_check "$sf_m" synced)
-[ "$sf_rc" = 9 ] && [ "$sf_rc2" = 0 ] && [ "$sf_r" = ok ] && [ "$sf_r2" = ok ] \
-  && ok "an append pull with nothing local past the offset, killed after its write: the file equals sikstack's, reads as the same, and the base catches up" \
-  || bad "the plain append pull-crash row wrong -- rc=$sf_rc/$sf_rc2 $sf_r / $sf_r2"
-# A local order that already differs from sikstack's (another checkout's line landed between this checkout's pull and its
-# push): the file never equals sikstack's again, so a pull killed after its write must still send nothing of sikstack's.
-printf '{"type": "smoke_local", "mark": "local-race"}\n' >> "$SF/.sikstack/$sf_ev"
-sf_ctl "$(python3 -c 'import json, sys; print(json.dumps({"race": {"path": sys.argv[1], "lines": [json.dumps({"type": "agenda_added", "agenda": "cloud-race"})]}}))' "$sf_ev")"
-sf next >/dev/null; sf next >/dev/null
-sf_ord=$(python3 - "$SFS" "$SF/.sikstack" "$sf_ev" <<'PY'
-import base64, http.client, json, sys
-from pathlib import Path
-from urllib.parse import urlparse, quote
-u = urlparse(sys.argv[1])
-conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
-conn.request("GET", "/_fake/file?path=" + quote(sys.argv[3]))
-c = base64.b64decode(json.loads(conn.getresponse().read())["content"])
-d = (Path(sys.argv[2]) / sys.argv[3]).read_bytes()
-print("differs" if c != d and sorted(c.splitlines()) == sorted(d.splitlines()) else "same")
-PY
-)
-sf_add "$sf_ev" '{"type": "agenda_added", "agenda": "cloud-order"}'
-sf_kill wrote "$sf_ev" next; sf_rc=$?
-sf_m=$(sf_mark); sf next >/dev/null; sf_rc2=$?; sf_r=$(sf_check "$sf_m" once "$sf_ev" '"cloud-order"' '"cloud-race"' '"local-race"')
-[ "$sf_ord" = differs ] && [ "$sf_rc" = 9 ] && [ "$sf_rc2" = 0 ] && [ "$sf_r" = ok ] \
-  && ok "an event log whose order already differs from sikstack's, its pull killed after the write: the next command sends nothing of sikstack's, each line once" \
-  || bad "the differing-order append pull-crash row wrong -- order=$sf_ord rc=$sf_rc/$sf_rc2 $sf_r"
-sf sync --keep cloud "$sf_ev" >/dev/null; sf_m=$(sf_mark); sf next >/dev/null; sf_rc=$?; sf_r=$(sf_check "$sf_m" synced)
-[ "$sf_rc" = 0 ] && [ "$sf_r" = ok ] || bad "the event log did not settle on sikstack's order after sync --keep cloud -- rc=$sf_rc $sf_r"
+  && ok "the event log's eviction killed before its rewrite or after it (before base.json), and the settle after that killed once it fetched sikstack's copy: the next command sends only the lines sikstack lacks, sikstack holds each line once, and the disk's log is empty" \
+  || bad "an eviction or pull killed midway lost or re-sent an event line --$sf_bad"
+# sync --keep cloud brings sikstack's whole log here; the next command takes its lines off the disk again.
+sf sync --keep cloud "$sf_ev" >/dev/null; [ -s "$SF/.sikstack/$sf_ev" ]; sf_full=$?
+sf_m=$(sf_mark); sf next >/dev/null; sf_rc=$?; sf_r=$(sf_check "$sf_m" synced)
+[ "$sf_full" = 0 ] && [ "$sf_rc" = 0 ] && [ "$sf_r" = ok ] \
+  || bad "the event log did not come back and leave again around sync --keep cloud -- full=$sf_full rc=$sf_rc $sf_r"
 # (e) a stale write: another checkout changes the same file between this command's begin and its commit. sikstack refuses
 # the whole batch (409), the disk keeps this checkout's change, exit 1 though next succeeded; then the begin step's
 # mismatch refuses with nothing changed, until the two sides agree.
@@ -3391,6 +3387,10 @@ def synced():
     need(base.get("head") == S["head"], f"base head {base.get('head')} != sikstack head {S['head']}")
     need(set(base["files"]) == set(live), f"base and sikstack hold different paths: {sorted(set(base['files']) ^ set(live))[:4]}")
     for p, f in live.items():
+        if p == "works/events.jsonl":  # cold (0.4.0): once a push lands its sent lines leave the disk
+            need(base["files"][p]["rev"] == f["rev"] and (not (root / p).exists() or (root / p).read_bytes() == b""),
+                 f"{p}: the base's rev is not sikstack's, or the disk still holds sent lines")
+            continue
         need(base["files"][p]["rev"] == f["rev"] and (root / p).is_file() and sha(p) == f["sha256"], f"{p}: base, disk and sikstack disagree")
 if check == "nothing":  # a refusal: no request reached the fake
     need(not R, f"a refused link reached sikstack: {[r['path'] for r in R]}")
@@ -3506,8 +3506,8 @@ lk_m=$(lk_mark); printf '%s\n' "$LKK" | lk "$LKA" link "$LKU" > "$LKW/b.txt"; lk
 lk_modes=$(python3 -c 'import os, stat, sys; print("%o %o" % (stat.S_IMODE(os.stat(sys.argv[1]).st_mode), stat.S_IMODE(os.stat(sys.argv[2]).st_mode)))' "$LKX/sikstack" "$LKX/sikstack/workspace-keys.json")
 lk_keys=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(sorted(d), d[sys.argv[2]]["proj-1"]["key"] == sys.argv[3], d[sys.argv[2]]["proj-1"]["org_id"])' "$LKX/sikstack/workspace-keys.json" "$LKS" "$LKK")
 [ "$lk_rc" = 0 ] && [ "$lk_r" = ok ] && [ "$lk_modes" = "700 600" ] && [ "$lk_keys" = "['$LKS', 'https://elsewhere.example'] True org-1" ] \
-  && grep -qxE "store=cloud server=$LKS project=proj-1 head=r[0-9]+" "$LKW/b.txt" && [ -z "$(git -C "$LKA/.sikstack" status --porcelain)" ] \
-  && ok "link reads the key from stdin, verifies it by head, keeps it in a 0700 folder's 0600 file beside the other server's key, writes the link as config.toml's [cloud] table without it (committed alone) and uploads the truth set as several batches under 8,000,000 B; the workflow repo stays clean (.hi2vi/ excluded)" \
+  && grep -qxE "store=cloud server=$LKS project=proj-1 head=r[0-9]+" "$LKW/b.txt" && [ "$(git -C "$LKA/.sikstack" status --porcelain)" = " M works/events.jsonl" ] \
+  && ok "link reads the key from stdin, verifies it by head, keeps it in a 0700 folder's 0600 file beside the other server's key, writes the link as config.toml's [cloud] table without it (committed alone) and uploads the truth set as several batches under 8,000,000 B; the workflow repo's only change is the event log's sent lines leaving the disk (.hi2vi/ excluded)" \
   || bad "the link upload wrong -- rc=$lk_rc $lk_r modes=$lk_modes keys=$lk_keys $(tail -2 "$LKW/b.txt") $(git -C "$LKA/.sikstack" status --porcelain | head -3)"
 lk_m=$(lk_mark); lk "$LKA" next > "$LKW/b2.txt"; lk_rc=$?; lk_r=$(lk_check "$LKA/.sikstack" "$lk_m" next "$(grep '^store=' "$LKW/b2.txt")")
 [ "$lk_rc" = 0 ] && [ "$lk_r" = ok ] && ok "next prints store=cloud server=<server> project=<id> in a linked checkout, and its head request sends X-Sikstack-Base: <synced head>" \
@@ -3687,6 +3687,266 @@ kill "$LK_PID" 2>/dev/null; wait "$LK_PID" 2>/dev/null
 echo "link test runtime: $(( $(date +%s) - lk_t0 ))s"
 
 # ---------------------------------------------------------------------------
+echo "== Test 34: the cold set in cloud mode, against the local fake sikstack -- link uploads every truth path (archived phases, doc versions, docs/index.json, docs/reference, the event log) and then keeps only the working set on disk; an archive's move lands and the archived folder leaves the disk, and sync then sends no delete (run 3); a lost answer on that move evicts nothing until the resend lands; a cold file the base lacks or holds at other bytes, and a folder whose .gitignore is *, stay; sync --keep cloud brings a cold file back and the next command takes it off again; the event log's lines reach sikstack once across a lost answer and a stop mid-eviction; a fresh join writes no cold path; sync never lists an evicted path; unlink restores every cold file byte-equal to sikstack's, and unlink --from-disk names what it cannot =="
+co_t0=$(date +%s)
+newtmp COW; COX="$COW/xdg"; COA="$COW/a"; COB="$COW/b"; CO_OUT="$COW/out.txt"; : > "$CO_OUT"
+co() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$COX" python3 "$(wf_entry "$1")" "$@" ) 2>&1 | tee -a "$CO_OUT"; return "${PIPESTATUS[0]}"; }
+co_install() { { mkhost "$1" \
+  && git -C "$1/.sikstack" config user.email smoke@example.invalid && git -C "$1/.sikstack" config user.name smoke \
+  && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m install; } > "$1.setup.txt" 2>&1 || bad "cold probe: the install of $1 failed -- $(tail -3 "$1.setup.txt")"; }
+co_install "$COA"; co_install "$COB"
+# A: two phases archived in local mode (one with an agent's topic), a live one, a doc version, docs/index.json, two
+# docs/reference files and a local cache under docs/reference whose .gitignore is `*` (never in the truth set).
+{ for p in P1 P2 P3; do ( cd "$COA" && python3 "$ENG" phase new --phase "$p" --name "Phase $p" --objective toy >/dev/null ) || exit 1; done
+  mkdir -p "$COA/.sikstack/works/phases/active/P1/topics" "$COA/.sikstack/docs/versions/product" "$COA/.sikstack/docs/reference/cache"
+  printf 'an agent wrote this topic\n' > "$COA/.sikstack/works/phases/active/P1/topics/note.md"
+  ( cd "$COA" && python3 "$ENG" phase archive P1 --force >/dev/null ) || exit 1
+  printf '# product v0002\n' > "$COA/.sikstack/docs/versions/product/v0002_cold.md"
+  printf '{"docs": []}\n' > "$COA/.sikstack/docs/index.json"
+  printf 'reference one\n' > "$COA/.sikstack/docs/reference/one.md"
+  printf 'reference two\n' > "$COA/.sikstack/docs/reference/two.md"
+  printf '*\n' > "$COA/.sikstack/docs/reference/cache/.gitignore"; printf 'a local cache\n' > "$COA/.sikstack/docs/reference/cache/blob.txt"
+  git -C "$COA/.sikstack" add -A && git -C "$COA/.sikstack" commit -qm setup; } > "$COW/setup.txt" 2>&1 || bad "cold probe: the setup failed -- $(tail -3 "$COW/setup.txt")"
+COK="cold-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$COK" > "$COW/key"; chmod 600 "$COW/key"
+python3 "$REPO_ROOT/tests/fake_sikstack.py" --dir "$COW/fake" --port-file "$COW/port" --key-file "$COW/key" \
+  --project proj-1 --org org-1 --lifetime 900 > "$COW/fake.txt" 2>&1 &
+CO_PID=$!
+for _ in $(seq 1 100); do [ -s "$COW/port" ] && break; sleep 0.1; done
+COS="http://127.0.0.1:$(cat "$COW/port" 2>/dev/null)"; COU="$COS/projects/proj-1"
+co_mark() { if [ -f "$COW/fake/requests.jsonl" ]; then grep -c '' "$COW/fake/requests.jsonl"; else echo 0; fi; }
+co_ctl() { python3 - "$COS" "$1" <<'PY'
+import http.client, sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request("POST", "/_fake/control", sys.argv[2], {"Content-Type": "application/json"})
+assert conn.getresponse().status == 200
+PY
+}
+# co_snap <workflow dir> <out>: {rel: sha256} of every file under works/ and docs/ (the generated ones included).
+co_snap() { python3 - "$1" "$2" <<'PY'
+import hashlib, json, os, sys
+root, out = sys.argv[1], sys.argv[2]
+snap = {}
+for top in ("works", "docs"):
+    for d, _dirs, files in os.walk(os.path.join(root, top)):
+        for f in files:
+            p = os.path.join(d, f)
+            snap[os.path.relpath(p, root)] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+json.dump(snap, open(out, "w"), indent=1, sort_keys=True)
+PY
+}
+# co_check <workflow dir> <mark> <check> [args]: one named assertion over the fake's requests since <mark>, its records,
+# the checkout's base.json and journal, and its disk.
+co_check() { python3 - "$COW/fake/requests.jsonl" "$COS" "$@" <<'PY'
+import base64, collections, hashlib, http.client, json, sys
+from pathlib import Path
+from urllib.parse import urlparse, quote
+log, server, root, mark, check, extra = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6:]
+R = [json.loads(l) for l in (Path(log).read_text().splitlines() if Path(log).exists() else [])[mark:]]
+C = [r for r in R if r["path"].endswith("/commit")]
+ops = [op for c in C for op in c["batch"]["ops"]]
+u = urlparse(server)
+def get(path):
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    conn.request("GET", path)
+    resp = conn.getresponse()
+    return resp.status, json.loads(resp.read())
+S = get("/_fake/state")[1]
+live = {p: f for p, f in S["files"].items() if not f["deleted"]}
+hi = root / ".hi2vi"
+base = json.loads((hi / "base.json").read_text()) if (hi / "base.json").exists() else {}
+journal = json.loads((hi / "journal.json").read_text()) if (hi / "journal.json").exists() else None
+EV = "works/events.jsonl"
+def cold(p):
+    return p.startswith(("works/phases/archived/", "docs/versions/", "docs/reference/")) or p in ("docs/index.json", EV)
+def cloud(p):
+    return base64.b64decode(get("/_fake/file?path=" + quote(p))[1]["content"])
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+def need(cond, why):
+    if not cond:
+        print(why)
+        sys.exit(1)
+def thin():
+    """The disk holds the working set only: every cold file sikstack holds is off the disk and in the base at
+    sikstack's sha; every working file equals sikstack's; the event log on disk holds nothing sikstack holds."""
+    need(journal is None, f"the journal is left: {journal}")
+    need(base.get("head") == S["head"], f"base head {base.get('head')} != sikstack head {S['head']}")
+    need(set(base["files"]) == set(live), f"base and sikstack hold different paths: {sorted(set(base['files']) ^ set(live))[:4]}")
+    for p, f in live.items():
+        if p == EV:
+            here = (root / p).read_bytes() if (root / p).exists() else b""
+            need(here == b"", f"the event log on disk is not thin: {here[:80]!r}")
+            need(base["files"][p]["rev"] == f["rev"], "the event log's rev is not the base's")
+        elif cold(p):
+            need(not (root / p).exists(), f"{p}: a cold file sikstack holds is still on disk")
+            need(base["files"][p]["sha256"] == f["sha256"] and base["files"][p]["rev"] == f["rev"], f"{p}: base and sikstack disagree")
+        else:
+            need((root / p).is_file() and sha((root / p).read_bytes()) == f["sha256"] and base["files"][p]["rev"] == f["rev"],
+                 f"{p}: base, disk and sikstack disagree")
+if check == "uploaded":  # extra: the snapshot before the link
+    before = json.load(open(extra[0]))
+    truth_cold = sorted(p for p in before if cold(p) and p != EV and "/cache/" not in p)
+    need(len(truth_cold) >= 7, f"the setup made too few cold files: {truth_cold}")
+    need(C and all(c["status"] == 200 for c in C) and all(op["op"] in ("put", "append") for op in ops), "the upload did not land as adds")
+    for p in truth_cold:
+        need(p in live and live[p]["sha256"] == before[p], f"{p}: not uploaded at its bytes")
+    need(EV in live and cloud(EV) and sha(cloud(EV)) == before[EV], "the event log was not uploaded whole")
+    need("docs/reference/cache/blob.txt" not in live and "docs/reference/cache/.gitignore" not in live, "a .gitignore * cache reached sikstack")
+    after = {str(p.relative_to(root)) for top in ("works", "docs") for p in (root / top).rglob("*") if p.is_file()}
+    need(after == set(before) - set(truth_cold), f"the disk is not the working set: gone {sorted(set(before) - after - set(truth_cold))[:3]}, left {sorted(after & set(truth_cold))[:3]}")
+    need((root / "docs/reference/cache/blob.txt").read_text() == "a local cache\n", "the .gitignore * cache was touched")
+    thin()
+elif check == "run3":  # the archive's move landed, nothing deleted in sikstack, the archived folder off the disk
+    need(not [op for op in ops if op["op"] == "delete"], f"a delete was sent: {[op['path'] for op in ops if op['op'] == 'delete']}")
+    arch = [p for p in live if p.startswith("works/phases/archived/") and "_P2_" in p]
+    need(len(arch) >= 3 and not [p for p in live if p.startswith("works/phases/active/P2/")], f"sikstack does not hold P2 archived: {arch}")
+    need(len([p for p in live if p.startswith("works/phases/archived/") and "_P1_" in p and p.endswith("/topics/note.md")]) == 1, "P1's archived topic left sikstack")
+    need(not list((root / "works/phases").glob("archived/*_P2_*")), "the archived P2 folder is still on disk")
+    thin()
+elif check == "held":  # extra: the phase; a lost answer: its archived folder still here, sikstack still holds it active
+    need(journal is not None and journal.get("state") == "pushing", f"the journal does not hold the push: {journal}")
+    need(list((root / "works/phases").glob(f"archived/*_{extra[0]}_*/phase.json")), f"the archived {extra[0]} left the disk before its push landed")
+    need(not [p for p in base["files"] if p.startswith("works/phases/archived/") and f"_{extra[0]}_" in p], "the base names the archive before it landed")
+elif check == "landed":  # extra: the phase
+    need(not list((root / "works/phases").glob(f"archived/*_{extra[0]}_*")), f"the archived {extra[0]} is still on disk after its push landed")
+    need([p for p in live if p.startswith("works/phases/archived/") and f"_{extra[0]}_" in p], f"sikstack lacks the archived {extra[0]}")
+    need(not [op for op in ops if op["op"] == "delete"], "a delete was sent")
+    thin()
+elif check == "once":  # extra: a file of lines that must be in sikstack's log exactly once each
+    need(journal is None, f"the journal is left: {journal}")
+    log_lines = cloud(EV).decode().splitlines()
+    twice = sorted(l for l, n in collections.Counter(log_lines).items() if n > 1)
+    need(not twice, f"sikstack holds {len(twice)} line(s) twice, first {twice[:1]}")
+    for line in Path(extra[0]).read_text().splitlines():
+        need(log_lines.count(line) == 1, f"a line is in sikstack {log_lines.count(line)} time(s): {line[:80]}")
+    thin()
+elif check == "joined":  # a fresh join: the working set only, no cold path fetched or written
+    fetched = [p for r in R if r["path"].endswith("/fetch") for p in r.get("paths") or []]
+    need(fetched and not [p for p in fetched if cold(p)], f"the join fetched a cold path: {[p for p in fetched if cold(p)][:3]}")
+    on_disk = [str(p.relative_to(root)) for top in ("works", "docs") for p in (root / top).rglob("*") if p.is_file()]
+    need(not [p for p in on_disk if cold(p) and p != EV], f"a cold path is on the joined disk: {[p for p in on_disk if cold(p)][:3]}")
+    need(not C, "the join sent a batch")
+    thin()
+elif check == "restored":  # every cold file sikstack holds is on disk at its bytes; the event log is sikstack's whole log
+    need(not hi.exists(), ".hi2vi/ is left after unlink")
+    n = 0
+    for p, f in live.items():
+        if cold(p):
+            need((root / p).is_file() and (root / p).read_bytes() == cloud(p), f"{p}: not restored byte-equal to sikstack's copy")
+            n += p != EV
+    need(n >= 8, f"too few cold files restored: {n}")
+    print(f"ok {n}")
+    sys.exit(0)
+print("ok")
+PY
+}
+# (a) link uploads everything, then thins the disk to the working set (C4); the .gitignore * cache stays (C3).
+co_snap "$COA/.sikstack" "$COW/before.json"
+co_m=$(co_mark); printf '%s\n' "$COK" | co "$COA" link "$COU" > "$COW/a.txt"; co_rc=$?; co_r=$(co_check "$COA/.sikstack" "$co_m" uploaded "$COW/before.json")
+co_nb=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$COW/before.json"); co_snap "$COA/.sikstack" "$COW/after.json"
+co_na=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$COW/after.json")
+co_dirty=$(git -C "$COA/.sikstack" status --porcelain | awk '{print $2}' | grep -vE '^(works/events\.jsonl|works/phases/archived/|docs/versions/|docs/index\.json|docs/reference/)' | head -3)
+[ "$co_rc" = 0 ] && [ "$co_r" = ok ] && grep -q '^cold: [0-9]* file(s) .* are kept in sikstack only' "$COW/a.txt" && [ -z "$co_dirty" ] \
+  && ok "link uploads every truth path (an archived phase with its agent topic, a doc version, docs/index.json, docs/reference, the whole event log; never the .gitignore * cache), then keeps only the working set on disk ($co_nb files before, $co_na after; the event log empty), and the workflow repo's only changes are the evicted cold paths" \
+  || bad "the link's upload and thinning wrong -- rc=$co_rc $co_r / $(tail -3 "$COW/a.txt") / dirty: $co_dirty"
+# (b) run 3: archive in a linked checkout, then (as the plan's run did by hand) any archived folder still on disk
+# moved out, then sync. No delete may reach sikstack, and the archived phase stays live there (C1).
+co_m=$(co_mark); co "$COA" phase archive P2 --force > "$COW/b.txt"; co_rc=$?
+for d in "$COA"/.sikstack/works/phases/archived/*_P2_*; do [ -d "$d" ] && mv "$d" "$COW/hand-evicted-$(basename "$d")"; done
+co "$COA" sync > "$COW/b2.txt"; co_rc2=$?; co "$COA" sync --status > "$COW/b3.txt"; co_r=$(co_check "$COA/.sikstack" "$co_m" run3)
+[ "$co_rc" = 0 ] && [ "$co_rc2" = 0 ] && [ "$co_r" = ok ] && grep -q '^in sync: ' "$COW/b2.txt" && grep -qE ' here=0 differ=0 ' "$COW/b3.txt" \
+  && ok "run 3: phase archive's move lands as move ops and the archived folder leaves the disk; sync then sends no delete, sikstack still holds every archived file, and sync and sync --status list nothing" \
+  || bad "run 3 still loses the archive -- rc=$co_rc/$co_rc2 $co_r / $(head -3 "$COW/b2.txt") / $(cat "$COW/b3.txt")"
+# (c) a lost answer on the commit that carries the archive move: nothing is evicted until the resend lands (C2).
+co_ctl '{"commit": "drop-before"}'; co_m=$(co_mark); co "$COA" phase archive P3 --force > "$COW/c.txt"; co_rc=$?
+co_r=$(co_check "$COA/.sikstack" "$co_m" held P3)
+co_m=$(co_mark); co "$COA" next > "$COW/c2.txt"; co_rc2=$?; co_r2=$(co_check "$COA/.sikstack" "$co_m" landed P3)
+[ "$co_rc" = 1 ] && [ "$co_r" = ok ] && [ "$co_rc2" = 0 ] && [ "$co_r2" = ok ] \
+  && ok "a lost answer on the archive's commit: the archived folder stays on disk and the base does not name it; the next command resends, it lands, and only then the folder leaves the disk" \
+  || bad "eviction ran before the archive's push landed -- rc=$co_rc/$co_rc2 $co_r / $co_r2 / $(tail -1 "$COW/c.txt")"
+# (d) sync --keep cloud brings a cold file back; the next command takes it off again. Changed here, or new here, a
+# cold file stays through an eviction (the base's sha differs, or the base lacks it); the next command sends both
+# and then takes them off (C3).
+co_ref=docs/reference/one.md
+co "$COA" sync --keep cloud "$co_ref" > "$COW/d.txt"; co_rc=$?; [ -f "$COA/.sikstack/$co_ref" ]; co_back=$?
+co "$COA" next >/dev/null; co_rc2=$?; [ -f "$COA/.sikstack/$co_ref" ]; co_gone=$?
+co "$COA" sync --keep cloud "$co_ref" >/dev/null; printf 'changed here\n' >> "$COA/.sikstack/$co_ref"
+printf 'new here\n' > "$COA/.sikstack/docs/reference/new.md"
+co_ev=$( cd "$COA" && XDG_CONFIG_HOME="$COX" python3 - <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("workflow_engine", os.environ["ENG"])
+mod = importlib.util.module_from_spec(spec)
+sys.modules["workflow_engine"] = mod
+spec.loader.exec_module(mod)
+cloud = sys.modules["wf_cloud"]
+session = cloud.CloudSession(["probe"])
+session.cloud_head = session.base["head"]  # the base at head, no journal: the eviction's own rules decide
+print(session.evict())
+PY
+)
+[ -f "$COA/.sikstack/$co_ref" ] && [ -f "$COA/.sikstack/docs/reference/new.md" ]; co_kept=$?
+co_m=$(co_mark); co "$COA" next >/dev/null; co_rc3=$?; co_r=$(co_check "$COA/.sikstack" "$co_m" landed P3)
+[ "$co_rc" = 0 ] && [ "$co_back" = 0 ] && [ "$co_rc2" = 0 ] && [ "$co_gone" = 1 ] && [ "$co_ev" = 0 ] && [ "$co_kept" = 0 ] \
+  && [ "$co_rc3" = 0 ] && [ "$co_r" = ok ] && [ ! -e "$COA/.sikstack/docs/reference/new.md" ] && [ -f "$COA/.sikstack/docs/reference/cache/blob.txt" ] \
+  && ok "sync --keep cloud brings a cold file back and the next command takes it off again; an eviction leaves a cold file changed here and one sikstack lacks (and the .gitignore * cache); the next command sends both, then takes them off" \
+  || bad "the eviction took an unsynced cold file or kept a synced one -- rc=$co_rc/$co_rc2/$co_rc3 back=$co_back gone=$co_gone evicted=$co_ev kept=$co_kept $co_r"
+# (e) the event log after eviction: lines appended across a lost answer and a stop mid-eviction reach sikstack once (C7).
+co "$COA" agenda-add --title first --author person:smoke >/dev/null; co_rc=$?
+co_ctl '{"commit": "drop-after"}'; co "$COA" agenda-add --title lost --author person:smoke > "$COW/e.txt"; co_rc2=$?
+cp "$COA/.sikstack/works/events.jsonl" "$COW/pending.txt"; co_np=$(grep -c '' "$COW/pending.txt")
+( cd "$COA" && XDG_CONFIG_HOME="$COX" python3 - agenda-add --title killed --author person:smoke <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("workflow_engine", os.environ["ENG"])
+mod = importlib.util.module_from_spec(spec)
+sys.modules["workflow_engine"] = mod
+spec.loader.exec_module(mod)
+cloud = sys.modules["wf_cloud"]
+real = cloud._cloud_write_bytes
+def write(path, data):  # the eviction's rewrite of the log lands, then the process dies before base.json
+    real(path, data)
+    if str(path).endswith("/works/events.jsonl"):
+        os._exit(9)
+cloud._cloud_write_bytes = write
+sys.exit(mod.main(sys.argv[1:]))
+PY
+) >> "$CO_OUT" 2>&1; co_rc3=$?
+co_m=$(co_mark); co "$COA" agenda-add --title after --author person:smoke >/dev/null; co_rc4=$?; co_r=$(co_check "$COA/.sikstack" "$co_m" once "$COW/pending.txt")
+[ "$co_rc" = 0 ] && [ "$co_rc2" = 1 ] && [ "$co_np" -ge 1 ] && [ "$co_rc3" = 9 ] && [ "$co_rc4" = 0 ] && [ "$co_r" = ok ] \
+  && ok "event lines appended after eviction reach sikstack once: a lost answer keeps them on disk until the resend lands, a stop between the log's rewrite and base.json re-sends nothing, and the disk's log is empty after ($co_np pending line(s) checked)" \
+  || bad "the event log lost or doubled a line across eviction -- rc=$co_rc/$co_rc2/$co_rc3/$co_rc4 pending=$co_np $co_r"
+# (f) a fresh join takes the working set only (C5); sync lists nothing there.
+co_m=$(co_mark); printf '%s\n' "$COK" | co "$COB" link "$COU" > "$COW/f.txt"; co_rc=$?; co_r=$(co_check "$COB/.sikstack" "$co_m" joined)
+co "$COB" sync > "$COW/f2.txt"; co_rc2=$?; co "$COB" sync --status > "$COW/f3.txt"
+[ "$co_rc" = 0 ] && [ "$co_r" = ok ] && grep -q "^linked: joined sikstack's workspace" "$COW/f.txt" && [ -f "$COB/.sikstack/docs/current/product.md" ] \
+  && [ "$co_rc2" = 0 ] && grep -qE ' here=0 differ=0 ' "$COW/f3.txt" \
+  && ok "a fresh join fetches and writes no cold path (the working set only), and sync and sync --status there list nothing" \
+  || bad "the fresh join pulled the cold set -- rc=$co_rc/$co_rc2 $co_r / $(tail -2 "$COW/f.txt") / $(cat "$COW/f3.txt")"
+# (g) unlink restores every cold file byte-equal to sikstack's (C6); unlink --from-disk, offline, names what it cannot.
+co "$COA" unlink > "$COW/g.txt"; co_rc=$?; co_r=$(co_check "$COA/.sikstack" 0 restored)
+( cd "$COA" && python3 "$ENG" check --no-rebuild ) > "$COW/g2.txt" 2>&1; co_rc2=$?
+co_ctl '{"offline": true}'; co "$COB" unlink --from-disk > "$COW/g3.txt"; co_rc3=$?; co_ctl '{"offline": false}'
+co_nc=$(python3 - "$COS" <<'PY'
+import http.client, json, sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request("GET", "/_fake/state")
+f = json.loads(conn.getresponse().read())["files"]
+print(sum(1 for p, r in f.items() if not r["deleted"] and (p.startswith(("works/phases/archived/", "docs/versions/", "docs/reference/")) or p == "docs/index.json")))
+PY
+)
+[ "$co_rc" = 0 ] && [ "${co_r%% *}" = ok ] && grep -q '^restored [0-9]* cold file(s) from sikstack' "$COW/g.txt" && [ "$co_rc2" = 0 ] \
+  && [ "$co_rc3" = 0 ] && grep -q "^cannot restore offline: $co_nc cold file(s) held only in sikstack (docs/index.json 1, docs/reference/ [0-9]*, docs/versions/ 1, works/phases/archived/ [0-9]*)" "$COW/g3.txt" \
+  && ok "unlink restores every cold file byte-equal to sikstack's copy (${co_r#ok } files) and its whole event log, and the tree validates; unlink --from-disk, offline, names the $co_nc cold files it cannot restore by prefix" \
+  || bad "unlink did not restore the cold set -- rc=$co_rc/$co_rc2/$co_rc3 $co_r / $(head -3 "$COW/g.txt") / $(tail -2 "$COW/g2.txt") / $(cat "$COW/g3.txt")"
+if grep -rqF "$COK" "$COA" "$COB" "$CO_OUT" "$COW/fake" 2>/dev/null; then bad "the workspace key leaked into a tree, the output or the request log"; fi
+kill "$CO_PID" 2>/dev/null; wait "$CO_PID" 2>/dev/null
+echo "cold test runtime: $(( $(date +%s) - co_t0 ))s"
+
+# ---------------------------------------------------------------------------
 echo "== Test 24: the web's agenda inbox, applied by a linked engine against the local fake sikstack -- at next and sync, entries oldest first, each run in-process as its agenda command: exit 0 applied, each in a batch of its own with exactly the files its command wrote; a refusal's one line sent verbatim with exit 1, a usage error's with exit 2; a brief id refused unrun with nothing written; an entry another checkout applied first is a 409, its change dropped here and sikstack's copy pulled, never applied twice; a crash inside a command leaves the entry pending and the tree as it was; a delete clears its links in the same batch; the applier never deadlocks on .hi2vi/lock =="
 ib_t0=$(date +%s)
 newtmp IBW; IBX="$IBW/xdg"; IBA="$IBW/a"; IBL="$IBW/local"
@@ -3778,6 +4038,10 @@ def synced():
     need(base.get("head") == S["head"], f"base head {base.get('head')} != sikstack head {S['head']}")
     need(set(base["files"]) == set(live), f"base and sikstack hold different paths: {sorted(set(base['files']) ^ set(live))[:4]}")
     for p, f in live.items():
+        if p == "works/events.jsonl":  # cold (0.4.0): once a push lands its sent lines leave the disk
+            need(base["files"][p]["rev"] == f["rev"] and (not (root / p).exists() or (root / p).read_bytes() == b""),
+                 f"{p}: the base's rev is not sikstack's, or the disk still holds sent lines")
+            continue
         need(base["files"][p]["rev"] == f["rev"] and (root / p).is_file() and sha(p) == f["sha256"], f"{p}: base, disk and sikstack disagree")
 def with_result(eid):
     return [c for c in C if any(r["id"] == eid for r in c["batch"]["inbox"])]
@@ -4804,10 +5068,10 @@ si_mode=$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.arg
 si_head=$(curl -s "$SIS/_fake/state" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("head"))')
 grep -q '^rc=0' "$SIW/d.txt" && [ "$si_key" = signin-smoke-key ] && [ "$si_mode" = 0o600 ] && ! grep -q signin-smoke-key "$SIW/d.txt" \
   && grep -qx 'project_id = "p-si"' "$SIW/repo/.sikstack/config.toml" && grep -qx "server = \"$SIS\"" "$SIW/repo/.sikstack/config.toml" \
-  && [ -z "$(git -C "$SIW/repo/.sikstack" status --porcelain)" ] && git -C "$SIW/repo/.sikstack" log -1 --format=%s | grep -q 'link this checkout' \
+  && [ "$(git -C "$SIW/repo/.sikstack" status --porcelain)" = " M works/events.jsonl" ] && git -C "$SIW/repo/.sikstack" log -1 --format=%s | grep -q 'link this checkout' \
   && [ "$si_head" -ge 1 ] 2>/dev/null && grep -q '^linked: [0-9]* file(s) sent' "$SIW/d.txt" && grep -q '^on the web: ' "$SIW/d.txt" \
   && [ -z "$(ls "$SIW/data/sign-in" 2>/dev/null)" ] \
-  && ok "on approval sign-in keeps the key in the key file (0600, never printed), writes and commits the [cloud] table and uploads the workspace (head r$si_head)" \
+  && ok "on approval sign-in keeps the key in the key file (0600, never printed), writes and commits the [cloud] table and uploads the workspace (head r$si_head; the event log's sent lines then leave the disk, its one change in the workflow repo)" \
   || bad "sign-in on approval -- key=$si_key mode=$si_mode head=$si_head $(cat "$SIW/d.txt")"
 # (e) declined and expired codes end with one line; nothing is written.
 mkhost "$SIW/repo2" && git -C "$SIW/repo2/.sikstack" add -A && git -C "$SIW/repo2/.sikstack" commit -qm seed >/dev/null 2>&1
