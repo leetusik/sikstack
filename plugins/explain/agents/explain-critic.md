@@ -101,7 +101,9 @@ and `Read` only their ranges.
 6. **The code and the records,** at the ranges the entries cite (B9 *A citation*): the code
    with `git show <commit>:<path>` or Read (the working folder holds the run's commit for
    the code; confirm a range by its hash when unsure), a record with Read at its path (if
-   the phase was archived since, Grep its quote under the archived folder).
+   the phase was archived since, Grep its quote under the archived folder; a record not
+   on disk: `sikstack cold fetch <P|doc@version|path>` and read the path it prints, or
+   `sikstack cold search "<text>"` to find the line).
 7. **The earlier chapters** (a chapter only), only as far as the order rule needs: their
    `##`/`###` headings and the terms they define, and the body of any chapter the outline
    lists as this one's prerequisite: what this chapter must recap, never what its reader
@@ -452,7 +454,8 @@ the range by its content: the first 16 hex digits of
 (`sha256sum` where `shasum` is missing). Uncommitted code is cited `@WORKTREE`, hashed from
 the file and checked by content only. A behaviour ("X runs before Y") cites every range on
 its path, in order. A **record** range quotes its line or lines verbatim and needs no hash:
-its quote finds it again, in the phase's active or archived folder.
+its quote finds it again, in the phase's active or archived folder (a record not on
+disk: `sikstack cold search "<text>"`).
 
 **An entry** of `evidence.md`, one per range:
 

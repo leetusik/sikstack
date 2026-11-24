@@ -2,7 +2,7 @@
 name: explain
 description: Explain what code in the current repo does, a code change in it, or a subject a research phase covered, as a document in your own knowledge base (the one /explain:setup configured), written only from the code and from what the workflow workspace's phases recorded, a research phase's findings included. Records-only, with no research of its own: no web search, no research agents, nothing from outside the code and the records; whenever the records lack what the reader needs (a subject no phase covers, one with no code in this repo, or a covered subject whose reader needs outside basics no record states), it offers a research phase first (it reads the code, the web or your own material and records findings), it always honours your own "research first" whatever the coverage, and the explain's confirmation comes back by itself when that research passes. /explain:explain suggests the reader and the shape and asks one confirmation (a standalone document by default; a book or a chapter of a book only when asked) and, on your yes, hands it to the workspace's create-phase, which runs it as an explain phase in its own worktree: one writer drafts a native chapter traced sentence by sentence to the code and the records (visuals first, next steps from what is still open in the workspace, a quiz only when the subject earns one), one critic on a second model checks it, then a private publish. Needs a workflow workspace v96 or later; without one it refuses and runs nothing. Use ONLY when the user wants an explanation persisted as a document (explain and document, write this up, document what we just changed, teach me X and save it) — NOT for ordinary questions that deserve a normal chat answer.
 argument-hint: <topic or change-ref> [book=<slug>] [lang=<xx>] [from=P<N>]
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(curl -sS --max-time 5:*), Bash(curl -sS --max-time 30:*), Bash(python3 -c:*), Bash(python3 -I *knowledge-kb/explain/tools/pagetext.py *), Bash(knowledge --base-url:*), Bash(knowledge --version:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git grep:*), Bash(git blame:*), Bash(git status:*), Bash(shasum -a 256:*), Bash(sha256sum:*), Bash(mktemp -d:*)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(curl -sS --max-time 5:*), Bash(curl -sS --max-time 30:*), Bash(python3 -c:*), Bash(python3 -I *knowledge-kb/explain/tools/pagetext.py *), Bash(knowledge --base-url:*), Bash(knowledge --version:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git grep:*), Bash(git blame:*), Bash(git status:*), Bash(sikstack cold:*), Bash(shasum -a 256:*), Bash(sha256sum:*), Bash(mktemp -d:*)
 ---
 
 # explain
@@ -268,7 +268,9 @@ finds them from the records, and the confirmation names them:
    files, its key names and its plain name; a hit that is about the subject (not a passing
    mention) counts. A research phase is found this way: its `intent.md` records its
    subject and its `paths:` line (`none` for a subject with no code), and its `## Decisions`
-   gists name what it found.
+   gists name what it found. A record not on disk (a workspace linked to sikstack keeps
+   its archived phases only there): to find a line, `sikstack cold search "<text>"`; then
+   `sikstack cold fetch <P|doc@version|path>` and read the path it prints.
 3. **The covering phases** are the phases both ways find, ordered by how much of the
    subject each built or researched, at most 6 named (the rest counted). A phase or slice
    subject is covered by that phase, plus any later phase the commits name for its files.
@@ -412,7 +414,9 @@ artifact.
    names the covering phases, or finds none.
 
    **With `from=P<N>`**, that phase is covering, whatever the Grep finds (an id that names
-   no phase of this workspace, active or archived, is said so in one line and dropped).
+   no phase of this workspace, active or archived, is said so in one line and dropped; an
+   archived phase not on disk is found by `sikstack cold fetch <P>`, which prints its
+   folder).
    The coverage still runs over the subject's paths, so a covered subject keeps the phases
    that built its code on `phases:` beside it, and a book of it stays kind `codebase`
    (§1 *The unit, and where it goes*). Its `intent.md` holds, under *Original Input
@@ -465,7 +469,7 @@ artifact.
    Then check **what the records lack** (COVERAGE, *Covered, but the records lack what the
    reader needs*): with covering phases, one Grep over their `intent.md`, `phase.md` and
    `topics/` for the key terms each drafted section and must-cover item rests on, outside
-   the 10 reads. What none of them states (a field's terms, a formula, outside basics the
+   the 10 reads (a phase not on disk: `sikstack cold search "<text>"`). What none of them states (a field's terms, a formula, outside basics the
    reader is new to) is what step 7's closing paragraph names, and the research block's
    `question:` lines. A request that asks for research is offered it whatever this finds.
 
@@ -1043,10 +1047,12 @@ code and the covering phases' records on disk stay as they were at the commit wh
 read.
 
 1. **Find the records** of each phase on the brief's `phases:` line, in the workspace's
-   phases folder (§1 step 1: `works/phases/`, or `workflow/works/phases/` when nested):
-   `active/<P>/`, or its archived folder `archived/<stamp>_<P>_<slug>/` (Glob
-   `archived/*_<P>_*`). A phase found in neither is listed under `## Read` as `not found`,
-   and the run goes on with the others. With `phases: none` (the operator chose to explain
+   phases folder (§1 step 1: `works/phases/`, or `workflow/works/phases/` when nested;
+   `.sikstack/works/phases/` in a sikstack workspace): `active/<P>/`, or its archived
+   folder `archived/<stamp>_<P>_<slug>/` (Glob `archived/*_<P>_*`). A phase in neither on
+   disk (a workspace linked to sikstack keeps its archived phases only there): run
+   `sikstack cold fetch <P>` and read the folder it prints. One found nowhere is listed
+   under `## Read` as `not found`, and the run goes on with the others. With `phases: none` (the operator chose to explain
    from the code alone) there are no records: the chapter tells what the code does, and
    each why it cannot tell is a gap. The explain phase's own folder is never a record.
 2. **Read the records,** for the subject only, each by its parts:
@@ -1121,7 +1127,8 @@ none of this.
 1. **Find the prior's record,** read-only, as the front door's step 5 did: Grep the
    `result.md` of every slice of the workspace's phases, active and archived
    (`active/*/slices/*/result.md`, `archived/*/slices/*/result.md`), for
-   `PRIOR_REL_PATH`. A hit whose `## Published` table (or report line) records that
+   `PRIOR_REL_PATH`; archived records not on disk: `sikstack cold search
+   "<PRIOR_REL_PATH>"`, then `sikstack cold fetch <P>` for the hit's phase. A hit whose `## Published` table (or report line) records that
    `rel_path` at version `PRIOR_VERSION`, in a phase whose `intent.md` has a `## Explain`
    heading, names it: that phase's `doc/` (a chapter a book phase wrote: its
    `book/research/`, with that chapter's `evidence-ch<k>.md`). It must hold this skill's
@@ -1138,7 +1145,8 @@ none of this.
    commit with the same lines and hash; a code entry on a listed file whose range, hashed
    at this commit by B9's form, gives the same 16 hex digits; and a record entry of a phase
    that has not run since, its quote found again in that phase's folder (active or
-   archived) and re-cited at its path now. Every other prior entry is a lead: read its
+   archived; an archived folder not on disk through `sikstack cold fetch <P>`) and
+   re-cited at its path now. Every other prior entry is a lead: read its
    source again, by step 3 of D1, before an entry rests on it. A prior gap is carried as a
    gap unless a phase since answers it.
 4. **Read only what changed:** the phases since, by steps 1–2 of D1, and the changed code,
@@ -2287,7 +2295,9 @@ and `Read` only their ranges.
 6. **The code and the records,** at the ranges the entries cite (B9 *A citation*): the code
    with `git show <commit>:<path>` or Read (the working folder holds the run's commit for
    the code; confirm a range by its hash when unsure), a record with Read at its path (if
-   the phase was archived since, Grep its quote under the archived folder).
+   the phase was archived since, Grep its quote under the archived folder; a record not
+   on disk: `sikstack cold fetch <P|doc@version|path>` and read the path it prints, or
+   `sikstack cold search "<text>"` to find the line).
 7. **The earlier chapters** (a chapter only), only as far as the order rule needs: their
    `##`/`###` headings and the terms they define, and the body of any chapter the outline
    lists as this one's prerequisite: what this chapter must recap, never what its reader
@@ -2640,7 +2650,8 @@ the range by its content: the first 16 hex digits of
 (`sha256sum` where `shasum` is missing). Uncommitted code is cited `@WORKTREE`, hashed from
 the file and checked by content only. A behaviour ("X runs before Y") cites every range on
 its path, in order. A **record** range quotes its line or lines verbatim and needs no hash:
-its quote finds it again, in the phase's active or archived folder.
+its quote finds it again, in the phase's active or archived folder (a record not on
+disk: `sikstack cold search "<text>"`).
 
 **An entry** of `evidence.md`, one per range:
 

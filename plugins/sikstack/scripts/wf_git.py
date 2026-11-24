@@ -27,6 +27,11 @@ from wf_store import (  # noqa: E402
     rebuild_index_and_state, REPO_ANCHOR_KEYS, require_phase, resolve_current, ROOT, shown, slugify,
     STAMP_WORKS_FILES, status_box, stream_phases, WORKFLOW_CMD, WORKS, WORKTREES_DIR, write_json,
 )
+from wf_cold import (  # noqa: E402
+    archived_phase_dir as cold_archived_phase_dir,
+    archived_phase_files as cold_archived_phase_files, folder as cold_folder, hydrate as cold_hydrate,
+    linked as cold_linked, truth_rel as cold_truth_rel,
+)
 
 
 def _phase_branch(phase_id: str, name: str, slug_override=None) -> str:
@@ -1834,9 +1839,16 @@ def _find_phase_dir(phase_id: str):
 
     `require_phase` knows only `active/` on purpose (every state transition is an active-phase
     operation); the boundary of a done, archived phase is still a fair question -- a QA phase
-    looks back at it -- so this lookup covers both."""
+    looks back at it -- so this lookup covers both. In a linked checkout an evicted archive is read whole from
+    its read-only cache copy (wf_cold.folder), so a read of it (section, phase scope) prints what it did on disk."""
     if (ACTIVE / phase_id / "phase.json").exists():
         return ACTIVE / phase_id, False
+    if cold_linked():
+        rel = cold_archived_phase_dir(phase_id)
+        found = cold_folder(rel) if rel is not None else None
+        if found is None:
+            raise SystemExit(f"phase not found (active or archived): {phase_id}")
+        return found, True
     hits = []
     if ARCHIVED.exists():
         for d in sorted(ARCHIVED.iterdir()):
@@ -1863,7 +1875,7 @@ def _phase_creation_commit(phase_id: str, pdir: Path, archived: bool):
     if not archived:
         out = _git(["log", "--diff-filter=A", "--format=%H", "--", active_rel], check=False).stdout.split()
         return out[0] if out else None  # newest: right even if the id was ever reused
-    archived_rel = f"{pdir.relative_to(ROOT).as_posix()}/phase.json"
+    archived_rel = f"{cold_truth_rel(pdir)}/phase.json"  # an evicted archive's cache copy names its own path
     out = _git(["log", "--follow", "--diff-filter=A", "--format=%H", "--", archived_rel], check=False).stdout.split()
     if not out:
         out = _git(["log", "--diff-filter=A", "--format=%H", "--", active_rel], check=False).stdout.split()
@@ -3836,13 +3848,12 @@ def cmd_close(args: argparse.Namespace) -> int:
 # --- stacked PRs (P52): a phase's PR based on another open PR's branch ---------------------------
 
 def _pr_archived_phase_data() -> list:
-    """Every archived phase.json, read cheaply; an unreadable one is skipped, never fatal."""
+    """Every archived phase.json, read cheaply (an evicted one through its cache copy); an unreadable one is
+    skipped, never fatal."""
     out = []
-    if not ARCHIVED.is_dir():
-        return out
-    for d in sorted(ARCHIVED.iterdir()):
+    for _name, readable in cold_archived_phase_files():
         try:
-            data = read_json(d / "phase.json")
+            data = read_json(readable) if readable is not None else None
         except (OSError, ValueError):
             continue
         if isinstance(data, dict):
@@ -5052,13 +5063,13 @@ def _map_repo_anchors(name: str, repos: list) -> None:
         raise SystemExit(f"{refused}: {why}")
     converted = NESTED.get("converted_from") if NESTED is not None and isinstance(NESTED.get("converted_from"), list) else []
     pr_owner = any(isinstance(c, dict) and c.get("repo") == name for c in converted)
-    pdirs = [(d, False) for d in phase_dirs()]
-    if ARCHIVED.is_dir():
-        pdirs += [(d, True) for d in sorted(ARCHIVED.iterdir()) if d.is_dir() and (d / "phase.json").is_file()]
+    pdirs = [(d, False, d / "phase.json") for d in phase_dirs()]
+    # Archived: on disk, or a linked checkout's evicted ones read through the cache (hydrated before a write).
+    pdirs += [(ARCHIVED / name, True, readable) for name, readable in cold_archived_phase_files() if readable is not None]
     mapped, skipped, pr_mapped, pr_skipped = [], 0, [], 0
-    for pdir, archived in pdirs:
+    for pdir, archived, readable in pdirs:
         try:
-            data = read_json(pdir / "phase.json")
+            data = read_json(readable)
         except (OSError, ValueError) as exc:
             print(f"{pdir.name}: skipped: phase.json cannot be read ({exc})")
             skipped += 1
@@ -5113,6 +5124,8 @@ def _map_repo_anchors(name: str, repos: list) -> None:
             pr_mapped.append(data.get("id", pdir.name))
             changed = True
         if changed:
+            if archived:
+                cold_hydrate(pdir / "phase.json")  # an evicted one back in place: the commit puts it on its rev
             write_json(pdir / "phase.json", data)
     if mapped:
         append_event("nested_repo_anchors_mapped", repo=name, phases=mapped)

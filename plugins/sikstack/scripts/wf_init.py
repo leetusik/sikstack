@@ -113,7 +113,7 @@ def init_main(argv: list) -> int:
         if _init_git(state, "init", "-q").returncode != 0:
             print(f"sikstack init: git init failed in {state}", file=sys.stderr)
             return 1
-    _exclude(state, ["/.hi2vi/"])
+    _exclude(state, ["/.hi2vi/", "/cache/"])  # cloud mode's bookkeeping and its cold reads' cache (wf_cold)
     try:
         repos = json.loads((state / MARKER).read_text(encoding="utf-8")).get("repos") or []
     except (OSError, ValueError, AttributeError):

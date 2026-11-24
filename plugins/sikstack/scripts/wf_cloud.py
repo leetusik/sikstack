@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 import wf_store  # noqa: E402 -- the inbox applier sets its _CLOUD_UNDO (write_text's undo notes)
+import wf_cold  # noqa: E402 -- the cache: the eviction keeps an archived phase.json there; the hook's reads go lenient
 
 from wf_store import (  # noqa: E402
     _git, _git_available, _git_dir, _meter_ts, _one_line, _one_line_usage_errors, _worktree_entries, AGENDA,
@@ -88,9 +89,11 @@ CLOUD_FETCH_PATHS = 5000  # paths per P3 request (sikstack takes at most 20,000 
 # names sync), and `pushing` with the batch ids still to send (their bodies in `.hi2vi/outbox/`), from just
 # before the push until the base is updated, so a lost answer is resent with the same batch_id, which sikstack
 # applies once. A pull needs no journal: a revisioned file it wrote equals the cloud's sha, which reads as "same";
-# an append file it merged around lines not yet sent (or in an order of its own) does not, so each merge's result
-# is saved in base.json (`pulling`) before its write and settled against the disk when base.json is next read
-# (cloud_settle_pull); and a pull stopped by a write error records in base.json what it wrote before it stopped.
+# it never writes an append file (the event log is cold: sikstack keeps other checkouts' lines); and a pull stopped
+# by a write error records in base.json what it wrote before it stopped. (An engine before 0.4.0 merged the log in
+# its pull under a `pulling` write-ahead record; cloud_settle_pull still settles one left in base.json.) Eviction
+# needs none either: an evicted file stays in the base, and an event log rewritten to its unsent tail before its
+# offset was saved is settled against sikstack's copy (CloudSession.settle_appends).
 # One rule at every boundary (begin, commit, link, unlink, sync): any failure inside it ends the command in
 # CloudError's one line (the session hook: a note, exit 0), never a traceback or a false success.
 
@@ -539,6 +542,26 @@ def cloud_kind(rel: str) -> str:
     return "append" if CLOUD_APPEND_RE.fullmatch(rel) else "file"
 
 
+# The cold set: truth paths a linked checkout keeps only in sikstack once sikstack holds their exact bytes (the base's
+# sha after a landed push, with the base at head). The working set (every other truth path) always stays on disk.
+# base.json keeps an entry for every cold path sikstack holds, so a cold path in the base and absent on disk is
+# "evicted": unchanged, never a delete, never pulled. The event log is cold as an append file: only its pushed lines
+# leave the disk (CloudSession.evict), so the file holds the lines not yet sent and its base offset restarts at 0.
+CLOUD_COLD_PREFIXES = ("works/phases/archived/", "docs/versions/", "docs/reference/")
+CLOUD_COLD_FILES = ("docs/index.json", "works/events.jsonl")
+CLOUD_EMPTY_SHA = hashlib.sha256(b"").hexdigest()
+
+
+def cloud_cold(rel: str) -> bool:
+    """True for a truth-set path in the cold set."""
+    return isinstance(rel, str) and (rel.startswith(CLOUD_COLD_PREFIXES) or rel in CLOUD_COLD_FILES)
+
+
+def cloud_cold_top(rel: str) -> str:
+    """The cold prefix a cold path falls under, as unlink --from-disk names it."""
+    return next((p for p in CLOUD_COLD_PREFIXES if rel.startswith(p)), rel)
+
+
 def cloud_truth_rel(rel: str) -> bool:
     """True for a ROOT-relative POSIX path in the truth set: under works/ or docs/, minus the generated files,
     the templates, the version marker and temp files. (Folders whose .gitignore is `*` are cut in the walk.)"""
@@ -837,7 +860,11 @@ def cloud_settle_pull(base: dict) -> None:
 
 
 class CloudSession:
-    """One command's boundary in a linked checkout: begin (pull, pre-command scan), then commit (its batches, in order)."""
+    """One command's boundary in a linked checkout: begin (pull, pre-command scan), then commit (its batches, in order).
+    The newest session is `active`: the cold reads (wf_cold) fetch through it, so a read inside a command uses the
+    session (and the lock) that command already holds."""
+
+    active = None
 
     def __init__(self, tokens: list, deadline=None) -> None:
         self.tokens = list(tokens)
@@ -851,6 +878,9 @@ class CloudSession:
         self.cache = self._load("stat.json") or {}
         self.pre = {}
         self.inbox_pending = None  # P1's count, read at the begin step; None: unknown, so the inbox is asked
+        self.cloud_head = None  # the newest head sikstack named (P1, a manifest, a landed batch): eviction needs base = it
+        self.evicted = 0  # files the last eviction took off the disk
+        CloudSession.active = self
 
     def _load(self, name: str):
         try:
@@ -963,7 +993,7 @@ class CloudSession:
     def _count_changed(self) -> int:
         files, disk = self.base["files"], cloud_scan(dict(self.cache))
         return sum(1 for rel in set(files) | set(disk)
-                   if disk.get(rel) != (files.get(rel) or {}).get("sha256"))
+                   if disk.get(rel) != (files.get(rel) or {}).get("sha256") and not (rel not in disk and cloud_cold(rel)))
 
     # The begin step ------------------------------------------------------------------------------
     def begin(self, inbox: bool = False) -> None:
@@ -978,7 +1008,10 @@ class CloudSession:
         self.inbox_pending = info.get("inbox_pending")
         disk = cloud_scan(self.cache)
         head = info.get("head")
+        self.cloud_head = head if isinstance(head, int) else None
         if isinstance(head, int) and head != self.base["head"] and self._pull(disk):
+            disk = cloud_scan(self.cache)
+        if self.settle_appends():
             disk = cloud_scan(self.cache)
         if inbox:
             cloud_inbox_step(self)
@@ -990,29 +1023,35 @@ class CloudSession:
         """Fast-forward the disk to sikstack's head. A path changed on both sides is a mismatch: refused before
         anything is written. Returns True when a file was written or deleted (the generated files are then
         rebuilt). Not `strict` (sync): the clean paths are pulled, the mismatched ones left as they are, the
-        base's head kept (so the next manifest names them again), and the list of mismatched paths returned."""
+        base's head kept (so the next manifest names them again), and the list of mismatched paths returned.
+        The cold set is never written from sikstack: a cold path absent here is only recorded in the base (rev,
+        sha, kind; a deletion drops it), so a fresh join takes the working set alone; a cold path present here
+        keeps the rules of any other path. The event log's lines from other checkouts are never appended here:
+        the pull records the record's rev, and this checkout's own synced offset stays as it was."""
         manifest = self._ask("GET", f"manifest?since={self.base['head']}")
         new_head, changes = manifest.get("head"), manifest.get("changes")
         if not isinstance(new_head, int) or not isinstance(changes, list):
             raise self._unreachable("a malformed manifest")
         files = self.base["files"]
-        fetch, delete, same, mismatch = {}, [], {}, []
+        fetch, delete, same, mismatch, appends = {}, [], {}, [], {}
         for change in changes:
             rel = change.get("path") if isinstance(change, dict) else None
             if not cloud_truth_rel(rel):
                 continue  # nothing outside the truth set is ever written from the cloud
             b, here = files.get(rel), disk.get(rel)
-            if change.get("deleted"):
+            if cloud_kind(rel) == "append" or change.get("kind") == "append":
+                appends[rel] = change  # appends never conflict, and sikstack's lines stay in sikstack
+            elif change.get("deleted"):
                 if here is None:
                     same[rel] = None
                 elif b is not None and here == b.get("sha256"):
                     delete.append(rel)
                 else:
                     mismatch.append(rel)
+            elif here is None and cloud_cold(rel):
+                same[rel] = change  # cold: recorded, never fetched (an evicted path, or a fresh join's)
             elif here is not None and here == change.get("sha256"):
                 same[rel] = change
-            elif change.get("kind") == "append" or cloud_kind(rel) == "append":
-                fetch[rel] = change  # appends never conflict: the cloud's new lines are merged in
             elif (b is None and here is None) or (b is not None and here == b.get("sha256")):
                 fetch[rel] = change
             else:
@@ -1027,66 +1066,18 @@ class CloudSession:
             if missing:
                 raise self._unreachable(f"{len(missing)} file(s) missing from the fetch, first {missing[0]}")
         written, at = [], None  # the paths written or deleted so far, and the path in hand
-        merges = {}  # each append file's merge: rel -> (the merged bytes, or None when nothing is added; its entry)
         try:
             for rel, (item, data) in sorted(got.items()):
-                if cloud_kind(rel) != "append":
-                    continue
                 path, at = ROOT / rel, rel
-                local = path.read_bytes() if path.is_file() else b""
-                b = files.get(rel) or {}
-                offset = b.get("offset", 0) if b.get("kind") == "append" else 0
-                offset = offset if 0 <= offset <= len(local) else len(local)
-                seen = {}
-                for line in local.splitlines(keepends=True):
-                    seen[line.rstrip(b"\n")] = seen.get(line.rstrip(b"\n"), 0) + 1
-                new = []
-                for line in data.splitlines():
-                    if seen.get(line, 0):
-                        seen[line] -= 1
-                    else:
-                        new.append(line + b"\n")
-                added = b"".join(new)
-                merged = local[:offset] + added + local[offset:]
-                offset += len(added)
-                entry = {"rev": item.get("rev"), "sha256": _sha(merged[:offset]), "kind": "append", "offset": offset}
-                merges[rel] = (merged if added else None, entry)
-            # Write-ahead: the merged file differs from sikstack's whenever this checkout holds lines past its offset (or
-            # an order of its own), so a pull stopped after a write would leave sikstack's lines past the old offset, to
-            # be sent back as new. Each merge's result and its entry are in base.json before its write.
-            pulling = {rel: {"size": len(merged), "sha256": _sha(merged), "entry": entry}
-                       for rel, (merged, entry) in merges.items() if merged is not None}
-            if pulling:
-                at = f"{CLOUD_DIR}/base.json"
-                self.base["pulling"] = pulling
-                self.save_base()
-            for rel, (item, data) in sorted(got.items()):
-                path, at = ROOT / rel, rel
-                if rel in merges:
-                    merged, entry = merges[rel]
-                    if merged is not None:
-                        _cloud_write_bytes(path, merged)
-                    files[rel] = entry
-                else:
-                    _cloud_write_bytes(path, data)
-                    files[rel] = {"rev": item.get("rev"), "sha256": item.get("sha256"), "kind": "file"}
+                _cloud_write_bytes(path, data)
+                files[rel] = {"rev": item.get("rev"), "sha256": item.get("sha256"), "kind": "file"}
                 written.append(rel)
             for rel in delete:
                 at = rel
                 _cloud_remove(rel)
                 files.pop(rel, None)
                 written.append(rel)
-            for rel, change in same.items():
-                at = rel
-                if change is None:
-                    files.pop(rel, None)
-                elif cloud_kind(rel) == "append":
-                    size = (ROOT / rel).stat().st_size
-                    files[rel] = {"rev": change.get("rev"), "sha256": change.get("sha256"), "kind": "append", "offset": size}
-                else:
-                    files[rel] = {"rev": change.get("rev"), "sha256": change.get("sha256"), "kind": "file"}
         except OSError as exc:  # record what landed (the head stays), so the next command's pull resumes from it
-            self.base.pop("pulling", None)  # each write that landed has its entry; the one that failed did not land
             try:
                 self.save_base()
                 if written:
@@ -1096,14 +1087,87 @@ class CloudSession:
             raise CloudError(f"{at} could not be written here from sikstack ({exc.__class__.__name__}: "
                              f"{exc.strerror or exc}): {len(written)} pulled path(s) landed before it and are recorded "
                              "in .hi2vi/base.json; fix it, then run the command again (the pull resumes from there)")
-        self.base.pop("pulling", None)
+        for rel, change in same.items():
+            if change is None:
+                files.pop(rel, None)
+            else:
+                files[rel] = {"rev": change.get("rev"), "sha256": change.get("sha256"), "kind": "file"}
+        for rel, change in appends.items():
+            self._pull_append(rel, change)
         if not mismatch:
             self.base["head"] = new_head
+            self.cloud_head = new_head
         self.save_base()
         wrote = bool(got or delete)
         if wrote:
             cloud_rebuild(list(got) + delete)
         return wrote if strict else sorted(mismatch)
+
+    def _pull_append(self, rel: str, change: dict) -> None:
+        """The pull's record of an append file (the event log): its rev only. A base with no entry yet gets one that
+        says what of the local file sikstack holds: nothing (no file, or an empty one), all of it (equal bytes), or
+        unknown (sha256 None), which the next settle_appends answers against sikstack's copy."""
+        files = self.base["files"]
+        if change.get("deleted"):
+            files.pop(rel, None)
+            return
+        b = files.get(rel)
+        if isinstance(b, dict) and b.get("kind") == "append":
+            files[rel] = dict(b, rev=change.get("rev"))
+            return
+        try:
+            data = (ROOT / rel).read_bytes()
+        except OSError:
+            data = b""
+        if not data:
+            files[rel] = {"rev": change.get("rev"), "sha256": CLOUD_EMPTY_SHA, "kind": "append", "offset": 0}
+        elif _sha(data) == change.get("sha256"):
+            files[rel] = {"rev": change.get("rev"), "sha256": _sha(data), "kind": "append", "offset": len(data)}
+        else:
+            files[rel] = {"rev": change.get("rev"), "sha256": None, "kind": "append", "offset": 0}
+
+    def settle_appends(self) -> bool:
+        """Make every append file's base entry true of the disk again: its first `offset` bytes are what sikstack
+        holds of it. When they are not (an eviction stopped between the file's rewrite and base.json, a hand
+        edit, a joined checkout's own copy, unlink's restored log), sikstack's copy is fetched and every local
+        line it already holds is dropped from the disk (it lives in sikstack), the rest kept as not yet sent, with
+        the offset at 0. Never a revisioned put of the log: its lines reach sikstack once, as appends. Returns True
+        when a file was rewritten."""
+        files, wrote = self.base["files"], False
+        for rel, b in sorted(files.items()):
+            if cloud_kind(rel) != "append" or not isinstance(b, dict):
+                continue
+            path = ROOT / rel
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue  # no file: nothing here is unsent
+            offset = b.get("offset")
+            if b.get("kind") == "append" and isinstance(offset, int) and 0 <= offset <= len(data) \
+                    and _sha(data[:offset]) == b.get("sha256"):
+                continue
+            item, cloud = self.fetch([rel]).get(rel, (None, b""))
+            held, lines = {}, cloud.split(b"\n")
+            if lines[-1] == b"":
+                lines.pop()  # the newline closing the last line (or an empty record)
+            for line in lines:
+                held[line] = held.get(line, 0) + 1
+            cut = data.rfind(b"\n") + 1
+            keep = []
+            for line in data[:cut].split(b"\n")[:-1]:
+                if held.get(line, 0):
+                    held[line] -= 1
+                else:
+                    keep.append(line + b"\n")
+            pending = b"".join(keep) + data[cut:]
+            if pending != data:
+                _cloud_write_bytes(path, pending)
+                self.cache.pop(rel, None)
+                wrote = True
+            files[rel] = {"rev": (item or {}).get("rev", b.get("rev")), "sha256": CLOUD_EMPTY_SHA, "kind": "append",
+                          "offset": 0}
+            self.save_base()
+        return wrote
 
     # The commit step -----------------------------------------------------------------------------
     def _origin(self, rel: str, sha) -> str:
@@ -1112,7 +1176,9 @@ class CloudSession:
 
     def _diff(self, post: dict, skip=()) -> list:
         """[(wire op, base entry after a 200 or None for a delete)] of every truth-set difference, bar the
-        paths in `skip` (sync's mismatched paths, which only `sync --keep` resolves)."""
+        paths in `skip` (sync's mismatched paths, which only `sync --keep` resolves). A cold path in the base and
+        absent here is unchanged (evicted: sikstack holds it), never a delete and never half of a move; the event
+        log sends only its lines past the synced offset, never a put."""
         files, out, adds, dels = self.base["files"], [], {}, {}
         for rel in sorted((set(files) | set(post)) - set(skip)):
             b, here = files.get(rel), post.get(rel)
@@ -1120,18 +1186,20 @@ class CloudSession:
                 adds[rel] = here
                 continue
             if here is None:
-                dels[rel] = b
+                if not cloud_cold(rel):
+                    dels[rel] = b
                 continue
             if here == b.get("sha256"):
                 continue
             data = (ROOT / rel).read_bytes()
-            if b.get("kind") == "append" and cloud_kind(rel) == "append":
-                offset = b.get("offset", 0)
-                if 0 <= offset <= len(data) and _sha(data[:offset]) == b.get("sha256"):
-                    op = self._append_op(rel, data, offset, b.get("rev"), here)
-                    if op:
-                        out.append(op)
-                    continue
+            if cloud_kind(rel) == "append":
+                offset = b.get("offset") if b.get("kind") == "append" else None
+                if not (isinstance(offset, int) and 0 <= offset <= len(data) and _sha(data[:offset]) == b.get("sha256")):
+                    offset = 0  # settle_appends ran at the begin step: only a write since then gets here
+                op = self._append_op(rel, data, offset, b.get("rev"), here)
+                if op:
+                    out.append(op)
+                continue
             out.append(self._put_op(rel, data, b.get("rev"), here))
         # P7: a delete and an add of equal content are one move, so the record's history follows it.
         for rel, b in sorted(dels.items()):
@@ -1171,30 +1239,79 @@ class CloudSession:
         return op, entry, rel
 
     def _append_op(self, rel: str, data: bytes, offset: int, rev, here: str):
-        """P6: the complete lines past the synced offset, or None when there are none; a tail that is not
-        utf-8 goes as a revisioned put instead."""
+        """P6: the complete lines past the synced offset, or None when there are none. A byte that is not utf-8
+        goes as U+FFFD: a revisioned put would replace sikstack's whole log with this disk's unsent tail."""
         cut = data.rfind(b"\n", offset) + 1
         if cut <= offset:
             return None
-        try:
-            lines = data[offset:cut].decode("utf-8").split("\n")[:-1]
-        except UnicodeDecodeError:
-            return self._put_op(rel, data, rev, here)
+        lines = data[offset:cut].decode("utf-8", errors="replace").split("\n")[:-1]
         entry = {"rev": rev, "sha256": _sha(data[:cut]), "kind": "append", "offset": cut}
         return {"op": "append", "path": rel, "lines": lines, "origin": self._origin(rel, here)}, entry, rel
 
-    def commit(self, skip=()) -> int:
+    def commit(self, skip=(), evict: bool = True) -> int:
         """Steps 1 to 4: diff, the batches (each under CLOUD_BATCH_MAX as sent), journal `pushing`, P4, the base
         updated per landed batch, the journal cleared. A 409 or a network error keeps the disk as it is.
+        Then (`evict`) the cold set is thinned, only once the push landed or there was nothing to push.
         Returns the number of ops sent."""
+        if self.settle_appends():
+            self.save_cache()
         post = cloud_scan(self.cache)
         planned = self._diff(post, skip)
         self.save_cache()
         if not planned:
             self.clear_journal()
-            return 0
-        self.send(planned)
+        else:
+            self.send(planned)
+        if evict:
+            self.evict()
         return len(planned)
+
+    def evict(self) -> int:
+        """Take off the disk what sikstack provably holds: each cold file whose bytes, hashed now, equal the base's
+        sha256, and the event log's synced lines. Runs only with no journal (the push landed, the base updated)
+        and the base at the newest head sikstack named. Never touches a path outside the truth set (a folder
+        whose .gitignore is `*`), a cold file the base lacks (sikstack does not hold it) or one whose bytes
+        differ from the base's (a change not yet sent). Each file goes on its own and the base is never changed
+        for it (an evicted path stays in the base), so a stop midway leaves files the next eviction takes; the
+        event log is rewritten to its unsent tail first, then its offset set to 0 (stopped between, the next
+        settle_appends drops what sikstack holds). Returns the number of files taken off."""
+        self.evicted = 0
+        if self.journal() is not None or not isinstance(self.cloud_head, int) or self.base["head"] != self.cloud_head:
+            return 0
+        files, logs = self.base["files"], False
+        for rel in sorted(cloud_scan(self.cache)):
+            b = files.get(rel)
+            if not cloud_cold(rel) or not isinstance(b, dict):
+                continue
+            path = ROOT / rel
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if cloud_kind(rel) == "append":
+                offset = b.get("offset")
+                if not (b.get("kind") == "append" and isinstance(offset, int) and 0 < offset <= len(data)
+                        and _sha(data[:offset]) == b.get("sha256")):
+                    continue
+                _cloud_write_bytes(path, data[offset:])
+                files[rel] = dict(b, sha256=CLOUD_EMPTY_SHA, offset=0)
+                self.cache.pop(rel, None)
+                logs = True
+                continue
+            if b.get("kind") != "file" or _sha(data) != b.get("sha256"):
+                continue
+            if re.fullmatch(r"works/phases/archived/[^/]+/phase\.json", rel):  # its reads (agenda links, the PR
+                try:  # stack, ids) then never cost a fetch on this machine; best effort, the bytes just checked
+                    wf_cold.keep(rel, data)
+                except OSError:
+                    pass
+            _cloud_remove(rel)
+            self.cache.pop(rel, None)
+            self.evicted += 1
+        if logs:
+            self.save_base()
+        self.save_cache()
+        return self.evicted
 
     def send(self, planned: list, resume=None, inbox=(), command=None) -> None:
         """The batches of `planned` ops, journaled in the outbox, then pushed. `resume`: a journal entry to put
@@ -1319,6 +1436,7 @@ class CloudSession:
             files[rel] = entry
         if answer["head"] == self.base["head"] + 1:
             self.base["head"] = answer["head"]  # else another writer landed between: the next pull reads from here
+        self.cloud_head = max(answer["head"], self.cloud_head if isinstance(self.cloud_head, int) else 0)
         self.save_base()
 
 
@@ -1347,7 +1465,11 @@ def cloud_fail_open(args: argparse.Namespace, line: str):
     """The hook's way past a cloud stop: the command runs on the disk as it is (its ids read from it), then the
     stop as a note."""
     normalize_id_args(args)
-    result = args.func(args)
+    wf_cold.LENIENT = True  # an evicted file with no valid cached copy reads as absent: no second wait on the network
+    try:
+        result = args.func(args)
+    finally:
+        wf_cold.LENIENT = False
     print(f"note: {line}")
     return result
 
@@ -1515,13 +1637,17 @@ def cloud_commit_hint() -> str:
 
 
 def cloud_exclude() -> None:
-    """Hide `.hi2vi/` in the workflow repo's common info/exclude (the installer does too; this covers an
-    install not yet updated). Never .gitignore, which is tracked."""
+    """Hide `.hi2vi/` and the cold reads' `cache/` in the workflow repo's common info/exclude (init does too; this
+    covers an install made before either). `link` calls it, and so does a process's first cache write
+    (`wf_cold.keep`), so a checkout linked before the cache existed hides it before git can see it. Never
+    .gitignore, which is tracked."""
     exclude = _git_dir(common=True) / "info" / "exclude"
     existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    if {f"{CLOUD_DIR}/", f"/{CLOUD_DIR}/", CLOUD_DIR, f"/{CLOUD_DIR}"} & {l.strip() for l in existing.splitlines()}:
+    have = {l.strip() for l in existing.splitlines()}
+    add = [f"/{name}/" for name in (CLOUD_DIR, wf_cold.CACHE_DIR) if not {f"{name}/", f"/{name}/", name, f"/{name}"} & have]
+    if not add:
         return
-    write_text(exclude, existing + ("\n" if existing and not existing.endswith("\n") else "") + f"/{CLOUD_DIR}/\n")
+    write_text(exclude, existing + ("\n" if existing and not existing.endswith("\n") else "") + "".join(f"{l}\n" for l in add))
 
 
 def cloud_parse_address(address: str) -> tuple:
@@ -1677,19 +1803,12 @@ def cloud_link_with(server: str, project: str, key: str, command: str = "link") 
     disk = cloud_scan({})
     mode = "upload"
     if live:
-        if disk == {rel: c.get("sha256") for rel, c in live.items()}:
+        rows = cloud_join_rows(disk, live)
+        if not rows:
             mode = "equal"
         elif all(CLOUD_SEED_RE.fullmatch(rel) for rel in disk):
             mode = "unused"
         else:
-            rows = []
-            for rel in sorted(set(disk) | set(live)):
-                if rel not in live:
-                    rows.append(f"here only  {rel}")
-                elif rel not in disk:
-                    rows.append(f"cloud only  {rel}")
-                elif disk[rel] != live[rel].get("sha256"):
-                    rows.append(f"differs  {rel}")
             print(f"link refuses: sikstack already holds this project's workspace (r{manifest['head']}), and {len(rows)} "
                   "path(s) here differ from it; a second checkout joins only from an unused install or an equal set "
                   "(nothing was written)")
@@ -1709,7 +1828,8 @@ def cloud_link_with(server: str, project: str, key: str, command: str = "link") 
     cloud_write_link({"schema": CLOUD_SCHEMA, "server": server, "org_id": info.get("org_id"),
                       "project_id": project, "linked_at": now_iso()})
     # The workflow repo was clean (link refuses otherwise), so the link's config.toml line is its one change: commit it
-    # alone, so the checkout stays clean while linked. No git identity there: say so, and leave it to the user.
+    # alone (the cold set's eviction then shows in its status: the workflow repo is inert while linked, and unlink
+    # brings every cold path back before its one commit). No git identity there: say so, and leave it to the user.
     if _git(["add", "--", "config.toml"], check=False).returncode != 0 or \
             _git(["commit", "-q", "-m", f"chore(sikstack): link this checkout to {server}"], check=False).returncode != 0:
         print(f"note: config.toml's [{CLOUD_TABLE}] table is not committed in the workflow repo; commit it ({cloud_commit_hint()})")
@@ -1729,11 +1849,30 @@ def cloud_link_with(server: str, project: str, key: str, command: str = "link") 
     if mode == "upload":
         print(f"linked: {sent} file(s) sent to sikstack")
     else:
-        pulled = sum(1 for rel, c in live.items() if disk.get(rel) != c.get("sha256"))
+        pulled = sum(1 for rel, c in live.items() if disk.get(rel) != c.get("sha256") and not cloud_cold(rel))
         print(f"linked: joined sikstack's workspace ({pulled} file(s) taken from sikstack"
               + (", this unused install's seed files replaced)" if mode == "unused" else ")"))
+    cold = sum(1 for rel, b in session.base["files"].items()
+               if cloud_cold(rel) and cloud_kind(rel) == "file" and not (ROOT / rel).is_file())
+    if cold:
+        print(f"cold: {cold} file(s) (archived phases, doc versions, docs/reference, docs/index.json) are kept in "
+              "sikstack only, off this disk; sent event lines too")
     print(f"store=cloud server={server} project={project} head=r{session.base['head']}")
     return 0
+
+
+def cloud_join_rows(disk: dict, live: dict) -> list:
+    """The paths that keep a checkout from joining sikstack's workspace as an equal set, as link lists them. A thin
+    checkout is equal too: a cold path absent here is held in sikstack, and an empty event log holds no line."""
+    rows = []
+    for rel in sorted(set(disk) | set(live)):
+        here, c = disk.get(rel), live.get(rel)
+        if c is not None and here == c.get("sha256"):
+            continue
+        if c is not None and cloud_cold(rel) and here in (None, CLOUD_EMPTY_SHA if cloud_kind(rel) == "append" else None):
+            continue
+        rows.append(f"here only  {rel}" if c is None else f"cloud only  {rel}" if here is None else f"differs  {rel}")
+    return rows
 
 
 SIGNIN_WAIT = 540  # seconds one run waits for the connect page (under the Bash tool's 10-minute cap); run it again to go on
@@ -1846,7 +1985,8 @@ def cloud_unlink(args: argparse.Namespace) -> int:
         lock.acquire()
         session = CloudSession(["unlink"])
         session.begin()
-        session.commit()
+        session.commit(evict=False)
+        restored = cloud_restore_cold(session)
     except Exception as exc:  # noqa: BLE001 - one line, whatever stopped it
         lock.release()
         line = cloud_stop_line(exc, "unlink")
@@ -1858,13 +1998,20 @@ def cloud_unlink(args: argparse.Namespace) -> int:
     finally:
         lock.release()
     print(f"unlinked from {session.link.server} project {session.link.project} at r{session.base['head']}")
+    if restored:
+        print(f"restored {restored} cold file(s) from sikstack (archived phases, doc versions, docs/reference, "
+              "docs/index.json) and its whole event log")
     print(f"local mode: the files on disk are the truth again; commit them ({cloud_commit_hint()})")
     print(f"the workspace key stays in {cloud_key_file()}: revoke it on the project's page when no checkout needs it")
     return 0
 
 
 def cloud_unlink_from_disk() -> int:
-    """unlink --from-disk: no request at all. The disk becomes the truth as it is; say what it cannot hold."""
+    """unlink --from-disk: no request at all. The disk becomes the truth as it is, plus what the checkout already
+    holds: every evicted cold file whose cached copy is at the base's bytes goes back to its own path, and an
+    archived folder it cannot fill stays by its archive name with wf_cold.HELD_MARKER naming what only sikstack
+    holds, so no archived phase id is minted again and an archived phase.json's agenda link still counts. Then it
+    says what it could not bring back, and never names a re-link: a local change after it makes link refuse."""
     folder = ROOT / CLOUD_DIR
     try:
         base = read_json(folder / "base.json")
@@ -1874,18 +2021,87 @@ def cloud_unlink_from_disk() -> int:
         cloud_settle_pull(base)
     files = base.get("files") if isinstance(base.get("files"), dict) else {}
     head = base.get("head") if isinstance(base.get("head"), int) else 0
+    try:
+        link = cloud_read_link() or {}
+    except (OSError, ValueError):
+        link = {}
+    server, project = link.get("server") or "its server", link.get("project_id") or "?"
     disk = cloud_scan({})
-    unsent = sum(1 for rel in set(files) | set(disk) if disk.get(rel) != (files.get(rel) or {}).get("sha256"))
+    cold = sorted(rel for rel, b in files.items() if cloud_cold(rel) and cloud_kind(rel) == "file" and rel not in disk)
+    unsent = sum(1 for rel in set(files) | set(disk)
+                 if disk.get(rel) != (files.get(rel) or {}).get("sha256") and not (rel not in disk and cloud_cold(rel)))
     try:
         with CloudLock(CLOUD_HOOK_LOCK_WAIT):
+            try:  # each file equals the base's, so a stop here leaves a linked checkout the next eviction thins
+                back = wf_cold.write_back(cold, files)
+            except OSError as exc:
+                raise CloudError(f"a cached cold file could not be written back ({exc})")
             shutil.rmtree(str(folder))
             cloud_drop_link()
     except CloudError as exc:
         raise SystemExit(f"unlink --from-disk refused, the checkout is still linked: {exc}")
+    cold = [rel for rel in cold if rel not in set(back)]
+    try:
+        held = wf_cold.keep_held(cold, head, server, project)
+    except OSError as exc:
+        held = []
+        print(f"cannot keep the archived folders' {wf_cold.HELD_MARKER} notes ({exc}): their phase ids may be minted again")
+
+    def tops(rels):
+        counts = {}
+        for rel in rels:
+            counts[cloud_cold_top(rel)] = counts.get(cloud_cold_top(rel), 0) + 1
+        return ", ".join(f"{top} {n}" for top, n in sorted(counts.items()))
     print(f"unlinked from the disk, offline: changes made in sikstack after r{head} are not on this disk"
           + (f", and {unsent} file(s) changed here were never sent to sikstack" if unsent else ""))
+    if back:
+        print(f"restored {len(back)} cold file(s) from this checkout's cache, at sikstack's bytes ({tops(back)})")
+    if cold:
+        print(f"cannot restore offline: {len(cold)} cold file(s) held only in sikstack ({tops(cold)}); they stay there "
+              f"(project {project} on {server}), and local mode reads only this disk")
+    if held:
+        print(f"kept {len(held)} archived phase folder(s) with {wf_cold.HELD_MARKER} naming the files held only in "
+              "sikstack, so their phase ids are never minted again")
+    if any(cloud_kind(rel) == "append" and isinstance(b, dict) and b.get("offset") == 0 and b.get("rev") is not None
+           for rel, b in files.items()):
+        print("cannot restore offline: works/events.jsonl holds only the lines never sent; the sent ones are in sikstack")
     print(f"local mode: the files on disk are the truth again; commit them ({cloud_commit_hint()})")
     return 0
+
+
+def cloud_restore_cold(session: CloudSession) -> int:
+    """unlink's way back for the cold set, after its push: every cold file in the base and absent here is fetched,
+    checked against the base's sha256 and written; the event log becomes sikstack's whole log plus the bytes here
+    past the synced offset (a line not yet complete). A file sikstack does not hold at the base's bytes refuses
+    before anything is written, so the link stays and nothing is dropped. Returns the number of files written."""
+    files = session.base["files"]
+    want = sorted(rel for rel, b in files.items()
+                  if cloud_cold(rel) and cloud_kind(rel) == "file" and isinstance(b, dict) and not (ROOT / rel).is_file())
+    logs = sorted(rel for rel, b in files.items() if cloud_kind(rel) == "append" and isinstance(b, dict))
+    if not want and not logs:
+        return 0
+    got = session.fetch(want + logs)
+    bad = [rel for rel in want if rel not in got or got[rel][0].get("sha256") != files[rel].get("sha256")]
+    if bad:
+        more = f" (and {len(bad) - 1} more)" if len(bad) > 1 else ""
+        raise CloudError(f"{len(bad)} cold file(s) could not be brought back from sikstack at the synced bytes, first "
+                         f"{bad[0]}{more}: run unlink again (nothing was dropped)")
+    at = None
+    try:
+        for rel in want:
+            at = rel
+            _cloud_write_bytes(ROOT / rel, got[rel][1])
+        for rel in logs:
+            if rel not in got:
+                continue
+            at, path = rel, ROOT / rel
+            local = path.read_bytes() if path.is_file() else b""
+            offset = files[rel].get("offset") if isinstance(files[rel].get("offset"), int) else len(local)
+            _cloud_write_bytes(path, got[rel][1] + local[min(offset, len(local)):])
+    except OSError as exc:
+        raise CloudError(f"{at} could not be written here ({exc.__class__.__name__}: {exc.strerror or exc}): run unlink "
+                         "again (the files written so far are sikstack's own bytes)")
+    return len(want)
 
 
 def cloud_rel_arg(raw: str) -> str:
@@ -1907,12 +2123,17 @@ def cloud_rel_arg(raw: str) -> str:
     return rel
 
 
-def cloud_keep_check(session: CloudSession, paths: list) -> None:
+def cloud_keep_check(session: CloudSession, paths: list, side=None) -> None:
     """sync --keep's refusal before anything is sent or written: every path must be a file on disk or a file
-    sikstack holds (a path on neither side has nothing to keep)."""
+    sikstack holds (a path on neither side has nothing to keep); --keep local never takes a cold path absent here
+    (evicted: there is no copy here to keep, and sending its absence would delete it in sikstack)."""
     absent = [rel for rel in paths if not (ROOT / rel).is_file()]
     if not absent:
         return
+    cold = [rel for rel in absent if cloud_cold(rel)]
+    if side == "local" and cold:
+        raise CloudError(f"sync --keep local refused: {cold[0]} is cold, held in sikstack and not on this disk, so there "
+                         "is no copy here to keep; sync --keep cloud brings it here (nothing was changed)")
     got = session.fetch(absent)
     unknown = [rel for rel in absent if rel not in got]
     if unknown:
@@ -2163,6 +2384,10 @@ def cloud_differences(session: CloudSession, running: bool) -> list:
     disk, files, rows = cloud_scan(session.cache), session.base["files"], []
     for rel in sorted(set(files) | set(disk) | set(changes)):
         b, here, c = files.get(rel), disk.get(rel), changes.get(rel)
+        if here is None and cloud_cold(rel):
+            continue  # cold: held in sikstack, never on this disk until fetched (evicted, or never pulled)
+        if cloud_kind(rel) == "append":
+            c = None  # sikstack's lines are never pulled here: only this disk's unsent lines can differ
         bsha = (b or {}).get("sha256")
         csha = bsha if c is None else (None if c.get("deleted") else c.get("sha256"))
         here_changed, cloud_changed = here != bsha, csha != bsha
@@ -2297,12 +2522,13 @@ def cloud_keep(session: CloudSession, side: str, paths: list, running) -> None:
                     entry["offset"] = len(data)
                 files[rel] = entry
                 continue
-            b = files.get(rel) or {}
-            offset = b.get("offset", 0)
-            if (cloud_kind(rel) == "append" and b.get("kind") == "append" and 0 <= offset <= len(data)
-                    and _sha(data[:offset]) == b.get("sha256")):
-                op = session._append_op(rel, data, offset, b.get("rev"), _sha(data))  # its new lines: never a put
-                if op:                                                                # over other checkouts' lines
+            if cloud_kind(rel) == "append":  # its unsent lines, never a put over sikstack's whole log
+                session.settle_appends()
+                data, b = path.read_bytes(), files.get(rel) or {}
+                offset = b.get("offset") if b.get("kind") == "append" and isinstance(b.get("offset"), int) else 0
+                op = session._append_op(rel, data, offset if _sha(data[:offset]) == b.get("sha256") else 0,
+                                        b.get("rev"), _sha(data))
+                if op:
                     planned.append(op)
                 continue
             planned.append(session._put_op(rel, data, rev, _sha(data)))
@@ -2319,7 +2545,7 @@ def cloud_keep(session: CloudSession, side: str, paths: list, running) -> None:
 def cloud_sync_run(session: CloudSession, keep, paths: list) -> int:
     _cloud_sync_head(session)
     if keep:
-        cloud_keep_check(session, paths)
+        cloud_keep_check(session, paths, keep)
     notes = []
     entry = session.journal()
     if entry and entry.get("state") == "pushing" and isinstance(entry.get("batches"), list):
@@ -2365,7 +2591,7 @@ def cloud_sync_run(session: CloudSession, keep, paths: list) -> int:
 
 def add_cloud_parsers(sub) -> None:
     """Link, sign-in, unlink, sync: this part's commands, registered by the entry's build_parser in their place."""
-    p = sub.add_parser("link", help="Link this checkout to sikstack (cloud mode): sikstack becomes the truth for works/ and docs/, and every command syncs at its boundary. Takes the project's page address; the workspace key is pasted at a prompt (one stdin line when not a terminal), never on the command line, and kept in $XDG_CONFIG_HOME/sikstack/workspace-keys.json (folder 0700, file 0600; a key the pre-plugin engine kept in $XDG_CONFIG_HOME/hi2vi/workspace-keys.json is still read). The link itself is the [cloud] table of .sikstack/config.toml. An empty project in sikstack gets this checkout's files; one that already holds files is joined only from an unused install or an equal set, else the differences are listed. Refused, nothing written: at root, in a phase's worktree, with a phase in flight on a stream or another worktree, with uncommitted changes in the workflow repo, when already linked, http:// to a non-local host, a key file open to group or others. Prints store=cloud server= project= head=")
+    p = sub.add_parser("link", help="Link this checkout to sikstack (cloud mode): sikstack becomes the truth for works/ and docs/, and every command syncs at its boundary. Takes the project's page address; the workspace key is pasted at a prompt (one stdin line when not a terminal), never on the command line, and kept in $XDG_CONFIG_HOME/sikstack/workspace-keys.json (folder 0700, file 0600; a key the pre-plugin engine kept in $XDG_CONFIG_HOME/hi2vi/workspace-keys.json is still read). The link itself is the [cloud] table of .sikstack/config.toml. An empty project in sikstack gets this checkout's files; one that already holds files is joined only from an unused install or an equal set (a cold file absent here counts as equal), else the differences are listed. Once sikstack holds them, the cold set leaves the disk: archived phases, docs/versions, docs/reference, docs/index.json and the event log's sent lines (a join never takes them); every command after a landed push does the same. Refused, nothing written: at root, in a phase's worktree, with a phase in flight on a stream or another worktree, with uncommitted changes in the workflow repo, when already linked, http:// to a non-local host, a key file open to group or others. Prints store=cloud server= project= head=")
     p.add_argument("address", help="the project's page address: <server>/projects/<project-id>")
     p.set_defaults(func=cloud_link)
     _one_line_usage_errors(p)
@@ -2377,7 +2603,7 @@ def add_cloud_parsers(sub) -> None:
     p.set_defaults(func=cloud_sign_in)
     _one_line_usage_errors(p)
 
-    p = sub.add_parser("unlink", help="Return a linked checkout to local mode: pull to sikstack's head (refused on a mismatch: sync first), push what is here, remove .hi2vi/; then commit the workflow repo once. The key stays in user config (revoke it on the project's page). --from-disk: offline, keep the disk as it is and say what it cannot hold")
+    p = sub.add_parser("unlink", help="Return a linked checkout to local mode: pull to sikstack's head (refused on a mismatch: sync first), push what is here, bring every cold file back from sikstack (archived phases, doc versions, docs/reference, docs/index.json, checked by sha; the whole event log), remove .hi2vi/; then commit the workflow repo once. Any cold file sikstack cannot give back refuses, still linked. The key stays in user config (revoke it on the project's page). --from-disk: offline, keep the disk as it is plus every cold file this checkout's cache holds at sikstack's bytes (written back to its own path), keep each archived folder it cannot fill by its archive name with HELD_IN_SIKSTACK.md naming the files only sikstack holds (its phase id stays spent), and say what it cannot hold, the cold files by prefix")
     p.add_argument("--from-disk", action="store_true", dest="from_disk", help="the offline way back: no request; the disk becomes the truth as it is")
     p.set_defaults(func=cloud_unlink)
     _one_line_usage_errors(p)

@@ -20,6 +20,9 @@ from wf_store import (  # noqa: E402
     MAIN_HOST, mint_id, NESTED, now_iso, PHASE_ARG_HELP, PHASE_ID_RE, phase_dirs, phase_execution, phase_in_flight,
     read_json, rebuild_index_and_state, ROOT, shown, SLICE_ID_RE, WORKFLOW_CMD, WORKS, write_json, write_text,
 )
+from wf_cold import (  # noqa: E402
+    archived_phase_files as cold_archived_phase_files, hydrate as cold_hydrate,
+)
 
 
 # The agenda's read side (P66 F4): agenda.json, its entries, and the `agenda` key of a phase.json, are hand-
@@ -203,23 +206,25 @@ def _agenda_link_holders(skipped=None) -> list:
     and `linked` (the key is present, whatever its value). Active phases in selection order (`phase_dirs`, the
     backlog's), then archived ones in archive order (the folder name starts with the archive stamp). An archived
     phase.json that does not read as a JSON object is skipped, never fatal; its path goes into `skipped` when the
-    caller passes a list (validate reports it)."""
+    caller passes a list (validate reports it). A linked checkout's evicted archive is read through the cache
+    (wf_cold), so its link still counts; its `path` stays the file's own place."""
     holders = []
     for pdir in phase_dirs():
         data = read_json(pdir / "phase.json")
         holders.append({"kind": "phase", "id": pdir.name, "path": pdir / "phase.json", "place": "active",
                         "status": data.get("status"), "agenda": _agenda_link_value(data), "value": data.get("agenda"),
                         "linked": "agenda" in data})
-    for adir in (sorted(d for d in ARCHIVED.iterdir() if d.is_dir()) if ARCHIVED.is_dir() else []):
+    for name, readable in cold_archived_phase_files():
+        adir = ARCHIVED / name
         try:
-            data = read_json(adir / "phase.json")
+            data = read_json(readable) if readable is not None else None
         except (OSError, ValueError):
             data = None
         if isinstance(data, dict):
             holders.append({"kind": "phase", "id": str(data.get("id") or adir.name), "path": adir / "phase.json",
                             "place": "archived", "status": "done", "agenda": _agenda_link_value(data),
                             "value": data.get("agenda"), "linked": "agenda" in data})
-        elif skipped is not None and (adir / "phase.json").exists():
+        elif skipped is not None and readable is not None:
             skipped.append(adir / "phase.json")
     return holders
 
@@ -1242,7 +1247,10 @@ def agenda_fold(args: argparse.Namespace) -> None:
 
 def _agenda_set_link(holder: dict, aid) -> None:
     """Write one phase's or job's link: `aid` sets `"agenda"`, None removes the key (present only while linked).
-    The file is read again here and nothing else in it changes."""
+    The file is read again here and nothing else in it changes. An evicted archived phase.json is brought back to
+    its place first (wf_cold.hydrate); the commit step puts it, and the eviction takes it off again."""
+    if holder.get("place") == "archived":
+        cold_hydrate(holder["path"])
     data = read_json(holder["path"])
     if aid is None:
         data.pop("agenda", None)

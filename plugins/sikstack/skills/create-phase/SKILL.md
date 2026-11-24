@@ -38,7 +38,7 @@ Every explain is its own explain phase: every unit is a phase, a **document** by
 1. **Gather the `## Explain` fields**, drafted the way the plugin's front door drafts them (its §1 and *The front door, step by step*, steps 4–6). The sixteen, in order:
    - **unit**: `document`, `book` or `chapter`. The literal `unit` line is what the front door tests for;
    - **subject**: a phase id, a slice id or a topic of this repository's code;
-   - **phases**: the covering phases (at most 6), or `none`;
+   - **phases**: the covering phases (at most 6), or `none`. For their records, a record not on disk: `sikstack cold fetch <P|doc@version|path>` and read the path it prints; to find a line, `sikstack cold search "<text>"`;
    - **book**: `none`, or slug and title (kind `codebase`), or the book a chapter joins;
    - **chapter**: `none`, or `<key> — "<title>" · position <n>`;
    - **prior**: `none`, or the version a v2 supersedes;

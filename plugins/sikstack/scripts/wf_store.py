@@ -31,6 +31,9 @@ SEAMS = {
         'agenda_index', 'agenda_links', 'agenda_read_all', 'agenda_require_item', 'rebuild_agenda_dashboard',
         'validate_agenda',
     ),
+    "wf_cold": (
+        'archived_base_dirs',
+    ),
     "wf_cloud": (
         'cloud_commits_waiting_line', 'cloud_linked', 'cloud_store_line', 'COMMITTED_AT',
     ),
@@ -394,6 +397,10 @@ def shown_rel(rel: str) -> str:
 WORKS = ROOT / "works"
 ACTIVE = WORKS / "phases" / "active"
 ARCHIVED = WORKS / "phases" / "archived"
+# An archived folder that `unlink --from-disk` (offline) could not fill: it keeps the folder under its archive name
+# (so `archived_phase_ids` reads its id from the name) and this note naming the files held only in sikstack; never a
+# stub phase.json. validate warns once while any is left.
+HELD_MARKER = "HELD_IN_SIKSTACK.md"
 # The agenda (P66): one folder per item, `works/agenda/<AID>/agenda.json`, rewritten in place on every
 # change and never moved -- a status is a field, not a folder. Its thread (0.3.0) is one file per entry under
 # `works/agenda/<AID>/entries/`, written once and never rewritten (wf_agenda).
@@ -1038,8 +1045,13 @@ def phase_pinned(data) -> bool:
 def archived_phase_ids() -> set:
     """Every phase id archived/ holds, from each folder's `archive_manifest.json` `phase_id`, its
     `phase.json` `id` and the `_<id>_` in the folder name (`_archive_one` writes all three): an archived
-    id is spent. An unreadable entry gives what still reads, never an error."""
+    id is spent. An unreadable entry gives what still reads, never an error. A linked checkout adds the folder
+    names sikstack holds (`archived_base_dirs`: the base's paths, no request), so an evicted archive stays spent."""
     ids = set()
+    for name in archived_base_dirs():
+        match = ARCHIVE_FOLDER_ID_RE.search(name)
+        if match:
+            ids.add(match.group(1))
     for adir in (ARCHIVED.iterdir() if ARCHIVED.is_dir() else []):
         if not adir.is_dir():
             continue
@@ -3074,6 +3086,11 @@ def validate() -> int:
     if state.get("current_slice") and state["current_slice"] not in seen_slices:
         errors.append(f"state current_slice does not exist: {state['current_slice']}")
     validate_agenda(errors, warnings)  # the agenda, its threads, and an unfolded works/deferred/ (agenda-fold)
+    held = sorted(d.name for d in (ARCHIVED.iterdir() if ARCHIVED.is_dir() else []) if (d / HELD_MARKER).is_file())
+    if held:
+        warnings.append(f"{len(held)} archived phase folder(s) hold {HELD_MARKER} (first {held[0]}): unlink --from-disk "
+                        "kept them, offline, so their phase ids stay spent; the files each note names are held only in "
+                        "sikstack, not on this disk")
     # Nested personal install (P28): a malformed marker is an ERROR, so a broken nested install is
     # never mistaken for at-root mode; the host must be a git work tree (phase scope and the
     # product commits read it). Silent at root -- no marker, nothing checked.
@@ -4279,7 +4296,8 @@ def _archive_one(pdir: Path, forced: bool) -> Path:
     base_name = f"{timestamp()}_{phase_id}_{slugify(phase.get('name', phase_id))}"
     archive_name = base_name
     suffix = 1
-    while (ARCHIVED / archive_name).exists():
+    held = set(archived_base_dirs())  # a linked checkout's evicted archive folders: their names are taken too
+    while (ARCHIVED / archive_name).exists() or archive_name in held:
         suffix += 1
         archive_name = f"{base_name}_{suffix}"
     dest = ARCHIVED / archive_name

@@ -216,6 +216,7 @@
       "server/workspace/service.py",
       "server/workspace_api.py",
       "tests/test_workspace_store.py",
+      "tests/test_workspace_search.py",
       "server/workspace_read.py",
       "server/workspace_web_api.py",
       "server/installs_api.py",
