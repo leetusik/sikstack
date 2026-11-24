@@ -60,6 +60,10 @@ export interface KeysProps {
   format?: FormatOptions;
   /** The panel's id (org home keeps `org-keys-head` on its head, for the landing's link). */
   headId?: string;
+  /**
+   * The list alone, for an org member (P78: org keys are the owner's to mint and revoke): no New key, no Revoke.
+   */
+  readOnly?: boolean;
 }
 
 /** The form's radio labels, by scope. */
@@ -85,6 +89,7 @@ export function Keys({
   loading = false,
   format,
   headId,
+  readOnly = false,
 }: KeysProps) {
   const heading = KEYS.heading[scope];
   const uid = useId();
@@ -141,21 +146,23 @@ export function Keys({
     <Panel aria-label={heading}>
       <PanelHead>
         <h2 id={headId}>{heading}</h2>
-        <Button
-          ref={triggerRef}
-          aria-expanded={formOpen}
-          disabled={busy}
-          onClick={() =>
-            state.phase === "mint"
-              ? closeForm()
-              : dispatch({ type: "toggle-form" })
-          }
-        >
-          {KEYS.newKey}
-        </Button>
+        {readOnly ? null : (
+          <Button
+            ref={triggerRef}
+            aria-expanded={formOpen}
+            disabled={busy}
+            onClick={() =>
+              state.phase === "mint"
+                ? closeForm()
+                : dispatch({ type: "toggle-form" })
+            }
+          >
+            {KEYS.newKey}
+          </Button>
+        )}
       </PanelHead>
 
-      {formOpen ? (
+      {formOpen && !readOnly ? (
         <form
           className="panel-body has-rule stack"
           noValidate
@@ -263,7 +270,7 @@ export function Keys({
                     <td className="nowrap">{date(r.created, format)}</td>
                     <td className="nowrap">{when(r.lastUsed, format)}</td>
                     <td className="at-end">
-                      {r.status !== "revoked" ? (
+                      {r.status !== "revoked" && !readOnly ? (
                         <Button
                           variant="quiet"
                           aria-label={KEYS.revokeLabel(label)}

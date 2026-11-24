@@ -36,13 +36,15 @@ import {
 import { renameOrgAction } from "../orgs/actions";
 import { NamePanel } from "./name-panel";
 import { ProjectsPanel } from "./projects-panel";
-import { UrlPanel } from "./url-panel";
+import { UrlPanel, UrlReadPanel } from "./url-panel";
 
 /**
  * Org home (job 01 round 03-instrument, `OrgHome.dc.html`): a system page inside the Shell, in the
  * signed order: the org's name; the read-out in two groups; Projects; Trend with Public URL beside
  * Recent activity; Org API keys. The toast region is the Shell's (`publishToast`). For the org's owner,
- * Org name (F15's rename, P78) sits over Public URL, in its pattern; the role is `/app/members`'s.
+ * Org name (F15's rename, P78) sits over Public URL, in its pattern; the role is `/app/members`'s. The org-level writes
+ * are the owner's (P78): a member sees Public URL's address alone (no panel while there is none) and the org keys
+ * without New key or Revoke.
  *
  * Reads, in parallel: `/app/usage` (the 30-day figures and the trend), `/app/credentials` (the org's
  * keys, and their lines in the feed), `/app/documents` (`total`: Active total, the documents the org
@@ -99,6 +101,9 @@ export default async function DashboardPage() {
     readRole(token),
   ]);
 
+  // The org-level writes (the name, Public URL, org keys) are the owner's: a member, or a role read that failed,
+  // sees no form and no key controls (the API refuses a member's writes either way).
+  const owner = role === "owner";
   const series = usage.daily_counts.map((day) => day.searches);
   const lastDay = usage.daily_counts.at(-1)?.day ?? today(format);
 
@@ -134,8 +139,12 @@ export default async function DashboardPage() {
       <Grid className="orghome-pair">
         <Stack gap={5}>
           <Trend series={series} lastDay={lastDay} format={format} />
-          {role === "owner" ? <NamePanel name={orgName} save={renameOrgAction} /> : null}
-          <UrlPanel slug={slug} save={saveOrgSlug} />
+          {owner ? <NamePanel name={orgName} save={renameOrgAction} /> : null}
+          {owner ? (
+            <UrlPanel slug={slug} save={saveOrgSlug} />
+          ) : slug ? (
+            <UrlReadPanel slug={slug} />
+          ) : null}
         </Stack>
         <ActivityPanel
           lines={activityLines(projects?.activity ?? [], orgKeys, format)}
@@ -149,6 +158,7 @@ export default async function DashboardPage() {
         revoke={revokeOrgKey}
         format={format}
         headId={ORG_KEYS_HEAD_ID}
+        readOnly={!owner}
       />
       <HashLanding id={ORG_KEYS_HEAD_ID} />
     </div>

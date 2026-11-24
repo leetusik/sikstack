@@ -41,6 +41,7 @@ from server import installs_api
 from server import listen_api
 from server import listen_play
 from server import orgs_api
+from server import password_reset
 from server import reader_api
 from server import reader_state
 from server import usage_api
@@ -218,6 +219,12 @@ app.include_router(installs_api.router)
 # invite's read and accept by its code (/app/invite/{code}…; the read is open signed out,
 # rate-limited). Postgres-only: with no DATABASE_URL the member and invite routes answer 404.
 app.include_router(orgs_api.router)
+
+# Password reset and change: a reset link by mail (/auth/password/forgot, the same answer
+# for any address), its check and use by code (/auth/password/reset[/check]; a reset ends
+# every session of the account), and the signed-in change (/auth/password/change; every
+# other session ends). Postgres-only: with no DATABASE_URL every route answers 404.
+app.include_router(password_reset.router)
 
 # Design builds: the engine's publish, list and delete (/api/design/{project_id}/builds…,
 # the project's workspace key) and the members' list, read, share switch and open

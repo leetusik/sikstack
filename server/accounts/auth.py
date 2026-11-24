@@ -3,7 +3,8 @@
 ``require_user`` resolves an opaque ``Authorization: Bearer`` token to the
 active user plus the tenant the request acts in (``active_tenant``: the
 ``X-Sikstack-Org`` header's org, else the user's first), raising ``AuthError`` on any
-session miss and a 403 on a header naming an org the user is not in. S3/S4
+session miss and a 403 on a header naming an org the user is not in;
+``require_owner`` adds the owner check of the org-level writes. S3/S4
 import ``require_user`` / ``AuthContext`` / ``AuthError`` from here;
 ``auth_error_handler`` (registered on the app) renders the shared generic 401.
 On a successful token resolve it stamps the token's ``last_used_at``
@@ -26,7 +27,7 @@ from fastapi.responses import JSONResponse
 
 from server.accounts.security import sha256_hex
 from server.accounts.service import AccountsPersistenceError, get_accounts_service
-from server.accounts.types import TenantRecord, UserRecord
+from server.accounts.types import ROLE_OWNER, TenantRecord, UserRecord
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,18 @@ async def optional_user(request: Request) -> AuthContext | None:
     # A resolved session naming an org it is not in is refused (403), never
     # downgraded to an anonymous read.
     return AuthContext(user=user, tenant=active_tenant(request, tenants))
+
+
+async def require_owner(ctx: AuthContext) -> None:
+    """403 unless the caller is an ``owner`` of the request's active org.
+
+    The guard of every org-level write: the org's name, its Public URL (slug), its
+    org API keys and its invites. A ``member`` keeps the project-level work.
+    """
+
+    role = await get_accounts_service().get_member_role(ctx.tenant.id, ctx.user.id)
+    if role != ROLE_OWNER:
+        raise HTTPException(status_code=403, detail="only an owner of this org can do that")
 
 
 async def auth_error_handler(request: Request, exc: Exception) -> JSONResponse:

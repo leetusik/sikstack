@@ -70,6 +70,11 @@ export interface KbRequestOptions {
    */
   org?: string | null;
   signal?: AbortSignal;
+  /**
+   * The visitor's address as the edge recorded it (`edgeAddress`), sent as `X-Real-IP` so the API's
+   * per-client limit counts the visitor, not this server (`sendJson` only; `getRaw` takes `headers`).
+   */
+  address?: string | null;
 }
 
 /**
@@ -170,6 +175,7 @@ export async function sendJson<T>(
     headers: {
       Accept: "application/json",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(options.address ? { "X-Real-IP": options.address } : {}),
       ...(await authHeaders(options)),
     },
     body: body === undefined ? undefined : JSON.stringify(body),

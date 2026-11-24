@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 
-import { SIGN_IN_COPY, WAITLIST_COPY } from "@/content/auth";
+import { FORGOT_COPY, SIGN_IN_COPY, WAITLIST_COPY } from "@/content/auth";
 import {
   Button,
   Field,
@@ -48,6 +48,8 @@ import { useAuthEmail } from "./auth-email";
  * - Sent from an invite link (`next` is `/invite?code=…`, P78), the form sends the code as `invite`;
  *   an answer that says the code joined the account to its org (`joined`, the org's name) lands on
  *   that org's home with the invite page's toast. Otherwise it returns to the invite, as before.
+ * - Sign in has "Forgot password?" on its own line under the link line (P78, F10): `/forgot`, the email typed
+ *   carried along by the same layout memory.
  */
 export type SignInScreen = "sign-in" | "sign-up";
 
@@ -308,6 +310,13 @@ export function SignInForm({
               {copy.altLink}
             </Link>
           </p>
+          {up ? null : (
+            <p className="cluster gap-1">
+              <Link href={FORGOT_COPY.href} className="link link-row signin-alt">
+                {FORGOT_COPY.link}
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

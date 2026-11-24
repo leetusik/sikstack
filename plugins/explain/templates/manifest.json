@@ -229,6 +229,8 @@
       "server/invites.py",
       "server/orgs_api.py",
       "tests/test_org_invites.py",
+      "server/password_reset.py",
+      "tests/test_password_reset.py",
       "server/email_address.py",
       "tests/test_email_address.py",
       "server/reading_time.py",

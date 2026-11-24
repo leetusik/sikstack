@@ -15,6 +15,11 @@ is idempotent on the tenant's ``UNIQUE(tenant_id, name)``). ``PATCH /app/tenant`
 claims the caller's tenant's public **org slug** (the ``{org}`` of a pretty share
 URL) — 422 on a malformed/reserved value, 409 when another tenant holds it.
 
+Org-level writes are the org owner's alone (``require_owner``, a **403** for a
+``member``): the slug claim and the org key mint and revoke here, the name and the
+invites in ``server.orgs_api``. A member keeps the project-level work: projects,
+their visibility and their keys.
+
 Ported from vocky ``app_api.py`` (Starlette → FastAPI): body binding and path
 params are FastAPI-native (malformed UUID / blank name → standard **422**, not
 vocky's Starlette 400-single-string), while the 404-both-cases scoping guard is
@@ -34,7 +39,7 @@ from starlette.concurrency import run_in_threadpool
 
 from server import config, db, publish, write_lock
 from server import reconcile as reconcile_mod
-from server.accounts.auth import AuthContext, require_user
+from server.accounts.auth import AuthContext, require_owner, require_user
 from server.accounts.security import generate_opaque_token, sha256_hex
 from server.accounts.service import DuplicateOrgSlugError, get_accounts_service
 from server.accounts.slugs import InvalidOrgSlugError, normalize_org_slug
@@ -182,9 +187,11 @@ async def set_tenant_slug(
     A malformed or reserved slug is a **422** from ``SetTenantSlugInput`` (message
     citing the constraint) before any DB work; a slug already held by another tenant
     is a **409** from the translated ``UNIQUE`` violation, never a 500. Re-claiming
-    the tenant's own current slug succeeds unchanged.
+    the tenant's own current slug succeeds unchanged. The org's owner only (a
+    member's claim is a **403**, ``require_owner``).
     """
 
+    await require_owner(ctx)
     try:
         updated = await get_accounts_service().set_tenant_slug(
             ctx.tenant.id, payload.slug
@@ -439,8 +446,10 @@ async def create_org_credential(
     sha256 hash (and a short display prefix) is persisted — the raw key is never
     recoverable afterward. A ``workspace`` key is refused with a 422 before anything
     is minted: it is bound to one project, so only the project key route makes one.
+    The org's owner only (a member is a **403**, ``require_owner``).
     """
 
+    await require_owner(ctx)
     if body.scope == CREDENTIAL_SCOPE_WORKSPACE:
         raise HTTPException(
             status_code=422,
@@ -484,9 +493,11 @@ async def delete_org_credential(
 
     Answers 404 when the id is not one of the caller's org-level credentials, so a
     caller cannot revoke or probe another org's — or a project-bound — credential id
-    (the same anti-probe pattern as the per-project delete).
+    (the same anti-probe pattern as the per-project delete). The org's owner only (a
+    member is a **403**, ``require_owner``).
     """
 
+    await require_owner(ctx)
     service = get_accounts_service()
     credentials = await service.list_org_credentials(ctx.tenant.id)
     if not any(record.id == credential_id for record in credentials):

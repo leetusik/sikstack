@@ -481,3 +481,53 @@ def test_signup_with_the_code_skips_the_waitlist_and_joins(org, monkeypatch):
     assert _role(org, org_id, invited) == "member"
     assert org.sent == []  # no waitlist mail and no alert: it is not waitlisted
     assert org.get(f"/app/invite/{code}").json()["state"] == "used"
+
+
+# --- owner-only org writes: the Public URL and org API keys ---------------------------
+
+
+def test_org_level_writes_are_the_owners_alone(org):
+    """A member is refused (403) on every org-level write; the owner still succeeds.
+
+    The org's Public URL (``PATCH /app/tenant``), its org API keys (``POST`` and
+    ``DELETE /app/credentials``), its name and its invites belong to the owner. A
+    member keeps the project-level work: projects and project keys.
+    """
+
+    owner, member = _account(org), _account(org)
+    org_id = _new_org(org, owner)
+    code = _invite(org, owner, org_id, member["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=member["h"]).status_code == 200
+    as_owner, as_member = _in(owner["h"], org_id), _in(member["h"], org_id)
+    slug = f"p78-{uuid4().hex[:12]}"
+
+    # The Public URL: a member's claim changes nothing.
+    refused = org.patch("/app/tenant", json={"slug": slug}, headers=as_member)
+    assert refused.status_code == 403, refused.text
+    with org.db.connect() as conn:
+        assert conn.execute(
+            text("SELECT slug FROM tenants WHERE id = :t"), {"t": org_id}
+        ).scalar_one() is None
+    claimed = org.patch("/app/tenant", json={"slug": slug}, headers=as_owner)
+    assert claimed.status_code == 200 and claimed.json()["tenant"]["slug"] == slug
+
+    # Org API keys: a member mints none and revokes none.
+    minted = org.post("/app/credentials", json={"name": "ci"}, headers=as_owner)
+    assert minted.status_code == 201, minted.text
+    key_id = minted.json()["credential"]["id"]
+    assert org.post("/app/credentials", json={"name": "mine"}, headers=as_member).status_code == 403
+    assert org.delete(f"/app/credentials/{key_id}", headers=as_member).status_code == 403
+    keys = org.get("/app/credentials", headers=as_owner).json()["credentials"]
+    assert [(k["name"], k["revoked_at"]) for k in keys] == [("ci", None)]
+    assert org.delete(f"/app/credentials/{key_id}", headers=as_owner).status_code == 204
+
+    # The name and invites, owner-only since they were built.
+    assert org.patch("/app/tenant/name", json={"name": "Mine"}, headers=as_member).status_code == 403
+    assert org.post("/app/invites", json={"email": _email()}, headers=as_member).status_code == 403
+
+    # Project-level work stays a member's.
+    made = org.post("/app/projects", json={"name": "member-work"}, headers=as_member)
+    assert made.status_code == 201, made.text
+    project_id = made.json()["project"]["id"]
+    key = org.post(f"/app/projects/{project_id}/credentials", json={"name": "k"}, headers=as_member)
+    assert key.status_code == 201, key.text

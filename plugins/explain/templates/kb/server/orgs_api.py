@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from server import config, invites
-from server.accounts.auth import AuthContext, optional_user, require_user
+from server.accounts.auth import AuthContext, optional_user, require_owner, require_user
 from server.accounts.repository import AccountsRepository
 from server.accounts.security import sha256_hex
 from server.accounts.service import get_accounts_service
@@ -96,12 +96,6 @@ def _refused(status: int, reason: str, detail: str) -> JSONResponse:
     return JSONResponse({"detail": detail, "reason": reason}, status_code=status)
 
 
-async def _require_owner(ctx: AuthContext) -> None:
-    role = await get_accounts_service().get_member_role(ctx.tenant.id, ctx.user.id)
-    if role != ROLE_OWNER:
-        raise HTTPException(status_code=403, detail="only an owner of this org can do that")
-
-
 async def _name_taken(ctx: AuthContext, name: str, *, besides: UUID | None = None) -> bool:
     tenants = await get_accounts_service().list_tenants_for_user(ctx.user.id)
     wanted = name.casefold()
@@ -140,7 +134,7 @@ async def rename_org(
 ) -> dict[str, object] | JSONResponse:
     """Rename the active org (owner only)."""
 
-    await _require_owner(ctx)
+    await require_owner(ctx)
     if await _name_taken(ctx, payload.name, besides=ctx.tenant.id):
         return _refused(409, "taken", "you already have an org with that name")
     updated = await get_accounts_service().set_tenant_name(ctx.tenant.id, payload.name)
@@ -203,7 +197,7 @@ async def create_invite(
     """Invite one address into the active org as a member (owner only)."""
 
     _require_accounts_plane()
-    await _require_owner(ctx)
+    await require_owner(ctx)
     email = invites.normalize_email(payload.email)
     if not is_plain_address(email):
         return _refused(422, "address", "enter one email address, like name@example.com")
@@ -246,7 +240,7 @@ async def revoke_invite(invite_id: UUID, ctx: AuthContext = Depends(require_user
     """Revoke one of the active org's invites (owner only; no confirm)."""
 
     _require_accounts_plane()
-    await _require_owner(ctx)
+    await require_owner(ctx)
     async with get_session_maker()() as session, session.begin():
         row = (
             await session.execute(

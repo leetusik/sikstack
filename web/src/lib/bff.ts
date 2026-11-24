@@ -63,6 +63,34 @@ const credentialsSchema = z.object({
   invite: z.string().min(1).max(200).optional(),
 });
 
+/**
+ * Steps 1–4 of the pipeline above for any other public JSON route (P78: the password reset's two, `forgot` and
+ * `reset`): JSON only (415), same-origin (403), the per-IP limit in its own `bucket` (429), the body parsed (400)
+ * and checked against `schema` (422). Answers the refusal to return, or the parsed body.
+ */
+export async function publicJsonGate<T>(
+  req: Request,
+  options: { bucket: string; limit: number; windowMs: number; schema: z.ZodType<T> },
+): Promise<{ refused: Response } | { body: T }> {
+  if (!(req.headers.get("content-type") ?? "").includes("application/json")) {
+    return { refused: json(415, { ok: false }) };
+  }
+  if (!assertSameOrigin(req)) return { refused: json(403, { ok: false }) };
+  const ip = clientIp(req.headers);
+  if (!checkRateLimit(`${options.bucket}:${ip}`, options.limit, options.windowMs).ok) {
+    return { refused: json(429, { ok: false }) };
+  }
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return { refused: json(400, { ok: false }) };
+  }
+  const parsed = options.schema.safeParse(raw);
+  if (!parsed.success) return { refused: json(422, { ok: false }) };
+  return { body: parsed.data };
+}
+
 export interface CredentialRouteOptions {
   /** Throttle: max attempts per IP per `windowMs`. */
   limit: number;

@@ -1296,3 +1296,21 @@ class OrgInviteModel(Base):
         nullable=True,
     )
     revoked_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class PasswordResetModel(Base):
+    """One password-reset code for an account (``server.password_reset``).
+
+    Only the code's sha256 is stored; it works once (``used_at``) and until
+    ``expires_at`` (1 hour after it was made).
+    """
+
+    __tablename__ = "password_resets"
+    __table_args__ = (Index("ix_password_resets_user_id", "user_id"),)
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = _uuid_fk("users.id")
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = _ts()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = _ts(nullable=True)

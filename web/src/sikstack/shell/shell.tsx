@@ -11,6 +11,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { SHELL } from "@/content/app";
+import { ACCOUNT } from "@/content/account";
 import { ORG_SHELL } from "@/content/org";
 import { plural } from "@/lib/format";
 
@@ -49,6 +50,8 @@ type MenuKey = "org" | "project" | "account";
 const ORG_HOME = "/dashboard";
 /** New org (P78-s2.S2's design): the org menu's foot leads there. */
 const NEW_ORG = "/orgs/new";
+/** The account page (P78, F10): the account menu's link, before Sign out. */
+const ACCOUNT_PAGE = "/account";
 /** The rail's words, the org form's Members with them. */
 const RAIL_WORDS = { ...SHELL.rail, members: ORG_SHELL.members };
 
@@ -320,6 +323,14 @@ export function Shell({
                   aria-label={SHELL.account}
                 >
                   <p className="menu-title">{email}</p>
+                  <Link
+                    className="menu-item is-plain"
+                    href={ACCOUNT_PAGE}
+                    aria-current={pathname === ACCOUNT_PAGE ? "page" : undefined}
+                    onClick={() => set(null)}
+                  >
+                    {ACCOUNT.menuLink}
+                  </Link>
                   <button
                     type="button"
                     className="menu-item is-plain"
