@@ -41,6 +41,7 @@ vi.mock("@/sikstack/frame/dialog", async () => {
   };
 });
 vi.mock("@/lib/workspace/actions", () => ({
+  acceptAgendaItems: vi.fn(),
   addAgendaItem: vi.fn(),
   deleteAgendaItems: vi.fn(),
   discardChange: vi.fn(),
@@ -80,6 +81,7 @@ const { EMPTY_OVERLAY, reconcile, view } =
   await import("@/lib/workspace/optimistic");
 const { dates, phaseLookup } = await import("@/lib/workspace/model");
 const { TITLE_REFUSAL } = await import("@/lib/workspace/rules");
+const { AGENDA_ITEM } = await import("@/content/workspace/agenda-item");
 const AgendaPage = (
   await import("@/app/(app)/projects/[projectId]/workspace/page")
 ).default;
@@ -106,7 +108,6 @@ function item(
     created: "2026-10-20",
     changed,
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: null,
@@ -129,7 +130,6 @@ const PLATFORM: AgendaItem[] = [
     "2026-11-13",
     {
       phases: ["P56-t8", "P55-m1"],
-      deferred: ["D92-x4", "D93-k1", "D94-r2"],
       note: "On Nov 9 the backlog here was four days old and nothing said it.",
     },
   ),
@@ -262,6 +262,69 @@ const list = (
     }),
   );
 
+describe("Proposed, apart and first (P61-e9)", () => {
+  const PROPOSED: AgendaItem[] = [
+    item(
+      "A8-sf",
+      "Retry a sync once after a timeout",
+      "proposed",
+      "2026-11-20",
+      {
+        proposed: { by: "agent:fold", at: "2026-11-20T09:00:00+09:00" },
+      },
+    ),
+    item("A9-hb", "Show who wrote each note", "proposed", "2026-11-20", {
+      proposed: {
+        by: "agent:claude-opus-5-5",
+        at: "2026-11-20T10:00:00+09:00",
+      },
+    }),
+  ];
+
+  it("lists the Proposed items in their own part, before Open, each with who proposed it and the day", () => {
+    const p = parts([...PROPOSED, ...PLATFORM]);
+    expect(ids(p.proposed)).toEqual(["A8-sf", "A9-hb"]);
+    expect(ids(p.open)).not.toContain("A8-sf");
+    expect(p.proposed[0].status).toEqual({
+      word: "Proposed",
+      cls: "status status-pending",
+    });
+    expect(p.proposed[1].proposed).toEqual({
+      by: { name: "claude-opus-5-5", agent: true },
+      day: "Nov 20",
+    });
+    const out = list([...PROPOSED, ...PLATFORM]);
+    const proposedHead = out.indexOf(">Proposed</h2>");
+    const openHead = out.indexOf(">Open and in progress</h2>");
+    expect(proposedHead).toBeGreaterThan(-1);
+    expect(proposedHead).toBeLessThan(openHead);
+    // Accept stands in Delete's place, named for the item
+    expect(out).toContain(
+      '<button type="button" class="agenda-del" aria-label="Accept: Show who wrote each note">Accept</button>',
+    );
+    expect(out).toContain(
+      '<span class="ws-author"><span class="strong">fold</span><span class="badge">Agent</span></span>',
+    );
+  });
+
+  it("draws an item whose Accept waits (`accepting`) Open, first in the open order, waiting, with no Accept after a reload", () => {
+    const waiting = [
+      { ...PROPOSED[0] },
+      { ...PROPOSED[1], accepting: true, sync: "waiting" as const },
+      ...PLATFORM,
+    ];
+    const p = parts(waiting);
+    expect(ids(p.proposed)).toEqual(["A8-sf"]);
+    expect(ids(p.open)[0]).toBe("A9-hb");
+    expect(p.open[0].mark).toBe("waiting");
+    const out = list(waiting);
+    expect(out).not.toContain('aria-label="Accept: Show who wrote each note"');
+    expect(out).toContain(
+      'aria-label="Accept: Retry a sync once after a timeout"',
+    );
+  });
+});
+
 describe("the three parts", () => {
   it("puts each item in its part from its stored state, deferred winning over a running phase", () => {
     const p = parts(PLATFORM);
@@ -325,19 +388,14 @@ describe("the three parts", () => {
 });
 
 describe("a row", () => {
-  it("ends with how far its phases are, its deferred jobs, or the day it changed", () => {
+  it("ends with how far its phases are, or the day it changed", () => {
     const p = parts(PLATFORM);
-    expect(p.open.map((r) => r.end)).toEqual([
-      "1 of 2 phases done, 3 deferred jobs",
-      "",
-      "",
-    ]);
+    expect(p.open.map((r) => r.end)).toEqual(["1 of 2 phases done", "", ""]);
     expect(p.deferred.map((r) => r.end)).toEqual(["Nov 9", "Nov 6", "Oct 26"]);
     expect(p.ended.map((r) => r.end)).toEqual(["Nov 14", "Nov 12"]);
-    const jobsOnly = parts([
-      item("A3-b2", "Jobs only", "open", "2026-11-01", { deferred: ["D1-a2"] }),
-    ]);
-    expect(jobsOnly.open[0].end).toBe("1 deferred job");
+    // an item's deferred jobs are folded onto its thread (P61-e9): its end cell names none
+    const none = parts([item("A3-b2", "No phase", "open", "2026-11-01")]);
+    expect(none.open[0].end).toBe("");
   });
 
   it("draws the body as the frame's row, led by the grip and the box, the mark and Delete named for the item", () => {
@@ -345,9 +403,7 @@ describe("a row", () => {
     expect(out).toMatch(
       /<li class="row agenda-row" data-row="A12-p3"><button type="button" class="agenda-grip" aria-label="Reorder: Say so when the copy has been behind for a day" aria-describedby="[^"]+-how" aria-pressed="false"><\/button><label class="check agenda-check"><input type="checkbox"\/><span class="sr-only">Select: Say so when the copy has been behind for a day<\/span><\/label><div class="agenda-body"><div class="ws-row agenda-cells"><span class="ws-id">A12-p3<\/span>/,
     );
-    expect(out).toContain(
-      '<span class="dim ws-end">1 of 2 phases done, 3 deferred jobs</span>',
-    );
+    expect(out).toContain('<span class="dim ws-end">1 of 2 phases done</span>');
     expect(out).not.toMatch(/data-row="A10-h5">.*?ws-end.*?data-row="A4-c1"/);
     expect(out).toContain(
       '<span class="ws-name-text" lang="ko">하이라이트 색을 직접 고르고 싶어요</span>',
@@ -553,7 +609,7 @@ describe("the confirm", () => {
       '<h2>Delete “<span lang="en">Sign-in emails land in spam</span>”?</h2>',
     );
     expect(out).toContain(
-      "<p>It leaves the agenda for good, with its note. Its phases and deferred jobs stay. You cannot undo this.</p>",
+      "<p>It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.</p>",
     );
     expect(out).toMatch(
       />Cancel<\/button><button type="button" class="btn btn-danger"><span class="swap"><span>Yes, delete<\/span><span>Deleting…<\/span>/,
@@ -569,6 +625,13 @@ describe("the confirm", () => {
     expect((props.returnFocus as () => unknown)()).toBeNull();
     (props.onClose as () => void)();
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the thread goes with the item and only its phases stay, on the item page's Delete too", () => {
+    // a delete removes the item's whole thread, folded deferred jobs included (P61-e9)
+    expect(AGENDA_ITEM.confirm.text).toBe(
+      "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
+    );
   });
 
   it("holds while the delete is sent: Escape does nothing", () => {
@@ -814,7 +877,6 @@ describe("the page", () => {
     streams: [],
     pointer: { phase: null, slice: null, next: null, waiting: [] },
     phases: PHASES.map((p) => ({ ...p, name: null }) as unknown as PhaseRow),
-    deferred: [],
     docs: [],
     retired: [],
     agenda,

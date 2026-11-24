@@ -1,5 +1,5 @@
 // The Workspace's Agenda (design job 02, rounds 01-workspace and 02-agenda-and-links: `Agenda.dc.html`,
-// `AgendaList.dc.html`, frame.md F301 to F303, F309): its three parts, the add form, the rows with their grip, box and
+// `AgendaList.dc.html`, frame.md F301 to F303, F309): its four parts (Proposed first, P61-e9), the add form, the rows with their grip, box and
 // Delete, the picked rows' actions in the head or the strip, Drop's and Delete's confirm, the open changes no row
 // carries, its loading and failed parts. Words: `@/content/workspace/agenda`.
 //

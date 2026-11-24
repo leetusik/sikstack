@@ -12,7 +12,7 @@ export const PHASE_PAGE = {
   notFoundTitle: "Phase not found",
   /** Read before a decision's slice by a screen reader: `Decided in S1` (`PhaseNotebook.dc.html`). */
   decidedIn: "Decided in ",
-  /** Under the explaining document's title (`Phase.dc.html`, Explained in). */
+  /** Under each explaining document's title (`Phase.dc.html`, Explained in). */
   library: "Library",
   /** A part that loads, to a screen reader. */
   loading: "Loading…",

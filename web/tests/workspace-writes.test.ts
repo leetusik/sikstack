@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  acceptAgendaItems,
   addAgendaItem,
   deferAgendaItems,
   deleteAgendaItems,
@@ -8,6 +9,7 @@ import {
   dropAgendaItems,
   editAgendaItem,
   moveAgendaItem,
+  noteAgendaItem,
   reopenAgendaItems,
   retryChange,
   solveAgendaItems,
@@ -25,7 +27,7 @@ import {
   type AgendaRead,
   type Overlay,
 } from "@/lib/workspace/optimistic";
-import { TITLE_REFUSAL } from "@/lib/workspace/rules";
+import { changeBody, TITLE_REFUSAL } from "@/lib/workspace/rules";
 import type { AgendaItem, InboxEntry, Unplaced } from "@/lib/workspace/types";
 
 // The web's agenda writes, and the optimistic model the Agenda and an item's page share. The
@@ -180,6 +182,24 @@ describe("the write actions post the route's exact payload", () => {
         () => deleteAgendaItems(PROJECT, ["A6-j2", "A8-r5"]),
         { kind: "delete", items: ["A6-j2", "A8-r5"], fields: {} },
       ],
+      // P61-e9: Accept on Proposed items, and a note on an item's thread (the server adds its author and source)
+      [
+        () => acceptAgendaItems(PROJECT, ["A9-hb", "A9-hb"]),
+        { kind: "accept", items: ["A9-hb"], fields: {} },
+      ],
+      [
+        () =>
+          noteAgendaItem(
+            PROJECT,
+            "A3-1z",
+            "  Seen on the **2 GB** export too.\n",
+          ),
+        {
+          kind: "entry",
+          items: ["A3-1z"],
+          fields: { kind: "note", body: "Seen on the **2 GB** export too." },
+        },
+      ],
     ];
     for (const [act, body] of cases) {
       const calls = api(201, { entry: entry({}) });
@@ -304,6 +324,52 @@ describe("the write actions post the route's exact payload", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("refuses an empty note and a second item before sending, in the route's words", async () => {
+    const calls = api(201, { entry: entry({}) });
+    expect(await noteAgendaItem(PROJECT, "A3-1z", "   ")).toEqual({
+      ok: false,
+      reason: "refused",
+      message: "an entry needs a body of text",
+    });
+    expect(
+      changeBody({
+        kind: "entry",
+        items: ["A3-1z", "A2-k5"],
+        fields: { kind: "note", body: "x" },
+      }),
+    ).toEqual({ ok: false, error: "entry takes exactly one item" });
+    expect(
+      changeBody({
+        kind: "entry",
+        items: ["A3-1z"],
+        fields: { kind: "shout" as "note", body: "x" },
+      }),
+    ).toEqual({
+      ok: false,
+      error:
+        "an entry's kind must be one of note, issue, feedback, question, decision",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("sends an edit's note untouched: the item page trims only a note it changed (D308)", () => {
+    const code = "    indented code\nstays code";
+    expect(
+      changeBody({
+        kind: "edit",
+        items: ["A2-k5"],
+        fields: { title: " New title ", note: code },
+      }),
+    ).toEqual({
+      ok: true,
+      body: {
+        kind: "edit",
+        items: ["A2-k5"],
+        fields: { title: "New title", note: code },
+      },
+    });
+  });
+
   it("answers the route's refusals verbatim", async () => {
     api(422, { detail: "A9-zz names no agenda item" });
     expect(await deferAgendaItems(PROJECT, ["A9-zz"])).toEqual({
@@ -365,7 +431,6 @@ function row(
     created: "2026-11-01",
     changed: "2026-11-10",
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: null,
@@ -472,6 +537,91 @@ describe("the optimistic model", () => {
     };
     overlay = reconcile(overlay, read);
     expect(overlay.changes).toEqual([]);
+  });
+
+  it("clears a change the engine applied otherwise than it was sent, once a sync landed after it (D311)", () => {
+    const edit = entry({
+      kind: "edit",
+      items: ["A11-f4"],
+      fields: { title: "A weekly mail" },
+      created_at: "2026-11-18T09:00:00Z",
+    });
+    let overlay = write(EMPTY_OVERLAY, edit);
+    // applied before any read showed it waiting, stored otherwise (the engine kept its own words), no mark
+    const stored = STORED.map((r) =>
+      r.id === "A11-f4" ? { ...r, title: "A weekly mail, per project" } : r,
+    );
+    // a read from before the write: it stays
+    overlay = reconcile(overlay, {
+      agenda: stored,
+      synced: "2026-11-18T08:58:00Z",
+    });
+    expect(overlay.changes).toHaveLength(1);
+    // the read after the sync that took it: it clears, and the stored title shows without a mark
+    const read: AgendaRead = { agenda: stored, synced: "2026-11-18T09:01:00Z" };
+    overlay = reconcile(overlay, read);
+    expect(overlay.changes).toEqual([]);
+    expect(
+      view(read, overlay).agenda.find((r) => r.id === "A11-f4"),
+    ).toMatchObject({
+      title: "A weekly mail, per project",
+      sync: null,
+    });
+  });
+
+  it("never takes another member's waiting change on the item as this change seen (D311)", () => {
+    const move = entry({
+      kind: "move",
+      items: ["A8-r5"],
+      fields: { before: "A2-k5" },
+      created_at: "2026-11-18T09:00:00Z",
+    });
+    let overlay = write(EMPTY_OVERLAY, move);
+    // a read from before the write: another member's change on A8-r5 waits
+    overlay = reconcile(overlay, {
+      agenda: mark(STORED, { "A8-r5": "waiting" }),
+      synced: "2026-11-18T08:58:00Z",
+    });
+    // the next read, still from before this write: that change was taken, this one was not
+    const read: AgendaRead = { agenda: STORED, synced: "2026-11-18T08:59:00Z" };
+    overlay = reconcile(overlay, read);
+    expect(overlay.changes).toHaveLength(1);
+    const shownRows = view(read, overlay).agenda;
+    expect(shownRows.map((r) => r.id).slice(0, 2)).toEqual(["A8-r5", "A2-k5"]);
+    expect(shownRows[0].sync).toBe("waiting");
+  });
+
+  it("shows an Accept at once, and a thread entry as its item waiting (P61-e9)", () => {
+    const proposed = row("A9-hb", "Show who wrote each note", {
+      state: "proposed",
+      proposed: { by: "agent:claude-opus-5-5", at: "2026-11-20T09:00:00Z" },
+    });
+    const accept = entry({ kind: "accept", items: ["A9-hb"] });
+    const note = entry({
+      kind: "entry",
+      items: ["A11-f4"],
+      fields: { kind: "note", body: "Seen again." },
+    });
+    let overlay = write(write(EMPTY_OVERLAY, accept), note);
+    const read: AgendaRead = { agenda: [proposed, ...STORED] };
+    const rows = view(read, overlay).agenda;
+    expect(rows.find((r) => r.id === "A9-hb")).toMatchObject({
+      state: "proposed",
+      accepting: true,
+      sync: "waiting",
+    });
+    expect(rows.find((r) => r.id === "A11-f4")).toMatchObject({
+      title: "A weekly mail of what changed in each project",
+      sync: "waiting",
+    });
+    // the read says the accept waits itself (`accepting`): one row, the read's
+    overlay = reconcile(overlay, {
+      agenda: [
+        { ...proposed, accepting: true, sync: "waiting" },
+        ...mark(STORED, { "A11-f4": "waiting" }),
+      ],
+    });
+    expect(overlay.changes.map((c) => c.kind)).toEqual(["accept", "entry"]);
   });
 
   it("shows a refused change's line once, from the read", () => {

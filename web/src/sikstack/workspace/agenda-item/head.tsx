@@ -3,10 +3,18 @@ import type { ReactNode } from "react";
 import { WS_ACTIONS, WS_GLOSSARY } from "@/content/workspace/frame";
 import { Swap } from "@/sikstack/ui";
 import { cx } from "@/lib/cx";
+import { PROPOSED } from "@/content/workspace/agenda-thread";
 import { langOf } from "@/lib/workspace/model";
 
-import { Fact, Facts, WaitingBadge, WsStatus, WsText } from "../frame";
-
+import {
+  Author,
+  authorOf,
+  Fact,
+  Facts,
+  WaitingBadge,
+  WsStatus,
+  WsText,
+} from "../frame";
 import type { HeadAction, ItemView } from "./model";
 import type { Busy } from "./state";
 
@@ -16,12 +24,16 @@ import type { Busy } from "./state";
  * button only while every linked phase is done. While a send runs every button is disabled and the busy one
  * (Defer, Reopen) shows its pending label at the same width. While a form is open the whole group is away
  * (`.agendaitem-away`): it keeps its width, so the title wraps as before, and has no height.
+ *
+ * A Proposed item's **Accept** (P61-e9) ends the group, the page's primary, `Accepting…` while it is sent
+ * (`accepting`); its marks read Proposed; its facts add **Proposed by**.
  */
 export function HeadActions({
   actions,
   allDone = false,
   opened = false,
   busy = null,
+  accepting = false,
   loading = false,
   on,
 }: {
@@ -29,29 +41,42 @@ export function HeadActions({
   allDone?: boolean;
   opened?: boolean;
   busy?: Busy | null;
+  /** Accept is on its way. */
+  accepting?: boolean;
   loading?: boolean;
   on?: Partial<Record<HeadAction, () => void>>;
 }) {
-  const off = loading || busy !== null;
+  const off = loading || busy !== null || accepting;
   const press = (action: HeadAction) => () => {
     if (!off && !opened) on?.[action]?.();
   };
   const button = (action: HeadAction) => {
-    const swap = action === "defer" || action === "reopen";
-    const sending = swap && busy === action;
+    const swap =
+      action === "defer" || action === "reopen" || action === "accept";
+    const sending = swap && (action === "accept" ? accepting : busy === action);
     const label =
       action === "edit"
         ? WS_ACTIONS.edit
         : action === "delete"
           ? WS_ACTIONS.delete[0]
-          : WS_ACTIONS[action][0];
+          : action === "accept"
+            ? PROPOSED.accept[0]
+            : WS_ACTIONS[action][0];
+    const pending =
+      action === "accept"
+        ? PROPOSED.accept[1]
+        : action === "defer" || action === "reopen"
+          ? WS_ACTIONS[action][1]
+          : "";
     return (
       <button
         key={action}
         type="button"
         className={cx(
           "btn",
-          action === "solve" && allDone && !loading && "btn-primary",
+          ((action === "solve" && allDone) || action === "accept") &&
+            !loading &&
+            "btn-primary",
         )}
         disabled={swap ? off && !sending : off}
         data-busy={sending ? "true" : undefined}
@@ -59,7 +84,7 @@ export function HeadActions({
         data-focus={action}
         onClick={press(action)}
       >
-        {swap ? <Swap labels={[label, WS_ACTIONS[action][1]]} /> : label}
+        {swap ? <Swap labels={[label, pending]} /> : label}
       </button>
     );
   };
@@ -82,7 +107,11 @@ export function HeadActions({
 export function HeadMarks({ view }: { view: ItemView }) {
   return (
     <div className="agendaitem-marks">
-      <WsStatus kind="item" value={view.status} />
+      {view.proposed ? (
+        <span className={PROPOSED.cls}>{PROPOSED.word}</span>
+      ) : (
+        <WsStatus kind="item" value={view.status} />
+      )}
       {view.waiting ? <WaitingBadge /> : null}
     </div>
   );
@@ -106,6 +135,7 @@ export function HeadFacts({
   prose?: Readonly<Record<string, ReactNode>>;
 }) {
   const labels = WS_GLOSSARY.labels.item;
+  const by = view.proposed ? authorOf(view.proposed.by) : null;
   const text = (value: string) =>
     (prose && Object.hasOwn(prose, value) ? prose[value] : null) ?? (
       <WsText text={value} />
@@ -130,6 +160,11 @@ export function HeadFacts({
           lang={langOf(view.note)}
         >
           {text(view.note)}
+        </Fact>
+      ) : null}
+      {by ? (
+        <Fact label={PROPOSED.by}>
+          <Author author={by} />
         </Fact>
       ) : null}
       <Fact label={labels.created}>{created}</Fact>

@@ -11,6 +11,10 @@ import {
 } from "@/components/reader/document-page";
 import { READER_DOCUMENT } from "@/content/reader-document";
 import { requestNonce } from "@/sikstack/shell/data";
+import {
+  documentPhaseRows,
+  withDocumentPhases,
+} from "@/sikstack/reader/document/with-phases";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { resolveDocument } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
@@ -210,19 +214,24 @@ export default async function PrettyDocumentPage({
   // Temporary (307), outside any try; the browser keeps `#section`.
   const chapter = chapterRedirectHref(doc, { v, lang: langOf(query.lang) });
   if (chapter) redirect(chapter);
-  const [loaded, nonce, jar] = await Promise.all([
+  const [loaded, nonce, jar, phases] = await Promise.all([
     loadOnce(ctx?.token, orgSlug, project, slug, v, cookie),
     requestNonce(),
     cookies(),
+    documentPhaseRows(ctx?.token, doc),
   ]);
   const listen = await documentListen(loaded, ctx?.token);
-  return renderDocument(loaded, {
-    from: firstOf(query[FROM_PARAM]),
-    org: orgSlug,
-    nonce,
-    timeZone: viewerTimeZone(jar),
-    listen,
-  });
+  // P61-e9: a member's way back to the phases the document was explained from, under its end.
+  return withDocumentPhases(
+    renderDocument(loaded, {
+      from: firstOf(query[FROM_PARAM]),
+      org: orgSlug,
+      nonce,
+      timeZone: viewerTimeZone(jar),
+      listen,
+    }),
+    phases,
+  );
 }
 
 /** `decodeURIComponent` that returns the input unchanged on a malformed escape. */

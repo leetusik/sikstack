@@ -6,14 +6,9 @@ import { PROJECT_HOME } from "@/content/project";
 import { WS_HEAD } from "@/content/workspace/frame";
 import { requireIdentity } from "@/lib/auth-guards";
 import { viewerTimeZone } from "@/lib/time-zone";
-import {
-  agendaHref,
-  backlogHref,
-  deferredHref,
-  docsHref,
-} from "@/lib/workspace/address";
+import { agendaHref, backlogHref, docsHref } from "@/lib/workspace/address";
 import { readWorkspace } from "@/lib/workspace/read";
-import { WsNav, wsSyncLine, type WsSyncLine } from "@/sikstack/workspace/frame";
+import { NO_LINE, WsNav, wsSyncLine } from "@/sikstack/workspace/frame";
 import {
   askedPage,
   BacklogFailed,
@@ -42,9 +37,6 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-/** A line for a read that failed: the head stands and says nothing of a sync it could not read. */
-const NO_LINE: WsSyncLine = { state: "fresh", text: "", cls: "", version: "" };
-
 export default async function WorkspaceBacklogPage({
   params,
   searchParams,
@@ -61,7 +53,6 @@ export default async function WorkspaceBacklogPage({
   const hrefs = {
     agenda: agendaHref(projectId),
     backlog: backlogHref(projectId),
-    deferred: deferredHref(projectId),
     docs: docsHref(projectId),
   };
 

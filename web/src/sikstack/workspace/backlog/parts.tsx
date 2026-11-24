@@ -62,7 +62,7 @@ function NowCell({ cell }: { cell: BacklogCell }) {
   );
 }
 
-/** The pointer (`BacklogNow`): one body a running stream, or the sentence, then None and the open jobs. */
+/** The pointer (`BacklogNow`): one body a running stream, or the sentence, then None while nothing waits. */
 export function BacklogNow({ now }: { now: BacklogView["now"] }) {
   const L = BACKLOG.now.labels;
   return (
@@ -94,9 +94,9 @@ export function BacklogNow({ now }: { now: BacklogView["now"] }) {
           <p className="block-text">{now.idle}</p>
         </div>
       ) : null}
-      <div className="panel-body has-rule backlog-facts">
-        <dl className="backlog-pointer is-facts">
-          {now.none ? (
+      {now.none ? (
+        <div className="panel-body has-rule backlog-facts">
+          <dl className="backlog-pointer is-facts">
             <div className="backlog-cell">
               <dt>{L.waiting}</dt>
               <dd className="backlog-value is-none">
@@ -105,19 +105,9 @@ export function BacklogNow({ now }: { now: BacklogView["now"] }) {
                 </span>
               </dd>
             </div>
-          ) : null}
-          <div className="backlog-cell">
-            <dt>{L.deferredJobs}</dt>
-            <dd className="backlog-value">
-              <Link className="link-strong" href={now.deferred.href}>
-                <span className="backlog-ref">
-                  <span>{now.deferred.text}</span>
-                </span>
-              </Link>
-            </dd>
-          </div>
-        </dl>
-      </div>
+          </dl>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -153,10 +143,6 @@ export function BacklogNowLoading() {
           <div className="backlog-cell">
             <dt>{L.waiting}</dt>
             <dd className="backlog-value">{skel("3em")}</dd>
-          </div>
-          <div className="backlog-cell">
-            <dt>{L.deferredJobs}</dt>
-            <dd className="backlog-value">{skel("4em")}</dd>
           </div>
         </dl>
       </div>

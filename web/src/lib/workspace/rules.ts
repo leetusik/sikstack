@@ -9,7 +9,7 @@
  * Deliberately free of `server-only`: the actions and the client forms share it.
  */
 
-import type { ChangeKind } from "./types";
+import type { ChangeKind, EntryKind } from "./types";
 
 /** The signed field error (F45), the route's refusal word for word. */
 export const TITLE_REFUSAL = "Enter a title of 1–200 characters.";
@@ -82,7 +82,19 @@ export type ChangeFields = {
   drop: { reason?: string };
   reopen: Record<string, never>;
   delete: Record<string, never>;
+  /** One entry on the item's thread; the server adds its author and source. */
+  entry: { kind: EntryKind; body: string };
+  accept: Record<string, never>;
 };
+
+/** The entry kinds the server takes (the engine's `ENTRY_KINDS`). */
+export const ENTRY_KINDS: readonly EntryKind[] = [
+  "note",
+  "issue",
+  "feedback",
+  "question",
+  "decision",
+];
 
 /** One change, as the changes route takes it: `{kind, items, fields}`. */
 export type Change = {
@@ -139,7 +151,12 @@ export function changeBody(
     if (error) return { ok: false, error };
   }
   const ids = Array.from(new Set(items));
-  if ((change.kind === "edit" || change.kind === "move") && ids.length !== 1) {
+  if (
+    (change.kind === "edit" ||
+      change.kind === "move" ||
+      change.kind === "entry") &&
+    ids.length !== 1
+  ) {
     return { ok: false, error: `${change.kind} takes exactly one item` };
   }
   switch (change.kind) {
@@ -203,15 +220,44 @@ export function changeBody(
         body: { kind: change.kind, items: ids, fields } as Change,
       };
     }
+    case "entry": {
+      // The route's checks: a known kind, a body with text, at most TEXT_MAX; it stores the body stripped.
+      const raw = (change.fields ?? {}) as Partial<{
+        kind: string;
+        body: unknown;
+      }>;
+      if (!ENTRY_KINDS.includes(raw.kind as EntryKind)) {
+        return {
+          ok: false,
+          error: `an entry's kind must be one of ${ENTRY_KINDS.join(", ")}`,
+        };
+      }
+      const body = typeof raw.body === "string" ? raw.body.trim() : "";
+      if (!body) return { ok: false, error: "an entry needs a body of text" };
+      if (length(body) > TEXT_MAX)
+        return {
+          ok: false,
+          error: `body must be text of at most ${TEXT_MAX} characters`,
+        };
+      return {
+        ok: true,
+        body: {
+          kind: "entry",
+          items: ids,
+          fields: { kind: raw.kind as EntryKind, body },
+        },
+      };
+    }
     case "defer":
     case "reopen":
     case "delete":
+    case "accept":
       return { ok: true, body: { kind: change.kind, items: ids, fields: {} } };
     default:
       return {
         ok: false,
         error:
-          "kind must be one of edit, move, defer, solve, drop, reopen, delete (an add has its own route)",
+          "kind must be one of edit, move, defer, solve, drop, reopen, delete, entry, accept (an add has its own route)",
       };
   }
 }

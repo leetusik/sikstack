@@ -1,11 +1,11 @@
 import { todayIn } from "@/lib/workspace/model";
-import type { AgendaItem, InboxEntry, Workspace } from "@/lib/workspace/types";
+import type { AgendaItem, ChangeKind, InboxEntry, Workspace } from "@/lib/workspace/types";
 
-import { DATA_SETS, type DataName, type DataSet } from "./answers";
+import { DATA_SETS, ME, type DataName, type DataSet } from "./answers";
 import { applyChange, type AgendaChange } from "./apply";
 import { mintedId, topNumber } from "./ids";
 import { DESIGN_STAMP, storeKey } from "./mark";
-import { RECORDING, TIME_ZONE } from "./recording";
+import { NOW, RECORDING, TIME_ZONE } from "./recording";
 
 /**
  * The design build's browser store: the workspace the pages draw, seeded from the recording and kept
@@ -102,6 +102,9 @@ export function reset(): void {
   publish(SEED);
 }
 
+/** What the store holds with every applied change, shown or not yet (a second change in one task reads the first). */
+export const current = (): Snap => pending ?? read();
+
 /** The data set the store holds now. */
 export const dataOf = (s: Snap): DataName => s.data ?? "recorded";
 
@@ -125,15 +128,20 @@ export function setItem(id: string, fields: Partial<AgendaItem>): void {
   keep({ ...cur, workspace: { ...cur.workspace, agenda } });
 }
 
-/** Apply one change and keep it; the inbox entry it would have been, or the engine's refusal. */
+/** Apply one change and keep it; the inbox entry it would have been, or the engine's refusal. An `entry` is
+ * written by the signed-in account (`ME`, `person:<handle>`), from the web unless `source` names another place. */
 export function apply(
   change: AgendaChange,
+  source?: string,
 ): { ok: true; entry: InboxEntry } | { ok: false; refused: string } {
   const cur = pending ?? read();
   let minted = cur.minted;
+  const id = uuid();
   const out = applyChange(cur.workspace, change, {
     day: todayIn(TIME_ZONE),
     mint: () => mintedId(cur.top ?? TOP, minted++),
+    // the design's clock is the recording's: a note written now reads "just now" beside it
+    entry: { id, at: new Date(NOW).toISOString().replace(/\.\d+Z$/, "Z"), author: ME, source },
   });
   if (!out.ok) return out;
   const next: Snap = { ...cur, workspace: out.workspace, minted, stamp: DESIGN_STAMP };
@@ -149,8 +157,9 @@ export function apply(
   return {
     ok: true,
     entry: {
-      id: uuid(),
-      kind: change.kind,
+      id,
+      // `entry` and `accept` are inbox kinds `InboxEntry` does not type yet (lib/workspace/types.ts says so).
+      kind: change.kind as ChangeKind,
       items: change.kind === "add" ? [] : [...change.items],
       fields: { ...change.fields },
       minted_id: out.minted,

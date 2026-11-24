@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | api | expect | feature <name> | status | down
+# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | api [other] | expect | feature <name> | status | down
 #
 # Runs the whole product on loopback without touching the checkout: a throwaway
 # postgres:17 container, the API on the host (scratch KB_ROOT, KB_GIT_COMMIT=false),
@@ -321,12 +321,17 @@ print(f"other account: created {email} (its own org)")
 PY
 }
 
-# api <method> <path> [json]: one call to the API as the local test account (a fresh login's token, never printed);
-# prints `status=<n>` and the answer's body.
+# api [other] <method> <path> [json]: one call to the API as the local test account, or with `other` as the second
+# account (made by `signin other`), by a fresh login's token, never printed; prints `status=<n>` and the answer's body.
 api() {
   load_state
   [ -n "${API_PORT:-}" ] || die "not up: run '$0 up' first"
-  env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" python3 - "$@" <<'PY'
+  local who=TEST
+  if [ "$1" = other ]; then
+    shift; who=OTHER
+    grep -q '^SIKSTACK_DEV_OTHER_EMAIL=' "$ENV_FILE" || die "no second account: run '$0 signin other' first"
+  fi
+  env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" WHO="$who" python3 - "$@" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 api, env = os.environ["API"], {}
 for line in open(os.environ["ENV_FILE"]):
@@ -340,9 +345,10 @@ def call(method, path, body=None, token=None):
             return r.status, r.read().decode()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
-status, body = call("POST", "/auth/login", json.dumps({"email": env["SIKSTACK_DEV_TEST_EMAIL"], "password": env["SIKSTACK_DEV_TEST_PASSWORD"]}))
+who = os.environ["WHO"]
+status, body = call("POST", "/auth/login", json.dumps({"email": env[f"SIKSTACK_DEV_{who}_EMAIL"], "password": env[f"SIKSTACK_DEV_{who}_PASSWORD"]}))
 if status != 200:
-    raise SystemExit(f"api: the test account's login answered {status}")
+    raise SystemExit(f"api: the {who.lower()} account's login answered {status}")
 token = json.loads(body)["token"]
 args = sys.argv[1:]
 status, body = call(args[0], args[1], args[2] if len(args) > 2 else None, token)
@@ -510,11 +516,11 @@ case "${1:-}" in
   up) shift; up "$@" ;;
   signin) shift; signin "$@" ;;
   workspace) shift; workspace "$@" ;;
-  api) shift; [ $# -ge 2 ] || die "usage: $0 api <method> <path> [json]"; api "$@" ;;
+  api) shift; [ $# -ge 2 ] || die "usage: $0 api [other] <method> <path> [json]"; api "$@" ;;
   seed) seed ;;
   expect) shift; load_state; expect "$@" ;;
   feature) shift; [ $# -ge 1 ] || die "usage: $0 feature <name>"; for n in "$@"; do feature "$n" || exit 1; done ;;
   status) status ;;
   down) down ;;
-  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | api <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
+  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | api [other] <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
 esac

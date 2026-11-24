@@ -4,6 +4,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -11,16 +12,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { AGENDA_ITEM } from "@/content/workspace/agenda-item";
+import { PROPOSED } from "@/content/workspace/agenda-thread";
 import { WS_ACTIONS, WS_CHANGE, WS_STATES } from "@/content/workspace/frame";
 import { Dialog, DialogActions } from "@/sikstack/frame";
 import { StateBlock, type StateModel } from "@/sikstack/states";
 import { Button, Swap } from "@/sikstack/ui";
 import {
+  acceptAgendaItems,
   deferAgendaItems,
   deleteAgendaItems,
   discardChange,
   dropAgendaItems,
   editAgendaItem,
+  noteAgendaItem,
   reopenAgendaItems,
   retryChange,
   solveAgendaItems,
@@ -32,6 +36,7 @@ import type { WriteAnswer } from "@/lib/workspace/types";
 import {
   BackRow,
   ItemHead,
+  NO_LINE,
   wsNotFoundState,
   WsText,
   type WsBack,
@@ -40,7 +45,7 @@ import {
 
 import { AgendaItemForm } from "./form";
 import { HeadActions, HeadFacts, HeadMarks } from "./head";
-import { JobsPanel, PhasesPanel } from "./lists";
+import { PhasesPanel } from "./lists";
 import { retryLabel, type HeadAction, type ItemPageRead } from "./model";
 import {
   afterSend,
@@ -51,6 +56,8 @@ import {
   vanished,
   type Busy,
 } from "./state";
+import { Thread } from "./thread";
+import { threadView } from "./thread-model";
 
 export type { ItemPageRead } from "./model";
 
@@ -61,7 +68,11 @@ export type { ItemPageRead } from "./model";
  * 2. the head: the id and the title, the status and Waiting for sync as one group, the actions; the facts;
  * 3. the form slot (Edit, Solve or Drop, one at a time);
  * 4. a change the workspace refused: its line, then **Discard** and **Try again** at the notice's right end;
- * 5. **Phases** and **Deferred jobs**.
+ * 5. **Thread** (P61-e9): every entry oldest first, then the note composer;
+ * 6. **Phases**.
+ *
+ * On a Proposed item the head offers **Accept** (P61-e9, the head's primary): it becomes Open, first in the open
+ * order, and waits for the sync; the read then says so (`accepting`), so a reload offers no second Accept.
  *
  * Every write is one inbox entry through the Workspace's actions; it is laid over the read until a read shows
  * it applied or refused, and the page reads again after each one. After its own Delete the page says **Item
@@ -93,14 +104,20 @@ export function AgendaItemPage({
 }) {
   const router = useRouter();
   const [state, dispatch] = useReducer(reduce, INITIAL);
+  /** The read an Accept was sent on: Accept stays busy until the next read, which reads the item Open. */
+  const [acceptSent, setAcceptSent] = useState<object | null>(null);
+  const [acceptFailed, setAcceptFailed] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const readItem = read.state === "ready" ? read.item : null;
 
   // a new read folds in: what it shows applied or refused leaves the overlay
+  const synced = read.state === "ready" ? (read.synced ?? null) : null;
   useEffect(() => {
-    if (readItem) dispatch({ type: "read", item: readItem });
+    if (readItem) dispatch({ type: "read", item: readItem, synced });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readItem]);
+  const accepting = acceptSent !== null && acceptSent === readItem;
 
   // a discarded add the next read no longer holds: Item deleted, and the Agenda opens
   const away = vanished(read, state);
@@ -188,7 +205,7 @@ export function AgendaItemPage({
 
   async function submitForm() {
     if (!state.form || state.busy) return;
-    const out = formSend(state.form, state.draft);
+    const out = formSend(state.form, state.draft, { note: item.note });
     dispatch({ type: "submit" });
     if (!out) return;
     const answer =
@@ -204,6 +221,24 @@ export function AgendaItemPage({
     if (answer.ok || answer.reason !== "title") router.refresh();
   }
 
+  /** Accept (P61-e9): one `accept` entry; the page reads again and shows the item Open, waiting for the sync. */
+  async function accept() {
+    if (accepting || state.busy) return;
+    setAcceptSent(readItem);
+    setAcceptFailed(null);
+    const answer = await acceptAgendaItems(project, [id]);
+    // taken: Accept stays busy until the next read, which reads the item Open (`accepting`)
+    if (!answer.ok) {
+      setAcceptSent(null);
+      setAcceptFailed(
+        answer.reason === "refused" || answer.reason === "closed"
+          ? answer.message
+          : PROPOSED.failed,
+      );
+    }
+    router.refresh();
+  }
+
   const open = (form: "edit" | "solve" | "drop") => () =>
     dispatch({ type: "open", form, item });
   const on: Partial<Record<HeadAction, () => void>> = {
@@ -214,6 +249,7 @@ export function AgendaItemPage({
     reopen: () =>
       void sendHead("reopen", () => reopenAgendaItems(project, [id])),
     delete: () => dispatch({ type: "ask" }),
+    accept: () => void accept(),
   };
   const title = item.title ?? id;
   const refused = view.refused;
@@ -235,6 +271,7 @@ export function AgendaItemPage({
             allDone={view.allDone}
             opened={state.form !== null}
             busy={busy}
+            accepting={accepting}
             on={on}
           />
         }
@@ -340,8 +377,24 @@ export function AgendaItemPage({
           </div>
         </div>
       ) : null}
+      {acceptFailed ? (
+        <p className="notice notice-danger" role="alert">
+          {acceptFailed}
+        </p>
+      ) : null}
+      <Thread
+        entries={threadView(view.thread, {
+          project,
+          when: (value) => fmt.when(value),
+        })}
+        prose={prose}
+        onAdd={async (body) => {
+          const answer = await noteAgendaItem(project, id, body);
+          router.refresh();
+          return answer;
+        }}
+      />
       <PhasesPanel project={project} view={view} />
-      <JobsPanel project={project} view={view} date={fmt.date} />
     </div>
   );
 }
@@ -370,14 +423,6 @@ function arrived(item: string): boolean {
     return false;
   }
 }
-
-/** A back row with no sync line to say (the reads that carry it failed): the way back alone. */
-const NO_LINE: WsSyncLine = {
-  state: "unlinked",
-  text: "",
-  cls: "",
-  version: "",
-};
 
 function TopRow({ back, line }: { back: WsBack; line: WsSyncLine | null }) {
   if (line) return <BackRow {...back} line={line} />;

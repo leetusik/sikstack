@@ -89,7 +89,6 @@ function item(
     created: "2026-10-20",
     changed,
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: null,
@@ -496,7 +495,7 @@ describe("Drop's and Delete's confirm", () => {
   it("asks Delete with no field and Yes, delete; many items say they leave for good", () => {
     const many = confirm({ kind: "delete", ids: ["A36-n2", "A35-n1"] });
     expect(many).toContain(
-      "<h2>Delete 2 items?</h2><p>They leave the agenda for good, with their notes. Their phases and deferred jobs stay. You cannot undo this.</p>",
+      "<h2>Delete 2 items?</h2><p>They leave the agenda for good, with their threads. Their phases stay. You cannot undo this.</p>",
     );
     expect(many).not.toContain("Reason (optional)");
     expect(many).toMatch(

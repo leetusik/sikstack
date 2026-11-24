@@ -19,9 +19,10 @@ import {
   viewerTimeZone,
   type CookieReader,
 } from "@/lib/time-zone";
-import { backlogHref, phaseHref } from "@/lib/workspace/address";
-import { langOf, openJobs } from "@/lib/workspace/model";
+import { agendaHref, backlogHref, phaseHref } from "@/lib/workspace/address";
+import { langOf } from "@/lib/workspace/model";
 import type { WorkspaceRead } from "@/lib/workspace/read";
+import type { AgendaItem } from "@/lib/workspace/types";
 
 import type {
   MintCredentialState,
@@ -128,8 +129,8 @@ export interface HomePhase {
 export type WorkspacePart =
   | {
       kind: "phases";
-      /** `12 deferred`: the open jobs (deferred or ready, F42). */
-      deferred: string;
+      /** `4 open · 1 proposed`: the agenda's count (`agendaCount`), a link to the Agenda. */
+      agenda: { text: string; href: string };
       phases: HomePhase[];
       /** `--steps-n`: the longest phase shown, so every row's step is one width. */
       longest: number;
@@ -140,8 +141,25 @@ export type WorkspacePart =
   | { kind: "loading" };
 
 /**
+ * The agenda's count on the panel's head: the items Open or In progress, and the Proposed ones apart.
+ * An ended item (Solved, Dropped) or a Deferred one counts in neither.
+ */
+export function agendaCount(items: readonly Pick<AgendaItem, "state">[]): {
+  open: number;
+  proposed: number;
+} {
+  let open = 0;
+  let proposed = 0;
+  for (const it of items) {
+    if (it.state === "open" || it.state === "in_progress") open += 1;
+    else if (it.state === "proposed") proposed += 1;
+  }
+  return { open, proposed };
+}
+
+/**
  * The panel from the page's one Workspace read: a synced workspace's five newest phases (the read
- * lists them newest first, the pointer's phase leading, as the board does) and its open jobs; the
+ * lists them newest first, the pointer's phase leading, as the board does) and its agenda's count; the
  * signed link sentence for a project not linked, never synced, or with no workspace the read can
  * find. A failed read is not a form the board draws: the page throws it (the Feedback panel's rule).
  */
@@ -156,6 +174,7 @@ export function workspacePart(
   }
   if (read.state !== "ready") return { kind: "link" };
   const ws = read.value;
+  const count = agendaCount(ws.agenda);
   const phases = ws.phases.slice(0, PHASES_SHOWN).map((p): HomePhase => {
     const name = p.name?.trim() || p.id;
     const current = p.status !== "done" && p.current ? p.current : null;
@@ -179,7 +198,10 @@ export function workspacePart(
   });
   return {
     kind: "phases",
-    deferred: PROJECT_HOME.workspace.deferred(num(openJobs(ws.deferred))),
+    agenda: {
+      text: PROJECT_HOME.workspace.agenda(num(count.open), num(count.proposed)),
+      href: agendaHref(projectId),
+    },
     phases,
     longest: stepsN(phases.map((p) => p.total)),
     all: backlogHref(projectId),

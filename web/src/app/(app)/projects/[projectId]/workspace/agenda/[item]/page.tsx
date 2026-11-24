@@ -93,7 +93,7 @@ export default async function AgendaItemRoute({
               state: "ready",
               item: read.item,
               phases: read.phases,
-              jobs: read.jobs,
+              synced: read.synced ?? null,
             }
           : { state: "not-found", projectName: read.projectName }
       }

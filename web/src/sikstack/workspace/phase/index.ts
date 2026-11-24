@@ -23,6 +23,7 @@ export { PhaseFailed, PhaseMissing } from "./states";
 export {
   agendaItemOf,
   askedDates,
+  explainedDocuments,
   gatePlace,
   isCurrentSlice,
   NOTEBOOK_DECISIONS_SHOWN,
@@ -32,6 +33,7 @@ export {
   originalParagraphs,
   pullRequestView,
   sliceSub,
+  type ExplainedRow,
   type PhaseItemView,
   type PullRequestView,
 } from "./model";

@@ -5,8 +5,10 @@
  * - `/projects/<id>/workspace`: the Agenda (`?deferred=N`, the Deferred part's page);
  * - `…/workspace/agenda/<item>`;
  * - `…/workspace/backlog` (`?archived=N`), `…/workspace/phases/<phase>`, `…/workspace/slices/<slice>`;
- * - `…/workspace/deferred` (`?q=`, `?status=`, `?page=N`) and `…/workspace/deferred/<job>`;
  * - `…/workspace/docs`, `…/workspace/docs/<doc>`, `…/workspace/docs/<doc>?version=<stored id>`.
+ *
+ * The deferred jobs pages are retired (P61-e9): `…/workspace/deferred` redirects to the Agenda, and
+ * `…/workspace/deferred/<job>` to the item its fold entry names (`retiredJobHref`).
  *
  * Pages are 1-based in the address and page 1 is written as no key (F300). A filter or a search
  * resets the page: the caller passes no page with a new filter.
@@ -30,36 +32,22 @@ import { safeNextPath } from "@/lib/next-path";
 /** The query key that carries where an item was opened from. */
 export const FROM_PARAM = "from";
 
-/** The Deferred jobs list's status filter; `open` (deferred or ready) is the default. */
-export type JobFilter = "open" | "promoted" | "dropped" | "done";
-export const JOB_FILTERS: readonly JobFilter[] = [
-  "open",
-  "promoted",
-  "dropped",
-  "done",
-];
-
 /** A Workspace list page an item can be opened from, at its place. */
 export type WorkspaceList =
   | { list: "agenda"; deferred?: number }
   | { list: "backlog"; archived?: number }
-  | { list: "deferred"; q?: string; status?: JobFilter; page?: number }
   | { list: "docs" };
 
 /** A list page's own address keys. */
 const LIST_KEYS: Record<WorkspaceList["list"], readonly string[]> = {
   agenda: ["deferred"],
   backlog: ["archived"],
-  deferred: ["q", "status", "page"],
   docs: [],
 };
 
 const PAGE = /^[1-9][0-9]{0,5}$/;
-/** The search's longest kept value (the Library's `MAX_PART_LENGTH`). */
-const MAX_QUERY_LENGTH = 200;
 /** A project id as the server writes it (`projects.id`, a UUID), unescaped. */
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,35}$/;
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const PARSE_BASE = "https://from.invalid";
 
 function seg(value: string): string {
@@ -111,20 +99,6 @@ export function backlogHref(
   return withQuery(`${base(project)}/backlog`, query);
 }
 
-/** The Deferred jobs list, with its search, status and page. */
-export function deferredHref(
-  project: string,
-  place: { q?: string; status?: JobFilter; page?: number } = {},
-): string {
-  const query = new URLSearchParams();
-  if (place.q) query.set("q", place.q);
-  if (place.status && place.status !== "open")
-    query.set("status", place.status);
-  const page = pageValue(place.page);
-  if (page) query.set("page", page);
-  return withQuery(`${base(project)}/deferred`, query);
-}
-
 /** The docs list. */
 export function docsHref(project: string): string {
   return `${base(project)}/docs`;
@@ -137,12 +111,6 @@ export function listHref(project: string, list: WorkspaceList): string {
       return agendaHref(project, { deferred: list.deferred });
     case "backlog":
       return backlogHref(project, { archived: list.archived });
-    case "deferred":
-      return deferredHref(project, {
-        q: list.q,
-        status: list.status,
-        page: list.page,
-      });
     case "docs":
       return docsHref(project);
   }
@@ -187,13 +155,12 @@ export function sliceHref(
   return itemHref(`${base(project)}/slices/${seg(slice)}`, project, from);
 }
 
-/** A deferred job's page. */
-export function jobHref(
-  project: string,
-  job: string,
-  from?: WorkspaceList | null,
-): string {
-  return itemHref(`${base(project)}/deferred/${seg(job)}`, project, from);
+/**
+ * Where a retired deferred job's old address leads (P61-e9): the agenda item whose fold entry carries the job, or
+ * the Agenda when no entry names it (or the lookup failed).
+ */
+export function retiredJobHref(project: string, agenda: string | null): string {
+  return agenda ? agendaItemHref(project, agenda) : agendaHref(project);
 }
 
 /** A doc's page, at its latest version or the stored version named (`v0002`, never `v2`). */
@@ -248,7 +215,6 @@ export function decodeWorkspaceFrom(
   let list: WorkspaceList["list"];
   if (rest.length === 0) list = "agenda";
   else if (rest.length === 1 && rest[0] === "backlog") list = "backlog";
-  else if (rest.length === 1 && rest[0] === "deferred") list = "deferred";
   else if (rest.length === 1 && rest[0] === "docs") list = "docs";
   else return null;
 
@@ -273,28 +239,6 @@ export function decodeWorkspaceFrom(
       const page = pageOf(raw);
       return page === null ? null : { list, archived: page };
     }
-    case "deferred": {
-      const out: WorkspaceList = { list };
-      const q = value("q");
-      if (q !== null) {
-        if (q.length === 0 || q.length > MAX_QUERY_LENGTH || CONTROL.test(q)) {
-          return null;
-        }
-        out.q = q;
-      }
-      const status = value("status");
-      if (status !== null) {
-        if (!(JOB_FILTERS as readonly string[]).includes(status)) return null;
-        out.status = status as JobFilter;
-      }
-      const rawPage = value("page");
-      if (rawPage !== null) {
-        const page = pageOf(rawPage);
-        if (page === null) return null;
-        out.page = page;
-      }
-      return out;
-    }
     case "docs":
       return { list };
   }
@@ -304,7 +248,6 @@ export function decodeWorkspaceFrom(
 export type WayBackItem =
   | { kind: "agenda-item" }
   | { kind: "phase" }
-  | { kind: "job" }
   | { kind: "doc" }
   /** A slice goes back to its phase (its full id), carrying the phase's own way back. */
   | { kind: "slice"; phase: string }
@@ -312,14 +255,12 @@ export type WayBackItem =
   | { kind: "doc-version"; doc: string };
 
 /** Where a way back leads; the page labels it with that place's or record's own name (F36). */
-export type WayBackTo =
-  "agenda" | "backlog" | "deferred" | "docs" | "phase" | "doc";
+export type WayBackTo = "agenda" | "backlog" | "docs" | "phase" | "doc";
 
 /** The list each item kind goes back to, and the one list it trusts a `from` for. */
 const HOME: Record<WayBackItem["kind"], WorkspaceList["list"]> = {
   "agenda-item": "agenda",
   phase: "backlog",
-  job: "deferred",
   doc: "docs",
   slice: "backlog",
   "doc-version": "docs",
@@ -327,7 +268,7 @@ const HOME: Record<WayBackItem["kind"], WorkspaceList["list"]> = {
 
 /**
  * The way back from an item (F36, F300): its own list (the Agenda from an item, the backlog from a
- * phase, Deferred from a job, Docs from a doc), at the page `from` names when `from` is that same
+ * phase, Docs from a doc), at the page `from` names when `from` is that same
  * list; a slice goes back to its phase and an earlier version to its doc, each carrying that
  * `from` on. A `from` of another list is ignored, so the label (the destination's name) always
  * matches where the link leads. `list` is the `from` kept, for the item's own links to pass on.

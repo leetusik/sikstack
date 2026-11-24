@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -275,6 +275,40 @@ class WorkspaceService:
                         project_id, kind=kind, items=items, fields=fields,
                         minted_id=minted_id, user_id=user_id, at=now,
                     )
+            except SQLAlchemyError as exc:
+                raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
+
+    async def add_inbox_many(
+        self,
+        project_id: UUID,
+        entries: Sequence[dict[str, Any]],
+        *,
+        user_id: UUID | None,
+    ) -> list[InboxEntry]:
+        """Write several pending entries in one transaction, all or none, in this order.
+
+        Each is ``{kind, items, fields, minted_id?}``. The engine applies the inbox
+        oldest first (``created_at``, then id), so each entry is stamped one microsecond
+        after the one before it: an ``entry`` on an add's minted id always follows the
+        add, whatever the two ids are.
+        """
+
+        for entry in entries:
+            if entry["kind"] not in INBOX_KINDS:
+                raise WorkspaceInputError(f"unknown agenda change {entry['kind']!r}")
+        now = _utc_now()
+        async with self._session_maker() as session:
+            repository = WorkspaceRepository(session)
+            try:
+                async with session.begin():
+                    return [
+                        await repository.insert_inbox(
+                            project_id, kind=entry["kind"], items=entry["items"],
+                            fields=entry["fields"], minted_id=entry.get("minted_id"),
+                            user_id=user_id, at=now + timedelta(microseconds=k),
+                        )
+                        for k, entry in enumerate(entries)
+                    ]
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
 

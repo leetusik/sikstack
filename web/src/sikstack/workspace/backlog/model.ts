@@ -8,7 +8,7 @@
  *   A stop's `what` is drawn only when the read carries one (it never does yet).
  * - **Now**: one block a stream that has a phase: Phase (its status and compact progress), Slice, and Next on
  *   the default stream only. No stream has a phase: one sentence, by what the phases are. Then **Waiting on
- *   operator** `None` (only when nothing waits) and **Deferred jobs** `12 open`.
+ *   operator** `None` (only when nothing waits).
  * - **Phases**: the phases in play (archived ones left out), their own count, `--steps-n` their longest.
  * - **Archived phases**: their own panel, ten a page, the page from `?archived=N` (held to 1 … the last page).
  *
@@ -20,12 +20,11 @@ import { BACKLOG } from "@/content/workspace/backlog";
 import { WS_GLOSSARY, WS_STOP } from "@/content/workspace/frame";
 import {
   backlogHref,
-  deferredHref,
   phaseHref,
   sliceHref,
   type WorkspaceList,
 } from "@/lib/workspace/address";
-import { langOf, openJobs } from "@/lib/workspace/model";
+import { langOf } from "@/lib/workspace/model";
 import type { PhaseRow, SliceName, Workspace } from "@/lib/workspace/types";
 
 import { wsStatus, type WsStatusWord } from "../frame/status-model";
@@ -111,7 +110,6 @@ export interface BacklogView {
     idle: string | null;
     /** Waiting on operator `None`: only when nothing waits. */
     none: boolean;
-    deferred: { text: string; href: string };
   };
   phases: { count: string; longest: number; rows: BacklogPhase[] };
   archived: BacklogArchived | null;
@@ -250,10 +248,6 @@ export function backlogView(
       blocks,
       idle: running.length === 0 ? idleSentence(ws.phases) : null,
       none: waiting.length === 0,
-      deferred: {
-        text: BACKLOG.now.open(openJobs(ws.deferred)),
-        href: deferredHref(project),
-      },
     },
     phases: {
       count: BACKLOG.phases.count(live.length),

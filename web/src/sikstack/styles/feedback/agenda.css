@@ -50,4 +50,13 @@
       padding-block: 0;
     }
   }
+
+  /* Add to agenda's choice: a new item first, then the agenda's items, one radio a row; a long agenda
+     scrolls inside the confirm so its sentence and buttons stay in view */
+  .fi-pick { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .fi-pick-list { display: flex; flex-direction: column; max-height: min(18em, 40vh); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-m); }
+  .fi-pick-option { flex: none; align-items: baseline; padding: var(--space-2) var(--space-3); }
+  .fi-pick-option + .fi-pick-option { border-top: 1px solid var(--line); }
+  .fi-pick-option > input { align-self: center; }
+  .fi-pick-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); min-width: 0; overflow-wrap: anywhere; }
 }

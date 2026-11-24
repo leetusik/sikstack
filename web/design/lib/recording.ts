@@ -1,12 +1,13 @@
 import raw from "design-recording";
 
+import type { FeedbackAgenda, FeedbackDetail } from "@/lib/feedback/types";
 import type { AgendaItem, WorkspaceHead, Workspace } from "@/lib/workspace/types";
 
 import { DESIGN_MARK } from "./mark";
 
 /**
- * A recording of the real API (`design/scripts/record.mjs`): `GET /app/projects/{id}/workspace` and
- * each `GET …/workspace/agenda/{item}`, with the project id and every date normalized, plus the
+ * A recording of the real API (`design/scripts/record.mjs`): `GET /app/projects/{id}/workspace`,
+ * each `GET …/workspace/agenda/{item}` and each piece of feedback the pages draw, with the project id and every date normalized, plus the
  * Shell's names (never the account's) and the moment it was taken, which the design's clock reads.
  */
 export interface Recording {
@@ -23,6 +24,9 @@ export interface Recording {
   };
   workspace: Workspace;
   items: Record<string, AgendaItem & { workspace: WorkspaceHead }>;
+  /** Each piece of feedback the pages draw (`--feedback`), by its sample id: `GET /app/feedback/{id}` and
+   * `GET /app/feedback/{id}/agenda`. */
+  feedback?: Record<string, { record: FeedbackDetail; agenda: FeedbackAgenda }>;
 }
 
 function check(value: unknown): Recording {

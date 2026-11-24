@@ -68,6 +68,14 @@ injected at their call sites, never inside the shared projector, so the list rou
 never pays the tenant lookup it costs. On the **id** read it is emitted only when
 the dateless pretty path round-trips back to that same row (P25.F1), so a superseded
 duplicate slug answers ``null`` rather than pointing at a different document.
+
+The two DETAIL reads also carry ``phases``: the workspace phases a document was
+explained from, ``[{id, name, role}]`` (``role`` ``explain`` for the explain phase that
+published it, ``source`` for each phase its ``## Explain`` ``phases:`` line names),
+derived from the linked workspace of the document's own project
+(``server.workspace_read.project_explain_links``). Only a member reads them: an
+anonymous or cross-org reader of a public document, legacy mode, a project with no
+linked workspace and a workspace read that fails all read ``[]``.
 """
 
 from __future__ import annotations
@@ -83,9 +91,11 @@ from server import db
 from server import publish_gate
 from server import search as search_mod
 from server.accounts.auth import AuthContext, optional_user, require_user
-from server.accounts.service import get_accounts_service
+from server.accounts.service import AccountsReadError, get_accounts_service
 from server.accounts.types import TenantRecord
 from server.api_auth import ApiAuthContext, get_tenant_one_id
+from server.workspace import WorkspaceReadError
+from server.workspace_read import open_reader, project_explain_links
 
 router = APIRouter()
 
@@ -367,6 +377,32 @@ async def _document_canonical_path(
     return _canonical_path(org_slug, doc)
 
 
+async def _explained_from(doc: dict, ctx: AuthContext | None) -> list[dict]:
+    """The phases ``doc`` was explained from, for a member of its tenant; else ``[]``.
+
+    The document's project is found by name among the tenant's projects (documents key
+    off the project's name), its linked workspace read at its head, and the links
+    resolved as the phase reads resolve them, so the two senses always agree.
+    """
+
+    if ctx is None or config.database_url() is None:
+        return []
+    if str(doc.get("tenant_id") or "") != str(ctx.tenant.id):
+        return []
+    try:
+        projects = await get_accounts_service().list_projects_for_tenant(ctx.tenant.id)
+        project = next((p for p in projects if p.name == doc.get("project")), None)
+        if project is None:
+            return []
+        reader = await open_reader(project.id)
+        if not reader.linked:
+            return []
+        links = await project_explain_links(reader, project.tenant_id, project.name)
+    except (AccountsReadError, WorkspaceReadError):
+        return []
+    return links["byDoc"].get(int(doc["id"]), [])
+
+
 @router.get("/app/documents")
 async def list_documents(
     project: UUID | None = None,
@@ -435,6 +471,7 @@ async def get_document(
         "canonical_path": await _document_canonical_path(conn, doc, tenant),
         "chapter": _chapter_of(conn, doc),
         "org": _org_of(tenant),
+        "phases": await _explained_from(doc, ctx),
     }
 
 
@@ -481,6 +518,7 @@ async def resolve_document_by_slug(
         "canonical_path": _canonical_path(tenant.slug, doc),
         "chapter": _chapter_of(conn, doc),
         "org": _org_of(tenant),
+        "phases": await _explained_from(doc, ctx),
     }
 
 

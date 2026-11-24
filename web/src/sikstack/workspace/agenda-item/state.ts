@@ -103,11 +103,23 @@ export type FormSend =
   | { kind: "solve"; outcome: string }
   | { kind: "drop"; reason: string };
 
-/** The form's send: the title and the note trimmed (F45), the line trimmed; null on the title refusal. */
-export function formSend(form: FormKind, draft: Draft): FormSend | null {
+/**
+ * The form's send: the title trimmed and the note trimmed (F45), the line trimmed; null on the title refusal. A note
+ * the edit left as it was (`was`, the item's stored note) is sent untouched (D308): an edit of the title alone never
+ * trims the note, so one that starts with an indented code block stays a code block.
+ */
+export function formSend(
+  form: FormKind,
+  draft: Draft,
+  was: { note?: string | null } = {},
+): FormSend | null {
   if (form === "edit") {
     if (titleError(draft.title) !== null) return null;
-    return { kind: "edit", title: draft.title.trim(), note: draft.note.trim() };
+    const note =
+      typeof was.note === "string" && draft.note === was.note
+        ? draft.note
+        : draft.note.trim();
+    return { kind: "edit", title: draft.title.trim(), note };
   }
   return form === "solve"
     ? { kind: "solve", outcome: draft.line.trim() }
@@ -134,8 +146,8 @@ export type PageEvent =
       /** Delete, Try again and Discard: the item's title, for Item deleted. */
       title?: string;
     }
-  /** A new read of the item. */
-  | { type: "read"; item: AgendaItem }
+  /** A new read of the item, and the Workspace's sync instant it carried. */
+  | { type: "read"; item: AgendaItem; synced?: string | null }
   /** A new read holds no item under the page's id. */
   | { type: "missing" };
 
@@ -221,7 +233,10 @@ export function reduce(state: PageState, event: PageEvent): PageState {
         : state.overlay;
       const next: PageState = {
         ...state,
-        overlay: reconcile(overlay, { agenda: [event.item] }),
+        overlay: reconcile(overlay, {
+          agenda: [event.item],
+          synced: event.synced ?? null,
+        }),
       };
       return held
         ? {
@@ -331,10 +346,15 @@ export type PageDraw =
   | { kind: "gone"; title: string }
   | { kind: "not-found"; projectName: string | null };
 
-/** What the page draws from its read and its state: an item this page took away is Item deleted, never Not found. */
+/**
+ * What the page draws from its read and its state: an item this page took away is Item deleted, never Not found;
+ * so is one whose delete waits for the sync (the read's `deleting`), on a reload or after a failed read.
+ */
 export function pageView(read: ItemPageRead, state: PageState): PageDraw {
   if (state.gone !== null) return { kind: "gone", title: state.gone };
   const ready = read.state === "ready" ? read : null;
+  if (ready?.item.deleting && state.moved === null)
+    return { kind: "gone", title: ready.item.title ?? ready.item.id };
   // a read after Discard on a refused add holds nothing under its id: the add's own row went with it
   if (!ready && state.discarding)
     return { kind: "gone", title: state.discarding.title };

@@ -38,10 +38,29 @@ INBOX_RESULT_STATES = (INBOX_APPLIED, INBOX_REFUSED)
 INBOX_OPEN_STATES = (INBOX_PENDING, INBOX_REFUSED)
 
 #: The changes an inbox entry carries, each one engine agenda command
-#: (``agenda-add``, ``agenda-edit``, ``agenda-move``, ``agenda-defer`` …).
+#: (``agenda-add``, ``agenda-edit``, ``agenda-move``, ``agenda-defer`` …; ``entry`` is
+#: ``agenda-entry``, one entry on an item's thread, and ``accept`` is ``agenda-accept``,
+#: a Proposed item made Open: the engine's ``CLOUD_INBOX_COMMANDS``).
 INBOX_ADD = "add"
 INBOX_DELETE = "delete"
-INBOX_KINDS = (INBOX_ADD, "edit", "move", "defer", "solve", "drop", "reopen", INBOX_DELETE)
+INBOX_ENTRY = "entry"
+INBOX_ACCEPT = "accept"
+INBOX_KINDS = (INBOX_ADD, "edit", "move", "defer", "solve", "drop", "reopen", INBOX_DELETE,
+               INBOX_ENTRY, INBOX_ACCEPT)
+
+#: An item's thread entry, by the engine's rules word for word (``wf_agenda.py``:
+#: ``ENTRY_KINDS``, ``ENTRY_ONE_LINE``, ``ENTRY_AUTHOR_RE``, ``ENTRY_SOURCE_RE``): an
+#: author is ``person:`` or ``agent:`` and a name whose first character is neither
+#: whitespace nor ``:``, one line of at most 120 characters in all; a source is
+#: ``<kind>:<ref>``, one line of at most 320.
+ENTRY_KINDS = ("note", "issue", "feedback", "question", "decision")
+ENTRY_ONE_LINE = r"[^\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]"
+ENTRY_AUTHOR_PATTERN = rf"(?=.{{1,120}}\Z)(?:person|agent):[^\s:]{ENTRY_ONE_LINE}*"
+ENTRY_SOURCE_PATTERN = rf"[a-z][a-z0-9-]{{0,19}}:[^\s]{ENTRY_ONE_LINE}{{0,298}}"
+#: Who the engine names when a web entry names no author (``CLOUD_INBOX_AUTHOR``), and the
+#: source every note written on the web carries.
+WEB_AUTHOR = "person:web"
+WEB_NOTE_SOURCE = "web:agenda"
 
 #: The engine's agenda id rule, word for word (``AGENDA_ID_PATTERN``): a number and a
 #: two-symbol tail of lowercase Crockford base32 without ``i l o u``, at least one

@@ -18,7 +18,6 @@ vi.mock("next/navigation", async (orig) => ({
     sliceId: "P57-4q.S4",
     phaseId: "P57-4q",
     item: "A7-m3",
-    job: "D141-4r",
   }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => `/projects/${PROJECT}/workspace`,
@@ -29,7 +28,6 @@ const reads = vi.hoisted(() => ({
   readPhase: vi.fn(),
   readSlice: vi.fn(),
   readItem: vi.fn(),
-  readJob: vi.fn(),
 }));
 vi.mock("@/lib/workspace/read", async (orig) => ({
   ...(await orig<object>()),
@@ -62,17 +60,14 @@ const { markWsRetry, WsNav, WsSync, wsSyncLine } =
 const W = "@/app/(app)/projects/[projectId]/workspace";
 const AgendaPage = (await import(`${W}/page`)).default;
 const BacklogPage = (await import(`${W}/backlog/page`)).default;
-const DeferredPage = (await import(`${W}/deferred/page`)).default;
 const DocsPage = (await import(`${W}/docs/page`)).default;
 const DocPage = (await import(`${W}/docs/[doc]/page`)).default;
 const PhasePage = (await import(`${W}/phases/[phaseId]/page`)).default;
 const SliceError = (await import(`${W}/slices/[sliceId]/error`)).default;
 const ItemError = (await import(`${W}/agenda/[item]/error`)).default;
-const JobError = (await import(`${W}/deferred/[job]/error`)).default;
 const PhaseError = (await import(`${W}/phases/[phaseId]/error`)).default;
 const SlicePage = (await import(`${W}/slices/[sliceId]/page`)).default;
 const ItemPage = (await import(`${W}/agenda/[item]/page`)).default;
-const JobPage = (await import(`${W}/deferred/[job]/page`)).default;
 const DocError = (await import(`${W}/docs/[doc]/error`)).default;
 
 const html = (el: ReactElement) => renderToStaticMarkup(el);
@@ -117,17 +112,14 @@ const boundary = (Component: Boundary) =>
 const FAILED: [name: string, draw: () => Promise<string> | string][] = [
   ["the Agenda", () => page(AgendaPage)],
   ["the backlog", () => page(BacklogPage)],
-  ["the deferred list", () => page(DeferredPage)],
   ["the docs list", () => page(DocsPage)],
   ["a doc", () => page(DocPage, { doc: "architecture" })],
   ["a phase", () => page(PhasePage, { phaseId: "P57-4q" })],
   ["a slice", () => page(SlicePage, { sliceId: "P57-4q.S4" })],
   ["an agenda item", () => page(ItemPage, { item: "A7-m3" })],
-  ["a deferred job", () => page(JobPage, { job: "D141-4r" })],
   ["a phase's boundary", () => boundary(PhaseError)],
   ["a slice's boundary", () => boundary(SliceError)],
   ["an agenda item's boundary", () => boundary(ItemError)],
-  ["a deferred job's boundary", () => boundary(JobError)],
   ["a doc's boundary", () => boundary(DocError)],
 ];
 
@@ -171,7 +163,6 @@ describe("the sync line while Try again reads the page again", () => {
     const hrefs = {
       agenda: "/a",
       backlog: "/b",
-      deferred: "/d",
       docs: "/o",
     };
     end = markWsRetry();

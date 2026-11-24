@@ -7,12 +7,14 @@ import {
   afterSend,
   AgendaItemPage,
   deletedState,
+  formSend,
   headActions,
   INITIAL,
   itemLines,
   itemView,
   pageView,
   reduce,
+  threadView,
   vanished,
   type ItemPageRead,
   type ItemRead,
@@ -20,25 +22,28 @@ import {
   type PhaseLine,
 } from "@/sikstack/workspace/agenda-item";
 import { AgendaItemForm } from "@/sikstack/workspace/agenda-item/form";
+import { itemProse } from "@/sikstack/workspace/agenda-item/prose";
 import { wsSyncLine } from "@/sikstack/workspace/frame";
 import { EMPTY_OVERLAY, view } from "@/lib/workspace/optimistic";
 import type {
   AgendaItem,
   InboxEntry,
-  JobRow,
   PhaseRow,
+  ThreadEntry,
   WriteAnswer,
 } from "@/lib/workspace/types";
 
 // An agenda item's page: the head's buttons by the item's state, what a write leaves on the page (Defer then
 // Reopen, Delete, the form's refusals), Not found, and the reads the page makes. The fixture is a real item of
-// this kind: a product redesign with four linked phases and a deferred job, as the workspace writes them.
+// this kind: a product redesign with four linked phases, as the workspace writes them.
 
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }));
 vi.mock("@/lib/workspace/actions", () => ({
+  acceptAgendaItems: vi.fn(),
+  noteAgendaItem: vi.fn(),
   deferAgendaItems: vi.fn(),
   deleteAgendaItems: vi.fn(),
   discardChange: vi.fn(),
@@ -67,7 +72,6 @@ const ITEM: AgendaItem = {
   created: "2026-11-03",
   changed: "2026-11-14",
   phases: ["P57-4q", "P58-r2", "P56-t8", "P55-m1"],
-  deferred: ["D141-4r"],
   outcome: "",
   reason: "",
   sync: null,
@@ -115,29 +119,13 @@ const PHASES: PhaseRow[] = [
   phase("P56-t8", "One platform at sikstack.com", "done", 5, 5),
   phase("P55-m1", "Three repos under one host", "done", 4, 4),
 ];
-const JOBS: JobRow[] = [
-  {
-    id: "D141-4r",
-    title: "Cache the reader's fonts on the box",
-    lang: "en",
-    status: "deferred",
-    source: "P56-t8.S3",
-    trigger: null,
-    created: "2026-11-12",
-    reason: null,
-    promotedTo: null,
-    dropped: null,
-    agenda: "A7-m3",
-  },
-];
-
 function lines(phases: PhaseRow[]): PhaseLine[] {
-  return itemLines(ITEM, { phases, deferred: JOBS }).phases;
+  return itemLines(ITEM, { phases }).phases;
 }
 
 function read(item: Partial<AgendaItem> = {}, phases = PHASES): ItemRead {
   const it = { ...ITEM, ...item };
-  return { item: it, ...itemLines(it, { phases, deferred: JOBS }) };
+  return { item: it, ...itemLines(it, { phases }) };
 }
 
 function entry(kind: InboxEntry["kind"], id: string): InboxEntry {
@@ -226,7 +214,7 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     // open, no phase: no sentence, no primary, the command to plan one
     html = page({
       state: "ready",
-      ...read({ state: "open", phases: [], deferred: [] }),
+      ...read({ state: "open", phases: [] }),
     });
     expect(buttons(html).primary).toEqual([]);
     expect(html).toContain(
@@ -295,7 +283,7 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     expect(html.match(/ws-sub/g)).toHaveLength(1);
   });
 
-  it("lists the linked phases in the Workspace's order with one steps width, and the jobs", () => {
+  it("lists the linked phases in the Workspace's order with one steps width, and no Deferred jobs panel", () => {
     const r = read();
     expect(r.phases.map((p) => p.id)).toEqual([
       "P57-4q",
@@ -306,15 +294,206 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     const html = page({ state: "ready", ...r });
     expect(html).toContain('<p class="meta">4 phases</p>');
     expect(html).toContain("--steps-n:7");
-    expect(html).toContain('<p class="meta">1 job</p>');
     expect(html).toContain(`/projects/${PROJECT}/workspace/phases/P57-4q`);
-    expect(html).toContain(`/projects/${PROJECT}/workspace/deferred/D141-4r`);
+    // a folded job reads as its `issue` entry in the thread (P61-e9): no jobs panel, no job page
+    expect(html).not.toContain("agendaitem-jobs");
+    expect(html).not.toContain("/workspace/deferred/");
     // an ended item with no phase draws no Phases panel
     const ended = page({
       state: "ready",
-      ...read({ state: "solved", phases: [], deferred: [] }),
+      ...read({ state: "solved", phases: [] }),
     });
     expect(ended).not.toContain('id="agendaitem-phases"');
+  });
+});
+
+describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () => {
+  const PROPOSED_BY = {
+    by: "agent:claude-opus-5-5",
+    at: "2026-11-20T09:00:00+09:00",
+  };
+  const THREAD: ThreadEntry[] = [
+    {
+      id: "20261124T015846.624077Z-913g",
+      kind: "issue",
+      author: "agent:fold",
+      by: "agent",
+      name: "fold",
+      source: "slice:P67-b1.REVIEW",
+      created: "2026-11-17T09:00:00Z",
+      body: "Folded from deferred job D305-8m.",
+      job: "D305-8m",
+      sync: null,
+    },
+    {
+      id: "20261124T042949.905151Z-akrs",
+      kind: "note",
+      author: "person:mina",
+      by: "person",
+      name: "mina",
+      source: "web:agenda",
+      created: "2026-11-18T08:00:00Z",
+      body: "Download reads like a file save to me.",
+      job: null,
+      sync: null,
+    },
+    {
+      id: "0ff1c2d3-0000-4000-8000-000000000001",
+      kind: "feedback",
+      author: "person:you",
+      by: "person",
+      name: "you",
+      source: "feedback:e7a57758-bb40-4a09-9963-bb0752b3c3e9",
+      created: "2026-11-18T08:50:00Z",
+      body: "Export hangs at 99%.\n\n/feedback/e7a57758-bb40-4a09-9963-bb0752b3c3e9",
+      job: null,
+      sync: null,
+    },
+    {
+      id: "7c1e4b2a-0d3f-4a5b-8c6d-000000000099",
+      kind: "note",
+      author: "person:you",
+      by: "person",
+      name: "you",
+      source: "web:agenda",
+      created: "2026-11-18T08:59:00Z",
+      body: "Seen on the **2 GB** export too.",
+      job: null,
+      sync: "waiting",
+    },
+  ];
+
+  it("offers Delete, Edit, Drop and Accept on a Proposed item, Accept the primary, and says who proposed it", () => {
+    expect(headActions("open", true)).toEqual([
+      "delete",
+      "edit",
+      "drop",
+      "accept",
+    ]);
+    const html = page({
+      state: "ready",
+      ...read({ state: "proposed", phases: [], proposed: PROPOSED_BY }),
+    });
+    expect(buttons(html)).toEqual({
+      labels: ["Delete", "Edit", "Drop", "Accept"],
+      primary: ["Accept"],
+    });
+    expect(html).toContain(
+      '<span class="status status-pending">Proposed</span>',
+    );
+    expect(html).toContain("<dt>Proposed by</dt>");
+    expect(html).toContain(
+      '<span class="ws-author"><span class="strong">claude-opus-5-5</span><span class="badge">Agent</span></span>',
+    );
+  });
+
+  it("reads an item whose Accept waits (`accepting`) as Open, with no second Accept after a reload", () => {
+    const html = page({
+      state: "ready",
+      ...read({
+        state: "proposed",
+        phases: [],
+        proposed: PROPOSED_BY,
+        accepting: true,
+        sync: "waiting",
+      }),
+    });
+    expect(buttons(html).labels).toEqual([
+      "Delete",
+      "Edit",
+      "Defer",
+      "Drop",
+      "Solve",
+    ]);
+    expect(html).not.toContain(">Accept<");
+    expect(html).toContain("Waiting for sync");
+  });
+
+  it("draws the thread oldest first: author (an agent marked), kind, source and time; a feedback entry's kind links to it", () => {
+    const view = threadView(THREAD, {
+      project: PROJECT,
+      when: (v) => (v ? v.slice(11, 16) : ""),
+    });
+    expect(
+      view.map((e) => [
+        e.author?.name,
+        e.author?.agent,
+        e.kind,
+        e.source?.text,
+        e.mark,
+      ]),
+    ).toEqual([
+      ["fold", true, "Issue", "P67-b1.REVIEW", null],
+      ["mina", false, "Note", "Web", null],
+      ["you", false, "Feedback", "Feedback", null],
+      ["you", false, "Note", "Web", "waiting"],
+    ]);
+    expect(view[2].source?.href).toBe(
+      `/projects/${PROJECT}/feedback/e7a57758-bb40-4a09-9963-bb0752b3c3e9`,
+    );
+    // the way back to the feedback is the kind's link, so the body's last line is left out
+    expect(view[2].body).toBe("Export hangs at 99%.");
+    const html = page({
+      state: "ready",
+      ...read({ phases: [], entries: THREAD }),
+    });
+    const thread = html.slice(html.indexOf('class="thread"'));
+    expect(thread.indexOf("fold")).toBeLessThan(thread.indexOf("mina"));
+    expect(thread.indexOf("mina")).toBeLessThan(thread.indexOf("Seen on the"));
+    expect(html).toContain("<h2 id=");
+    expect(html).toContain(">Thread</h2>");
+    expect(html).toContain(">4 entries</p>");
+    expect(html).toContain('<label class="label"');
+    expect(html).toContain(">Add note<");
+    // Thread before Phases
+    expect(html.indexOf(">Thread</h2>")).toBeLessThan(
+      html.indexOf("agendaitem-phases"),
+    );
+  });
+
+  it("draws a waiting note's Markdown as a synced one's, from the server's prose (D305)", () => {
+    const item = { ...ITEM, entries: THREAD };
+    const prose = itemProse(item);
+    const waiting = THREAD[3].body;
+    expect(Object.hasOwn(prose, waiting)).toBe(true);
+    const html = renderToStaticMarkup(
+      createElement(AgendaItemPage, {
+        project: PROJECT,
+        back: { href: `/projects/${PROJECT}/workspace`, label: "Agenda" },
+        line: null,
+        timeZone: ZONE,
+        now: NOW,
+        prose,
+        read: { state: "ready", ...read({ phases: [], entries: THREAD }) },
+      }),
+    );
+    expect(html).toContain("Seen on the <strong>2 GB</strong> export too.");
+    expect(html).not.toContain("Seen on the **2 GB** export too.");
+  });
+
+  it("draws Item deleted for an item whose delete waits (`deleting`), on a reload (D309)", () => {
+    const r: ItemPageRead = {
+      state: "ready",
+      ...read({ deleting: true, sync: "waiting" }),
+    };
+    expect(pageView(r, INITIAL)).toEqual({
+      kind: "gone",
+      title: "One product at sikstack.com, designed new",
+    });
+    const html = page(r);
+    expect(html).toContain("Item deleted");
+    expect(html).not.toContain("isn’t part of");
+  });
+
+  it("sends the note untouched when an edit changed only the title (D308)", () => {
+    const note = "    an indented code block\nstays code";
+    expect(
+      formSend("edit", { title: " A new title ", note, line: "" }, { note }),
+    ).toEqual({ kind: "edit", title: "A new title", note });
+    // a note the edit changed is trimmed, as F45 says
+    expect(
+      formSend("edit", { title: "T", note: "  changed  ", line: "" }, { note }),
+    ).toEqual({ kind: "edit", title: "T", note: "changed" });
   });
 });
 
@@ -579,7 +758,6 @@ describe("a change that takes the item from under the page", () => {
     created: "2026-11-18",
     changed: "2026-11-18",
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: MARK,
@@ -828,7 +1006,6 @@ describe("reading an agenda item", () => {
     streams: [],
     pointer: { phase: "P57-4q", slice: "P57-4q.S4", next: null, waiting: [] },
     phases: PHASES,
-    deferred: JOBS,
     docs: [],
     retired: [],
     agenda: [ITEM],
@@ -842,7 +1019,7 @@ describe("reading an agenda item", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reads the item's route, plus the Workspace once for its phases' and jobs' rows", async () => {
+  it("reads the item's route, plus the Workspace once for its phases' rows", async () => {
     const calls = api((url) =>
       url.endsWith("/agenda/A7-m3")
         ? { status: 200, body: { ...ITEM, workspace: HEAD } }
@@ -857,13 +1034,13 @@ describe("reading an agenda item", () => {
     if (r.state !== "ready") return;
     expect(r.head).toEqual(HEAD);
     expect(r.phases).toEqual(lines(PHASES));
-    expect(r.jobs.map((j) => j.id)).toEqual(["D141-4r"]);
+    expect(r.synced).toBe(HEAD.sync.at);
   });
 
-  it("reads only the item's route when it holds no phase and no job", async () => {
+  it("reads only the item's route when it holds no phase", async () => {
     const calls = api(() => ({
       status: 200,
-      body: { ...ITEM, phases: [], deferred: [], workspace: HEAD },
+      body: { ...ITEM, phases: [], workspace: HEAD },
     }));
     const r = await loadAgendaItem(TOKEN, PROJECT, "A7-m3");
     expect(calls).toHaveLength(1);

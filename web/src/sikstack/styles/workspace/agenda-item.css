@@ -1,4 +1,4 @@
-/* sikstack — the Workspace's agenda item sheet (design job 02, round 02-agenda-and-links). Holds an agenda item's page: its head, its forms, its phases and deferred jobs (`AgendaItem*.dc.html`).
+/* sikstack — the Workspace's agenda item sheet (design job 02, round 02-agenda-and-links). Holds an agenda item's page: its head, its forms, its thread and composer, its phases (`AgendaItem*.dc.html`).
    The boards' own rules, as signed, added by the build of that part; the frame's and the system's classes are
    never redefined here (src/sikstack/styles/README.md). Changes from the signed boards:
    - the title row is the frame's item head (`.page-head.ws-head`, F85), whose 8 px this row takes from its title
@@ -62,4 +62,23 @@
     align-items: center;
     min-height: var(--control-h);
   }
+
+  /* the Thread panel: its head, the title and its count on one baseline, as an Agenda part's head */
+  .panel-head.thread-head { justify-content: flex-start; }
+  .thread-count { font-variant-numeric: tabular-nums; }
+
+  /* an entry: its line of who, what and when, then its body at the measure */
+  .row.thread-entry { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-2); }
+  .thread-by { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-width: 0; }
+  .thread-by > .badge { align-self: center; }
+  .thread-when { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .thread-body { max-width: var(--measure); }
+  .thread-body.ws-prose { white-space: pre-line; }
+  .thread-body > .ws-prose-block { white-space: normal; }
+  /* a body and the note are Markdown (`Md`): its blocks as the renderer draws them, a paragraph's lines as written */
+  .thread-body > .md-wrap, .agendaitem-long > dd > .md-wrap { white-space: normal; }
+  .thread-body .md p, .agendaitem-long .md p { white-space: pre-line; }
+
+  /* the composer: the field at a line's measure, Add note on its right edge; the panel's rule spans the panel */
+  .thread-compose { max-width: var(--measure); }
 }

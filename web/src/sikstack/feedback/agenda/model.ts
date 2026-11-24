@@ -9,6 +9,11 @@
  *   Added to agenda, the Agenda part shows the item).
  * - Focus: the dialog opens on Cancel; when it closes, focus goes to what stands at the head's end:
  *   the status after an add (the button is gone), else the button that opened it.
+ *
+ * P61-e9: a piece of feedback can be on more than one item, read from
+ * `GET /app/feedback/{id}/agenda` (`FeedbackAgenda`: the server derives it from the entries, never from the
+ * feedback), so filed and waiting carry the items; the confirm is a choice between **A new item** and an item already
+ * on the agenda (`AgendaPick`, `pickable`).
  */
 
 import {
@@ -17,19 +22,27 @@ import {
   type AgendaOffer,
 } from "@/lib/feedback/agenda";
 
+/** An agenda item a piece of feedback is on, as the Agenda part draws it: the read's row and the item's page. */
+export type AgendaPartItem = AgendaItem;
+
 export type AgendaPageState =
-  | { kind: "filed"; item: AgendaItem }
-  | { kind: "waiting"; item: AgendaItem }
+  | { kind: "filed"; items: AgendaPartItem[] }
+  | { kind: "waiting"; items: AgendaPartItem[] }
   | { kind: "not-offered"; reason: "no-project" | "no-workspace"; text: string }
   | { kind: "offered"; project: string };
 
-/** The page's state from `canAdd` and `sent`: filed, else waiting, else not offered, else offered. */
+/**
+ * The page's state from `canAdd` and the items it is on: filed (on at least one item, none waiting), else waiting
+ * (one of them waits for the sync), else not offered, else offered.
+ */
 export function agendaPageState(
   offer: AgendaOffer,
-  item: AgendaItem | null,
+  items: readonly AgendaPartItem[],
 ): AgendaPageState {
-  if (item && item.sync === null) return { kind: "filed", item };
-  if (item) return { kind: "waiting", item };
+  if (items.length > 0)
+    return items.some((i) => i.sync !== null)
+      ? { kind: "waiting", items: [...items] }
+      : { kind: "filed", items: [...items] };
   if (!offer.offered)
     return {
       kind: "not-offered",
@@ -40,6 +53,43 @@ export function agendaPageState(
 }
 
 export type AddPhase = "rest" | "confirm" | "adding" | "failed" | "added";
+
+/** Where the confirm adds the feedback: a new item (the default, the signed add), or an item already on the agenda. */
+export type AgendaPick = { kind: "new" } | { kind: "item"; id: string };
+
+export const NEW_ITEM: AgendaPick = { kind: "new" };
+
+/** An item the confirm offers: its id, title and the title's language. */
+export interface PickItem {
+  id: string;
+  title: string;
+  lang: "en" | "ko";
+}
+
+const PICKABLE = ["proposed", "open", "in_progress", "deferred"];
+
+/**
+ * The items a piece of feedback can join, in the Agenda's order: those not ended (Proposed, Open, In progress,
+ * Deferred) that do not hold it already (the server refuses the same feedback twice on one item, a 409).
+ */
+export function pickable(
+  agenda: readonly {
+    id: string;
+    title: string | null;
+    lang: string;
+    state: string | null;
+  }[],
+  on: readonly { id: string }[],
+): PickItem[] {
+  const held = new Set(on.map((i) => i.id));
+  return agenda
+    .filter((a) => PICKABLE.includes(a.state ?? "open") && !held.has(a.id))
+    .map((a) => ({
+      id: a.id,
+      title: a.title ?? a.id,
+      lang: a.lang === "ko" ? "ko" : "en",
+    }));
+}
 
 /** The confirm is open. */
 export function isOpen(phase: AddPhase): boolean {

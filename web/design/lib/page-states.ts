@@ -37,6 +37,7 @@ export const AGENDA_STATES = pageStates("Agenda", [
   { key: "many", label: "Many items", from: `${WS}/page.tsx:75 (ready) · data/sample/states/many.json`, data: true },
   { key: "empty", label: "Empty agenda", from: "agenda-list.tsx:853 emptyText · data/sample/states/empty.json", data: true },
   { key: "waiting", label: "Waiting for sync", from: "agenda-list.tsx:760 unplaced, WaitingBadge · data/sample/states/waiting.json", data: true },
+  { key: "web-waiting", label: "Note, feedback and accept waiting", from: "agenda/agenda-list.tsx Proposed, rows WaitingBadge · data/sample/states/web-waiting.json", data: true },
   { key: "behind", label: "Synced long ago", from: "frame/sync-model.ts:44 behind (made: answers.ts)", data: true },
   { key: "loading", label: "Loading", from: `${WS}/loading.tsx` },
   { key: "unlinked", label: "Not linked", from: `${WS}/page.tsx:48 unlinked · data/sample/states/unlinked.json` },
@@ -51,6 +52,8 @@ const ITEM = `${WS}/agenda/[item]`;
  * and the item in each state the store can give it. The data states set this item's own fields. */
 export const ITEM_STATES = pageStates("Agenda item", [
   { key: "open", label: "Open", from: "agenda-item/item-page.tsx (ready) · item.state open", data: true },
+  { key: "proposed", label: "Proposed", from: "agenda-item/model.ts headActions, head.tsx HeadMarks · item.state proposed (recorded: A8-sf, A9-hb; made on another item from A9-hb's proposed)", data: true },
+  { key: "note-waiting", label: "Note waiting for sync", from: "agenda-item/thread.tsx WaitingBadge · entry.sync waiting (made: states/web-waiting.json's pending note, put on this item)", data: true },
   { key: "deferred", label: "Deferred", from: "agenda-item/item-page.tsx (ready) · item.state deferred", data: true },
   { key: "solved", label: "Solved", from: "agenda-item/item-page.tsx (ready) · item.state solved, its outcome", data: true },
   { key: "dropped", label: "Dropped", from: "agenda-item/item-page.tsx (ready) · item.state dropped, its reason", data: true },
@@ -79,4 +82,32 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
   { key: "shared", label: "Shared", from: `${VIEW}:202 share on, Copy · recording design.details (share.on)` },
   { key: "private", label: "Private", from: `${VIEW}:198 one line · recording design.shareRefused (409)` },
   { key: "gone", label: "Gone", from: `${VIEW}:293 DesignBuildGone · recording design.gone (404)` },
+]);
+
+const FB = "src/sikstack/feedback";
+const FB_AGENDA = "src/sikstack/feedback/agenda";
+const FB_ROUTE = "src/app/(app)/projects/[projectId]/feedback/[feedbackId]";
+
+/**
+ * A piece of feedback not on the agenda yet (P61-e9; f3 of the recording): the add in each of its phases, its waiting
+ * answer, the two not-offered answers (no workspace linked, no project), and the routes' branches.
+ */
+export const FEEDBACK_STATES = pageStates("Feedback item", [
+  { key: "offered", label: "Add to agenda", from: `${FB}/item/body.tsx offered (linked, on no item) · ${FB_AGENDA}/control.tsx · recording f3, on no item`, data: true },
+  { key: "no-workspace", label: "No workspace linked", from: `${FB}/item/body.tsx not offered · lib/feedback/agenda.ts canAdd: linked false` },
+  { key: "confirm-new", label: "Confirm: a new item", from: `${FB_AGENDA}/control.tsx:163 isOpen, :179 the choice (A new item)` },
+  { key: "confirm-existing", label: "Confirm: an existing item", from: `${FB_AGENDA}/control.tsx:179 the choice (A3-1z picked)` },
+  { key: "adding", label: "Adding", from: `${FB_AGENDA}/control.tsx:163 isLocked (Adding…)` },
+  { key: "failed", label: "Add failed", from: `${FB_AGENDA}/control.tsx:174 failed notice` },
+  { key: "waiting", label: "Added, waiting for sync", from: `${FB_AGENDA}/part.tsx:43, :87 · data/sample/states/web-waiting.json (f3 on A11-vz, waiting)`, data: true },
+  { key: "no-project", label: "No project", from: `${FB_AGENDA}/part.tsx:38 not offered, no project (made: no recorded feedback is in no project)` },
+  { key: "loading", label: "Loading", from: `${FB_ROUTE}/loading.tsx` },
+  { key: "not-found", label: "Not found", from: `${FB_ROUTE}/not-found.tsx` },
+  { key: "error", label: "Page error", from: `${FB_ROUTE}/error.tsx` },
+]);
+
+/** A piece of feedback already on the agenda (f1: a new item and A3-1z; f2: A3-1z): the part names each item. */
+export const FEEDBACK_FILED_STATES = pageStates("Feedback item on the agenda", [
+  { key: "filed", label: "On the agenda", from: `${FB_AGENDA}/part.tsx:43 one row an item · recording.json feedback (GET /app/feedback/{id}/agenda)`, data: true },
+  { key: "no-workspace", label: "No workspace linked", from: `${FB}/item/body.tsx not offered · lib/feedback/agenda.ts canAdd: linked false, sent() none` },
 ]);

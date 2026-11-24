@@ -6,11 +6,11 @@ import { Copy } from "@/sikstack/frame";
 import { WsSync } from "./sync";
 import type { WsSyncLine } from "./sync-model";
 
-const PLACES: WsPlace[] = ["agenda", "backlog", "deferred", "docs"];
+const PLACES: WsPlace[] = ["agenda", "backlog", "docs"];
 
 /**
- * The Workspace head (frame.md F40, F41, `WsNav.dc.html`) on each of the four places: the `h1` **Workspace** and
- * the sync line in one 44 px row, then the four places as real links on a hairline, the current one
+ * The Workspace head (frame.md F40, F41, `WsNav.dc.html`) on each of the three places: the `h1` **Workspace** and
+ * the sync line in one 44 px row, then the three places as real links on a hairline, the current one
  * `aria-current="page"`. While the page loads the line is a bar and the title and places stand.
  *
  * A workspace that has never synced, or is not linked, draws the title and one panel instead, and the page draws

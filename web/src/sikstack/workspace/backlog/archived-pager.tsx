@@ -9,7 +9,7 @@ import { archivedHref } from "./model";
 
 /**
  * The Archived phases panel's pager (F300, F304): the product's one pager, its links `?archived=N`. A page asked for
- * from it keeps the operator on the panel, as the Agenda's Deferred part and the Deferred jobs list do: the page
+ * from it keeps the operator on the panel, as the Agenda's Deferred part does: the page
  * stays where it is while the next page is read, then the panel's head comes to the top. A modified click (a new
  * tab, a new window) is the link's own.
  */

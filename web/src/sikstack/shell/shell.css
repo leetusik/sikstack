@@ -12,10 +12,7 @@
       own focused frame, `ReviewFrame`, outside the `(app)` group.)
    2. The chrome-less document view (`?view=full`, round 06 §4.4): the bar and the rail are hidden and the
       main column takes the whole width; nothing unmounts.
-   3. Print drops the chrome, as kb-print.css does for the old frame.
-   4. Workspace, the inert rail item (operator D1): no pointer and no hover, so it promises no click.
-      In the strip under 72em it spans two cells, so its `Coming` badge never runs into the next item
-      (operator OQ14); the rail at 72em and wider is a column and does not change. */
+   3. Print drops the chrome, as kb-print.css does for the old frame. */
 
 .kb-app.kb-legacy-page {
   min-height: 0;
@@ -34,19 +31,6 @@
     grid-column: 1 / -1;
     grid-row: 1 / -1;
     padding: 0;
-  }
-
-  .nav-item[aria-disabled="true"] {
-    cursor: default;
-  }
-  .nav-item[aria-disabled="true"]:hover .nav-pill {
-    background: transparent;
-    color: inherit;
-  }
-  @container app not (min-width: 72em) {
-    .rail > .nav-item[aria-disabled="true"] {
-      grid-column: span 2;
-    }
   }
 
   @media print {

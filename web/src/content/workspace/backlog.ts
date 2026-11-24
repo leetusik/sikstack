@@ -23,8 +23,6 @@ export const BACKLOG = {
         "Nothing is in progress. A planned phase starts when it is run in the workspace.",
       plain: "Nothing is in progress.",
     },
-    /** The count of open deferred jobs (F42): `12 open`. */
-    open: (n: number) => `${n} open`,
     failed: WS_STATES.partFailed.backlog,
     retry: WS_STATES.retry,
   },

@@ -7,6 +7,7 @@ import {
   agendaItemOf,
   askedDates,
   DecisionList,
+  explainedDocuments,
   gatePlace,
   originalParagraphs,
   PhaseGate,
@@ -148,7 +149,6 @@ const view = (p: Phase, item = null as ReturnType<typeof agendaItemOf>) =>
       links: {
         slice: (full: string) => `/projects/${PROJECT}/workspace/slices/${full}`,
         item: (id: string) => `/projects/${PROJECT}/workspace/agenda/${id}`,
-        library: `/projects/${PROJECT}/library`,
       },
       dates: D,
     }),
@@ -307,8 +307,8 @@ describe("Intent", () => {
 describe("the agenda item", () => {
   const row = (over: Partial<AgendaItem>): AgendaItem => ({
     id: "A7-m3", title: "Workspace pages on sikstack", lang: "en", note: "", state: "open", created: "2026-11-12",
-    changed: null, phases: ["P8-q4"], deferred: [], outcome: "", reason: "", sync: null, ...over,
-  });
+    changed: null, phases: ["P8-q4"], outcome: "", reason: "", sync: null, ...over,
+  }) as AgendaItem;
   const phases: Pick<PhaseRow, "id" | "short" | "status">[] = [{ id: "P8-q4", short: "P8", status: "in_progress" }];
 
   it("reads the item's state over the Workspace's phases and its mark", () => {
@@ -325,6 +325,31 @@ describe("the agenda item", () => {
   });
 });
 
+describe("Explained in", () => {
+  const doc = (id: number, title: string) => ({ id, rel_path: `guides/doc-${id}.md`, title, href: `/documents/${id}` });
+  const linked = (id: number, title: string, role: "explain" | "source") => ({ ...doc(id, title), phase: "P9-e1", role });
+
+  it("lists an explain phase's documents and a source phase's, each once, as links to the reader", () => {
+    const explain = phase({ explain: { title: "How the agenda works", documents: [doc(41, "How the agenda works")] }, explainedIn: [linked(41, "How the agenda works", "explain")] });
+    expect(explainedDocuments(explain)).toEqual([{ key: 41, title: "How the agenda works", href: "/documents/41" }]);
+    const source = phase({ explain: null, explainedIn: [linked(41, "How the agenda works", "source"), linked(42, "에이전다 읽기", "source")] });
+    const out = view(source);
+    expect(out).toContain('<h2 id="phase-doc-head">Explained in</h2>');
+    expect(out).toContain('<a class="link-strong ws-open" href="/documents/41"><span class="row-stack"><span class="ws-name-text">How the agenda works</span><span class="meta ws-sub">Library</span></span></a>');
+    expect(out).toContain('<a class="link-strong ws-open" href="/documents/42"><span class="row-stack"><span class="ws-name-text" lang="ko">에이전다 읽기</span>');
+    expect(count(out, 'class="row phase-link-row"')).toBe(2);
+    // never the project's library list
+    expect(out).not.toContain(`/projects/${PROJECT}/library`);
+  });
+
+  it("draws no panel when the phase names no document", () => {
+    for (const over of [{ explain: null }, { explain: { title: "An explain phase" } }, { explain: { title: "x", documents: [] }, explainedIn: [] }] as Partial<Phase>[]) {
+      expect(explainedDocuments(phase(over))).toEqual([]);
+      expect(view(phase(over))).not.toContain("Explained in");
+    }
+  });
+});
+
 describe("the page's reads", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -338,8 +363,8 @@ describe("the page's reads", () => {
     const workspace = {
       project: PROJECT, linked: true, version: "97", sync: { state: "fresh", at: "2026-11-18T00:58:00Z" },
       streams: [], pointer: { phase: "P8-q4", slice: "S10", next: null, waiting: [] },
-      phases: [{ id: "P8-q4", short: "P8", status: "in_progress" }], deferred: [], docs: [], retired: [],
-      agenda: [{ id: "A7-m3", title: "Workspace pages on sikstack", lang: "en", note: "", state: "open", created: "2026-11-12", changed: null, phases: ["P8-q4"], deferred: [], outcome: "", reason: "", sync: null }],
+      phases: [{ id: "P8-q4", short: "P8", status: "in_progress" }], docs: [], retired: [],
+      agenda: [{ id: "A7-m3", title: "Workspace pages on sikstack", lang: "en", note: "", state: "open", created: "2026-11-12", changed: null, phases: ["P8-q4"], outcome: "", reason: "", sync: null }],
       unplaced: [],
     } as unknown as Workspace;
     vi.stubGlobal(

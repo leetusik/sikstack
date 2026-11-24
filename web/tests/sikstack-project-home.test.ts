@@ -27,7 +27,7 @@ import type { WorkspaceRead } from "@/lib/workspace/read";
 import type { PhaseRow, Workspace } from "@/lib/workspace/types";
 
 // Project home's core rules (job 01 round 03-instrument): the Workspace panel on the project's synced
-// workspace (its five newest phases, its open jobs, the way to the Workspace) and the signed sentence
+// workspace (its five newest phases, its agenda's count linking to the Agenda, the way to the Workspace) and the signed sentence
 // with the link command for a project not linked; the Library's five newest, a refused visibility
 // change, and Not found's statuses.
 
@@ -91,7 +91,8 @@ const PHASES: PhaseRow[] = [
   phase("P64-3y", "Apply sikstack: Listen and Review", "blocked", 2, 8, "S3"),
 ];
 
-const job = (id: string, status: string) => ({ id, status });
+/** An agenda row as the read lists it; only its state counts on the panel. */
+const item = (id: string, state: string) => ({ id, state });
 
 const WORKSPACE = {
   project: PROJECT,
@@ -101,17 +102,17 @@ const WORKSPACE = {
   streams: [],
   pointer: { phase: "P67-b1", slice: "P67-b1.S5", next: null, waiting: [] },
   phases: PHASES,
-  deferred: [
-    ...Array.from({ length: 10 }, (_, i) => job(`D${290 + i}-4p`, "deferred")),
-    job("D301-dm", "ready"),
-    job("D302-4z", "ready"),
-    job("D236-ev", "promoted"),
-    job("D111-v0", "done"),
-    job("D137-x2", "dropped"),
-  ],
   docs: [],
   retired: [],
-  agenda: [],
+  agenda: [
+    item("A9-k2", "proposed"),
+    item("A8-p4", "proposed"),
+    item("A7-m3", "in_progress"),
+    ...Array.from({ length: 3 }, (_, i) => item(`A${3 + i}-x${i}`, "open")),
+    item("A2-d1", "deferred"),
+    item("A1-s0", "solved"),
+    item("A0-q9", "dropped"),
+  ],
   unplaced: [],
 } as unknown as Workspace;
 
@@ -176,10 +177,14 @@ describe("Workspace panel: the current slice by name", () => {
 describe("Workspace panel: linked and synced", () => {
   const part = workspacePart({ state: "ready", value: WORKSPACE }, PROJECT);
 
-  it("lists the five newest phases in the read's order, with the open jobs as the count", () => {
+  it("lists the five newest phases in the read's order, with the agenda's count as the head's link", () => {
     expect(part.kind).toBe("phases");
     if (part.kind !== "phases") return;
-    expect(part.deferred).toBe("12 deferred");
+    // Open and In progress together; Proposed apart; Deferred, Solved and Dropped in neither
+    expect(part.agenda).toEqual({
+      text: "4 open · 2 proposed",
+      href: `/projects/${PROJECT}/workspace`,
+    });
     expect(part.phases.map((p) => p.id)).toEqual([
       "P67",
       "P69",
@@ -193,7 +198,9 @@ describe("Workspace panel: linked and synced", () => {
 
   it("draws each phase: id, the name as a link to it, its current slice, status, count and steps", () => {
     const html = panel(part);
-    expect(html).toContain('<p class="meta">12 deferred</p>');
+    expect(html).toContain(
+      `<p class="meta"><a class="link" href="/projects/${PROJECT}/workspace">4 open · 2 proposed</a></p>`,
+    );
     expect(html).toContain(
       `href="/projects/${PROJECT}/workspace/phases/P67-b1"`,
     );

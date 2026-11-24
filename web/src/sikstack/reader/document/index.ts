@@ -4,6 +4,9 @@
 // (`@/sikstack/reader/body/body`, imported by its path). Words: `@/content/reader-document`; the sheet is
 // `styles/library/document.css` (the page adds no class of its own: the frame's and `reader.css`'s).
 export { DocumentReader, type DocumentReaderProps } from "./document-reader";
+// The way back to the phases a document was explained from (P61-e9). The page's read and its hand-over to the
+// reader (`documentPhaseRows`, `withDocumentPhases`) are server-only: import them from `./with-phases`.
+export { DocumentPhases } from "./document-phases";
 export {
   DocumentBookmarks,
   DocumentNotes,

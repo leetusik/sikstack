@@ -53,7 +53,7 @@ import "./project-home.css";
 // - the Library's rows: the org library listing (`getOrgLibrary`), this project's books and documents;
 // - Feedback: page 1 of `listFeedbackPage({project_id, limit: 5})`, and `countFeedback` over the
 //   viewer's month for `N this month` (D247-4x); either failing is the panel's failed form.
-// - Workspace: the project's Workspace (`readWorkspace`, one read: its phases and deferred jobs); for a
+// - Workspace: the project's Workspace (`readWorkspace`, one read: its phases and agenda items); for a
 //   project not linked or never synced, the link command from the request's origin (`headers()`).
 // Every date is in the viewer's zone (the `kb_tz` cookie), UTC until it is known (decision 5).
 //

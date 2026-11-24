@@ -36,14 +36,6 @@
     "gate": {"state": "not_required", "note": "Nothing a user sees changes.", "walkthrough": [], "words": null, "cleared": null},
     "review": {"verdict": "pass", "note": "Every slice holds."}, "branches": [], "agenda": null}
   ],
-  "deferred": [
-   {"id": "D20-a3", "title": "Cap the retry queue", "lang": "en", "status": "deferred", "source": "P8-q4.S1", "trigger": "the next ops pass",
-    "created": "2026-11-12", "reason": "An endless queue fills the disk.", "promotedTo": null, "dropped": null, "agenda": "A2-k5"},
-   {"id": "D19-b4", "title": "Retry failed uploads", "lang": "en", "status": "promoted", "source": "P7-m3.REVIEW", "trigger": "a user report",
-    "created": "2026-10-04", "reason": "Uploads fail on a flaky network.", "promotedTo": "P8-q4", "dropped": null, "agenda": null},
-   {"id": "D18-c6", "title": "업로드 실패 알림을 한 번만 보내기", "lang": "ko", "status": "dropped", "source": "P7-m3.S1", "trigger": "다음 알림 작업",
-    "created": "2026-10-03", "reason": "알림이 두 번 갑니다.", "promotedTo": null, "dropped": "The alert was removed.", "agenda": null}
-  ],
   "docs": [
    {"id": "product", "title": "Product", "state": "current", "version": "v2611020550", "ordinal": 2, "versioned": "2026-10-05", "from": ["P7-m3"], "stale": [],
     "versions": [{"version": "v0001", "ordinal": 1, "date": "2026-09-01", "summary": "Initial product doc"}]},
@@ -55,9 +47,11 @@
   ],
   "agenda": [
    {"id": "A2-k5", "title": "Uploads that fail", "lang": "en", "note": "Seen twice last week.", "state": "in_progress", "created": "2026-11-09",
-    "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "", "sync": null},
+    "changed": "2026-11-11", "phases": ["P8-q4"], "outcome": "", "reason": "",
+    "proposed": null, "entryCount": 0, "latest": "2026-11-11", "sync": null, "accepting": false},
    {"id": "A1-h7", "title": "검색이 느려요", "lang": "ko", "note": "", "state": "solved", "created": "2026-10-01",
-    "changed": "2026-10-20", "phases": [], "deferred": [], "outcome": "Indexed.", "reason": "", "sync": null}
+    "changed": "2026-10-20", "phases": [], "outcome": "Indexed.", "reason": "",
+    "proposed": null, "entryCount": 0, "latest": "2026-10-20", "sync": null, "accepting": false}
   ],
   "unplaced": []
  },
@@ -97,7 +91,8 @@
      {"repo": "bootstrap_agentic_workspace", "branch": "feat/retry-queue", "pr": null}
     ],
   "agenda": "A2-k5",
-  "explain": null
+  "explain": null,
+  "explainedIn": []
  },
  "slice": {
   "id": "S1", "full": "P8-q4.S1", "phase": "P8-q4", "name": "Server endpoint", "kind": "implementation", "status": "done", "risk": "low",
@@ -110,11 +105,6 @@
    "body": "## What changed\n\n- `server/retry.py`: the endpoint."
   },
   "stop": null
- },
- "job": {
-  "id": "D20-a3", "title": "Cap the retry queue", "lang": "en", "status": "deferred", "source": "P8-q4.S1", "trigger": "the next ops pass",
-  "created": "2026-11-12", "reason": "An endless queue fills the disk.", "brief": "## What\n\nCap it at 1,000 rows.\n",
-  "promotedTo": null, "dropped": null, "agenda": "A2-k5"
  },
  "doc": {
   "id": "product", "title": "Product", "state": "current", "version": "v2611020550", "ordinal": 2, "versioned": "2026-10-05", "from": ["P7-m3"], "stale": [],
@@ -131,6 +121,7 @@
  },
  "item": {
   "id": "A2-k5", "title": "Uploads that fail", "lang": "en", "note": "Seen twice last week.", "state": "in_progress", "created": "2026-11-09",
-  "changed": "2026-11-11", "phases": ["P8-q4"], "deferred": ["D20-a3"], "outcome": "", "reason": "", "sync": null
+  "changed": "2026-11-11", "phases": ["P8-q4"], "outcome": "", "reason": "",
+  "proposed": null, "entryCount": 0, "latest": "2026-11-11", "sync": null, "accepting": false, "entries": [], "deleting": false
  }
 }

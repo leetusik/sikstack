@@ -1,9 +1,9 @@
 /* sikstack — the Workspace's frame sheet (design job 02, rounds 01-workspace and 02-agenda-and-links: its frame.css,
    frame.md F35 to F51, F80, F85). Holds what every Workspace page shares and the system does not: progress, the
-   Workspace row and its four layouts, the first row of a page with the sync line, the four places, an item's title
-   row, a long fact and a link as a fact's value, an id that never breaks, a command to copy. The names the
-   Workspace shares with the product (its layout lengths, the status shapes, `.steps`, `.facts`, `.badge.is-waiting`)
-   are the system's, in ../bundle.css. Changes from the signed sheet:
+   Workspace row and its four layouts, the first row of a page with the sync line, the three places, an item's title
+   row, a long fact and a link as a fact's value, an id that never breaks, a command to copy, an author on the
+   agenda. The names the Workspace shares with the product (its layout lengths, the status shapes, `.steps`,
+   `.facts`, `.badge.is-waiting`) are the system's, in ../bundle.css. Changes from the signed sheet:
    - sections 1, 2 and the shared parts of 3, 6 and 7 are the system's (above); section 8, Markdown, is ./md.css;
    - `.page-top > .sc-host` and the `#dc-root` rule are canvas-only and not built;
    - the pages' own answers to F85 (`.dj-head`, `.slice-head`, `.phase-head`, `.docs-head`) are one `.ws-head`, and
@@ -41,8 +41,8 @@
 /* a long word in it (a constant, a path) breaks inside its line wherever the page draws it: it sits in a flex or
    grid item (a slice's sentence, a fact's value), whose least width would otherwise be that word */
 .ws-prose, .ws-prose-block { overflow-wrap: anywhere; }
-.ws-prose strong { font-weight: 600; }
-.ws-prose code { padding: 1px var(--code-pad) 1px 0; border-radius: var(--radius-xs); background: var(--bg); box-shadow: calc(-1 * var(--code-pad)) 0 0 var(--bg); font-family: var(--font-mono); font-size: var(--fs-meta); }
+.ws-prose strong, .phase-md strong, .phase-gate-text strong { font-weight: 600; }
+.ws-prose code, .phase-md code, .phase-gate-text code { padding: 1px var(--code-pad) 1px 0; border-radius: var(--radius-xs); background: var(--bg); box-shadow: calc(-1 * var(--code-pad)) 0 0 var(--bg); font-family: var(--font-mono); font-size: var(--fs-meta); }
 /* a long value's prose (`WsProseBlock`): its paragraphs and lists in one column, a line break kept as written, a
    list in the Markdown list style (./md.css) */
 .ws-prose-block { display: flex; flex-direction: column; gap: var(--space-2); white-space: normal; }
@@ -66,7 +66,7 @@
 .ws-top { display: flex; flex-wrap: wrap; align-items: center; align-self: stretch; justify-content: space-between; gap: 0 var(--space-4); min-height: var(--control-h); }
 .sync { display: flex; margin: 0; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); color: var(--ink-2); font-size: var(--fs-meta); line-height: var(--lh-meta); }
 .sync.is-behind > .status { color: var(--ink); font-weight: 500; }
-/* the four places of the Workspace: a row of links on a hairline, the current one underlined in ink */
+/* the three places of the Workspace: a row of links on a hairline, the current one underlined in ink */
 .subnav { display: flex; flex-wrap: wrap; align-self: stretch; gap: 0 var(--space-5); border-bottom: 1px solid var(--line); }
 .subnav-item { display: inline-flex; align-items: center; min-width: var(--control-h); height: var(--control-h); margin: 0 0 -1px; padding: 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ink-2); font-weight: 500; line-height: 1; text-decoration: none; cursor: pointer; }
 .subnav-item:hover { color: var(--ink); border-bottom-color: var(--line); }
@@ -93,4 +93,8 @@
 
 /* a command to copy: the system's Copy field in the mono face, 28em at most (frame.md F45) */
 .command { align-self: stretch; max-width: 28em; }
+
+/* an author on the agenda (`Author`): the name, and an agent's mark after it on the name's baseline */
+.ws-author { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.ws-author > .badge { align-self: center; }
 }

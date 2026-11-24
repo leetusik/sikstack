@@ -25,7 +25,7 @@ import { readWorkspace } from "@/lib/workspace/read";
 import { requestOrigin } from "../../model";
 
 /**
- * The docs (`Docs.dc.html`, the list; F41, F79, F82): one of the Workspace's four places. The Workspace head with
+ * The docs (`Docs.dc.html`, the list; F41, F79, F82): one of the Workspace's three places. The Workspace head with
  * Docs current, then panel **Docs** (`5 docs, 2 stale`, the table) and panel **Retired** when the workspace has
  * retired docs. One read, `GET …/workspace`. Never synced and not linked are the head's one panel alone (F40); a
  * read that failed keeps the places and the panel's head, `Docs did not load.` and **Try again**; a project that is

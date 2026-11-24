@@ -30,6 +30,18 @@ export const READER_DOCUMENT = {
     place: (pct: number) => `About ${pct}% through`,
   },
 
+  /**
+   * The way back to the phases the document was explained from (`DocumentPhases`, a member's only): the
+   * heading, then one row a phase, its name over its id and role. Unsigned: it mirrors the phase page's
+   * signed **Explained in** (P61-e9, taken as drawn).
+   */
+  phases: {
+    heading: "Explained from",
+    role: { explain: "Explain phase", source: "Source phase" },
+    /** The line under a phase's name: `P48-q4 · Explain phase`. */
+    sub: (id: string, role: string) => `${id} · ${role}`,
+  },
+
   /** The way back's word at the end and on Not found: `Back to Library`, `Back to Personal`. */
   backTo: (name: string) => `Back to ${name}`,
 

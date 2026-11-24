@@ -4,13 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FeedbackDetail } from "@/lib/feedback/types";
 
-// P65-nh.S6 — Add to agenda and the Agenda part, behind the agenda seam (job 04 round 02,
+// P65-nh.S6, P61-e9 — Add to agenda and the Agenda part, behind the agenda seam (job 04 round 02,
 // `FeedbackItemSend*`, `FeedbackItemAgenda*`; frame.md F143, F341 to F344; operator decision 2;
-// D237-we). The suite has no DOM: the confirm's native behaviour (showModal, focus moves) is checked
-// in a real browser (S10); here its rules are pure steps and its states static markup, driven by props.
+// D237-we): the seam reads `GET /app/feedback/{id}/agenda` and files through `POST …/agenda {item?}`.
+// The suite has no DOM: the confirm's native behaviour (showModal, focus moves) is checked in a real
+// browser; here its rules are pure steps and its states static markup, driven by props.
 
 const detail = vi.fn();
 const projects = vi.fn();
+const agendaRead = vi.fn();
+const workspace = vi.fn();
 
 vi.mock("@/lib/auth-guards", () => ({
   requireIdentity: async () => ({
@@ -20,6 +23,14 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 vi.mock("@/lib/feedback/app", () => ({
   getFeedbackDetail: (...args: unknown[]) => detail(...args),
+  getFeedbackAgenda: (...args: unknown[]) => agendaRead(...args),
+}));
+vi.mock("@/lib/workspace/read", () => ({
+  readWorkspace: (...args: unknown[]) => workspace(...args),
+}));
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: async () => "t",
 }));
 vi.mock("@/lib/knowledge/app", () => ({
   listProjects: (...args: unknown[]) => projects(...args),
@@ -40,23 +51,24 @@ import {
   cancel,
   focusBack,
   isLocked,
+  pickable,
   send,
   type AddPhase,
+  type AgendaPick,
   type AgendaScopeProps,
+  type PickItem,
 } from "@/sikstack/feedback/agenda";
 import { FeedbackItemBody } from "@/sikstack/feedback/item/body";
 import {
-  agendaFiling,
   agendaStatus,
-  AgendaUnavailableError,
   canAdd,
-  fileAgendaItem,
   itemTitle,
-  mintAgendaId,
   sent,
   type AgendaItem,
   type AgendaStatus,
 } from "@/lib/feedback/agenda";
+import { fileAgendaItem } from "@/lib/feedback/agenda-actions";
+import type { FeedbackAgenda } from "@/lib/feedback/types";
 
 const ID = "0b9a6a52-2a0e-4c62-9a63-4a3c3f6d2f11";
 const PROJECT = "7c1e1f7e-3f5c-4d55-8d0e-1b4b0f5f9a01";
@@ -102,19 +114,29 @@ function record(over: Partial<FeedbackDetail> = {}): FeedbackDetail {
 function item(over: Partial<AgendaItem> = {}): AgendaItem {
   return {
     id: "A13-n1",
-    project: PROJECT,
     title: "On my phone the top bar runs off the screen.",
     lang: "en",
     state: "open",
-    created: "2026-11-15",
     sync: "waiting",
     href: "/agenda/A13-n1",
     ...over,
   };
 }
 
-async function page(over: Partial<FeedbackDetail> = {}) {
+/** `GET /app/feedback/{id}/agenda`'s answer. */
+function onAgenda(
+  linked: boolean,
+  items: FeedbackAgenda["items"] = [],
+): FeedbackAgenda {
+  return { project: PROJECT, linked, items };
+}
+
+async function page(
+  over: Partial<FeedbackDetail> = {},
+  agenda: FeedbackAgenda = onAgenda(false),
+) {
   detail.mockResolvedValue(record(over));
+  agendaRead.mockResolvedValue(agenda);
   const node = await FeedbackItemBody({
     scope: null,
     feedbackId: ID,
@@ -123,12 +145,19 @@ async function page(over: Partial<FeedbackDetail> = {}) {
   return renderToStaticMarkup(node as ReactElement);
 }
 
-function headEnd(phase: AddPhase, added: AgendaItem | null = null) {
-  const props = { project: "platform", phase, item: added } as AgendaScopeProps;
+function headEnd(
+  phase: AddPhase,
+  filed: AgendaItem[] = [],
+  pick?: AgendaPick,
+  items: PickItem[] = [],
+) {
   return renderToStaticMarkup(
     createElement(
       AgendaScope,
-      props,
+      { project: "platform", phase, filed, pick, items } as Omit<
+        AgendaScopeProps,
+        "children"
+      > as AgendaScopeProps,
       createElement(AgendaHeadEnd),
       createElement(AgendaSlot),
     ),
@@ -138,11 +167,14 @@ function headEnd(phase: AddPhase, added: AgendaItem | null = null) {
 beforeEach(() => {
   detail.mockReset();
   projects.mockReset();
+  agendaRead.mockReset();
+  workspace.mockReset();
   projects.mockResolvedValue([{ id: PROJECT, name: "platform" }]);
+  workspace.mockResolvedValue({ state: "error", status: 503 });
 });
 
-describe("the seam today (decision 2)", () => {
-  it("offers the add to no record: no project, then no workspace linked", () => {
+describe("the seam (decision 2, P61-e9): GET /app/feedback/{id}/agenda", () => {
+  it("offers the add when the project's workspace is linked; else no project, then no workspace", () => {
     expect(canAdd({ project_id: null })).toEqual({
       offered: false,
       reason: "no-project",
@@ -152,33 +184,163 @@ describe("the seam today (decision 2)", () => {
       reason: "no-workspace",
       project: "platform",
     });
-    expect(sent(record({ project_id: PROJECT }))).toBeNull();
-  });
-
-  it("never files: the write throws until a store exists", async () => {
-    await expect(
-      fileAgendaItem(record({ project_id: PROJECT })),
-    ).rejects.toBeInstanceOf(AgendaUnavailableError);
-  });
-
-  it("files an Open item first, its title cut, its note the message and a link back; mints A<n>-n<k>", () => {
     expect(
-      agendaFiling({
-        id: ID,
-        message: "Line one\nLine two",
-        project_id: PROJECT,
-      }),
-    ).toEqual({
-      project: PROJECT,
-      title: "Line one",
-      lang: "en",
-      note: `Line one\nLine two\n\n/feedback/${ID}`,
-      from: ID,
-      state: "open",
-      place: "first",
+      canAdd({ project_id: PROJECT }, "platform", onAgenda(false)),
+    ).toEqual({ offered: false, reason: "no-workspace", project: "platform" });
+    expect(canAdd({ project_id: PROJECT }, "platform", onAgenda(true))).toEqual(
+      { offered: true, project: "platform" },
+    );
+    expect(canAdd({ project_id: null }, null, onAgenda(true))).toEqual({
+      offered: false,
+      reason: "no-project",
     });
-    expect(mintAgendaId(13, 0)).toBe("A13-n1");
-    expect(mintAgendaId(13, 1)).toBe("A14-n2");
+  });
+
+  it("reads every item the record is on, each linking to its page in the record's project", () => {
+    const on = onAgenda(true, [
+      {
+        id: "A10-3n",
+        title: "Export",
+        lang: "en",
+        state: "open",
+        sync: "waiting",
+      },
+      {
+        id: "A3-1z",
+        title: "Uploads",
+        lang: "en",
+        state: "proposed",
+        sync: null,
+      },
+    ]);
+    expect(sent({ project_id: PROJECT }, on)).toEqual([
+      {
+        ...on.items[0],
+        href: `/projects/${PROJECT}/workspace/agenda/A10-3n`,
+      },
+      {
+        ...on.items[1],
+        href: `/projects/${PROJECT}/workspace/agenda/A3-1z`,
+      },
+    ]);
+    expect(sent({ project_id: PROJECT }, null)).toEqual([]);
+    expect(sent({ project_id: null }, on)).toEqual([]);
+  });
+
+  it("reads the agenda route and keeps its three fields", async () => {
+    const { getFeedbackAgenda } =
+      await vi.importActual<typeof import("@/lib/feedback/app")>(
+        "@/lib/feedback/app",
+      );
+    process.env.KB_API_BASE_URL = "http://kb.test:8766";
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return new Response(
+          JSON.stringify({ project: PROJECT, linked: true, items: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+    try {
+      expect(await getFeedbackAgenda("t", ID)).toEqual(onAgenda(true));
+      expect(urls).toEqual([`http://kb.test:8766/app/feedback/${ID}/agenda`]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("files on a new item with {} and on an item with {item}, then answers every item it is on", async () => {
+    process.env.KB_API_BASE_URL = "http://kb.test:8766";
+    const posts: { url: string; method: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        posts.push({
+          url,
+          method: String(init.method),
+          body: init.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return new Response(JSON.stringify({ item: "A14-x2", entries: [] }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    agendaRead.mockResolvedValue(
+      onAgenda(true, [
+        {
+          id: "A14-x2",
+          title: "Export",
+          lang: "en",
+          state: "open",
+          sync: "waiting",
+        },
+      ]),
+    );
+    try {
+      const filed = await fileAgendaItem(ID, { kind: "new" });
+      await fileAgendaItem(ID, { kind: "item", id: "A3-1z" });
+      expect(posts).toEqual([
+        {
+          url: `http://kb.test:8766/app/feedback/${ID}/agenda`,
+          method: "POST",
+          body: {},
+        },
+        {
+          url: `http://kb.test:8766/app/feedback/${ID}/agenda`,
+          method: "POST",
+          body: { item: "A3-1z" },
+        },
+      ]);
+      expect(filed).toEqual([
+        {
+          id: "A14-x2",
+          title: "Export",
+          lang: "en",
+          state: "open",
+          sync: "waiting",
+          href: `/projects/${PROJECT}/workspace/agenda/A14-x2`,
+        },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("throws when the filing is refused (the same feedback twice on one item), so the confirm says it failed", async () => {
+    process.env.KB_API_BASE_URL = "http://kb.test:8766";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ detail: "this feedback is on A3-1z already" }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    try {
+      await expect(
+        fileAgendaItem(ID, { kind: "item", id: "A3-1z" }),
+      ).rejects.toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("leaves the web's own id minting behind: the server mints the id", async () => {
+    const seam = await import("@/lib/feedback/agenda");
+    expect("mintAgendaId" in seam).toBe(false);
+    expect("AgendaUnavailableError" in seam).toBe(false);
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(
+      new URL("../src/lib/feedback/agenda.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/no agenda store yet/i);
   });
 });
 
@@ -215,11 +377,26 @@ describe("the five statuses (F37, F301, D237-we)", () => {
     }
     const html = renderToStaticMarkup(
       createElement(AgendaPart, {
-        state: { kind: "filed", item: item({ state: "deferred", sync: null }) },
+        state: {
+          kind: "filed",
+          items: [item({ state: "deferred", sync: null })],
+        },
       }),
     );
     expect(html).toContain('<span class="status status-idle">Deferred</span>');
     expect(html).not.toContain(">Open<");
+    // an item still Proposed reads Proposed, the Agenda's own mark
+    const proposed = renderToStaticMarkup(
+      createElement(AgendaPart, {
+        state: {
+          kind: "filed",
+          items: [item({ state: "proposed", sync: null })],
+        },
+      }),
+    );
+    expect(proposed).toContain(
+      '<span class="status status-pending">Proposed</span>',
+    );
   });
 });
 
@@ -227,46 +404,129 @@ describe("the page's state (filed, else waiting, else not offered, else the add)
   const notOffered = canAdd({ project_id: null });
   const offered = { offered: true as const, project: "platform" };
 
-  it("puts an item before the offer, and a filed item before a waiting one", () => {
-    expect(agendaPageState(notOffered, item({ sync: null })).kind).toBe(
+  it("puts the items before the offer, and waiting while any of them waits", () => {
+    expect(agendaPageState(notOffered, [item({ sync: null })]).kind).toBe(
       "filed",
     );
-    expect(agendaPageState(offered, item({ sync: null })).kind).toBe("filed");
-    expect(agendaPageState(notOffered, item()).kind).toBe("waiting");
-    expect(agendaPageState(offered, item()).kind).toBe("waiting");
-    expect(agendaPageState(notOffered, null)).toEqual({
+    expect(agendaPageState(offered, [item({ sync: null })]).kind).toBe("filed");
+    expect(agendaPageState(notOffered, [item()]).kind).toBe("waiting");
+    expect(
+      agendaPageState(offered, [item({ sync: null }), item({ id: "A3-1z" })])
+        .kind,
+    ).toBe("waiting");
+    expect(agendaPageState(notOffered, [])).toEqual({
       kind: "not-offered",
       reason: "no-project",
       text: NO_PROJECT,
     });
-    expect(agendaPageState(offered, null)).toEqual({
+    expect(agendaPageState(offered, [])).toEqual({
       kind: "offered",
       project: "platform",
     });
   });
 });
 
-describe("the page today: no add, the Agenda part says why (F341)", () => {
-  it("reads a project's record as no workspace linked, a project-less one as no project", async () => {
+describe("the page: the add mounted when offered, the Agenda part says why when not (F341)", () => {
+  it("reads a project's record with no workspace linked as no workspace, a project-less one as no project", async () => {
     expect(AGENDA.noWorkspace("platform")).toBe(NO_WORKSPACE);
     expect(AGENDA.noProject).toBe(NO_PROJECT);
-    const withProject = await page({ project_id: PROJECT });
+    const withProject = await page({ project_id: PROJECT }, onAgenda(false));
     expect(withProject).toContain(`<p class="block-text">${NO_WORKSPACE}</p>`);
     expect(withProject).not.toContain(NO_PROJECT);
+    expect(withProject).not.toContain(ADD.action);
     const without = await page({ project_id: null });
     expect(without).toContain(`<p class="block-text">${NO_PROJECT}</p>`);
     expect(without).not.toContain("has no workspace linked");
+    expect(without).not.toContain(ADD.action);
+    // a record in no project reads no agenda at all
+    expect(agendaRead).toHaveBeenCalledTimes(1);
   });
 
-  it("renders no add button and no confirm for any record", async () => {
-    for (const html of [
-      await page({ project_id: PROJECT }),
-      await page({ project_id: null }),
-    ]) {
-      expect(html).not.toContain(ADD.action);
-      expect(html).not.toContain("<dialog");
-      expect(html).not.toContain('class="fi-send"');
-    }
+  it("mounts Add to agenda for a record in a linked project that is on no item yet", async () => {
+    const html = await page({ project_id: PROJECT }, onAgenda(true));
+    expect(html).toContain(
+      '<div class="fi-send"><button type="button" class="btn btn-primary">Add to agenda</button></div>',
+    );
+    expect(agendaRead).toHaveBeenCalledWith("t", ID);
+    expect(workspace).toHaveBeenCalledWith("t", PROJECT);
+  });
+
+  it("reads Added to agenda once the record is on an item, and offers no second add (as drawn)", async () => {
+    const html = await page(
+      { project_id: PROJECT },
+      onAgenda(true, [
+        {
+          id: "A10-3n",
+          title: "Export",
+          lang: "en",
+          state: "open",
+          sync: null,
+        },
+        {
+          id: "A3-1z",
+          title: "Uploads",
+          lang: "en",
+          state: "open",
+          sync: "waiting",
+        },
+      ]),
+    );
+    expect(html).toContain("Added to agenda");
+    expect(html).not.toContain(
+      '<button type="button" class="btn btn-primary">Add to agenda</button>',
+    );
+    expect(html).toContain(
+      `href="/projects/${PROJECT}/workspace/agenda/A10-3n"`,
+    );
+    expect(html).toContain(
+      `href="/projects/${PROJECT}/workspace/agenda/A3-1z"`,
+    );
+    expect(html).toContain(AGENDA.sync);
+  });
+});
+
+describe("the choice: a new item, or an item not ended (as drawn)", () => {
+  it("lists every item not ended, in the Agenda's order, less those that hold the feedback", () => {
+    const agenda = [
+      { id: "A8-sf", title: "Proposed one", lang: "en", state: "proposed" },
+      { id: "A10-3n", title: "Open one", lang: "en", state: "open" },
+      { id: "A2-k5", title: "Running", lang: "en", state: "in_progress" },
+      { id: "A4-c1", title: "Set aside", lang: "en", state: "deferred" },
+      { id: "A5-d2", title: "Done", lang: "en", state: "solved" },
+      { id: "A6-e3", title: "Gone", lang: "en", state: "dropped" },
+      { id: "A7-gg", title: "결제가 안 돼요", lang: "ko", state: "open" },
+    ];
+    expect(pickable(agenda, [{ id: "A10-3n" }]).map((i) => i.id)).toEqual([
+      "A8-sf",
+      "A2-k5",
+      "A4-c1",
+      "A7-gg",
+    ]);
+    expect(pickable(agenda, []).find((i) => i.id === "A7-gg")?.lang).toBe("ko");
+  });
+
+  it("draws A new item checked first, then each item; the sentence follows the choice", () => {
+    const items: PickItem[] = [
+      { id: "A3-1z", title: "Uploads", lang: "en" },
+      { id: "A7-gg", title: "결제가 안 돼요", lang: "ko" },
+    ];
+    const fresh = headEnd("confirm", [], undefined, items);
+    expect(fresh).toContain('<legend class="label">Add it to</legend>');
+    expect(fresh.indexOf("A new item")).toBeLessThan(fresh.indexOf("A3-1z"));
+    expect(fresh).toMatch(
+      /<input type="radio"[^>]*checked=""[^>]*\/><span>A new item<\/span>/,
+    );
+    expect(fresh).toContain(ADD.text);
+    const existing = headEnd(
+      "confirm",
+      [],
+      { kind: "item", id: "A3-1z" },
+      items,
+    );
+    expect(existing).toContain(
+      "It joins A3-1z’s thread, with this message and a link back to it. You cannot undo this from here.",
+    );
+    expect(existing).toContain('<span lang="ko">결제가 안 돼요</span>');
   });
 });
 
@@ -306,10 +566,10 @@ describe("the add's markup, every state by props", () => {
     );
   });
 
-  it("asking: the confirm's title, text, Cancel then Add to agenda", () => {
+  it("asking: the confirm's title, the choice, the text, Cancel then Add to agenda", () => {
     const html = headEnd("confirm");
-    expect(html).toContain(
-      '<dialog class="dlg" aria-label="Add this feedback to platform’s agenda?"><div class="dlg-body"><h2>Add this feedback to platform’s agenda?</h2><p>It becomes the first open item there, with this message and a link back to it. You cannot undo this from here.</p><div class="dlg-actions"><button type="button" class="btn">Cancel</button><button type="button" class="btn btn-primary"><span class="swap"><span>Add to agenda</span><span>Adding…</span></span></button></div></div></dialog>',
+    expect(html).toMatch(
+      /<dialog class="dlg" aria-label="Add this feedback to platform’s agenda\?"><div class="dlg-body"><h2>Add this feedback to platform’s agenda\?<\/h2><fieldset class="field fi-pick"><legend class="label">Add it to<\/legend><div class="fi-pick-list"><label class="check fi-pick-option"><input type="radio" name="[^"]+" checked=""\/><span>A new item<\/span><\/label><\/div><\/fieldset><p>It becomes the first open item there, with this message and a link back to it. You cannot undo this from here.<\/p><div class="dlg-actions"><button type="button" class="btn">Cancel<\/button><button type="button" class="btn btn-primary"><span class="swap"><span>Add to agenda<\/span><span>Adding…<\/span><\/span><\/button><\/div><\/div><\/dialog>/,
     );
     expect(html).not.toContain('role="alert"');
   });
@@ -324,15 +584,15 @@ describe("the add's markup, every state by props", () => {
     );
   });
 
-  it("failed: the notice with role=alert between the title and the sentence", () => {
+  it("failed: the notice with role=alert between the title and the choice", () => {
     const html = headEnd("failed");
     expect(html).toContain(
-      '</h2><p role="alert" class="notice notice-danger">Could not add this feedback to the agenda. Try again.</p><p>It becomes',
+      '</h2><p role="alert" class="notice notice-danger">Could not add this feedback to the agenda. Try again.</p><fieldset class="field fi-pick">',
     );
   });
 
   it("added: the head reads Added to agenda, a status that can take focus; the Agenda part shows the item waiting", () => {
-    const html = headEnd("added", item());
+    const html = headEnd("added", [item()]);
     expect(html).toContain(
       '<div class="fi-send"><p class="cluster baseline" role="status" tabindex="-1"><span class="strong">Added to agenda</span></p></div>',
     );
@@ -350,7 +610,7 @@ describe("the add's markup, every state by props", () => {
       createElement(AgendaPart, {
         state: {
           kind: "filed",
-          item: item({ sync: null, title: "결제가 안 돼요", lang: "ko" }),
+          items: [item({ sync: null, title: "결제가 안 돼요", lang: "ko" })],
         },
       }),
     );

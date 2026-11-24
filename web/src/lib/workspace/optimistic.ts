@@ -9,14 +9,18 @@
  *
  * - **A write marks its items Waiting for sync** and shows its result (F36's "After"): an edit's
  *   title and note, a move's place, Defer, Solve and Drop's state (with the outcome or reason),
- *   Reopen's Open at the end of the operator's order; a delete hides its items; an add is first.
+ *   Reopen's Open at the end of the operator's order; an Accept's item reads `accepting` (Open,
+ *   first in the open order); a thread entry only marks its item; a delete hides its items; an add
+ *   is first.
  * - **It stays through reads that do not project it**: a read taken before the write, or one that
  *   shows the stored values with the mark.
  * - **It clears on a read that shows it applied or refused**: refused, the read carries the
  *   engine's line itself (the row's `Change refused` mark, or `unplaced`), so the page shows it
- *   once, from the read; applied, the read's row has no mark once the change was seen waiting (or
- *   its row already shows the result); an add or a delete clears as soon as the read itself shows
- *   the row or hides it.
+ *   once, from the read; applied, the read's rows carry no mark and either already show the result
+ *   or come from a sync that landed after the change was written (`synced` past its `created`), so
+ *   a change the engine stored otherwise than it was sent clears too; an add or a delete clears as
+ *   soon as the read itself shows the row or hides it. A row's `waiting` mark is never taken as
+ *   this change seen: another member's waiting change marks the row the same way.
  * - **Never twice**: an id is shown once, an add the read already carries is not added again, and a
  *   change the read shows refused is not also shown waiting.
  * - **Discard and Try again** close the old entry here at once: its mark goes (a discarded add's row
@@ -50,7 +54,9 @@ export interface PendingChange {
   minted: string | null;
   /** The day it was made, in the viewer's zone: an item it changes reads it as `changed`. */
   day: string;
-  /** A read has shown it waiting: a later read without its mark shows it applied. */
+  /** The inbox entry's own instant (`created_at`); null while it is being sent. */
+  created: string | null;
+  /** A read named this entry waiting (`unplaced`): a later read without it shows it taken. */
   seen: boolean;
 }
 
@@ -69,10 +75,15 @@ export interface Overlay {
   next: number;
 }
 
-/** What a read gives the model: the agenda in the operator's order, and the unplaced changes. */
+/**
+ * What a read gives the model: the agenda in the operator's order, the unplaced changes, and the
+ * Workspace's sync instant (`workspace.sync.at`: it moves when a batch lands, which carries every
+ * change the engine took).
+ */
 export interface AgendaRead {
   agenda: readonly AgendaItem[];
   unplaced?: readonly Unplaced[];
+  synced?: string | null;
 }
 
 export const EMPTY_OVERLAY: Overlay = { changes: [], closed: [], next: 1 };
@@ -105,6 +116,7 @@ export function begin(
     fields: { ...change.fields },
     minted: null,
     day: todayIn(timeZone, now),
+    created: null,
     seen: false,
   };
   return {
@@ -140,6 +152,7 @@ function fromEntry(entry: InboxEntry, key: string, day: string): PendingChange {
     fields: { ...entry.fields },
     minted: entry.minted_id,
     day,
+    created: entry.created_at ?? null,
     seen: false,
   };
 }
@@ -237,6 +250,17 @@ function named(read: AgendaRead): {
 
 const ENDED = ["deferred", "solved", "dropped"];
 
+/** Whether the read comes from after a sync that landed once the change was written. */
+function landedAfter(
+  synced: string | null | undefined,
+  created: string | null,
+): boolean {
+  if (!synced || !created) return false;
+  const at = Date.parse(synced);
+  const made = Date.parse(created);
+  return Number.isFinite(at) && Number.isFinite(made) && at > made;
+}
+
 /** Whether the read's rows already show the change's result. */
 function shown(change: PendingChange, read: AgendaRead): boolean {
   const rows = read.agenda.filter((r) => change.items.includes(r.id));
@@ -252,6 +276,8 @@ function shown(change: PendingChange, read: AgendaRead): boolean {
       return all((r) => r.state === "dropped");
     case "reopen":
       return all((r) => !ENDED.includes(r.state ?? ""));
+    case "accept":
+      return all((r) => r.state !== "proposed" || r.accepting === true);
     case "edit":
       return all(
         (r) =>
@@ -303,12 +329,15 @@ export function reconcile(overlay: Overlay, read: AgendaRead): Overlay {
     }
     const rows = read.agenda.filter((r) => c.items.includes(r.id));
     if (rows.length === 0) continue; // its items are gone, and no change of them is open
+    // Marked waiting: this change, or another member's on the same item; it stays either way.
     if (rows.some((r) => r.sync === "waiting")) {
-      changes.push({ ...c, seen: true });
+      changes.push(c);
       continue;
     }
-    // No mark: taken, once it was seen waiting or its result shows; else a read from before it.
-    if (c.seen || shown(c, read)) continue;
+    // No mark: taken, once a read named it waiting, its result shows, or a sync landed after it
+    // (the engine may store it otherwise than it was sent); else a read from before it.
+    if (c.seen || shown(c, read) || landedAfter(read.synced, c.created))
+      continue;
     changes.push(c);
   }
   // A closed entry stays hidden while a read still names it (a read from before the close).
@@ -330,7 +359,6 @@ function addedRow(change: PendingChange): AgendaItem {
     created: change.day,
     changed: change.day,
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: "waiting",
@@ -405,6 +433,18 @@ export function view(
               })
             : r,
         );
+        break;
+      case "accept":
+        // Open, first in the open order (after the Proposed part), until the sync takes it.
+        rows = rows.map((r) =>
+          c.items.includes(r.id) && r.state === "proposed"
+            ? touch(r, { accepting: true })
+            : r,
+        );
+        break;
+      case "entry":
+        // A note on the thread: the item waits; the thread itself is the read's.
+        rows = rows.map((r) => (c.items.includes(r.id) ? touch(r, {}) : r));
         break;
       case "reopen": {
         // Open (In progress as its phases say: `itemState`), at the end of the operator's order.

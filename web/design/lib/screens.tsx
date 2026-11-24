@@ -17,8 +17,11 @@ import {
   deferredPageFrom,
   workspaceHrefs,
 } from "@/sikstack/workspace/agenda";
-import { AgendaItemLoading, AgendaItemPage } from "@/sikstack/workspace/agenda-item";
-import { itemLines } from "@/sikstack/workspace/agenda-item/model";
+import {
+  AgendaItemLoading,
+  AgendaItemPage,
+  itemLines,
+} from "@/sikstack/workspace/agenda-item";
 import { itemProse } from "@/sikstack/workspace/agenda-item/prose";
 import { WsItemFailed, WsNav, wsSyncLine, type WsSyncLine } from "@/sikstack/workspace/frame";
 import { agendaHref, decodeWorkspaceFrom } from "@/lib/workspace/address";
@@ -31,7 +34,7 @@ import { agendaItemBack } from "@/app/(app)/projects/[projectId]/workspace/agend
 
 import { Shell } from "@/sikstack/shell/shell";
 
-import { DATA_SETS, HEADS, type DataName } from "./answers";
+import { DATA_SETS, HEADS, ME, WAITING_NOTE, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";
 import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
 import { AGENDA_STATES, ITEM_STATES } from "./page-states";
@@ -54,11 +57,11 @@ import {
  * page lists the states production's own branches draw for it, and draws each with production's parts.
  */
 
-function useSnap() {
+export function useSnap() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-function useWorkspace() {
+export function useWorkspace() {
   return useSnap().workspace;
 }
 
@@ -68,7 +71,7 @@ function useHydrated() {
   return useSyncExternalStore(never, () => true, () => false);
 }
 
-const SHELL = RECORDING.shell;
+export const SHELL = RECORDING.shell;
 
 export function Frame({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
@@ -105,7 +108,7 @@ export function Frame({ children }: { children: ReactNode }) {
 const BLANK_LINE: WsSyncLine = { state: "fresh", text: "", cls: "", version: "" };
 
 /** What a boundary state receives: a render that threw, as Next hands it (no digest: no server drew it). */
-const THROWN: Error & { digest?: string } = new Error("design: a render that threw");
+export const THROWN: Error & { digest?: string } = new Error("design: a render that threw");
 
 function lineOf(ws: WorkspaceHead) {
   return wsSyncLine(ws.sync, ws.version, { timeZone: TIME_ZONE, now: NOW });
@@ -291,18 +294,58 @@ function endedWords(state: "solved" | "dropped"): string {
 /** The item state the store's item is in, when the widget lists it. */
 function itemImplied(item: AgendaItem | undefined): ItemState | null {
   if (!item) return "not-found";
-  if (item.sync === "waiting") return "waiting";
+  if (item.sync === "waiting" && !(item.entries ?? []).some((e) => e.sync === "waiting")) return "waiting";
+  if ((item.entries ?? []).some((e) => e.sync === "waiting")) return "note-waiting";
+  if (item.state === "proposed") return "proposed";
   const s = itemState(item);
   return s === "in_progress" ? null : s;
+}
+
+/** Made: who proposed a recorded Proposed item, for an item put in that state that has no proposal of its own. */
+function recordedProposal(): AgendaItem["proposed"] {
+  return RECORDING.workspace.agenda.find((a) => a.state === "proposed")?.proposed ?? null;
 }
 
 /** Put one item in a data state, unless it is in it already. */
 function enterItem(id: string, key: ItemState) {
   const item = getSnapshot().workspace.agenda.find((a) => a.id === id);
   if (!item || itemImplied(item) === key) return;
-  if (key === "waiting") return setItem(id, { sync: "waiting" });
+  if (key === "waiting") return setItem(id, { sync: "waiting", entries: (item.entries ?? []).filter((e) => e.sync === null) });
+  if (key === "proposed")
+    return setItem(id, {
+      state: "proposed",
+      proposed: item.proposed ?? recordedProposal(),
+      sync: null,
+      entries: (item.entries ?? []).filter((e) => e.sync === null),
+    });
+  if (key === "note-waiting") {
+    // made: the note `web-waiting` recorded waiting on A3-1z, by the design's account, last on this item's thread
+    const at = ME.indexOf(":");
+    return setItem(id, {
+      sync: "waiting",
+      entries: [
+        ...(item.entries ?? []).filter((e) => e.sync === null),
+        {
+          id: "5f0c2e7a-8d41-4c3b-9a6e-2b7d1f4c8e90",
+          kind: "note",
+          author: ME,
+          by: "person",
+          name: ME.slice(at + 1),
+          source: "web:agenda",
+          created: RECORDING.now,
+          body: WAITING_NOTE,
+          job: null,
+          sync: "waiting",
+        },
+      ],
+    });
+  }
   if (key !== "open" && key !== "deferred" && key !== "solved" && key !== "dropped") return;
-  const fields: Partial<AgendaItem> = { state: key, sync: null };
+  const fields: Partial<AgendaItem> = {
+    state: key,
+    sync: null,
+    entries: (item.entries ?? []).filter((e) => e.sync === null),
+  };
   if (key === "solved") fields.outcome = item.outcome || endedWords("solved");
   if (key === "dropped") fields.reason = item.reason || endedWords("dropped");
   setItem(id, fields);
@@ -325,7 +368,7 @@ export function AwayScreen({ path }: { path: string }) {
             title: "Not in this design",
             text: open
               ? "In sikstack this opens the build on its own host, which this design build does not have."
-              : `${path} is not part of this design build. It draws the Workspace's Agenda and its items, and Design.`,
+              : `${path} is not part of this design build. It draws the Workspace's Agenda and its items, a piece of feedback, and Design.`,
             actions: [
               open
                 ? { kind: "link", label: "Open Design", href: `/projects/${PROJECT}/design`, variant: "primary" }

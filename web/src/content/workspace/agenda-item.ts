@@ -33,7 +33,7 @@ export const AGENDA_ITEM = {
   /** The Delete confirm (F303), one item. */
   confirm: {
     title: (title: string) => `Delete “${title}”?`,
-    text: "It leaves the agenda for good, with its note. Its phases and deferred jobs stay. You cannot undo this.",
+    text: "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
     yes: "Yes, delete",
     pending: WS_ACTIONS.delete[1],
   },
@@ -43,9 +43,8 @@ export const AGENDA_ITEM = {
     text: (title: string) =>
       `“${title}” leaves the workspace at the next sync.`,
   },
-  /** The Phases panel's count and the Deferred jobs panel's (FG5): `4 phases`, `3 jobs`. */
+  /** The Phases panel's count (FG5): `4 phases`. */
   phaseCount: (n: number) => plural(n, "phase"),
-  jobCount: (n: number) => plural(n, "job"),
   /** The command that plans a phase for an item, in the Copy field (F45). */
   command: (item: string) => `/create-phase ${item}`,
   copyCommand: "Copy the command",

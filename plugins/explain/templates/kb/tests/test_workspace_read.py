@@ -170,7 +170,6 @@ def _routes(project_id: str) -> list[str]:
         f"{base}/phases/P8-q4",
         f"{base}/phases/P8",
         f"{base}/slices/P8-q4.S1",
-        f"{base}/deferred/D20-a3",
         f"{base}/docs/product",
         f"{base}/docs/product?version=v0001",
         f"{base}/agenda/A2-k5",
@@ -191,6 +190,7 @@ def test_shapes_come_back_field_for_field(store):
     sync = ws.pop("sync")
     assert sync["state"] == "fresh" and sync["at"].endswith("Z")
     assert ws == expected["workspace"]
+    assert "deferred" not in ws  # the deferred list retired
 
     head = {"version": "v99", "sync": sync}
 
@@ -202,16 +202,17 @@ def test_shapes_come_back_field_for_field(store):
     assert record(f"{base}/phases/P8-q4") == expected["phase"]
     assert record(f"{base}/phases/P8") == expected["phase"]  # by short id
     assert record(f"{base}/slices/P8-q4.S1") == expected["slice"]
-    assert record(f"{base}/deferred/D20-a3") == expected["job"]
     assert record(f"{base}/docs/product") == expected["doc"]
     assert record(f"{base}/docs/product?version=v0001") == expected["doc_v0001"]
     # the address keeps the stored id; its leading token names the same version
     assert record(f"{base}/docs/product?version=v0001_bootstrap") == expected["doc_v0001"]
     assert record(f"{base}/docs/product?version=v2611020550_the_retry_queue") == expected["doc"]
-    assert record(f"{base}/agenda/A2-k5") == expected["item"]
+    item = record(f"{base}/agenda/A2-k5")
+    assert item == expected["item"] and "deferred" not in item
 
     planned = _get(client, owner, f"{base}/phases/P9-r5")
-    assert planned["explain"] == {"title": "How export works"}
+    assert planned["explain"] == {"title": "How export works", "documents": []}
+    assert planned["explainedIn"] == []
     assert planned["notebook"] is None and planned["current"] is None
     archived = _get(client, owner, f"{base}/phases/P7-m3")
     assert archived["archived"] is True and archived["slices"][0]["full"] == "P7-m3.S1"
@@ -306,7 +307,7 @@ def test_a_renamed_slice_reads_its_new_name_at_the_new_head(store):
 
 def _item_routes(project_id: str) -> list[str]:
     base = f"/app/projects/{project_id}/workspace"
-    return [f"{base}/phases/P8-q4", f"{base}/slices/P8-q4.S1", f"{base}/deferred/D20-a3",
+    return [f"{base}/phases/P8-q4", f"{base}/slices/P8-q4.S1",
             f"{base}/docs/product", f"{base}/docs/product?version=v0001", f"{base}/agenda/A2-k5"]
 
 
@@ -494,6 +495,261 @@ def test_a_doc_version_reads_its_place_in_the_stored_history():
         {"id": "v2611171507_regression_checklist", "created_at": "2026-11-17T15:07:00+09:00"},
     ]
     assert [version_ordinals(versions)[v["id"]] for v in versions] == [1, 2, 3, 4]
+
+
+# -- Proposed, threads, the folded-job lookup and the explain links (P61-e9) ----------
+
+
+def _agenda_json(aid: str, title: str, **extra) -> str:
+    data = {"id": aid, "title": title, "note": None, "status": "open", "order": 3.0,
+            "created_at": "2026-11-20T09:00:00+09:00", "changed_at": "2026-11-20T09:00:00+09:00",
+            "outcome": None, "reason": None, **extra}
+    return json.dumps(data, indent=2) + "\n"
+
+
+def _index_with(*rows: dict) -> dict:
+    index = json.loads(_tree()["derived"]["works/index.json"])
+    index["agenda"] = [*rows, *index["agenda"]]
+    return {"path": "works/index.json", "content": json.dumps(index, indent=2) + "\n"}
+
+
+def _state_record() -> dict:
+    return {"path": "works/state.json", "content": _tree()["derived"]["works/state.json"]}
+
+
+def test_a_proposed_item_reads_proposed_apart_and_first(store):
+    client, _url, _engine = store
+    owner, project_id, key = _owner_with_key(client)
+    _store_tree(client, project_id, key)
+    base = f"/app/projects/{project_id}/workspace"
+    proposed = {"by": "agent:claude-opus-5-5", "at": "2026-11-20T09:00:00+09:00"}
+    _commit(client, project_id, key, [
+        _put("works/agenda/A3-p7/agenda.json", _agenda_json("A3-p7", "Retry storms", proposed=proposed)),
+        _put("works/agenda/A4-q8/agenda.json", _agenda_json("A4-q8", "Plain open work")),
+    ])
+
+    # neither is in index.json: the stored `proposed` key decides; a Proposed item leads,
+    # and the rest keep the engine's order, the items it does not list after
+    rows = _get(client, owner, base)["agenda"]
+    assert [(r["id"], r["state"]) for r in rows] == [
+        ("A3-p7", "proposed"), ("A2-k5", "in_progress"), ("A1-h7", "solved"), ("A4-q8", "open")]
+    assert rows[0]["proposed"] == proposed
+    assert all(r["proposed"] is None for r in rows[1:])
+    item = _get(client, owner, f"{base}/agenda/A3-p7")
+    assert item["state"] == "proposed" and item["proposed"] == proposed
+
+    # the engine's shown_status wins when index.json lists the item
+    accepted = {"id": "A3-p7", "title": "Retry storms", "status": "open", "shown_status": "Open",
+                "order": 1.0, "proposed": None, "phases": [], "phases_done": 0}
+    _commit(client, project_id, key, [], derived=[_index_with(accepted), _state_record()])
+    rows = _get(client, owner, base)["agenda"]
+    first = next(r for r in rows if r["id"] == "A3-p7")
+    assert first["state"] == "open" and first["proposed"] is None
+
+    shown = {**accepted, "id": "A4-q8", "title": "Plain open work", "shown_status": "Proposed",
+             "proposed": {"by": "agent:fold", "at": "2026-11-21T09:00:00+09:00"}}
+    _commit(client, project_id, key, [], derived=[_index_with(shown, accepted), _state_record()])
+    rows = _get(client, owner, base)["agenda"]
+    assert rows[0]["id"] == "A4-q8" and rows[0]["state"] == "proposed"
+    assert rows[0]["proposed"] == {"by": "agent:fold", "at": "2026-11-21T09:00:00+09:00"}
+    assert [r["state"] for r in rows[1:]] == ["open", "in_progress", "solved"]
+
+
+def _entry_file(aid: str, name: str, body: str, *, created: str, kind: str = "note",
+                author: str = "person:june", source: str = "web:agenda", **extra) -> dict:
+    data = {"kind": kind, "author": author, "source": source, "created_at": created,
+            "body": body, **extra}
+    return _put(f"works/agenda/{aid}/entries/{name}.json", json.dumps(data, indent=2) + "\n")
+
+
+def test_an_item_reads_its_thread_in_name_order_skipping_malformed_files(store):
+    client, _url, _engine = store
+    owner, project_id, key = _owner_with_key(client)
+    _store_tree(client, project_id, key)
+    base = f"/app/projects/{project_id}/workspace"
+    newer = "20261124T011500.000001Z-b2c3"
+    older = "20261123T001500.000001Z-a1b2"
+    _commit(client, project_id, key, [
+        _entry_file("A2-k5", newer, "Still failing on 3G.", created="2026-11-24T10:15:00+09:00",
+                    author="agent:claude-opus-5-5", source="slice:P8-q4.S1", kind="issue"),
+        _entry_file("A2-k5", older, "Seen twice.", created="2026-11-23T09:15:00+09:00"),
+        _put("works/agenda/A2-k5/entries/20261122T000000.000000Z-zz99.json", "not json\n"),
+        _put("works/agenda/A2-k5/entries/20261122T000001.000000Z-zz98.json", "[1, 2]\n"),
+        _put("works/agenda/A2-k5/entries/20261122T000002.000000Z-zz97.json", '{"kind": "note"}\n'),
+    ])
+
+    item = _get(client, owner, f"{base}/agenda/A2-k5")
+    assert item["entries"] == [
+        {"id": older, "kind": "note", "author": "person:june", "by": "person", "name": "june",
+         "source": "web:agenda", "created": "2026-11-23T09:15:00+09:00", "body": "Seen twice.",
+         "job": None, "sync": None},
+        {"id": newer, "kind": "issue", "author": "agent:claude-opus-5-5", "by": "agent",
+         "name": "claude-opus-5-5", "source": "slice:P8-q4.S1",
+         "created": "2026-11-24T10:15:00+09:00", "body": "Still failing on 3G.", "job": None,
+         "sync": None},
+    ]
+    row = next(r for r in _get(client, owner, base)["agenda"] if r["id"] == "A2-k5")
+    assert row["entryCount"] == 2 and row["latest"] == "2026-11-24"
+    assert "entries" not in row  # the list carries counts, never the thread
+    assert item["entryCount"] == 2 and item["deleting"] is False
+
+
+def test_a_folded_job_leads_to_the_item_whose_entry_carries_it(store):
+    client, _url, _engine = store
+    owner, project_id, key = _owner_with_key(client)
+    _store_tree(client, project_id, key)
+    base = f"/app/projects/{project_id}/workspace"
+    job = {"id": "D31-x9", "title": "Retry the upload queue", "source": "P8-q4",
+           "reason": "Not now.", "trigger": "When uploads fail again.",
+           "created_at": "2026-11-01T09:00:00+09:00"}
+    body = "Folded from deferred job D31-x9, created 2026-11-01T09:00:00+09:00.\nTitle: Retry"
+    _commit(client, project_id, key, [
+        _entry_file("A2-k5", "20261124T011500.000001Z-f0f0", body, kind="issue",
+                    created="2026-11-24T10:15:00+09:00", author="agent:fold",
+                    source="phase:P8-q4", job=job),
+    ])
+
+    # the lookup answers only the item, never the job's own shape
+    found = client.get(f"{base}/deferred/D31-x9", headers=_session(owner))
+    assert found.status_code == 200, found.text
+    assert found.json() == {"agenda": "A2-k5"}
+    item = _get(client, owner, f"{base}/agenda/A2-k5")
+    assert item["entries"][0]["job"] == "D31-x9"
+    assert "deferred" not in item
+
+    # a stored job no entry carries, and a job nothing names: both 404, agenda null
+    for job_id in ("D20-a3", "D77-zz"):
+        gone = client.get(f"{base}/deferred/{job_id}", headers=_session(owner))
+        assert gone.status_code == 404, (job_id, gone.text)
+        assert gone.json()["agenda"] is None and set(gone.json()) == {"detail", "agenda"}
+
+    # another account's lookup is the tenant's 404, the item never named
+    stranger = _signup(client)
+    res = client.get(f"{base}/deferred/D31-x9", headers=_session(stranger))
+    assert res.status_code == 404 and "A2-k5" not in res.text
+    assert "deferred" not in _get(client, owner, base)
+
+
+def test_the_published_section_parses_in_all_three_shapes():
+    from server.workspace_read import explain_phase_ids, published_rel_paths
+
+    rows = """# REVIEW
+
+## Published
+
+| url | rel_path | version |
+|---|---|---|
+| https://old-host.example.com/@june/kb/u10 | kb/2026-10-29-u10-end-to-end.md | 1 (id 71) |
+
+Project kb.
+"""
+    fields = """## Published
+
+| field | value |
+|---|---|
+| url | https://old-host.example.com/@june/kb/our-bar |
+| rel_path | `kb/2026-10-27-our-bar.md` |
+| id | 67 (unchanged) |
+
+## Next
+| rel_path | kb/not-published.md |
+"""
+    book = """## Published
+
+**The credential.** Never printed.
+
+| # | key | id | url | rel_path | version |
+|---|---|---|---|---|---|
+| 1 | `the-curve` | 74 | https://x/@june/kb/the-curve | kb/2026-11-12-the-curve.md | 1 |
+| 2 | `luck` | 75 | https://x/@june/kb/luck | kb/2026-11-12-luck.md | 1 |
+"""
+    assert published_rel_paths(rows) == ["kb/2026-10-29-u10-end-to-end.md"]
+    assert published_rel_paths(fields) == ["kb/2026-10-27-our-bar.md"]
+    assert published_rel_paths(book) == ["kb/2026-11-12-the-curve.md", "kb/2026-11-12-luck.md"]
+    assert published_rel_paths("## Published\n\nNothing was saved.\n") == []
+    assert published_rel_paths(None) == []
+    assert explain_phase_ids(["- unit: book", "- phases: P53-jq, P42, P58-pm"]) == [
+        "P53-jq", "P42", "P58-pm"]
+    assert explain_phase_ids(["- unit: document", "- project: kb (private)"]) == []
+
+
+def _explain_phase(pid: str, name: str, explain_lines: list[str], published: str) -> list[dict]:
+    root = f"works/phases/active/{pid}/"
+    phase = {"id": pid, "name": name, "status": "done", "created_at": "2026-11-20T09:00:00+09:00"}
+    review = {"id": f"{pid}.REVIEW", "phase_id": pid, "name": "review", "kind": "review",
+              "status": "done", "order": 9999, "completed_at": "2026-11-21T09:00:00+09:00"}
+    intent = "# Intent\n\n## Explain\n\n" + "\n".join(explain_lines) + "\n"
+    result = "# REVIEW\n\n- status: pass\n\n## Published\n\n" + published
+    return [
+        _put(root + "phase.json", json.dumps(phase, indent=2) + "\n"),
+        _put(root + "intent.md", intent),
+        _put(root + f"slices/{pid}.REVIEW/slice.json", json.dumps(review, indent=2) + "\n"),
+        _put(root + f"slices/{pid}.REVIEW/result.md", result),
+    ]
+
+
+def _seed_doc(tenant_id: str, project: str, slug: str, title: str) -> tuple[int, str]:
+    from server import db
+
+    rel_path = f"{project}/2026-11-20-{slug}.md"
+    conn = db.connect()
+    try:
+        doc_id = db.upsert_document(
+            conn, project=project, slug=slug, date="2026-11-20", title=title, tags=[],
+            source_repo=None, rel_path=rel_path, markdown="# " + title, related=[],
+            tenant_id=tenant_id,
+        )
+    finally:
+        conn.close()
+    return doc_id, rel_path
+
+
+def test_explain_links_run_both_ways_through_the_projects_own_documents(store):
+    client, _url, _engine = store
+    owner, project_id, key = _owner_with_key(client)
+    _store_tree(client, project_id, key)
+    base = f"/app/projects/{project_id}/workspace"
+    tenant, project = owner["tenant"]["id"], owner["project"]["name"]
+    doc_id, rel_path = _seed_doc(tenant, project, "the-retry-queue", "How the retry queue works")
+    other_project = client.post("/app/projects", json={"name": "elsewhere"},
+                                headers=_session(owner))
+    assert other_project.status_code == 201, other_project.text
+    _away_id, away_path = _seed_doc(tenant, "elsewhere", "elsewhere-doc", "Not this project's")
+
+    _commit(client, project_id, key, [
+        # the newer form: a phases line, a field/value table
+        *_explain_phase("P10-x1", "Explain the retry queue",
+                        ["- unit: document", "- phases: P8-q4, P99-zz", f"- project: {project} (private)"],
+                        f"| field | value |\n|---|---|\n| url | https://old-host.example.com/@x/{project}/old |\n"
+                        f"| rel_path | {rel_path} |\n"),
+        # the older form, no phases line; its path resolves to no document
+        *_explain_phase("P11-y2", "Explain nothing yet", ["- unit: document"],
+                        "| url | rel_path | version |\n|---|---|---|\n"
+                        f"| https://x | {project}/2026-11-20-missing.md | 1 |\n"),
+        # a path to another project's document: never linked
+        *_explain_phase("P12-z3", "Explain elsewhere", ["- unit: document", "- phases: P8-q4"],
+                        f"| url | rel_path | version |\n|---|---|---|\n| https://x | {away_path} | 1 |\n"),
+    ])
+
+    doc = {"id": doc_id, "rel_path": rel_path, "title": "How the retry queue works",
+           "href": f"/documents/{doc_id}"}
+    explain = _get(client, owner, f"{base}/phases/P10-x1")
+    assert explain["explain"] == {"title": "Explain the retry queue", "documents": [doc]}
+    assert explain["explainedIn"] == [{**doc, "phase": "P10-x1", "role": "explain"}]
+    source = _get(client, owner, f"{base}/phases/P8-q4")
+    assert source["explain"] is None
+    assert source["explainedIn"] == [{**doc, "phase": "P10-x1", "role": "source"}]
+    for unlinked in ("P11-y2", "P12-z3"):
+        phase = _get(client, owner, f"{base}/phases/{unlinked}")
+        assert phase["explain"]["documents"] == [] and phase["explainedIn"] == []
+
+    read = _get(client, owner, f"/app/documents/{doc_id}")
+    assert read["phases"] == [
+        {"id": "P10-x1", "name": "Explain the retry queue", "role": "explain"},
+        {"id": "P8-q4", "name": source["name"], "role": "source"},
+    ]
+    away = _get(client, owner, f"/app/documents/{_away_id}")
+    assert away["phases"] == []
 
 
 # -- the content cache: each cached text counted once (no database) ------------------

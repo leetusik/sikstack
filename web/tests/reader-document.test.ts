@@ -23,6 +23,7 @@ const app = vi.hoisted(() => ({
   getDocumentVersions: vi.fn(),
   resolveDocument: vi.fn(),
   getDocument: vi.fn(),
+  listProjects: vi.fn(),
 }));
 vi.mock("@/lib/knowledge/app", async (orig) => ({
   ...(await orig<object>()),
@@ -37,12 +38,17 @@ import {
   documentBack,
   missingDocument,
   documentMarks,
+  phaseRows,
   foldSections,
   hereMarked,
   markPlace,
   runBookmarkWire,
   type DocMark,
 } from "@/sikstack/reader/document";
+import {
+  documentPhaseRows,
+  withDocumentPhases,
+} from "@/sikstack/reader/document/with-phases";
 import { ReaderHead } from "@/sikstack/reader/reader-head";
 import {
   bookmarkWire,
@@ -649,6 +655,121 @@ describe("an earlier version at `?v=n` (a loose document)", () => {
       strictVersion: true,
     }).catch((e: unknown) => e);
     expect((out as { digest?: string }).digest ?? "").not.toMatch(/;404$/);
+  });
+});
+
+// ---- the way back to the phases (P61-e9) -------------------------------------------------------------
+
+describe("the way back to the phases the document was explained from (P61-e9)", () => {
+  const PID = "3f6c1d2e-8a4b-4c5d-9e0f-1a2b3c4d5e6f";
+  const PHASES = [
+    { id: "P50-4b", name: "Order books", role: "source" as const },
+    {
+      id: "P48-q4",
+      name: "Explain the arbitrage loop",
+      role: "explain" as const,
+    },
+    { id: "P51-3q", name: "주문 처리", role: "source" as const },
+  ];
+
+  it("lists the explain phase first, then the sources, each linking to its phase page", () => {
+    const rows = phaseRows(PHASES, PID);
+    expect(rows.map((r) => [r.key, r.sub, r.href])).toEqual([
+      [
+        "P48-q4",
+        "P48-q4 · Explain phase",
+        `/projects/${PID}/workspace/phases/P48-q4`,
+      ],
+      [
+        "P50-4b",
+        "P50-4b · Source phase",
+        `/projects/${PID}/workspace/phases/P50-4b`,
+      ],
+      [
+        "P51-3q",
+        "P51-3q · Source phase",
+        `/projects/${PID}/workspace/phases/P51-3q`,
+      ],
+    ]);
+    expect(rows[2].lang).toBe("ko");
+    expect(phaseRows([], PID)).toEqual([]);
+    expect(phaseRows(undefined, PID)).toEqual([]);
+    expect(phaseRows(PHASES, null)).toEqual([]);
+  });
+
+  it("the reader draws them under the end, and nothing for none", () => {
+    const html = inApp(
+      createElement(
+        DocumentReader,
+        { view: view(), marks: "bookmarks", phases: phaseRows(PHASES, PID) },
+        createElement("p", null, "the text"),
+      ),
+    );
+    expect(html).toContain(
+      '<h2 id="doc-phases-head" class="end-next-title">Explained from</h2>',
+    );
+    expect(html).toContain(
+      `<a class="link-strong chapter-open" href="/projects/${PID}/workspace/phases/P48-q4"><span class="row-stack"><span>Explain the arbitrage loop</span><span class="meta">P48-q4 · Explain phase</span></span></a>`,
+    );
+    const order = ["P48-q4", "P50-4b", "P51-3q"].map((id) =>
+      html.indexOf(`/workspace/phases/${id}"`),
+    );
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html.indexOf('data-end="1"')).toBeLessThan(
+      html.indexOf("doc-phases-head"),
+    );
+    const none = inApp(
+      createElement(
+        DocumentReader,
+        { view: view(), marks: "bookmarks", phases: [] },
+        createElement("p", null, "the text"),
+      ),
+    );
+    expect(none).not.toContain("Explained from");
+    expect(none).not.toContain("/workspace/phases/");
+  });
+
+  it("the page finds the project's id by the document's project, and reads nothing when no phase is named", async () => {
+    app.listProjects.mockReset();
+    app.listProjects.mockResolvedValue([
+      { id: "other", name: "vocky" },
+      { id: PID, name: "platform" },
+    ]);
+    const rows = await documentPhaseRows("tok", {
+      project: "platform",
+      phases: PHASES,
+    });
+    expect(rows[0].href).toBe(`/projects/${PID}/workspace/phases/P48-q4`);
+    expect(app.listProjects).toHaveBeenCalledWith("tok");
+    app.listProjects.mockClear();
+    expect(
+      await documentPhaseRows("tok", { project: "platform", phases: [] }),
+    ).toEqual([]);
+    expect(
+      await documentPhaseRows(undefined, {
+        project: "platform",
+        phases: PHASES,
+      }),
+    ).toEqual([]);
+    expect(app.listProjects).not.toHaveBeenCalled();
+    app.listProjects.mockRejectedValue(new ApiError(500, "down"));
+    expect(
+      await documentPhaseRows("tok", { project: "platform", phases: PHASES }),
+    ).toEqual([]);
+  });
+
+  it("hands the rows to the reader's element, and leaves another element as it was", () => {
+    const rows = phaseRows(PHASES, PID);
+    const el = renderDocument(
+      { kind: "reader", reader: loaded("md", view()) },
+      { from: null, org: "june" },
+    );
+    const out = withDocumentPhases(el, rows);
+    expect(out.type).toBe(DocumentReader);
+    expect((out.props as { phases?: unknown }).phases).toBe(rows);
+    expect(withDocumentPhases(el, [])).toBe(el);
+    const other = createElement("div");
+    expect(withDocumentPhases(other, rows)).toBe(other);
   });
 });
 

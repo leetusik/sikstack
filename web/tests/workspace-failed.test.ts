@@ -2,8 +2,8 @@ import { createElement, type ReactElement, Suspense } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// One failed state for every item page (frame.md F49, F84; F5's app error): a phase, a slice, an agenda item, a
-// deferred job and a doc that did not load all draw the back row with the sync line (the workspace answered, the
+// One failed state for every item page (frame.md F49, F84; F5's app error): a phase, a slice, an agenda item and
+// a doc that did not load all draw the back row with the sync line (the workspace answered, the
 // item's own read did not), F5's block with Try again and the item's way back, the reference when the error has a
 // digest (the route's boundary), and the item's id as the tab's title (`<id> · sikstack`). Node only: server
 // renders, the item's read mocked to fail and the Workspace's to answer.
@@ -13,7 +13,6 @@ const IDS = {
   phaseId: "P57-4q",
   sliceId: "P57-4q.S4",
   item: "A7-m3",
-  job: "D141-4r",
   doc: "architecture",
 };
 
@@ -29,7 +28,6 @@ const reads = vi.hoisted(() => ({
   readPhase: vi.fn(),
   readSlice: vi.fn(),
   readItem: vi.fn(),
-  readJob: vi.fn(),
   readDoc: vi.fn(),
 }));
 vi.mock("@/lib/workspace/read", async (orig) => ({
@@ -82,7 +80,6 @@ const PAGES: [name: string, dir: string, id: string, back: string][] = [
   ["a phase", "phases/[phaseId]", IDS.phaseId, "Back to Backlog"],
   ["a slice", "slices/[sliceId]", IDS.sliceId, "Back to P57-4q"],
   ["an agenda item", "agenda/[item]", IDS.item, "Back to Agenda"],
-  ["a deferred job", "deferred/[job]", IDS.job, "Back to Deferred"],
   ["a doc", "docs/[doc]", IDS.doc, "Back to Docs"],
 ];
 
@@ -114,7 +111,6 @@ beforeEach(() => {
       },
       phases: [],
       agenda: [],
-      deferred: [],
       docs: [],
     },
   });
@@ -122,7 +118,6 @@ beforeEach(() => {
     reads.readPhase,
     reads.readSlice,
     reads.readItem,
-    reads.readJob,
     reads.readDoc,
   ])
     read.mockResolvedValue({ state: "error", status: 503 });

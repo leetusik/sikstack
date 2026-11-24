@@ -16,12 +16,10 @@ export function SliceMissing({
   back,
   line,
   state,
-  onRetry,
 }: {
   back: WsBack;
   line: WsSyncLine | null;
   state: StateModel;
-  onRetry?: () => void;
 }) {
   return (
     <div className="column">
@@ -44,7 +42,7 @@ export function SliceMissing({
             <WsRetrySync />
           </div>
         )}
-        <StateBlock state={state} onRetry={onRetry} />
+        <StateBlock state={state} />
       </div>
     </div>
   );

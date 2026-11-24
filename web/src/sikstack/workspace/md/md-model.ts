@@ -101,3 +101,24 @@ export function mdHasOutline(
 ): boolean {
   return !!outline && sections.length >= MD_OUTLINE_MIN;
 }
+
+/**
+ * Whether an image's address stays on this site (D310): a path, never another host. An address with a scheme
+ * (`https:`, `data:`, …) or a protocol-relative one (`//host/…`) would make the reader's browser fetch from wherever
+ * it names, so it is drawn as its alt text instead.
+ */
+export function mdImageSrc(src: string | undefined): string | null {
+  if (!src) return null;
+  const s = src.trim();
+  // a scheme, or two leading slashes in any mix with backslashes (`//host`, `/\\host`), escaped or not: another host
+  let plain = s;
+  try {
+    plain = decodeURIComponent(s);
+  } catch {
+    // a malformed escape: judged as written
+  }
+  for (const form of [s, plain])
+    if (/^[a-z][a-z0-9+.-]*:/i.test(form) || /^[\\/]{2}/.test(form))
+      return null;
+  return s;
+}

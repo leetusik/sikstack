@@ -7,11 +7,13 @@
     "routes": [
       "GET /app/projects/{project}/workspace",
       "GET /app/projects/{project}/workspace/agenda/{item}",
+      "GET /app/feedback/{feedback}",
+      "GET /app/feedback/{feedback}/agenda",
       "GET /app/projects/{project}/design/builds",
       "GET /app/projects/{project}/design/builds/{build}",
       "POST /app/projects/{project}/design/builds/{build}/share (a private build's 409)"
     ],
-    "note": "project id and dates normalized; the Shell's names are fixed"
+    "note": "project id, feedback ids, the account's id, emails and dates normalized; the Shell's names are fixed"
   },
   "shell": {
     "org": {
@@ -21,17 +23,17 @@
     "project": {
       "name": "sample-product",
       "visibility": "private",
-      "created_at": "2026-11-20T08:55:16Z"
+      "created_at": "2026-11-20T09:00:00Z"
     },
     "email": "design@example.invalid"
   },
   "workspace": {
     "project": "00000000-0000-4000-8000-000000000001",
     "linked": true,
-    "version": "v1.0.0",
+    "version": "v0.3.0",
     "sync": {
       "state": "fresh",
-      "at": "2026-11-20T08:55:43Z"
+      "at": "2026-11-20T08:59:05Z"
     },
     "streams": [
       {
@@ -57,6 +59,63 @@
     "retired": [],
     "agenda": [
       {
+        "id": "A8-sf",
+        "title": "Retry a sync once after a network error",
+        "lang": "en",
+        "note": "",
+        "state": "proposed",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "proposed": {
+          "by": "agent:fold",
+          "at": "2026-11-20T08:58:20Z"
+        },
+        "entryCount": 1,
+        "latest": "2026-11-20",
+        "sync": null
+      },
+      {
+        "id": "A9-hb",
+        "title": "Show who wrote each note on an item",
+        "lang": "en",
+        "note": "Every note on an item reads the same today; a thread needs its authors.",
+        "state": "proposed",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "proposed": {
+          "by": "agent:claude-opus-5-5",
+          "at": "2026-11-20T08:58:26Z"
+        },
+        "entryCount": 0,
+        "latest": "2026-11-20",
+        "sync": null
+      },
+      {
+        "id": "A10-3n",
+        "title": "The export button says Download on my phone but Export on my laptop. Which one is it?",
+        "lang": "en",
+        "note": "",
+        "state": "open",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "",
+        "reason": "",
+        "proposed": null,
+        "entryCount": 1,
+        "latest": "2026-11-20",
+        "sync": null
+      },
+      {
         "id": "A1-5h",
         "title": "Write the onboarding checklist",
         "lang": "en",
@@ -68,6 +127,9 @@
         "deferred": [],
         "outcome": "",
         "reason": "",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
         "sync": null
       },
       {
@@ -82,6 +144,9 @@
         "deferred": [],
         "outcome": "",
         "reason": "",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
         "sync": null
       },
       {
@@ -96,6 +161,9 @@
         "deferred": [],
         "outcome": "",
         "reason": "",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
         "sync": null
       },
       {
@@ -110,6 +178,9 @@
         "deferred": [],
         "outcome": "",
         "reason": "",
+        "proposed": null,
+        "entryCount": 6,
+        "latest": "2026-11-20",
         "sync": null
       },
       {
@@ -124,20 +195,9 @@
         "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
-      },
-      {
-        "id": "A2-ry",
-        "title": "Decide the retry policy for sync",
-        "lang": "en",
-        "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
-        "state": "solved",
-        "created": "2026-11-20",
-        "changed": "2026-11-20",
-        "phases": [],
-        "deferred": [],
-        "outcome": "Three tries, a minute apart, then stop and say so",
-        "reason": "",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
         "sync": null
       },
       {
@@ -152,12 +212,142 @@
         "deferred": [],
         "outcome": "",
         "reason": "The light sidebar tested better",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
+        "sync": null
+      },
+      {
+        "id": "A2-ry",
+        "title": "Decide the retry policy for sync",
+        "lang": "en",
+        "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
+        "state": "solved",
+        "created": "2026-11-20",
+        "changed": "2026-11-20",
+        "phases": [],
+        "deferred": [],
+        "outcome": "Three tries, a minute apart, then stop and say so",
+        "reason": "",
+        "proposed": null,
+        "entryCount": 0,
+        "latest": "2026-11-20",
         "sync": null
       }
     ],
     "unplaced": []
   },
   "items": {
+    "A8-sf": {
+      "id": "A8-sf",
+      "title": "Retry a sync once after a network error",
+      "lang": "en",
+      "note": "",
+      "state": "proposed",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "proposed": {
+        "by": "agent:fold",
+        "at": "2026-11-20T08:58:20Z"
+      },
+      "entryCount": 1,
+      "latest": "2026-11-20",
+      "sync": null,
+      "entries": [
+        {
+          "id": "20261124T044134.101909Z-md2k",
+          "kind": "issue",
+          "author": "agent:fold",
+          "by": "agent",
+          "name": "fold",
+          "source": "phase:P2-m7",
+          "created": "2026-11-20T08:58:20Z",
+          "body": "Folded from deferred job D2-p8, created 2026-11-13T15:05:00+09:00.\nTitle: Retry a sync once after a network error\nSource: P2-m7\nReason: The retry policy was still open\nTrigger: Once the retry policy is decided",
+          "job": "D2-p8",
+          "sync": null
+        }
+      ],
+      "deleting": false,
+      "workspace": {
+        "version": "v0.3.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:05Z"
+        }
+      }
+    },
+    "A9-hb": {
+      "id": "A9-hb",
+      "title": "Show who wrote each note on an item",
+      "lang": "en",
+      "note": "Every note on an item reads the same today; a thread needs its authors.",
+      "state": "proposed",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "proposed": {
+        "by": "agent:claude-opus-5-5",
+        "at": "2026-11-20T08:58:26Z"
+      },
+      "entryCount": 0,
+      "latest": "2026-11-20",
+      "sync": null,
+      "entries": [],
+      "deleting": false,
+      "workspace": {
+        "version": "v0.3.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:05Z"
+        }
+      }
+    },
+    "A10-3n": {
+      "id": "A10-3n",
+      "title": "The export button says Download on my phone but Export on my laptop. Which one is it?",
+      "lang": "en",
+      "note": "",
+      "state": "open",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "",
+      "reason": "",
+      "proposed": null,
+      "entryCount": 1,
+      "latest": "2026-11-20",
+      "sync": null,
+      "entries": [
+        {
+          "id": "20261124T044219.030223Z-tn8m",
+          "kind": "feedback",
+          "author": "person:you",
+          "by": "person",
+          "name": "you",
+          "source": "feedback:00000000-0000-4000-8000-0000000000f1",
+          "created": "2026-11-20T08:59:05Z",
+          "body": "The export button says Download on my phone but Export on my laptop. Which one is it?\n\n/feedback/00000000-0000-4000-8000-0000000000f1",
+          "job": null,
+          "sync": null
+        }
+      ],
+      "deleting": false,
+      "workspace": {
+        "version": "v0.3.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:05Z"
+        }
+      }
+    },
     "A1-5h": {
       "id": "A1-5h",
       "title": "Write the onboarding checklist",
@@ -170,12 +360,17 @@
       "deferred": [],
       "outcome": "",
       "reason": "",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
       }
     },
@@ -191,12 +386,17 @@
       "deferred": [],
       "outcome": "",
       "reason": "",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
       }
     },
@@ -212,12 +412,17 @@
       "deferred": [],
       "outcome": "",
       "reason": "",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
       }
     },
@@ -233,12 +438,90 @@
       "deferred": [],
       "outcome": "",
       "reason": "",
+      "proposed": null,
+      "entryCount": 6,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [
+        {
+          "id": "20261124T044134.100983Z-cfwk",
+          "kind": "issue",
+          "author": "agent:fold",
+          "by": "agent",
+          "name": "fold",
+          "source": "slice:P2-m7.S3",
+          "created": "2026-11-20T08:58:20Z",
+          "body": "Folded from deferred job D1-k4, created 2026-11-12T10:20:00+09:00.\nTitle: The export button's label clashes with Share\nSource: P2-m7.S3\nReason: Out of scope for the toolbar slice\nTrigger: When the export flow is designed",
+          "job": "D1-k4",
+          "sync": null
+        },
+        {
+          "id": "20261124T044136.328694Z-78z1",
+          "kind": "note",
+          "author": "person:mina",
+          "by": "person",
+          "name": "mina",
+          "source": "web:agenda",
+          "created": "2026-11-20T08:58:22Z",
+          "body": "Download reads like a file save to me. Export says it leaves the app.",
+          "job": null,
+          "sync": null
+        },
+        {
+          "id": "20261124T044138.539096Z-tpz2",
+          "kind": "question",
+          "author": "agent:claude-opus-5-5",
+          "by": "agent",
+          "name": "claude-opus-5-5",
+          "source": "slice:P2-m7.S4",
+          "created": "2026-11-20T08:58:24Z",
+          "body": "On a phone the button is an icon only. Should its accessible name follow the same word?",
+          "job": null,
+          "sync": null
+        },
+        {
+          "id": "20261124T044218.981044Z-mgep",
+          "kind": "note",
+          "author": "person:you",
+          "by": "person",
+          "name": "you",
+          "source": "web:agenda",
+          "created": "2026-11-20T08:59:04Z",
+          "body": "Going with **Export**. The phone gets the same word as its accessible name.",
+          "job": null,
+          "sync": null
+        },
+        {
+          "id": "20261124T044219.051727Z-f3aw",
+          "kind": "feedback",
+          "author": "person:you",
+          "by": "person",
+          "name": "you",
+          "source": "feedback:00000000-0000-4000-8000-0000000000f2",
+          "created": "2026-11-20T08:59:05Z",
+          "body": "I could not find where to export my notes. I looked under Share first.\n\n/feedback/00000000-0000-4000-8000-0000000000f2",
+          "job": null,
+          "sync": null
+        },
+        {
+          "id": "20261124T044219.073763Z-n7d3",
+          "kind": "feedback",
+          "author": "person:you",
+          "by": "person",
+          "name": "you",
+          "source": "feedback:00000000-0000-4000-8000-0000000000f1",
+          "created": "2026-11-20T08:59:05Z",
+          "body": "The export button says Download on my phone but Export on my laptop. Which one is it?\n\n/feedback/00000000-0000-4000-8000-0000000000f1",
+          "job": null,
+          "sync": null
+        }
+      ],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
       }
     },
@@ -254,33 +537,17 @@
       "deferred": [],
       "outcome": "",
       "reason": "",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
-        }
-      }
-    },
-    "A2-ry": {
-      "id": "A2-ry",
-      "title": "Decide the retry policy for sync",
-      "lang": "en",
-      "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
-      "state": "solved",
-      "created": "2026-11-20",
-      "changed": "2026-11-20",
-      "phases": [],
-      "deferred": [],
-      "outcome": "Three tries, a minute apart, then stop and say so",
-      "reason": "",
-      "sync": null,
-      "workspace": {
-        "version": "v1.0.0",
-        "sync": {
-          "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
       }
     },
@@ -296,13 +563,186 @@
       "deferred": [],
       "outcome": "",
       "reason": "The light sidebar tested better",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
       "sync": null,
+      "entries": [],
+      "deleting": false,
       "workspace": {
-        "version": "v1.0.0",
+        "version": "v0.3.0",
         "sync": {
           "state": "fresh",
-          "at": "2026-11-20T08:55:43Z"
+          "at": "2026-11-20T08:59:05Z"
         }
+      }
+    },
+    "A2-ry": {
+      "id": "A2-ry",
+      "title": "Decide the retry policy for sync",
+      "lang": "en",
+      "note": "Today a failed sync waits for the next run. Should it retry, and how often?",
+      "state": "solved",
+      "created": "2026-11-20",
+      "changed": "2026-11-20",
+      "phases": [],
+      "deferred": [],
+      "outcome": "Three tries, a minute apart, then stop and say so",
+      "reason": "",
+      "proposed": null,
+      "entryCount": 0,
+      "latest": "2026-11-20",
+      "sync": null,
+      "entries": [],
+      "deleting": false,
+      "workspace": {
+        "version": "v0.3.0",
+        "sync": {
+          "state": "fresh",
+          "at": "2026-11-20T08:59:05Z"
+        }
+      }
+    }
+  },
+  "feedback": {
+    "00000000-0000-4000-8000-0000000000f1": {
+      "record": {
+        "id": "00000000-0000-4000-8000-0000000000f1",
+        "message": "The export button says Download on my phone but Export on my laptop. Which one is it?",
+        "source_product": "sikstack",
+        "feedback_value": null,
+        "comment": null,
+        "channel": "web",
+        "source_integration": "org-home",
+        "recorded_by": null,
+        "conversation_id": null,
+        "session_id": null,
+        "user_id": "00000000-0000-4000-8000-0000000000b1",
+        "trigger_type": null,
+        "trigger_message": null,
+        "trigger_metadata": {},
+        "target_type": null,
+        "target_id": null,
+        "target_role": null,
+        "target_text": null,
+        "event_at": null,
+        "ingested_at": "2026-11-20T08:58:48Z",
+        "tags": [],
+        "messages": [],
+        "used_context": [],
+        "source_metadata": {
+          "reply_email": "design@example.invalid"
+        },
+        "attributes": {},
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "comments": [],
+        "attachments": []
+      },
+      "agenda": {
+        "project": "00000000-0000-4000-8000-000000000001",
+        "linked": true,
+        "items": [
+          {
+            "id": "A10-3n",
+            "title": "The export button says Download on my phone but Export on my laptop. Which one is it?",
+            "lang": "en",
+            "state": "open",
+            "sync": null
+          },
+          {
+            "id": "A3-1z",
+            "title": "Pick a name for the export button",
+            "lang": "en",
+            "state": "open",
+            "sync": null
+          }
+        ]
+      }
+    },
+    "00000000-0000-4000-8000-0000000000f2": {
+      "record": {
+        "id": "00000000-0000-4000-8000-0000000000f2",
+        "message": "I could not find where to export my notes. I looked under Share first.",
+        "source_product": "sikstack",
+        "feedback_value": null,
+        "comment": null,
+        "channel": "web",
+        "source_integration": "org-home",
+        "recorded_by": null,
+        "conversation_id": null,
+        "session_id": null,
+        "user_id": "00000000-0000-4000-8000-0000000000b1",
+        "trigger_type": null,
+        "trigger_message": null,
+        "trigger_metadata": {},
+        "target_type": null,
+        "target_id": null,
+        "target_role": null,
+        "target_text": null,
+        "event_at": null,
+        "ingested_at": "2026-11-20T08:58:52Z",
+        "tags": [],
+        "messages": [],
+        "used_context": [],
+        "source_metadata": {
+          "reply_email": "design@example.invalid"
+        },
+        "attributes": {},
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "comments": [],
+        "attachments": []
+      },
+      "agenda": {
+        "project": "00000000-0000-4000-8000-000000000001",
+        "linked": true,
+        "items": [
+          {
+            "id": "A3-1z",
+            "title": "Pick a name for the export button",
+            "lang": "en",
+            "state": "open",
+            "sync": null
+          }
+        ]
+      }
+    },
+    "00000000-0000-4000-8000-0000000000f3": {
+      "record": {
+        "id": "00000000-0000-4000-8000-0000000000f3",
+        "message": "The Agenda list gets long. I would like to collapse the Solved part.",
+        "source_product": "sikstack",
+        "feedback_value": null,
+        "comment": null,
+        "channel": "web",
+        "source_integration": "org-home",
+        "recorded_by": null,
+        "conversation_id": null,
+        "session_id": null,
+        "user_id": "00000000-0000-4000-8000-0000000000b1",
+        "trigger_type": null,
+        "trigger_message": null,
+        "trigger_metadata": {},
+        "target_type": null,
+        "target_id": null,
+        "target_role": null,
+        "target_text": null,
+        "event_at": null,
+        "ingested_at": "2026-11-20T08:59:45Z",
+        "tags": [],
+        "messages": [],
+        "used_context": [],
+        "source_metadata": {
+          "reply_email": "design@example.invalid"
+        },
+        "attributes": {},
+        "project_id": "00000000-0000-4000-8000-000000000001",
+        "comments": [],
+        "attachments": []
+      },
+      "agenda": {
+        "project": "00000000-0000-4000-8000-000000000001",
+        "linked": true,
+        "items": []
       }
     }
   },

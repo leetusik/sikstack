@@ -4,11 +4,13 @@ import type { Ref } from "react";
 import { ADD, AGENDA } from "@/content/feedback-agenda";
 import { PARTS } from "@/content/feedback-frame";
 import { Status } from "@/sikstack/ui/marks";
-import { agendaStatus } from "@/lib/feedback/agenda";
+import { agendaStatus, type AgendaStatus } from "@/lib/feedback/agenda";
 import { PAGE_LANG } from "@/lib/feedback/lang";
 
+import { PROPOSED } from "@/content/workspace/agenda-thread";
+
 import { Waiting } from "../marks";
-import type { AgendaPageState } from "./model";
+import type { AgendaPageState, AgendaPartItem } from "./model";
 
 /** The Agenda part's states: what the feedback became, or why the add is not offered. */
 export type AgendaPartState = Exclude<AgendaPageState, { kind: "offered" }>;
@@ -23,6 +25,10 @@ export type AgendaPartState = Exclude<AgendaPageState, { kind: "offered" }>;
  *
  * Decided as drawn: the board's `button.link-strong.fi-item-open` (its `on-open-item`) is a link to the
  * item's own page (`item.href`), drawn in the board's classes.
+ *
+ * P61-e9: one row for each item the feedback is on, in the Agenda's order, each
+ * with its own `Waiting for sync`; the sync sentence once, under the rows, while any of them waits. An item still
+ * Proposed reads Proposed.
  */
 export function AgendaPart({ state }: { state: AgendaPartState }) {
   return (
@@ -35,37 +41,55 @@ export function AgendaPart({ state }: { state: AgendaPartState }) {
           <p className="block-text">{state.text}</p>
         </div>
       ) : (
-        <AgendaItemRow state={state} />
+        <AgendaItemRows state={state} />
       )}
     </section>
   );
 }
 
-function AgendaItemRow({
+const KNOWN: readonly string[] = [
+  "open",
+  "in_progress",
+  "deferred",
+  "solved",
+  "dropped",
+];
+
+/** The item's state in the Workspace's word and shape; Proposed in its own (the Agenda's Proposed part). */
+function ItemStatus({ state }: { state: string | null }) {
+  if (state === "proposed")
+    return <span className={PROPOSED.cls}>{PROPOSED.word}</span>;
+  const status = agendaStatus(
+    (KNOWN.includes(state ?? "") ? state : "open") as AgendaStatus,
+  );
+  return <Status state={status.shape}>{status.word}</Status>;
+}
+
+function AgendaItemRows({
   state,
 }: {
   state: Extract<AgendaPartState, { kind: "filed" | "waiting" }>;
 }) {
-  const { item } = state;
   const waiting = state.kind === "waiting";
-  const status = agendaStatus(item.state);
   return (
     <>
       <ul className="fi-items">
-        <li className="row fi-item">
-          <span className="dim">{item.id}</span>
-          <span className="fi-item-title">
-            <Link
-              className="link-strong fi-item-open"
-              href={item.href}
-              lang={item.lang !== PAGE_LANG ? item.lang : undefined}
-            >
-              {item.title}
-            </Link>
-            {waiting ? <Waiting /> : null}
-          </span>
-          <Status state={status.shape}>{status.word}</Status>
-        </li>
+        {state.items.map((item: AgendaPartItem) => (
+          <li key={item.id} className="row fi-item">
+            <span className="dim">{item.id}</span>
+            <span className="fi-item-title">
+              <Link
+                className="link-strong fi-item-open"
+                href={item.href}
+                lang={item.lang !== PAGE_LANG ? item.lang : undefined}
+              >
+                {item.title ?? item.id}
+              </Link>
+              {item.sync === "waiting" ? <Waiting /> : null}
+            </span>
+            <ItemStatus state={item.state} />
+          </li>
+        ))}
       </ul>
       {waiting ? (
         <div className="panel-body has-rule">

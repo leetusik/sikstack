@@ -40,7 +40,7 @@ export function WaitRows({ tail }: { tail: string }) {
 
 /**
  * Workspace (`ProjectHomeWorkspace.dc.html`, on the Workspace's own frame parts): `Workspace` and the
- * open jobs' count (`12 deferred`) in the head; one row a phase, at most five, newest first: the id,
+ * agenda's count (`4 open · 1 proposed`), a link to the Agenda, in the head; one row a phase, at most five, newest first: the id,
  * the name as a link to the phase with its current slice under it, the status (F37), the count and
  * the steps (F39); the foot **See all in Workspace**. Not linked or never synced: the signed sentence,
  * `No workspace linked yet. Run <link command> in the project’s repo.`, the command built from the
@@ -65,7 +65,11 @@ export function WorkspacePanel({
       <PanelHead>
         <h2>{w.heading}</h2>
         {part.kind === "phases" ? (
-          <p className="meta">{part.deferred}</p>
+          <p className="meta">
+            <Link href={part.agenda.href} className="link">
+              {part.agenda.text}
+            </Link>
+          </p>
         ) : null}
       </PanelHead>
       {part.kind === "phases" ? (

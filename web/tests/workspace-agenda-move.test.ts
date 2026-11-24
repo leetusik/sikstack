@@ -69,7 +69,6 @@ function item(
     created: "2026-10-20",
     changed,
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: null,

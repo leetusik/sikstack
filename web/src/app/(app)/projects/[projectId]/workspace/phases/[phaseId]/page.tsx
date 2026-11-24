@@ -14,7 +14,6 @@ import {
 } from "@/sikstack/workspace/phase";
 import { requireIdentity } from "@/lib/auth-guards";
 import { getProject } from "@/lib/knowledge/app";
-import { projectLibraryHref } from "@/lib/reader-href";
 import { viewerTimeZone } from "@/lib/time-zone";
 import {
   agendaItemHref,
@@ -143,7 +142,6 @@ export default async function PhasePage({
       links={{
         slice: (full) => sliceHref(projectId, full, way.list),
         item: (id) => agendaItemHref(projectId, id),
-        library: projectLibraryHref(projectId),
       }}
       dates={dates(zone)}
     />

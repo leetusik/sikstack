@@ -10,7 +10,7 @@ import {
   deferredPageFrom,
   workspaceHrefs,
 } from "@/sikstack/workspace/agenda";
-import { WsNav, wsSyncLine, type WsSyncLine } from "@/sikstack/workspace/frame";
+import { NO_LINE, WsNav, wsSyncLine } from "@/sikstack/workspace/frame";
 import { requireIdentity } from "@/lib/auth-guards";
 import { viewerTimeZone } from "@/lib/time-zone";
 import { readWorkspace } from "@/lib/workspace/read";
@@ -25,9 +25,6 @@ import { requestOrigin } from "../model";
 //
 // The tab title is the static `Workspace` (`Workspace · sikstack`): a title from the read would cost a second one.
 export const metadata: Metadata = { title: WS_HEAD.title };
-
-/** The line a failed read draws: the read gave no sync facts, so the line says nothing (no figure made up). */
-const NO_LINE: WsSyncLine = { state: "fresh", text: "", cls: "", version: "" };
 
 export default async function AgendaPage({
   params,
@@ -82,7 +79,7 @@ export default async function AgendaPage({
       />
       <AgendaList
         project={projectId}
-        read={{ agenda: ws.agenda, unplaced: ws.unplaced }}
+        read={{ agenda: ws.agenda, unplaced: ws.unplaced, synced: ws.sync.at }}
         phases={ws.phases.map((p) => ({
           id: p.id,
           short: p.short,

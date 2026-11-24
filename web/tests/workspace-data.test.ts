@@ -8,35 +8,27 @@ import {
   everyPhaseDone,
   itemEnd,
   itemState,
-  jobCounts,
   langOf,
-  openJobs,
   phaseLookup,
-  progress,
   staleNotes,
   todayIn,
   versionLabel,
 } from "@/lib/workspace/model";
 import {
   readDoc,
+  readFoldedJob,
   readItem,
-  readJob,
   readPhase,
   readSlice,
   readWorkspace,
 } from "@/lib/workspace/read";
-import type {
-  AgendaItem,
-  JobRow,
-  PhaseRow,
-  Workspace,
-} from "@/lib/workspace/types";
+import type { AgendaItem, PhaseRow, Workspace } from "@/lib/workspace/types";
 
 // The Workspace's reads and shared models. Reads go through the BFF's client with the session
 // (a stubbed fetch stands in for the API, answering the read model's own expected shapes, the
 // server suite's fixture); each read is one request and answers a state a page draws. The models
-// are what more than one page derives: an item's state and end cell, a phase's progress, the open
-// jobs, a stale doc's notes, and F2's dates in the viewer's zone.
+// are what more than one page derives: an item's state and end cell, a stale doc's notes, and F2's
+// dates in the viewer's zone.
 
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 
@@ -172,7 +164,6 @@ describe("reading the Workspace", () => {
     const records: Record<string, unknown> = {
       [`/workspace/phases/P8-q4`]: EXPECTED.phase,
       [`/workspace/slices/P8-q4.S1`]: EXPECTED.slice,
-      [`/workspace/deferred/D20-a3`]: EXPECTED.job,
       [`/workspace/docs/product?version=v0001`]: EXPECTED.doc_v0001,
       [`/workspace/agenda/A2-k5`]: EXPECTED.item,
     };
@@ -188,19 +179,40 @@ describe("reading the Workspace", () => {
     const reads = [
       await readPhase(TOKEN, PROJECT, "P8-q4"),
       await readSlice(TOKEN, PROJECT, "P8-q4.S1"),
-      await readJob(TOKEN, PROJECT, "D20-a3"),
       await readDoc(TOKEN, PROJECT, "product", "v0001"),
       await readItem(TOKEN, PROJECT, "A2-k5"),
     ];
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(4);
     for (const read of reads) {
       expect(read.state).toBe("ready");
       if (read.state === "ready") expect(read.value.workspace).toEqual(HEAD);
     }
-    const doc = reads[3];
+    const doc = reads[2];
     if (doc.state === "ready" && "ordinal" in doc.value) {
       expect(versionLabel(doc.value.ordinal)).toBe("v1");
     }
+  });
+
+  it("reads an old deferred job's address through the folded-job lookup: its item, or not found", async () => {
+    const calls = api((url) =>
+      url.endsWith("/workspace/deferred/D31-x9")
+        ? { status: 200, body: { agenda: "A2-k5" } }
+        : {
+            status: 404,
+            body: { detail: "D77-zz names no deferred job", agenda: null },
+          },
+    );
+    expect(await readFoldedJob(TOKEN, PROJECT, "D31-x9")).toEqual({
+      state: "ready",
+      value: { agenda: "A2-k5" },
+    });
+    expect(await readFoldedJob(TOKEN, PROJECT, "D77-zz")).toEqual({
+      state: "not-found",
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      `http://kb.test:8766/app/projects/${PROJECT}/workspace/deferred/D31-x9`,
+      `http://kb.test:8766/app/projects/${PROJECT}/workspace/deferred/D77-zz`,
+    ]);
   });
 
   it("escapes an id from the address into its one path segment", async () => {
@@ -236,7 +248,6 @@ function item(patch: Partial<AgendaItem>): AgendaItem {
     created: "2026-11-09",
     changed: "2026-11-11",
     phases: [],
-    deferred: [],
     outcome: "",
     reason: "",
     sync: null,
@@ -278,26 +289,17 @@ describe("an agenda item's state and end cell", () => {
     );
   });
 
-  it("says how far its phases are and its deferred jobs", () => {
+  it("says how far its phases are", () => {
     expect(
-      itemEnd(
-        item({
-          phases: ["P7-m3", "P8-q4", "P6-b2", "P5-c9"],
-          deferred: ["D20-a3", "D19-b4", "D18-c6"],
-        }),
-        lookup,
-      ).text,
-    ).toBe("2 of 4 phases done, 3 deferred jobs");
+      itemEnd(item({ phases: ["P7-m3", "P8-q4", "P6-b2", "P5-c9"] }), lookup)
+        .text,
+    ).toBe("2 of 4 phases done");
     expect(itemEnd(item({ phases: ["P7-m3"] }), lookup).text).toBe(
       "1 of 1 phase done",
-    );
-    expect(itemEnd(item({ deferred: ["D20-a3"] }), lookup).text).toBe(
-      "1 deferred job",
     );
     expect(itemEnd(item({}), lookup)).toEqual({
       phases: 0,
       done: 0,
-      jobs: 0,
       text: "",
     });
     // A phase the Workspace does not hold is not counted.
@@ -318,48 +320,7 @@ describe("an agenda item's state and end cell", () => {
   });
 });
 
-describe("a phase's progress", () => {
-  it("counts its slices and names its track", () => {
-    expect(progress({ done: 1, total: 7, status: "in_progress" })).toEqual({
-      count: "1/7",
-      label: "1 of 7 slices done, 1 in progress",
-      segs: ["is-done", "is-now", "", "", "", "", ""],
-    });
-    expect(progress({ done: 3, total: 3, status: "done" }).label).toBe(
-      "3 of 3 slices done",
-    );
-    expect(progress({ done: 0, total: 1, status: "planned" })).toEqual({
-      count: "0/1",
-      label: "0 of 1 slice done",
-      segs: [""],
-    });
-  });
-});
-
-describe("deferred jobs and docs", () => {
-  const statuses = (...s: string[]) =>
-    s.map((status) => ({ status }) as Pick<JobRow, "status">);
-
-  it("counts the open jobs (deferred or ready) and each filter", () => {
-    const jobs = statuses(
-      "deferred",
-      "ready",
-      "deferred",
-      "promoted",
-      "dropped",
-      "done",
-      "done",
-    );
-    expect(openJobs(jobs)).toBe(3);
-    expect(jobCounts(jobs)).toEqual({
-      open: 3,
-      promoted: 1,
-      dropped: 1,
-      done: 2,
-    });
-    expect(openJobs(WORKSPACE.deferred as JobRow[])).toBe(1);
-  });
-
+describe("docs", () => {
   it("says what a stale doc waits for", () => {
     expect(
       staleNotes({
