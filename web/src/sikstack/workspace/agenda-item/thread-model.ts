@@ -58,7 +58,7 @@ export function entrySource(
  * The body as the thread shows it: a piece of feedback's entry ends on the way back to it (`/feedback/<id>`, as the
  * server writes it), which the entry's kind already links, so that last line is left out.
  */
-function shownBody(e: ThreadEntry): string {
+export function shownBody(e: Pick<ThreadEntry, "body" | "source">): string {
   const ref = e.source?.startsWith("feedback:")
     ? e.source.slice("feedback:".length)
     : null;

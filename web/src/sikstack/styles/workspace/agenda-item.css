@@ -75,6 +75,9 @@
   .thread-body { max-width: var(--measure); }
   .thread-body.ws-prose { white-space: pre-line; }
   .thread-body > .ws-prose-block { white-space: normal; }
+  /* a body and the note are Markdown (`Md`): its blocks as the renderer draws them, a paragraph's lines as written */
+  .thread-body > .md-wrap, .agendaitem-long > dd > .md-wrap { white-space: normal; }
+  .thread-body .md p, .agendaitem-long .md p { white-space: pre-line; }
 
   /* the composer: the field at a line's measure, Add note on its right edge; the panel's rule spans the panel */
   .thread-compose { max-width: var(--measure); }
