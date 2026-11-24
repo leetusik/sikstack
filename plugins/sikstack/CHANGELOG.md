@@ -10,6 +10,21 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.5.0 — 2026-11-24
+
+- **The `/` menu holds only the skills a person types.** Nine stay: `do-whole-phase`, `do-next-slice`,
+  `create-phase`, `rotate-backlog`, `sik-mode`, `setup`, `sign-in`, `feedback` and `agenda`. The other seven carry
+  `user-invocable: false` and leave the menu. Six stay in the model's skill listing, so the agent runs them when
+  asked: `commit`, `pr`, `parallel-phase`, `read-code`, `executor-route` and `design-cowork`. `review-phase` also
+  keeps `disable-model-invocation: true`: it is path-only, read by the review's executor from its file, and the Skill
+  tool refuses it. A new text pin holds the class: every path-only skill is read by its path from another shipped
+  skill or agent, the session card never names one, and none offers the operator's words as a way in.
+- **A typed `/sikstack:commit` (or any of the other six) now answers "This skill can only be invoked by Claude".**
+  Ask in words instead: "commit this", "read the code", "run it in a worktree", "show the route table", "open a PR for
+  this". The lines that told a person to type one of them now say the spoken ask.
+- **The `archive-phase` skill is retired.** Nothing reached it once it left the menu. `/rotate-backlog` archives every
+  done phase; `sikstack phase archive <P>` archives one (`--all` for every active phase, when each is done).
+
 ## 0.4.0 — 2026-11-24
 
 - **The cold set lives only in sikstack while linked.** In cloud mode, archived phases (`works/phases/archived/**`),

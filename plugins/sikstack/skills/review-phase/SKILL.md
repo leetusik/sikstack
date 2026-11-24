@@ -2,6 +2,7 @@
 name: review-phase
 description: Review a completed phase against its objective and record a pass / changes_requested / blocked verdict.
 allowed-tools: Bash(sikstack:*), Read, Edit, Write, Glob, Grep, Bash
+user-invocable: false
 disable-model-invocation: true
 ---
 

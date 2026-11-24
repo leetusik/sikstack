@@ -2319,8 +2319,8 @@ def pathspec_lines(spec, repos=None) -> list:
 
 
 def _phase_scope_pathspec_only(args: argparse.Namespace) -> None:
-    """`phase scope --pathspec [<P>]`: print only the product pathspec, phase or no phase (`/read-code`
-    runs outside one). The same functions `phase scope <P>` diffs with, so the same value."""
+    """`phase scope --pathspec [<P>]`: print only the product pathspec, phase or no phase (the
+    `read-code` skill runs outside one). The same functions `phase scope <P>` diffs with, so the same value."""
     if args.base or args.head:
         raise SystemExit("phase scope --pathspec: refused -- the pathspec has no range; drop --base/--head")
     repos = nested_repos() if NESTED is not None else []
@@ -4566,7 +4566,7 @@ def _pr_check_print(pdir, data: dict, entries: list, body_arg, multi: bool, limi
 
 def _pr_check_by_hand(args: argparse.Namespace) -> int:
     """`pr check --body <file> [--base <b>] [--branch <b>] [--repo <name>]` with no phase: the pr skill's
-    by-hand route (`/pr`, a change made outside a phase). Measures the checked-out branch (or `--branch`)
+    by-hand route (asked in words, for a change made outside a phase). Measures the checked-out branch (or `--branch`)
     against `--base` (a branch, recorded as its name, as `pr branch` does), else the repo's default branch,
     and checks the body; there is no details file. Writes nothing."""
     if not args.body:

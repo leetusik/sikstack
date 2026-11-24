@@ -3,10 +3,10 @@ name: Production Deploy
 # Manual, main-only production deploy of the full knowledge site (web UI + API) to the shared Oracle box
 # (P9). knowledge runs as a Docker co-tenant behind the standalone `edge` project; the deploy SSHes into
 # the box and runs deploy/oracle-production-deploy-remote.sh, which verifies + reconciles the
-# publish-on-write clone (/opt/knowledge) and rebuilds + health-gates the three app services
-# (knowledge-api + knowledge-web + knowledge-mcp); this workflow then smokes the public site (the
-# `smoke_host` input, https://hi2vi.com by default). It installs no edge vhost: those land through the
-# edge repo, by the operator (deploy/README.md §3a).
+# publish-on-write clone (/opt/knowledge) and rebuilds + health-gates the four app services
+# (knowledge-api + knowledge-web + knowledge-mcp + knowledge-design); this workflow then smokes the
+# public site (the `smoke_host` input, https://sikstack.com by default). It installs no edge vhost:
+# those land through the edge repo, by the operator (deploy/README.md §3a).
 # Mirrors hi2vi_web's deploy-production.yml, isolated by
 # a distinct concurrency group (knowledge-deploy) and checkout path (/opt/knowledge). Never touches
 # another tenant's checkout or project. `workflow_dispatch` ONLY — the agent's constant publish-on-write pushes to `main`
@@ -17,13 +17,14 @@ on:
     inputs:
       smoke_host:
         description: >-
-          Host the external smoke runs against. hi2vi.com, except the cutover's first deploy,
-          which runs before the apex vhost lands and smokes the old host (deploy/README.md §6).
+          Host the external smoke runs against. sikstack.com; hi2vi.com is the fallback while its
+          redirect is pending or if the sikstack.com vhost has to come out (deploy/README.md §3c, §6).
+          Once hi2vi.com only redirects, its smoke fails.
         type: choice
         options:
+          - sikstack.com
           - hi2vi.com
-          - knowledge.hi2vi.com
-        default: hi2vi.com
+        default: sikstack.com
         required: true
 
 permissions:
@@ -50,8 +51,8 @@ jobs:
           fi
           # Refuse a bad smoke host before anything deploys (the smoke step checks again).
           case "${SMOKE_HOST}" in
-            hi2vi.com|knowledge.hi2vi.com) ;;
-            *) echo "smoke_host must be hi2vi.com or knowledge.hi2vi.com; got '${SMOKE_HOST}'." >&2; exit 1 ;;
+            sikstack.com|hi2vi.com) ;;
+            *) echo "smoke_host must be sikstack.com or hi2vi.com; got '${SMOKE_HOST}'." >&2; exit 1 ;;
           esac
           echo "sha=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
@@ -62,7 +63,7 @@ jobs:
     timeout-minutes: 90
     environment:
       name: production
-      url: https://hi2vi.com
+      url: https://sikstack.com
     concurrency:
       group: knowledge-deploy
       cancel-in-progress: false
@@ -102,8 +103,8 @@ jobs:
           set -euo pipefail
           # Only the two known hosts; anything else fails before a single request.
           case "${SMOKE_HOST}" in
-            hi2vi.com|knowledge.hi2vi.com) ;;
-            *) echo "smoke_host must be hi2vi.com or knowledge.hi2vi.com; got '${SMOKE_HOST}'." >&2; exit 1 ;;
+            sikstack.com|hi2vi.com) ;;
+            *) echo "smoke_host must be sikstack.com or hi2vi.com; got '${SMOKE_HOST}'." >&2; exit 1 ;;
           esac
           base="https://${SMOKE_HOST}"
           smoke_one() {
@@ -144,11 +145,11 @@ jobs:
           smoke_one "${base}/healthz"
           smoke_one "${base}/"
           smoke_mcp "${base}/mcp"
-          # Feedback's MCP endpoint is routed only by the apex vhost (deploy/hi2vi.conf); the
-          # old host's vhost predates it, so it is smoked on the apex only.
-          if [ "${SMOKE_HOST}" = "hi2vi.com" ]; then
-            smoke_mcp "${base}/feedback/mcp"
-          fi
+          # Feedback's MCP endpoint, routed by the serving apex vhost on either host: by
+          # deploy/sikstack.conf on sikstack.com, and by the old apex vhost on hi2vi.com while it
+          # still serves (before its redirect lands). The MCP server accepts both hosts
+          # (MCP_ALLOWED_HOSTS in compose.prod.yml).
+          smoke_mcp "${base}/feedback/mcp"
 
       - name: Upload deploy artifacts
         if: always()

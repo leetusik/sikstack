@@ -1,6 +1,6 @@
-# Secrets & DNS provisioning runbook — hi2vi.com
+# Secrets & DNS provisioning runbook — sikstack.com
 
-Operator runbook for the secrets + DNS that `https://hi2vi.com` needs.
+Operator runbook for the secrets + DNS that `https://sikstack.com` needs.
 This is the "**produce the credentials and register them**" half;
 [`README.md`](README.md) is the "**place them and bring the box up**" half.
 
@@ -36,7 +36,7 @@ Retrieve it only when something actually needs it:
 ssh oracle-cloud "sudo grep '^KB_API_TOKEN=' /opt/knowledge/.env"
 ```
 
-- **Cross-repo:** that exact value is what the hi2vi content agent uses as its
+- **Cross-repo:** that exact value is what the hi2vi_web content agent uses as its
   `KNOWLEDGE_API_TOKEN` (per the frozen consumer contract in the published
   `api.md`). It is the single shared secret between the two repos — hand it over a
   secure channel, and rotate both sides together (edit the box `.env`, then
@@ -125,7 +125,7 @@ secrets** on `leetusik/platform`:
 > is left completely untouched.
 
 **2b-i. Mint a dedicated, passphrase-less key** (least-privilege; a dedicated key can be
-rotated/revoked without disturbing hi2vi's deploy). Do this **on the operator's machine** — the one
+rotated/revoked without disturbing hi2vi_web's deploy). Do this **on the operator's machine** — the one
 that already has `gh` authenticated to `leetusik/platform` **and** SSH access to the box:
 
 ```bash
@@ -159,7 +159,7 @@ Or the web UI: `leetusik/platform` → **Settings** → **Secrets and variables*
 repository secret**. The driver `require_env`s the first two, so **both must exist** or the deploy dies
 before it connects; the passphrase secret may be absent.
 
-**2b-iii. Authorize the PUBLIC half on the box — append, never overwrite.** hi2vi's runner key lives on
+**2b-iii. Authorize the PUBLIC half on the box — append, never overwrite.** hi2vi_web's runner key lives on
 this same `opc` account and must survive:
 
 ```bash
@@ -172,7 +172,7 @@ ssh-copy-id -i "$tmp/knowledge_gha_runner.pub" opc@140.245.64.173
 
 > A **dedicated line** is the whole point of "dedicated": this key can later be rotated or revoked by
 > deleting **just its line** from `~opc/.ssh/authorized_keys` and rotating the `ORACLE_SSH_*` secrets —
-> hi2vi's deploy on the same account is never touched (blast-radius isolation). It is isolation, **not**
+> hi2vi_web's deploy on the same account is never touched (blast-radius isolation). It is isolation, **not**
 > command restriction: the driver `scp`s a script and then runs it, so an `authorized_keys`
 > forced-command lock isn't applicable here.
 
@@ -196,43 +196,53 @@ rm -rf "$tmp"
 
 ---
 
-## 3. Cloudflare DNS + origin TLS — **both already done, nothing to provision**
+## 3. Cloudflare DNS + origin TLS
 
-**3a. DNS — done.** The platform serves the apex `hi2vi.com`; the proxied
-`knowledge` and `vocky` records on the `hi2vi.com` zone stay, because those two hosts
-now answer with redirects to the apex (`README.md` §3). All three resolve to the same
-Cloudflare proxy IPs. Confirm any time:
+**3a. DNS.** The platform serves the apex `sikstack.com`, and each design build its own
+host `d-<build>.sikstack.com`. On the `sikstack.com` zone (Cloudflare nameservers),
+two proxied (orange-cloud) `A` records point at the box's address (the same address
+`hi2vi.com`'s `A @` record names): `@` and `*`. No `www`. SSL/TLS mode **Full
+(strict)**, as on `hi2vi.com`. Cloudflare's Universal SSL covers `*.sikstack.com` one
+label deep, which is why the design hosts are `d-<build>.sikstack.com` and not two
+labels deep. The old zone's apex and its proxied `knowledge` and `vocky` records stay:
+those hosts answer with redirects to `sikstack.com` (`README.md` §3). Confirm any time:
 
 ```bash
-dig +short hi2vi.com knowledge.hi2vi.com vocky.hi2vi.com   # Cloudflare proxy IPs, all the same
+dig +short sikstack.com d-bexampleexampleexampleexam.sikstack.com   # Cloudflare proxy IPs
+dig +short hi2vi.com knowledge.hi2vi.com vocky.hi2vi.com           # Cloudflare proxy IPs
 ```
 
-**3b. Origin cert — already covered.** The edge's Cloudflare Origin CA cert at
-`/home/opc/edge/certs/hi2vi.crt` carries SANs **`DNS:*.hi2vi.com, DNS:hi2vi.com`**
-(valid to 2041): the apex SAN covers `hi2vi.com` and the wildcard covers
-`knowledge.hi2vi.com` and `vocky.hi2vi.com`. All three vhosts (`deploy/hi2vi.conf`,
-`deploy/knowledge.conf`, `deploy/vocky.conf`) point straight at it. **No cert to
-issue, no per-host variant, no edge cert step.** Verified with:
+**3b. Origin cert — one new pair.** SSL/TLS → Origin Server → Create Certificate:
+"Generate private key and CSR with Cloudflare", RSA (2048), hostnames exactly
+`sikstack.com` and `*.sikstack.com`, 15 years. Save the certificate as
+`sikstack.com.crt` and the key as `sikstack.com.key` (shown once) in a folder outside
+every repo, mode 600. On the box they live at `/home/opc/sikstack_tls/` (key `600`,
+`opc:opc`, copied with `scp`, never printed), and the edge repo's `stage.sh` stages them
+as `/home/opc/edge/certs/sikstack.{crt,key}`, which `deploy/sikstack.conf` and
+`deploy/sikstack-design.conf` name (the edge repo's `validate.sh` lists `sikstack` in
+`CERT_NAMES`). Verify:
 
 ```bash
-ssh oracle-cloud "openssl x509 -in /home/opc/edge/certs/hi2vi.crt -noout -text \
+ssh oracle-cloud "openssl x509 -in /home/opc/edge/certs/sikstack.crt -noout -text \
   | grep -A1 'Subject Alternative Name'"
-# confirmed: DNS:*.hi2vi.com, DNS:hi2vi.com   -> the apex and both redirect hosts are covered
+# expect: DNS:sikstack.com, DNS:*.sikstack.com
 ```
 
-> If that cert is ever replaced by a per-host (non-wildcard) one, this assumption
-> breaks for the two redirect hosts: issue Origin CA certs for them, drop them under
-> `/home/opc/edge/certs/`, and repoint the `ssl_certificate*` lines in
-> `deploy/knowledge.conf` and `deploy/vocky.conf` (and add the new basenames to the
-> edge repo's `validate.sh` and `stage.sh`). (Cloudflare's public-facing TLS is
-> handled by the proxied records either way; this is only the **origin** cert nginx
-> serves to Cloudflare.)
+The old pair `/home/opc/edge/certs/hi2vi.{crt,key}` (SANs `DNS:*.hi2vi.com,
+DNS:hi2vi.com`, valid to 2041) stays for the three redirect hosts (`deploy/hi2vi.conf`,
+`deploy/knowledge.conf`, `deploy/vocky.conf`).
+
+**3c. Members sign in once.** The app's session and org cookies carry the `__Host-`
+prefix, so they belong to exactly one host. A session made on `hi2vi.com` is not sent
+to `sikstack.com`: after the move every member signs in once more on `sikstack.com`.
+The accounts, projects and keys are the same (one database), so nothing else changes,
+and a key minted before the move keeps working.
 
 ---
 
 ## 4. Optional `GOOGLE_API_KEY` — Gemini for hybrid search
 
-Recommended at launch. hi2vi's read/search use case (topic dedup, research
+Recommended at launch. The library's read/search use case (topic dedup, research
 grounding) is exactly what hybrid semantic search improves, and it is **one env var
 with graceful degradation**: absent or quota-limited → search silently falls back to
 BM25-only (`mode:"bm25"`), **zero code change** either way.
@@ -250,10 +260,10 @@ The api sends three mails, all best-effort and all from one sender:
 - **Feedback's owner alert**: when a Feedback event is captured, the project owner gets a
   mail after the response.
 - **The waitlist mail**: with the waitlist on (§4c), a new sign-up gets "You're on the
-  hi2vi waitlist" after the response.
-- **The approval mail**: approving a waitlisted account (§4c) sends it "Your hi2vi account
-  is open", with a sign-in link built from `KB_PUBLIC_BASE_URL` (`https://hi2vi.com`,
-  already set in `compose.prod.yml`) + `/login`.
+  sikstack waitlist" after the response.
+- **The approval mail**: approving a waitlisted account (§4c) sends it "Your sikstack
+  account is open", with a sign-in link built from `KB_PUBLIC_BASE_URL` (`https://sikstack.com`, already
+  set in `compose.prod.yml`) + `/login`.
 
 All three read the same five names from the box's `.env` (through the api's `env_file:`):
 
@@ -267,15 +277,22 @@ All three read the same five names from the box's `.env` (through the api's `env
 
 - Optional: with no host, or no sender (neither `KB_SMTP_FROM` nor `KB_SMTP_USER`), no
   mail goes out and everything else works unchanged (capture, sign-up, approval).
-- At hi2vi.com the sender is the **hi@hi2vi.com** mailbox: `KB_SMTP_FROM=hi@hi2vi.com`,
-  and the login is that mailbox (its provider refuses a sender that does not match the
-  login). Because the three mails share the sender, setting hi@hi2vi.com also moves
-  Feedback's owner alert to hi@hi2vi.com, away from any account the box used before.
+- At sikstack.com the sender is **`info@sikstack.com`, sent through Resend**:
+  `KB_SMTP_HOST=smtp.resend.com`, `KB_SMTP_PORT=587` (STARTTLS), `KB_SMTP_USER=resend`,
+  `KB_SMTP_PASSWORD=<a Resend API key with "Sending access" for the sikstack.com domain>`,
+  `KB_SMTP_FROM=info@sikstack.com`. It needs the `sikstack.com` domain verified in Resend
+  (its DKIM `TXT resend._domainkey` and the `MX` + SPF `TXT` on its `send` subdomain, DNS
+  only, grey cloud). Mail *to* `info@sikstack.com` arrives through Cloudflare Email
+  Routing (its MX and SPF on the apex, a custom address forwarding to the operator's
+  inbox); those records do not clash with Resend's. Resend's SMTP page gives that host,
+  port and user, with the API key as the password. This is the only production sender:
+  until Resend verifies the domain, no mail goes out (leave `KB_SMTP_HOST` unset).
 - Placement: the five lines go into `/opt/knowledge/.env` on the box, the password never
   shown on a screen, pasted into a chat or committed. Set them over ssh from the
   operator's machine with a script that reads each value by name from the operator's
-  local git-ignored `.env` and writes it into the box's file without printing it, or with
-  an editor on the box (`sudo vi`). Verify by name only
+  local git-ignored `.env` and writes it into the box's file without printing it (ending
+  the file in a newline first, as §4f's command does), or with an editor on the box
+  (`sudo vi`). Verify by name only
   (`grep -c '^KB_SMTP_PASSWORD=' /opt/knowledge/.env` prints `1`, never the value). Then
   recreate the api (`docker compose -f compose.prod.yml up -d --force-recreate --no-deps
   api`, or the next Production Deploy, which force-recreates it).
@@ -287,7 +304,7 @@ Not a secret, but it lives in the box's `.env` next to the mail settings
 
 - **Off by default.** With the line absent (or anything but `1`, `true`, `yes`, `on`), a
   sign-up gets an account and a session at once, so a self-hosted install behaves as it
-  always did. **On at hi2vi.com.**
+  always did. **On at sikstack.com.**
 - With it on, a new sign-up is created on the waitlist: it gets no session, sees the
   waitlist screen and, with `KB_SMTP_*` set, the waitlist mail. Signing in with the right
   password shows the same waitlist screen until the account is approved. Accounts that
@@ -311,37 +328,78 @@ Not a secret, but it lives in the box's `.env` next to the mail settings
   hand. Turning the switch on or off later needs only the `.env` line and an api
   recreate (as in §4b).
 
-### 4d. Optional `HI2VI_FEEDBACK_CAPTURE_KEY` — hi2vi's own Send feedback control
+### 4d. Optional `SIKSTACK_FEEDBACK_CAPTURE_KEY` — sikstack's own Send feedback control
 
-**What it is.** The key the web container posts hi2vi's own feedback with: the "Send
+**What it is.** The key the web container posts sikstack's own feedback with: the "Send
 feedback" link in the landing's footer and the button on org home. It is a Feedback
-key (`vk_…`) **bound to one project**, the `hi2vi` project in the operator's org, with
-the **`capture` scope only**: it can add a feedback item to that project and nothing
-else (no reads, no other project, no documents). Each message it captures mails the
-org's owner through §4b's sender.
+key (`vk_…`) **bound to one project**, the `sikstack` project in the operator's org,
+with the **`capture` scope only**: it can add a feedback item to that project and
+nothing else (no reads, no other project, no documents). Each message it captures mails
+the org's owner through §4b's sender.
 
-- **Who mints it:** the operator, signed in to hi2vi.com in their own org, after the
-  phase that ships the control is accepted (`README.md` §7 has the steps). Never minted
-  on a laptop's local stack and copied up: a local key does not exist in production.
+- **Who mints it:** the operator, signed in to the hosted app in their own org
+  (`README.md` §7 has the steps). Never minted on a laptop's local stack and copied up: a
+  local key does not exist in production.
 - **Optional.** Unset or blank: the control is not shown on either page, which is also
   how a self-hosted install runs. Nothing else depends on it.
 - **Server-only.** Not `NEXT_PUBLIC_`: only the Next.js server reads it, the browser
   never sees it. `compose.prod.yml` passes it to `knowledge-web` from the box's `.env`
-  (`${HI2VI_FEEDBACK_CAPTURE_KEY:-}`). The api's `env_file: .env` loads the same file,
+  (`${SIKSTACK_FEEDBACK_CAPTURE_KEY:-}`). The api's `env_file: .env` loads the same file,
   so the value also sits in `knowledge-api`'s environment, as `SESSION_SECRET` does;
   the api never reads it (it stores only the key's hash).
-- **Placement:** one line, `HI2VI_FEEDBACK_CAPTURE_KEY=<key>`, in `/opt/knowledge/.env`,
-  set the way §4b sets its password: never shown on a screen, pasted into a chat or
-  committed. The key is shown once, when it is minted. Verify by name only
-  (`grep -c '^HI2VI_FEEDBACK_CAPTURE_KEY=' /opt/knowledge/.env` prints `1`).
+- **The old names.** The web reads `HI2VI_FEEDBACK_<name>` when `SIKSTACK_FEEDBACK_<name>`
+  is unset, but `compose.prod.yml` passes only the new names to the container, so in
+  production only `SIKSTACK_FEEDBACK_*` lines in `.env` count.
+- **Placement:** one line, `SIKSTACK_FEEDBACK_CAPTURE_KEY=<key>`, in
+  `/opt/knowledge/.env`, set the way §4b sets its password: never shown on a screen,
+  pasted into a chat or committed. The key is shown once, when it is minted. Verify by
+  name only (`grep -c '^SIKSTACK_FEEDBACK_CAPTURE_KEY=' /opt/knowledge/.env` prints `1`).
 - **Rotate or revoke:** mint a new key for the project, replace the line, recreate the
   web container, then revoke the old key on the project's keys page. Revoking without a
   replacement makes every send fail (the control then says it could not send).
-- **The six numbers** (not secrets, optional, the same `.env`): `HI2VI_FEEDBACK_MAX_CHARS`
-  (2000), `HI2VI_FEEDBACK_IP_LIMIT` (5) per `HI2VI_FEEDBACK_IP_WINDOW_S` (600),
-  `HI2VI_FEEDBACK_ACCOUNT_LIMIT` (10) per `HI2VI_FEEDBACK_ACCOUNT_WINDOW_S` (600) and
-  `HI2VI_FEEDBACK_DAILY_CEILING` (200). Unset, blank or not a positive integer: the
-  default in brackets.
+- **The six numbers** (not secrets, optional, the same `.env`):
+  `SIKSTACK_FEEDBACK_MAX_CHARS` (2000), `SIKSTACK_FEEDBACK_IP_LIMIT` (5) per
+  `SIKSTACK_FEEDBACK_IP_WINDOW_S` (600), `SIKSTACK_FEEDBACK_ACCOUNT_LIMIT` (10) per
+  `SIKSTACK_FEEDBACK_ACCOUNT_WINDOW_S` (600) and `SIKSTACK_FEEDBACK_DAILY_CEILING` (200).
+  Unset, blank or not a positive integer: the default in brackets.
+
+### 4e. `KB_INSTALL_FEEDBACK_PROJECT_ID` — where `/sikstack:feedback` lands
+
+**Not a secret.** The id of the same `sikstack` project (§4d): an install's
+`/sikstack:feedback` report is captured into it, tagged with the install. Unset or
+blank, the route is dormant and answers 404, so the plugin's feedback command fails in
+production. The operator reads the id from the project's page and it may be pasted in
+chat. Placement: one line in `/opt/knowledge/.env`,
+`KB_INSTALL_FEEDBACK_PROJECT_ID=<project id>`; `compose.prod.yml` passes it to the api.
+Optional beside it: `KB_INSTALL_FEEDBACK_RATE_LIMIT` (reports per install per install
+window, default 5; `0` or less turns the per-install limit off). Then recreate the api.
+
+### 4f. `KB_DESIGN_ORIGIN` and `KB_DESIGN_SECRET` — the design origin
+
+- **`KB_DESIGN_ORIGIN`** (not a secret): `https://d-{build}.sikstack.com`, the literal
+  `{build}` where a build's id goes. The api (a build's address, its tickets), the web
+  (the viewer's frame policy) and `knowledge-design` (which host is which build) all
+  read it. Blank: builds are stored and listed but open nowhere.
+- **`KB_DESIGN_SECRET`** (the secret): signs the one-minute tickets the api mints and
+  the cookies `knowledge-design` sets; the api and `knowledge-design` must hold the same
+  value, and the web never reads it. **Generated in place on the box**, never shown:
+
+  ```bash
+  ssh oracle-cloud 'set -e; cd /opt/knowledge; umask 077
+    cp -p .env "$HOME/knowledge.env.bak.$(date +%Y%m%d%H%M%S)"
+    grep -q "^KB_DESIGN_SECRET=" .env || { [ -z "$(tail -c 1 .env)" ] || echo >> .env
+      printf "KB_DESIGN_SECRET=%s\n" "$(openssl rand -hex 32)" >> .env; }
+    grep -c "^KB_DESIGN_SECRET=" .env'
+  # expect: 1 (the count only, never the value)
+  ```
+
+  The `tail -c 1` test ends the file in a newline before the append, so a `.env` whose
+  last line has none keeps that line whole instead of gaining the new name on its end.
+  Any other line appended to `.env` goes the same way.
+
+  Rotating it signs every open design tab out of its build (they reopen from the
+  viewer). Then recreate the api and `knowledge-design` (the next Production Deploy
+  does both).
 
 ---
 
@@ -351,29 +409,33 @@ org's owner through §4b's sender.
       `/opt/knowledge-secrets/knowledge_deploy_key` (ed25519, no passphrase, chmod
       600); **public** half registered on `leetusik/platform` **with write access**.
 - [ ] **GHA runner key** (§2b) minted (dedicated, ed25519), `.pub` appended to
-      `~opc/.ssh/authorized_keys` (hi2vi's key left intact), and the three
+      `~opc/.ssh/authorized_keys` (hi2vi_web's key left intact), and the three
       `ORACLE_SSH_*` secrets set on `leetusik/platform` — gates the automated
       **Production Deploy** action (P9), not the initial hand bring-up.
 - [ ] **`KB_API_TOKEN`** — will be generated in place at `README.md` §1c (nothing to
-      do in advance); afterwards, hand the value to the hi2vi side as
+      do in advance); afterwards, hand the value to the hi2vi_web content agent as
       `KNOWLEDGE_API_TOKEN`.
 - [ ] **Box clone origin** set to the SSH form `git@github.com:leetusik/platform.git`
       (`README.md` §1a).
-- [ ] **Cloudflare apex, `knowledge` and `vocky` records** — ✅ already live, proxied.
-- [ ] **Origin cert coverage** — ✅ already covered by the `*.hi2vi.com` wildcard
-      (`hi2vi.crt`); nothing to issue.
+- [ ] **Cloudflare `sikstack.com` zone** (§3a): proxied `A @` and `A *` to the box,
+      Full (strict); the old zone's records left as they are.
+- [ ] **Origin cert** (§3b): the `sikstack.com` + `*.sikstack.com` pair on the box at
+      `/home/opc/sikstack_tls/`, staged by the edge repo as `certs/sikstack.{crt,key}`.
 - [ ] **`GOOGLE_API_KEY`** obtained (recommended) — or a deliberate BM25-only launch.
-- [ ] **`KB_SMTP_*`** (§4b, optional) set in `/opt/knowledge/.env` for the
-      hi@hi2vi.com mailbox (`KB_SMTP_FROM=hi@hi2vi.com`), values never printed — or a
-      deliberate launch with no outgoing mail (no Feedback alert, no waitlist mails).
-- [ ] **`KB_SIGNUP_WAITLIST=on`** (§4c) in `/opt/knowledge/.env` for hi2vi.com — or a
-      deliberate open sign-up.
-- [ ] **`HI2VI_FEEDBACK_CAPTURE_KEY`** (§4d, optional) — minted by the operator on
-      hi2vi.com for the `hi2vi` project (Capture only) and set in `/opt/knowledge/.env`
-      after the control ships (`README.md` §7), value never printed — or left unset, and
-      the control stays hidden.
+- [ ] **`KB_SMTP_*`** (§4b, optional) set in `/opt/knowledge/.env` for
+      `info@sikstack.com` over Resend, values never printed — or a deliberate launch with no
+      outgoing mail (no Feedback alert, no waitlist mails).
+- [ ] **`KB_SIGNUP_WAITLIST=on`** (§4c) in `/opt/knowledge/.env` — or a deliberate open
+      sign-up.
+- [ ] **`SIKSTACK_FEEDBACK_CAPTURE_KEY`** (§4d, optional) — minted by the operator for the
+      `sikstack` project (Capture only) and set in `/opt/knowledge/.env`
+      (`README.md` §7), value never printed — or left unset, and the control stays hidden.
+- [ ] **`KB_INSTALL_FEEDBACK_PROJECT_ID`** (§4e) — the `sikstack` project's id in
+      `/opt/knowledge/.env`, or `/sikstack:feedback` answers 404.
+- [ ] **`KB_DESIGN_ORIGIN=https://d-{build}.sikstack.com`** and **`KB_DESIGN_SECRET`**
+      (§4f, the secret generated in place) in `/opt/knowledge/.env`.
 - [ ] **Api recreated** after any `.env` change (`up -d --force-recreate --no-deps api`,
-      or the next Production Deploy), and both names checked by name only
+      or the next Production Deploy), and each name checked by name only
       (`grep -c '^KB_SIGNUP_WAITLIST=on$' /opt/knowledge/.env` prints `1`).
 - [ ] **Waitlist commands** known: `docker compose -f compose.prod.yml exec api python -m
       server.waitlist list` and `… approve <email>` (exit 0 approved, 1 unknown, 2 approved

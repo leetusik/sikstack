@@ -662,7 +662,7 @@ _RATE_MAX_KEYS = 20_000
 def _edge_client_ip(request: Request) -> str | None:
     """The client address the edge recorded, or ``None`` for an in-network caller.
 
-    The edge (``deploy/hi2vi.conf``) **sets** ``X-Real-IP`` to the connecting address
+    The edge (``deploy/sikstack.conf``) **sets** ``X-Real-IP`` to the connecting address
     on every proxied request, overwriting whatever a client sent, and the API has no
     public port. So a request carrying it came through the edge, and one without it
     came from inside the network: the Feedback MCP hop, which calls the API directly

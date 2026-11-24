@@ -2,7 +2,7 @@
 """The name guard: the product is sikstack; a line that still says hi2vi must be allowed.
 
 The product was named hi2vi before it became sikstack. A few lines keep the old name on
-purpose: the live box's config (on hi2vi.com until the domain moves), old records,
+purpose: the old domain's hosts (they only redirect to sikstack.com), old records,
 compatibility reads of old paths, headers and hosts, and history notes. Each is held by
 an entry in ``scripts/name_guard_allow.txt``; every other line naming hi2vi (in any case)
 fails the guard.

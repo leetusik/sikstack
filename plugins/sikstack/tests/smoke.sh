@@ -101,7 +101,7 @@ print(f"statements={len(ast.parse(src).body)} failed={fails}")
 sys.exit(1 if fails else 0)
 PY
 ); t0_rc=$?
-if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 20 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
+if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 16 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
 else printf '%s\n' "$t0_out"; bad "a shipped text pin failed (lines above)"; fi
 
 # ---------------------------------------------------------------------------
@@ -1466,7 +1466,7 @@ assert {"status": "A", "path": "src/probe.py"} in d["files"], d
   && ok "phase scope --json parses and carries the same creation commit, mode and file list" \
   || bad "phase scope --json is not the same answer as the text form"
 # F2: it prints the pathspec it read with, paste-ready after `--` (a guessed `.` would list works/), the same in
-# --json and from the phase-less `phase scope --pathspec` that /read-code runs.
+# --json and from the phase-less `phase scope --pathspec` that the read-code skill runs.
 p3_spec=$(printf '%s\n' "$scope_out" | sed -n 's/^pathspec=//p')
 p3_diff=$( cd "$FH" && eval "git diff --name-only $p3_created HEAD -- $p3_spec" 2>&1 )
 p3_json=$( cd "$F" && python3 "$ENG" phase scope P3 --json 2>/dev/null | python3 -c 'import json, shlex, sys; print(json.load(sys.stdin)["pathspec"] == shlex.split(sys.argv[1]))' "$p3_spec" 2>&1 )

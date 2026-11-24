@@ -6,12 +6,13 @@ set -Eeuo pipefail
 # inputs (TARGET_SHA is a 40-hex SHA, REPO_PATH is a git checkout), hands off to knowledge's OWN
 # deploy/deploy.sh — which owns ALL authoritative git INSIDE its one-shot root container (on-`main`
 # check + dirty-tracked-worktree refusal + .git/index.lock wait + `git fetch --prune origin main` +
-# fail-closed TARGET_SHA ancestor-verify + publish-on-write ff/rebase reconcile, then three-service
-# build + health-gate (api + web + mcp); see phase.md §E/§F) — then collects artifacts and reports.
+# fail-closed TARGET_SHA ancestor-verify + publish-on-write ff/rebase reconcile, then four-service
+# build + health-gate (api + web + mcp + design); see phase.md §E/§F) — then collects artifacts and
+# reports.
 #
 # It never touches the edge: no vhost is installed and the edge's deploy.sh is never run. The vhosts
-# in deploy/ (hi2vi.conf, and the redirect-only knowledge.conf and vocky.conf) land on the box only
-# through the edge repo, by the operator (deploy/README.md §3a).
+# in deploy/ (sikstack.conf and sikstack-design.conf, and the three redirect-only hosts of the old
+# domain) land on the box only through the edge repo, by the operator (deploy/README.md §3a).
 #
 # Why no git gate here (P9.F1): the authoritative fetch + ancestor-verify CANNOT run as `opc`. `origin`
 # is an SSH remote whose deploy key is root-owned/unreadable by opc, and opc has no GitHub key, so an
@@ -21,7 +22,7 @@ set -Eeuo pipefail
 # best-effort `git status` artifact capture (git-before/git-after), which never fails the deploy.
 #
 # Mirrors hi2vi_web/deploy/oracle-production-deploy-remote.sh for the knowledge checkout, with one
-# knowledge specific: unlike hi2vi, whose opc-side fetch works because its clone is not a root-committing
+# knowledge specific: unlike hi2vi_web, whose opc-side fetch works because its clone is not a root-committing
 # publish-on-write clone, knowledge relocates ALL authoritative git into deploy.sh's root container.
 # This helper does NOT itself check out — deploy/deploy.sh reconciles on `main`, never detaching. First
 # real run is P9.S5.
@@ -66,7 +67,7 @@ run_capture() {
 
 collect_status() {
   # knowledge's compose project has no `-p`/`--env-file` (env_file is baked as `.env` inside the file),
-  # so a plain `docker compose -f compose.prod.yml ps` is the artifact — unlike hi2vi's -p/--env-file form.
+  # so a plain `docker compose -f compose.prod.yml ps` is the artifact — unlike hi2vi_web's -p/--env-file form.
   docker compose -f "${COMPOSE_FILE}" ps \
     > "${REMOTE_ARTIFACT_DIR}/compose-ps.txt" 2>&1 || true
 }
@@ -97,7 +98,7 @@ main() {
   # to live here was removed: an opc-side fetch cannot authenticate (root-owned deploy key, no opc GitHub
   # key), so it would fail every deploy. TARGET_SHA is asserted 40-hex above, so deploy.sh's in-container
   # ancestor gate always fires. The git-before capture above is a best-effort artifact only.
-  log "Running deploy/deploy.sh (owns the authoritative reconcile: on-main check + dirty refusal + .git/index.lock wait + fetch origin/main + fail-closed TARGET_SHA ancestor-verify + ff/rebase, then three-service build + health-gate (api + web + mcp) — all inside one root container)."
+  log "Running deploy/deploy.sh (owns the authoritative reconcile: on-main check + dirty refusal + .git/index.lock wait + fetch origin/main + fail-closed TARGET_SHA ancestor-verify + ff/rebase, then four-service build + health-gate (api + web + mcp + design) — all inside one root container)."
   set +e
   deploy/deploy.sh "${TARGET_SHA}" > >(tee "${REMOTE_ARTIFACT_DIR}/deploy-output.txt") \
     2> >(tee "${REMOTE_ARTIFACT_DIR}/deploy-error.txt" >&2)
@@ -111,11 +112,11 @@ main() {
     append_summary "- Result: deploy failed with status \`${deploy_status}\`."
     exit "${deploy_status}"
   fi
-  append_summary "- Deploy: all three services built + healthy (knowledge-api + knowledge-web + knowledge-mcp)."
+  append_summary "- Deploy: all four services built + healthy (knowledge-api + knowledge-web + knowledge-mcp + knowledge-design)."
 
   run_capture "git-after" "${GIT[@]}" status --short --branch
   append_summary "- Finished at: \`$(date -u '+%Y-%m-%dT%H:%M:%SZ')\`"
-  append_summary "- Result: deploy completed successfully (all three services healthy)."
+  append_summary "- Result: deploy completed successfully (all four services healthy)."
   log "Deploy completed successfully."
 }
 

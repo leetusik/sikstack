@@ -9,4 +9,4 @@ The route is the Claude Code adapter's, never yours: kind first (decomposition, 
 5. **Usage limits.** A span stopped by a usage or rate limit is no verdict: then resume it with `SendMessage` or re-dispatch it from disk. A limit with no reset time is `pending --stop-kind limit --on-words "<their go-ahead resumes the span>"`.
 6. **Explore** for your own lookups: `subagent_type: sikstack:Explore` at the `--explore` model and effort, upgraded per call (`model: sonnet` or `opus`) for a lookup that needs judgment. Its brief is input to your plan, never a plan.
 
-`.sikstack/config.toml`'s `[claude.<row>]` blocks are the operator's knob; `/executor-route` shows the table (the adapter's `route` and `meter`).
+`.sikstack/config.toml`'s `[claude.<row>]` blocks are the operator's knob; the `executor-route` skill shows the table when the operator asks for it (the adapter's `route` and `meter`).
