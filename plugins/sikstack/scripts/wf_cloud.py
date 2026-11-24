@@ -2005,7 +2005,11 @@ def cloud_unlink(args: argparse.Namespace) -> int:
 
 
 def cloud_unlink_from_disk() -> int:
-    """unlink --from-disk: no request at all. The disk becomes the truth as it is; say what it cannot hold."""
+    """unlink --from-disk: no request at all. The disk becomes the truth as it is, plus what the checkout already
+    holds: every evicted cold file whose cached copy is at the base's bytes goes back to its own path, and an
+    archived folder it cannot fill stays by its archive name with wf_cold.HELD_MARKER naming what only sikstack
+    holds, so no archived phase id is minted again and an archived phase.json's agenda link still counts. Then it
+    says what it could not bring back, and never names a re-link: a local change after it makes link refuse."""
     folder = ROOT / CLOUD_DIR
     try:
         base = read_json(folder / "base.json")
@@ -2015,25 +2019,47 @@ def cloud_unlink_from_disk() -> int:
         cloud_settle_pull(base)
     files = base.get("files") if isinstance(base.get("files"), dict) else {}
     head = base.get("head") if isinstance(base.get("head"), int) else 0
+    try:
+        link = cloud_read_link() or {}
+    except (OSError, ValueError):
+        link = {}
+    server, project = link.get("server") or "its server", link.get("project_id") or "?"
     disk = cloud_scan({})
     cold = sorted(rel for rel, b in files.items() if cloud_cold(rel) and cloud_kind(rel) == "file" and rel not in disk)
     unsent = sum(1 for rel in set(files) | set(disk)
                  if disk.get(rel) != (files.get(rel) or {}).get("sha256") and not (rel not in disk and cloud_cold(rel)))
     try:
         with CloudLock(CLOUD_HOOK_LOCK_WAIT):
+            try:  # each file equals the base's, so a stop here leaves a linked checkout the next eviction thins
+                back = wf_cold.write_back(cold, files)
+            except OSError as exc:
+                raise CloudError(f"a cached cold file could not be written back ({exc})")
             shutil.rmtree(str(folder))
             cloud_drop_link()
     except CloudError as exc:
         raise SystemExit(f"unlink --from-disk refused, the checkout is still linked: {exc}")
+    cold = [rel for rel in cold if rel not in set(back)]
+    try:
+        held = wf_cold.keep_held(cold, head, server, project)
+    except OSError as exc:
+        held = []
+        print(f"cannot keep the archived folders' {wf_cold.HELD_MARKER} notes ({exc}): their phase ids may be minted again")
+
+    def tops(rels):
+        counts = {}
+        for rel in rels:
+            counts[cloud_cold_top(rel)] = counts.get(cloud_cold_top(rel), 0) + 1
+        return ", ".join(f"{top} {n}" for top, n in sorted(counts.items()))
     print(f"unlinked from the disk, offline: changes made in sikstack after r{head} are not on this disk"
           + (f", and {unsent} file(s) changed here were never sent to sikstack" if unsent else ""))
+    if back:
+        print(f"restored {len(back)} cold file(s) from this checkout's cache, at sikstack's bytes ({tops(back)})")
     if cold:
-        tops = {}
-        for rel in cold:
-            tops[cloud_cold_top(rel)] = tops.get(cloud_cold_top(rel), 0) + 1
-        print(f"cannot restore offline: {len(cold)} cold file(s) held only in sikstack ("
-              + ", ".join(f"{top} {n}" for top, n in sorted(tops.items())) + "); link this checkout again, then unlink, "
-              "to bring them back")
+        print(f"cannot restore offline: {len(cold)} cold file(s) held only in sikstack ({tops(cold)}); they stay there "
+              f"(project {project} on {server}), and local mode reads only this disk")
+    if held:
+        print(f"kept {len(held)} archived phase folder(s) with {wf_cold.HELD_MARKER} naming the files held only in "
+              "sikstack, so their phase ids are never minted again")
     if any(cloud_kind(rel) == "append" and isinstance(b, dict) and b.get("offset") == 0 and b.get("rev") is not None
            for rel, b in files.items()):
         print("cannot restore offline: works/events.jsonl holds only the lines never sent; the sent ones are in sikstack")
@@ -2575,7 +2601,7 @@ def add_cloud_parsers(sub) -> None:
     p.set_defaults(func=cloud_sign_in)
     _one_line_usage_errors(p)
 
-    p = sub.add_parser("unlink", help="Return a linked checkout to local mode: pull to sikstack's head (refused on a mismatch: sync first), push what is here, bring every cold file back from sikstack (archived phases, doc versions, docs/reference, docs/index.json, checked by sha; the whole event log), remove .hi2vi/; then commit the workflow repo once. Any cold file sikstack cannot give back refuses, still linked. The key stays in user config (revoke it on the project's page). --from-disk: offline, keep the disk as it is and say what it cannot hold, the cold files by prefix")
+    p = sub.add_parser("unlink", help="Return a linked checkout to local mode: pull to sikstack's head (refused on a mismatch: sync first), push what is here, bring every cold file back from sikstack (archived phases, doc versions, docs/reference, docs/index.json, checked by sha; the whole event log), remove .hi2vi/; then commit the workflow repo once. Any cold file sikstack cannot give back refuses, still linked. The key stays in user config (revoke it on the project's page). --from-disk: offline, keep the disk as it is plus every cold file this checkout's cache holds at sikstack's bytes (written back to its own path), keep each archived folder it cannot fill by its archive name with HELD_IN_SIKSTACK.md naming the files only sikstack holds (its phase id stays spent), and say what it cannot hold, the cold files by prefix")
     p.add_argument("--from-disk", action="store_true", dest="from_disk", help="the offline way back: no request; the disk becomes the truth as it is")
     p.set_defaults(func=cloud_unlink)
     _one_line_usage_errors(p)

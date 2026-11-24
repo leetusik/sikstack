@@ -3687,7 +3687,7 @@ kill "$LK_PID" 2>/dev/null; wait "$LK_PID" 2>/dev/null
 echo "link test runtime: $(( $(date +%s) - lk_t0 ))s"
 
 # ---------------------------------------------------------------------------
-echo "== Test 34: the cold set in cloud mode, against the local fake sikstack -- link uploads every truth path (archived phases, doc versions, docs/index.json, docs/reference, the event log) and then keeps only the working set on disk; an archive's move lands and the archived folder leaves the disk, and sync then sends no delete (run 3); a lost answer on that move evicts nothing until the resend lands; a cold file the base lacks or holds at other bytes, and a folder whose .gitignore is *, stay; sync --keep cloud brings a cold file back and the next command takes it off again; the event log's lines reach sikstack once across a lost answer and a stop mid-eviction; a fresh join writes no cold path; sync never lists an evicted path; unlink restores every cold file byte-equal to sikstack's, and unlink --from-disk names what it cannot =="
+echo "== Test 34: the cold set in cloud mode, against the local fake sikstack -- link uploads every truth path (archived phases, doc versions, docs/index.json, docs/reference, the event log) and then keeps only the working set on disk; an archive's move lands and the archived folder leaves the disk, and sync then sends no delete (run 3); a lost answer on that move evicts nothing until the resend lands; a cold file the base lacks or holds at other bytes, and a folder whose .gitignore is *, stay; sync --keep cloud brings a cold file back and the next command takes it off again; the event log's lines reach sikstack once across a lost answer and a stop mid-eviction; a fresh join writes no cold path; sync never lists an evicted path; unlink restores every cold file byte-equal to sikstack's; unlink --from-disk, offline, writes back what the cache holds at sikstack's bytes, keeps each archived folder (and its phase id) with a marker naming what only sikstack holds, even after cold clear and in a clone, and each line it prints is true when followed, a later local phase included =="
 co_t0=$(date +%s)
 newtmp COW; COX="$COW/xdg"; COA="$COW/a"; COB="$COW/b"; CO_OUT="$COW/out.txt"; : > "$CO_OUT"
 co() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$COX" python3 "$(wf_entry "$1")" "$@" ) 2>&1 | tee -a "$CO_OUT"; return "${PIPESTATUS[0]}"; }
@@ -3928,30 +3928,134 @@ co "$COB" sync > "$COW/f2.txt"; co_rc2=$?; co "$COB" sync --status > "$COW/f3.tx
   && [ "$co_rc2" = 0 ] && grep -qE ' here=0 differ=0 ' "$COW/f3.txt" \
   && ok "a fresh join writes no cold path to disk (the working set only; the archived phase.json files the agenda's links need are read into .sikstack/cache/), and sync and sync --status there list nothing" \
   || bad "the fresh join pulled the cold set -- rc=$co_rc/$co_rc2 $co_r / $(tail -2 "$COW/f.txt") / $(cat "$COW/f3.txt")"
-# (g) unlink restores every cold file byte-equal to sikstack's (C6); unlink --from-disk, offline, names what it cannot.
+# (g) unlink restores every cold file byte-equal to sikstack's (C6). First a change in sikstack after B's join.
+co "$COA" agenda-add --title "after the join" --author person:smoke >/dev/null
 co "$COA" unlink > "$COW/g.txt"; co_rc=$?; co_r=$(co_check "$COA/.sikstack" 0 restored)
 ( cd "$COA" && python3 "$ENG" check --no-rebuild ) > "$COW/g2.txt" 2>&1; co_rc2=$?
-co_ctl '{"offline": true}'; co "$COB" unlink --from-disk > "$COW/g3.txt"; co_rc3=$?; co_ctl '{"offline": false}'
-co_nc=$(python3 - "$COS" <<'PY'
-import http.client, json, sys
-from urllib.parse import urlparse
-u = urlparse(sys.argv[1])
-conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
-conn.request("GET", "/_fake/state")
-f = json.loads(conn.getresponse().read())["files"]
-print(sum(1 for p, r in f.items() if not r["deleted"] and (p.startswith(("works/phases/archived/", "docs/versions/", "docs/reference/")) or p == "docs/index.json")))
-PY
-)
 [ "$co_rc" = 0 ] && [ "${co_r%% *}" = ok ] && grep -q '^restored [0-9]* cold file(s) from sikstack' "$COW/g.txt" && [ "$co_rc2" = 0 ] \
-  && [ "$co_rc3" = 0 ] && grep -q "^cannot restore offline: $co_nc cold file(s) held only in sikstack (docs/index.json 1, docs/reference/ [0-9]*, docs/versions/ 1, works/phases/archived/ [0-9]*)" "$COW/g3.txt" \
-  && ok "unlink restores every cold file byte-equal to sikstack's copy (${co_r#ok } files) and its whole event log, and the tree validates; unlink --from-disk, offline, names the $co_nc cold files it cannot restore by prefix" \
-  || bad "unlink did not restore the cold set -- rc=$co_rc/$co_rc2/$co_rc3 $co_r / $(head -3 "$COW/g.txt") / $(tail -2 "$COW/g2.txt") / $(cat "$COW/g3.txt")"
-if grep -rqF "$COK" "$COA" "$COB" "$CO_OUT" "$COW/fake" 2>/dev/null; then bad "the workspace key leaked into a tree, the output or the request log"; fi
+  && ok "unlink restores every cold file byte-equal to sikstack's copy (${co_r#ok } files) and its whole event log, and the tree validates" \
+  || bad "unlink did not restore the cold set -- rc=$co_rc/$co_rc2 $co_r / $(head -3 "$COW/g.txt") / $(tail -2 "$COW/g2.txt")"
+# co_fromdisk <workflow dir> <its --from-disk output> <mark> <cache|cleared>: what unlink --from-disk left and printed.
+# No request since the mark; every cold file sikstack holds is either back on disk at sikstack's bytes (only from the
+# checkout's cache: with `cache`, exactly the archived phase.json files, one per archived folder; with `cleared`,
+# none) or absent and still live in sikstack; an archived folder with a file absent holds HELD_IN_SIKSTACK.md naming
+# exactly those files and its phase id, and no other folder holds one; each line printed states those counts; no
+# line names link (a re-link is no way back); the last line's commit command is printed for the caller to follow.
+co_fromdisk() { python3 - "$COW/fake/requests.jsonl" "$COS" "$@" <<'PY'
+import base64, collections, http.client, json, re, sys
+from pathlib import Path
+from urllib.parse import urlparse, quote
+log, server, root, out, mark, mode = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4], int(sys.argv[5]), sys.argv[6]
+u = urlparse(server)
+def get(path):
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    conn.request("GET", path)
+    return json.loads(conn.getresponse().read())
+def need(cond, why):
+    if not cond:
+        print(why)
+        sys.exit(1)
+R = (Path(log).read_text().splitlines() if Path(log).exists() else [])[mark:]
+need(not R, f"{len(R)} request(s) since the mark, first {R[:1]}")
+live = {p: f for p, f in get("/_fake/state")["files"].items() if not f["deleted"]}
+ARCH, TOPS = "works/phases/archived/", ("works/phases/archived/", "docs/versions/", "docs/reference/")
+cold = sorted(p for p in live if p.startswith(TOPS) or p == "docs/index.json")
+back = [p for p in cold if (root / p).is_file()]
+miss = [p for p in cold if not (root / p).is_file()]
+for p in back:
+    need((root / p).read_bytes() == base64.b64decode(get("/_fake/file?path=" + quote(p))["content"]), f"{p}: not sikstack's bytes")
+folders = sorted({p[len(ARCH):].split("/", 1)[0] for p in cold if p.startswith(ARCH)})
+if mode == "cache":
+    need(len(folders) >= 3 and back == [f"{ARCH}{n}/phase.json" for n in folders], f"not every archived phase.json came back from the cache: {back}")
+else:
+    need(not back, f"a cold file came back with the cache cleared: {back[:3]}")
+need(len(miss) >= 5, f"too few cold files left in sikstack only: {miss}")
+def counts(ps):
+    c = collections.Counter(next((t for t in TOPS if p.startswith(t)), p) for p in ps)
+    return ", ".join(f"{t} {n}" for t, n in sorted(c.items()))
+lines = Path(out).read_text().splitlines()
+marked = 0
+for name in folders:
+    gone = sorted(p[len(ARCH) + len(name) + 1:] for p in miss if p.startswith(f"{ARCH}{name}/"))
+    marker = root / ARCH / name / "HELD_IN_SIKSTACK.md"
+    if not gone:
+        need(not marker.exists(), f"{name}: a marker in a folder with nothing missing")
+        continue
+    need(marker.is_file(), f"{name}: no HELD_IN_SIKSTACK.md, {len(gone)} file(s) missing")
+    text = marker.read_text()
+    listed = sorted(l[2:].strip("`") for l in text.splitlines() if l.startswith("- "))
+    pid = re.search(r"_(P[0-9]+(?:-[0-9a-z]{2})?)_", name).group(1)
+    need(listed == gone and pid in text, f"{name}: the marker lists {listed[:3]}, missing {gone[:3]}, or lacks {pid}")
+    marked += 1
+want = [f"cannot restore offline: {len(miss)} cold file(s) held only in sikstack ({counts(miss)}); they stay there",
+        f"kept {marked} archived phase folder(s) with HELD_IN_SIKSTACK.md naming the files held only in sikstack, so "
+        "their phase ids are never minted again"]
+if back:
+    want.append(f"restored {len(back)} cold file(s) from this checkout's cache, at sikstack's bytes ({counts(back)})")
+for w in want:
+    need([l for l in lines if l.startswith(w)], f"no line starting {w!r}: {lines}")
+need(not [l for l in lines if l.startswith("restored ")] or back, "a restored line with nothing restored")
+need(not [l for l in lines if re.search(r"\blink\b", l)], f"a line names link: {[l for l in lines if re.search(r'link', l)]}")
+first = re.fullmatch(r"unlinked from the disk, offline: changes made in sikstack after r([0-9]+) are not on this disk", lines[0])
+need(first is not None, f"the first line: {lines[0]}")
+later = [p for p, f in live.items() if f["rev"] > int(first.group(1)) and not p.startswith(TOPS) and p != "works/events.jsonl"]
+need(mode == "cleared" or later, f"no change in sikstack after r{first.group(1)} to check the first line against")
+for p in later:
+    need(not (root / p).is_file() or (root / p).read_bytes() != base64.b64decode(get("/_fake/file?path=" + quote(p))["content"]),
+         f"{p}: changed in sikstack after r{first.group(1)}, and on this disk at those bytes")
+if "cannot restore offline: works/events.jsonl holds only the lines never sent; the sent ones are in sikstack" in lines:
+    sent = set(base64.b64decode(get("/_fake/file?path=works/events.jsonl")["content"]).decode().splitlines())
+    here = (root / "works/events.jsonl").read_text().splitlines() if (root / "works/events.jsonl").exists() else []
+    need(sent and not sent & set(here), "the event log line is not true: a sent line is on disk, or sikstack holds none")
+hint = re.fullmatch(r"local mode: the files on disk are the truth again; commit them \((git -C \S+ add -A && git -C \S+ commit)\)", lines[-1])
+need(hint is not None, f"the last line is not the commit line: {lines[-1]}")
+print(f"ok {len(back)} {len(miss)} {marked} {hint.group(1)}")
+PY
+}
+# co_follow <host> <co_fromdisk's ok line>: follow the commit line exactly as printed (a message added); the
+# workflow repo is then clean.
+co_follow() { local hint="${2#ok * * * }"; [ "${2%% *}" = ok ] && ( cd "$1" && eval "$hint -qm 'local mode again'" ) >> "$CO_OUT" 2>&1 \
+  && [ -z "$(git -C "$1/.sikstack" status --porcelain --untracked-files=all)" ]; }
+# (h) unlink --from-disk, offline, with the cache as the join and its reads left it: every cached archived phase.json
+# goes back to its own path, so the archived ids stay spent and their links count; each line it prints is true when
+# followed; a later local phase leaves every line true.
+co_ctl '{"offline": true}'; co_m=$(co_mark); co "$COB" unlink --from-disk > "$COW/h.txt"; co_rc=$?; co_ctl '{"offline": false}'
+co_r=$(co_fromdisk "$COB/.sikstack" "$COW/h.txt" "$co_m" cache); co_follow "$COB" "$co_r"; co_rc2=$?
+( cd "$COB" && python3 "$ENG" check ) > "$COW/h2.txt" 2>&1; co_rc3=$?
+( cd "$COB" && python3 "$ENG" phase new --name Four --objective toy ) > "$COW/h3.txt" 2>&1; co_rc4=$?
+co_miss=$(cd "$COB/.sikstack" && ls -d works/phases/archived/*_P1_* | head -1)
+co_m=$(co_mark); ( cd "$COB" && python3 "$ENG" cold fetch "$co_miss/phase.md" ) > "$COW/h4.txt" 2>&1; co_rc5=$?
+co_r2=$(co_fromdisk "$COB/.sikstack" "$COW/h.txt" "$co_m" cache)
+[ "$co_rc" = 0 ] && [ "${co_r%% *}" = ok ] && [ "$co_rc2" = 0 ] && [ "$co_rc3" = 0 ] \
+  && grep -q '^warning: 3 archived phase folder(s) hold HELD_IN_SIKSTACK.md' "$COW/h2.txt" \
+  && [ "$co_rc4" = 0 ] && grep -qE '^created phase P4-[0-9a-z]{2}' "$COW/h3.txt" \
+  && [ "$co_rc5" = 1 ] && grep -q 'not on disk (local mode reads only this disk' "$COW/h4.txt" && [ "${co_r2%% *}" = ok ] \
+  && ok "unlink --from-disk offline (the cache as the join left it) sends nothing, writes each archived phase.json back from the cache at sikstack's bytes, keeps HELD_IN_SIKSTACK.md in each archived folder naming exactly the files only sikstack holds, and names no re-link; its commit line, followed, leaves the workflow repo clean, check passes with one warning, phase new mints P4 (P1-P3 are archived), and after that the cold files are still in sikstack only and cold fetch asks nothing ($co_r)" \
+  || bad "unlink --from-disk left a broken local workspace -- rc=$co_rc/$co_rc2/$co_rc3/$co_rc4/$co_rc5 [$co_r] [$co_r2] / $(tr '\n' '|' < "$COW/h.txt") / $(tail -2 "$COW/h2.txt" | tr '\n' '|') / $(head -1 "$COW/h3.txt") / $(cat "$COW/h4.txt")"
+# (i) the same with the cache cleared first: nothing comes back, each archived folder stays by the base's name with
+# only its marker, and a clone of the committed workflow repo never mints an archived number either.
+COC="$COW/c"; co_install "$COC"
+printf '%s\n' "$COK" | co "$COC" link "$COU" > "$COW/i.txt"; co_rc=$?; co "$COC" cold clear >> "$COW/i.txt"
+co_ctl '{"offline": true}'; co_m=$(co_mark); co "$COC" unlink --from-disk > "$COW/i2.txt"; co_rc2=$?; co_ctl '{"offline": false}'
+co_r=$(co_fromdisk "$COC/.sikstack" "$COW/i2.txt" "$co_m" cleared); co_follow "$COC" "$co_r"; co_rc3=$?
+co_held=$(find "$COC/.sikstack/works/phases/archived" -type f | sed 's|.*/||' | sort | uniq -c | awk '{print $1 " " $2}' | tr '\n' ',')
+co_cl="$COW/clone"; { mkdir -p "$co_cl" && git -C "$co_cl" init -q && git -C "$co_cl" commit -q --allow-empty -m start \
+  && git clone -q "$COC/.sikstack" "$co_cl/.sikstack"; } >> "$CO_OUT" 2>&1
+( cd "$co_cl" && python3 "$ENG" phase new --name Four --objective toy ) > "$COW/i3.txt" 2>&1; co_rc4=$?
+( cd "$COC" && python3 "$ENG" phase new --name Four --objective toy ) > "$COW/i4.txt" 2>&1; co_rc5=$?
+co_m=$(co_mark); ( cd "$COC" && python3 "$ENG" cold fetch 1 ) > "$COW/i5.txt" 2>&1; co_rc6=$?; co_m2=$(co_mark)
+[ "$co_rc" = 0 ] && [ "$co_rc2" = 0 ] && [ "${co_r%% *}" = ok ] && [ "$co_rc3" = 0 ] && [ "$co_held" = "3 HELD_IN_SIKSTACK.md," ] \
+  && [ "$co_rc4" = 0 ] && grep -qE '^created phase P4-[0-9a-z]{2}' "$COW/i3.txt" && [ "$co_rc5" = 0 ] && grep -qE '^created phase P4-[0-9a-z]{2}' "$COW/i4.txt" \
+  && [ "$co_rc6" = 0 ] && [ "$co_m" = "$co_m2" ] && grep -qE '/works/phases/archived/[^/]+_P1_[^/]+$' "$COW/i5.txt" \
+  && grep -q '^cold fetch: on disk with only HELD_IN_SIKSTACK.md: unlink --from-disk left the files it names in sikstack only' "$COW/i5.txt" \
+  && ok "unlink --from-disk offline after cold clear writes no record it does not hold, keeps each archived folder by the base's name with only HELD_IN_SIKSTACK.md in it, and phase new mints P4 there and in a clone of the committed workflow repo; cold fetch 1 there prints the kept folder and says only its note is on disk, asking nothing ($co_r)" \
+  || bad "an archived id is not spent after cold clear and unlink --from-disk -- rc=$co_rc/$co_rc2/$co_rc3/$co_rc4/$co_rc5/$co_rc6 held=$co_held $(tr '\n' '|' < "$COW/i5.txt") [$co_r] / $(tr '\n' '|' < "$COW/i2.txt") / $(head -2 "$COW/i3.txt") / $(head -2 "$COW/i4.txt")"
+if grep -rqF "$COK" "$COA" "$COB" "$COC" "$CO_OUT" "$COW/fake" 2>/dev/null; then bad "the workspace key leaked into a tree, the output or the request log"; fi
 kill "$CO_PID" 2>/dev/null; wait "$CO_PID" 2>/dev/null
 echo "cold test runtime: $(( $(date +%s) - co_t0 ))s"
 
 # ---------------------------------------------------------------------------
-echo "== Test 35: the cold reads in cloud mode, against the local fake sikstack -- with every archived phase, doc version and the event log evicted, agenda and agenda-show still count an archived phase's link; section and phase scope of an evicted phase print what they did on disk; the next phase number is never an evicted one's; agenda-delete rewrites an evicted phase.json in sikstack and leaves it off the disk; meter reads the whole log; cold fetch / status / clear / search work, a tampered cached copy is fetched again, and cold search finds the same line in local mode =="
+echo "== Test 35: the cold reads in cloud mode, against the local fake sikstack -- with every archived phase, doc version and the event log evicted, agenda and agenda-show still count an archived phase's link; section and phase scope of an evicted phase print what they did on disk; the next phase number is never an evicted one's; agenda-delete rewrites an evicted phase.json in sikstack and leaves it off the disk; meter reads the whole log; cold fetch / status / clear / search work, a tampered cached copy is fetched again, and cold search finds the same line in local mode; after unlink --from-disk, agenda and agenda-show print what a full unlink prints =="
 cr_t0=$(date +%s)
 newtmp CRW; CRX="$CRW/xdg"; CRH="$CRW/h"; CR_OUT="$CRW/out.txt"; : > "$CR_OUT"; CRS_=""
 cr() { ( cd "$CRH" && XDG_CONFIG_HOME="$CRX" python3 "$(wf_entry "$1")" "$@" ) 2>&1 | tee -a "$CR_OUT"; return "${PIPESTATUS[0]}"; }
@@ -4129,7 +4233,32 @@ cr_rev=$(cr_py rev P2); cr_m=$(cr_mark); cr agenda-delete A2 > "$CRW/del.txt"; c
 [ "$cr_rc" = 0 ] && grep -q '^deleted A2-bb: 1 link cleared' "$CRW/del.txt" && [ "$cr_r" = ok ] \
   && ok "agenda-delete of an item an evicted phase links rewrites that phase.json in sikstack (a put on the base's rev r$cr_rev, the agenda key gone) and the file is off the disk again after the command" \
   || bad "agenda-delete did not reach the evicted phase.json -- rc=$cr_rc $cr_r / $(cat "$CRW/del.txt")"
-if grep -rqF "$CRK" "$CRH" "$CR_OUT" "$CRW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
+# An offline unlink keeps the evicted archive's agenda links: agenda and agenda-show print, byte for byte, what a full
+# unlink of the same checkout prints (a twin copied before either ran).
+cr_ctl() { python3 - "$CRS_" "$1" <<'PY'
+import http.client, sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request("POST", "/_fake/control", sys.argv[2], {"Content-Type": "application/json"})
+assert conn.getresponse().status == 200
+PY
+}
+cp -R "$CRH" "$CRW/twin"
+tw() { ( cd "$CRW/twin" && XDG_CONFIG_HOME="$CRX" python3 "$ENG" "$@" ) 2>&1; }
+tw unlink > "$CRW/u.full.txt"; cr_rc=$?
+cr_ctl '{"offline": true}'; cr unlink --from-disk > "$CRW/u.disk.txt"; cr_rc2=$?; cr_ctl '{"offline": false}'
+cr_d=""; cr_i=0
+for c in "agenda" "agenda-show A1" "agenda-show A2"; do
+  cr_i=$((cr_i + 1)); # shellcheck disable=SC2086
+  tw $c > "$CRW/u.full.$cr_i.txt"; echo "exit=$?" >> "$CRW/u.full.$cr_i.txt"
+  cr $c > "$CRW/u.disk.$cr_i.txt"; echo "exit=$?" >> "$CRW/u.disk.$cr_i.txt"
+  cmp -s "$CRW/u.full.$cr_i.txt" "$CRW/u.disk.$cr_i.txt" || cr_d="$cr_d [$c: $(diff "$CRW/u.full.$cr_i.txt" "$CRW/u.disk.$cr_i.txt" | head -4 | tr '\n' ' ')]"
+done
+[ "$cr_rc" = 0 ] && [ "$cr_rc2" = 0 ] && [ -z "$cr_d" ] && grep -q '(1 of 1 phase done)' "$CRW/u.disk.1.txt" \
+  && ok "after unlink --from-disk offline, agenda and agenda-show still count the evicted archived phase's link, byte-equal to a full unlink of the same checkout" \
+  || bad "unlink --from-disk lost an archived agenda link -- rc=$cr_rc/$cr_rc2$cr_d / $(tr '\n' '|' < "$CRW/u.disk.txt")"
+if grep -rqF "$CRK" "$CRH" "$CRW/twin" "$CR_OUT" "$CRW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
 kill "$CR_PID" 2>/dev/null; wait "$CR_PID" 2>/dev/null
 echo "cold reads test runtime: $(( $(date +%s) - cr_t0 ))s"
 

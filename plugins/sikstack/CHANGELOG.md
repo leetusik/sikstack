@@ -31,6 +31,11 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   found with `cold search`.
 - **Unlink restores everything** sikstack holds before its one commit; `unlink --from-disk` names what it cannot
   restore.
+- **`unlink --from-disk` (offline) keeps local mode working.** It writes every cold file this checkout's cache holds
+  at sikstack's bytes back to its own path (each archived `phase.json` at least, so agenda links still count). An
+  archived folder it cannot fill stays under its archive name with `HELD_IN_SIKSTACK.md` naming the files only
+  sikstack holds. Its phase id stays spent, in a clone too. While any such folder is left, `check` warns once and
+  local `cold fetch` and `cold status` say so. Its advice no longer names a re-link.
 - **The workflow repo while linked:** its `git status` shows the evicted paths (at least ` M works/events.jsonl`).
   The repo is inert in cloud mode; `unlink` brings them back.
 - **Migration notes:** none for local mode. A linked checkout thins at its first command on 0.4.0.

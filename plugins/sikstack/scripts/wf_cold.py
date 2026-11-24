@@ -24,8 +24,8 @@ from pathlib import Path
 
 import wf_store  # noqa: E402 -- its _CLOUD_UNDO (the inbox applier's undo notes) is read at call time
 from wf_store import (  # noqa: E402
-    ACTIVE, ARCHIVE_FOLDER_ID_RE, ARCHIVED, brief_id, id_number, lookup_id_number, read_json, ROOT, shown,
-    visible_ids, WORKS,
+    ACTIVE, ARCHIVE_FOLDER_ID_RE, ARCHIVED, brief_id, HELD_MARKER, id_number, lookup_id_number, read_json, ROOT,
+    shown, visible_ids, WORKS,
 )
 
 # The names this module calls in a module above it. It never imports that module: the entry (workflow.py) binds
@@ -216,6 +216,12 @@ def hydrate(path: Path) -> bool:
         raise SystemExit(f"{rel}: its cached copy changed while it was read: run the command again")
     target = ROOT / rel
     wf_store._cloud_undo_note(target)  # the inbox applier's undo: an entry that crashes removes it again
+    _write_file(target, data)
+    return True
+
+
+def _write_file(target: Path, data: bytes) -> None:
+    """Write `data` to its own path whole (a temp file beside it, then a rename), as a plain writable file."""
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".tmp_", suffix=target.name)
     try:
@@ -228,7 +234,51 @@ def hydrate(path: Path) -> bool:
         except OSError:
             pass
         raise
-    return True
+
+
+def write_back(rels: list, files: dict) -> list:
+    """unlink --from-disk, offline: each evicted rel whose cached copy's sha256 is the base's goes back to its own
+    path (a plain file), so local mode reads it there. No request. Returns the rels written, in order."""
+    done = []
+    for rel in rels:
+        entry = _held(rel, files)
+        if entry is None or (ROOT / rel).is_file():
+            continue
+        try:
+            data = (CACHE / rel).read_bytes()
+        except OSError:
+            continue
+        if _bytes_sha(data) == entry["sha256"]:
+            _write_file(ROOT / rel, data)
+            done.append(rel)
+    return done
+
+
+def keep_held(missing: list, head, server, project) -> list:
+    """unlink --from-disk, offline, after the write-back: each archived folder some of whose files are held only in
+    sikstack (`missing`) stays on disk under its archive name, so its phase id stays spent (archived_phase_ids reads
+    the name), with HELD_MARKER naming those files. Never a stub phase.json. Returns the folder names, sorted."""
+    by: dict = {}
+    for rel in missing:
+        if rel.startswith(ARCHIVED_REL):
+            name, _, inner = rel[len(ARCHIVED_REL):].partition("/")
+            if name and inner and inner != HELD_MARKER:
+                by.setdefault(name, []).append(inner)
+    for name, inner in sorted(by.items()):
+        match = ARCHIVE_FOLDER_ID_RE.search(name)
+        phase = f" ({match.group(1)})" if match else ""
+        text = (f"# Held in sikstack\n\n`unlink --from-disk` ran offline at r{head} with no copy of the files below, so "
+                f"this archived phase{phase} keeps them only in sikstack: project {project} on {server}, whose web "
+                "shows the phase on the project's workspace pages. This folder stays, under its archive name, so its "
+                "phase id is never minted again; nothing here stands in for the record.\n\n"
+                + "".join(f"- `{rel}`\n" for rel in sorted(inner)))
+        _write_file(ARCHIVED / name / HELD_MARKER, text.encode("utf-8"))
+    return sorted(by)
+
+
+def held_folders() -> list:
+    """The archived folder names on disk that hold HELD_MARKER (unlink --from-disk kept them), sorted."""
+    return sorted(d.name for d in (ARCHIVED.iterdir() if ARCHIVED.is_dir() else []) if (d / HELD_MARKER).is_file())
 
 
 def folder(rel_dir: str):
@@ -457,8 +507,8 @@ def _fetch_rel(rel: str) -> tuple:
     if not linked():
         path = ROOT / rel
         if not path.exists():
-            raise SystemExit(f"cold fetch: {rel} is not on disk (local mode: every record is on disk)")
-        return path, "cold fetch: on disk (local mode: every record is on disk; nothing was copied)"
+            raise SystemExit(f"cold fetch: {rel} is not on disk (local mode reads only this disk; nothing was asked)")
+        return path, "cold fetch: on disk (local mode reads only this disk; nothing was copied)"
     files = base_files()
     held = sorted(r for r in files if (r == rel or r.startswith(rel + "/")) and _held(r, files))
     gone = [r for r in held if not (ROOT / r).is_file()]
@@ -488,6 +538,12 @@ def cmd_cold_fetch(args: argparse.Namespace) -> None:
                 print("cold fetch: on disk (an active phase; nothing was copied)")
                 return
             rel = archived_phase_dir(phase)
+            held = [n for n in held_folders() if (ARCHIVE_FOLDER_ID_RE.search(n) or [None, None])[1] == phase]
+            if rel is None and held:
+                print(ARCHIVED / held[-1])
+                print(f"cold fetch: on disk with only {HELD_MARKER}: unlink --from-disk left the files it names in "
+                      "sikstack only (local mode reads only this disk; nothing was asked)")
+                return
             if rel is None:
                 raise SystemExit(f"cold fetch: {phase} has no archive folder on disk or in sikstack")
     if rel is None and "/" not in text:
@@ -618,8 +674,11 @@ def cmd_cold_status(args: argparse.Namespace) -> None:
     n, size = _cache_count()
     cache_line = f"cache: {n} file(s), {size} B in .sikstack/{CACHE_DIR}/" + (" (cold clear empties it)" if n else "")
     if not linked():
-        print("store=local: every record is on disk, nothing is cold; cold fetch prints a record's own path and "
-              "cold search scans the disk")
+        held = held_folders()
+        print(("store=local: every record is on disk, nothing is cold" if not held else
+               f"store=local: nothing is cold, but {len(held)} archived phase folder(s) hold {HELD_MARKER} (first "
+               f"{held[0]}): unlink --from-disk left the files each names in sikstack only")
+              + "; cold fetch prints a record's own path and cold search scans the disk")
         if n:
             print(cache_line + ", left from a link")
         return
