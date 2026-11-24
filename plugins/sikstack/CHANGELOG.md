@@ -16,14 +16,19 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   blocked the engine's requests that carried Python's own agent, so `link`, a linked checkout's commands, sign-in's
   link step and the design verbs stopped with a 403. Setup's registration and sign-in already sent it; now one helper
   sets it everywhere, and a text pin holds every request in the engine to it.
-- **A 403 that is not sikstack's own reads as a block.** When a 403's body is not the API's JSON (a text
-  `error code: 1010`, an HTML page, an empty body), `link`, `sign-in`, a linked command's stop line and the design
-  verbs say the request was blocked before it reached sikstack, with HTTP 403 and the body's first line, instead of
-  calling the key "not a workspace key". The API's own 403 reads as before.
+- **A 403 that is not sikstack's own reads as a block.** A 403 is sikstack's own only when it is the API's JSON
+  (`application/json`, an object holding `detail`). Any other 403 says the request was blocked before it reached
+  sikstack, with HTTP 403 and what the body says, instead of calling the key "not a workspace key". That covers
+  Cloudflare's JSON error (what it answers a request that accepts JSON, with `error code: 1010`), a text
+  `error code: 1010`, an HTML page and an empty body. It holds for `link`, a linked command's stop line, the design
+  verbs, `feedback` and every step of `sign-in`. A block at sign-in's start writes nothing. A block while it waits
+  ends the wait with that line and keeps the code, so the next `sign-in` picks the same code up again. The key is
+  blanked out of a block page before its line is cut, so no part of it is printed.
 - **`sikstack sign-in --release`** (`/sikstack:sign-in release`) frees an install that a wrong account claimed: it
   always starts a new code (a pending one is dropped), asks the server to release the install, prints whether it was
   released or was not connected, then waits for Connect as before. A server without release support is refused in one
-  line, and nothing is kept. Without `--release`, sign-in sends exactly what it sent before.
+  line, and nothing is kept. Without `--release`, sign-in sends exactly what it sent before. A Connect or a decline
+  that reaches a code while a release is ending it finds the code ended, so the release always holds.
 
 ## 0.5.0 — 2026-11-24
 

@@ -22,4 +22,5 @@ It claims this machine's install for the account you confirm on the web, and lin
    - `linked:` and `on the web:` lines: the install is connected; the repo's earlier work was uploaded. Relay the web address.
    - `still waiting` (exit 3): run the same command again; it keeps the same code while it lives.
    - a declined or expired code, or a refusal (an already linked checkout, uncommitted changes in `.sikstack/`): relay the one line it printed.
+   - a line saying the request was `blocked before it reached sikstack`: something in front of sikstack refused it, not the account or the key. Relay the line. When it says the code is kept, the same command resumes that code later.
 3. **Never print or ask for a key.** The key comes from the server once and goes straight into your user config; the command never shows it.

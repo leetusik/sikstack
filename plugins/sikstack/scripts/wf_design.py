@@ -157,10 +157,10 @@ def _design_call(link, prog: str, nothing: str, method: str, suffix: str = "", b
     handlers = [NoRedirect()] + wf_cloud._cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if link.local else [])
     request = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
-        status, raw = link._exchange(urllib.request.build_opener(*handlers), request, wire)
+        status, raw, kind = link._exchange(urllib.request.build_opener(*handlers), request, wire)
     except wf_cloud.CloudUnreachable as exc:
         raise SystemExit(f"{prog}: sikstack is not reachable at {link.server} ({exc}): {nothing}")
-    blocked = wf_cloud.cloud_block_line(status, raw, link._key)
+    blocked = wf_setup.block_line(status, raw, kind, link._key)
     if blocked:
         raise SystemExit(f"{prog}: the request to {link.server} was {blocked}, by something in front of it ({nothing})")
     try:

@@ -769,15 +769,15 @@ class CloudLink:
                              "control characters, so it is not a key (run link again): nothing was changed")
         return key.strip()
 
-    blocked = None  # the last call's block line (a 403 whose body is not a JSON object), else None
+    blocked = None  # the last call's block line (a 403 that is not the API's own JSON: wf_setup.block_line), else None
 
     def call(self, method: str, route: str, body=None, extra=None) -> tuple:
         """(status, payload) of one request. Any failure to get a whole answer raises CloudUnreachable: a
         network error, a timeout, a cut or malformed answer (http.client's HTTPException), anything else the
         client raises; a 3xx is never followed (the key stays with the host it was meant for); a request fails
         when it stalls (_CloudWire), never while its bytes still move, and the session hook's request also when
-        its `deadline` passes. An answer that is not JSON reads as {}; a 403 whose body is not a JSON object leaves its
-        block line in `self.blocked` (else None). `extra` adds headers (P1's X-Sikstack-Base)."""
+        its `deadline` passes. An answer that is not JSON reads as {}; a 403 that is not the API's own JSON
+        (wf_setup.block_line) leaves its block line in `self.blocked` (else None). `extra` adds headers (P1's X-Sikstack-Base)."""
         import urllib.request
         from urllib.parse import quote
         import wf_setup
@@ -799,8 +799,8 @@ class CloudLink:
         opener = urllib.request.build_opener(*handlers)
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
         self.blocked = None
-        status, raw = self._exchange(opener, request, wire)
-        self.blocked = cloud_block_line(status, raw, self._key)
+        status, raw, kind = self._exchange(opener, request, wire)
+        self.blocked = wf_setup.block_line(status, raw, kind, self._key)
         try:
             payload = json.loads(raw.decode("utf-8")) if raw else {}
         except (UnicodeDecodeError, ValueError):
@@ -808,15 +808,16 @@ class CloudLink:
         return status, payload if isinstance(payload, dict) else {}
 
     def _exchange(self, opener, request, wire: _CloudWire) -> tuple:
-        """(status, raw body); an HTTP error status whose body is read whole is an answer, every other failure
-        CloudUnreachable. An error body cut short or stalled is no answer: a 409 never reads as one with no conflicts."""
+        """(status, raw body, Content-Type); an HTTP error status whose body is read whole is an answer, every other
+        failure CloudUnreachable. An error body cut short or stalled is no answer: a 409 never reads as one with no
+        conflicts."""
         import urllib.error
         try:  # no timeout here: every wait of the request is a _CloudSocket step, or the connect's wire-bounded wait
             with opener.open(request) as resp:
-                return resp.status, resp.read()
+                return resp.status, resp.read(), resp.headers.get("Content-Type") or ""
         except urllib.error.HTTPError as exc:
             try:
-                return exc.code, exc.read() or b""
+                return exc.code, exc.read() or b"", (exc.headers.get("Content-Type") if exc.headers else "") or ""
             except Exception as err:  # noqa: BLE001 - the error answer was not read whole
                 raise CloudUnreachable(self._why(err, wire))
         except Exception as exc:  # noqa: BLE001 - URLError, OSError, http.client.HTTPException, ValueError, ...
@@ -1768,25 +1769,6 @@ def cloud_save_key(server: str, project: str, org, key: str) -> None:
         raise
 
 
-def cloud_block_line(status, raw, key: str = "") -> "str | None":
-    """A 403 is sikstack's own only when its body is a JSON object (the API's {"detail": ...}); any other 403 (a text
-    `error code: 1010`, an HTML page, an empty body) was blocked in front of it. The block's words, with the body's
-    first line (at most 80 characters, never the key), or None when the answer is not a block."""
-    if status != 403:
-        return None
-    try:
-        parsed = json.loads(raw.decode("utf-8")) if raw else None
-    except (UnicodeDecodeError, ValueError):
-        parsed = None
-    if isinstance(parsed, dict):
-        return None
-    text = (raw or b"").decode("utf-8", "replace")
-    first = next((" ".join(line.split()) for line in text.splitlines() if line.strip()), "")[:80].strip()
-    if key and first:
-        first = first.replace(key, "<key>")
-    return "blocked before it reached sikstack (HTTP 403" + (f": {first})" if first else ")")
-
-
 def cloud_probe(link: CloudLink, route: str) -> dict:
     """One of link's requests before anything is written; any answer but a 200 refuses with one line."""
     try:
@@ -1960,7 +1942,10 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
         body = {"install_id": install, "repo": repo, "plugin_version": wf_setup.plugin_version()}
         if args.release:
             body["release"] = True
-        status, answer = wf_setup.post_json(server, "/api/installs/sign-in", body, wf_setup.SETUP_TIMEOUT)
+        status, answer, blocked = wf_setup.post_json(server, "/api/installs/sign-in", body, wf_setup.SETUP_TIMEOUT)
+        if blocked:
+            raise SystemExit(f"{prog}: the request to {server} was {blocked}, by something in front of it: nothing was "
+                             "written")
         if status != 200 or not isinstance(answer.get("code"), str) or not isinstance(answer.get("poll_token"), str):
             why = answer if status is None else (answer.get("detail") or f"HTTP {status}")
             raise SystemExit(f"{prog}: {server} did not start a sign-in ({why}): nothing was written")
@@ -1980,8 +1965,11 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
     sys.stdout.flush()
     interval, stop = int(started["interval"]), time.monotonic() + max(1, int(args.wait))
     while True:
-        status, answer = wf_setup.post_json(server, "/api/installs/sign-in/poll",
-                                            {"poll_token": started["poll_token"]}, wf_setup.SETUP_TIMEOUT)
+        status, answer, blocked = wf_setup.post_json(server, "/api/installs/sign-in/poll",
+                                                     {"poll_token": started["poll_token"]}, wf_setup.SETUP_TIMEOUT)
+        if blocked:  # the pending code stays: the next run resumes it once the way through is open again
+            raise SystemExit(f"{prog}: the request to {server} was {blocked}, by something in front of it: the code "
+                             f"{started['code']} is kept; run `sikstack sign-in` again to keep waiting")
         state = answer.get("status") if isinstance(answer, dict) else None
         if status == 429 or state == "slow_down":
             interval += 5

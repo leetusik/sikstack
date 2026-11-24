@@ -311,7 +311,8 @@ async def start_sign_in(request: Request) -> dict[str, object]:
             raise HTTPException(status_code=404, detail=_NOT_REGISTERED)
         if release:
             # Lock in an approval's order (its code, then the install), so the two never deadlock:
-            # an approval that commits first is cleared here; one that waits finds its code ended.
+            # an approval that commits first is cleared here; one that waits reads the time only once it
+            # holds the code, after this commit, so it finds its code ended.
             pending = (
                 await session.execute(
                     select(InstallSignInModel)
@@ -531,9 +532,11 @@ async def approve_connect(code: str, request: Request, ctx: AuthContext = Depend
     else:
         raise _bad("pick the org to connect this install to (org_id)")
     stored = normalize_code(code)
-    now = utc_now()
     async with get_session_maker()() as session, session.begin():
         row, install = await _sign_in_by_code(session, stored, lock=True)
+        # The time is read once the code and the install are held: a release this waited on ended the code at
+        # its own earlier reading, so the code reads as ended here.
+        now = utc_now()
         if row is None or row.state != STATE_PENDING or _expired(row, now):
             raise HTTPException(status_code=410, detail="this code no longer works")
         if install.claimed_by is not None and install.claimed_by != ctx.user.id:
@@ -574,9 +577,11 @@ async def decline_connect(code: str, ctx: AuthContext = Depends(require_user)) -
 
     _require_accounts_plane()
     stored = normalize_code(code)
-    now = utc_now()
     async with get_session_maker()() as session, session.begin():
         row, install = await _sign_in_by_code(session, stored, lock=True)
+        # The time is read once the code and the install are held: a release this waited on ended the code at
+        # its own earlier reading, so the code reads as ended here.
+        now = utc_now()
         if row is None or row.state != STATE_PENDING or _expired(row, now):
             raise HTTPException(status_code=410, detail="this code no longer works")
         if install.claimed_by is not None and install.claimed_by != ctx.user.id:

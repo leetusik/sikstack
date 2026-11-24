@@ -50,7 +50,12 @@ install routes sign-in and feedback use, each logged whole (the poll token and k
 
 The Cloudflare gate: every /api/ request whose User-Agent does not start with `sikstack/` is answered 403 text/plain
 `error code: 1010` and logged as route "blocked" (/_fake/ is never gated). control block: true | <route> answers the
-next /api/ request (true) or the next one whose last path segment is <route> with that block; one-shot.
+next /api/ request (true) or the next one whose last path segment is <route> with that block; one-shot. control
+block_form (kept until changed): "text" (the default) is that text body; "json" is Cloudflare's RFC 9457 problem for
+a 1xxx error when the request accepts JSON (`application/json`, or `application/problem+json` when that is what it
+accepts; text otherwise), as its error-responses reference documents (type, title, status, detail, instance,
+error_code, ray_id, ...); "echo" is a page that echoes the request's Authorization header across its 80th character
+(a workspace key's), the way a debugging proxy's refusal can.
 control workspace_answer: {status, detail, route?} answers the next workspace request (of that route) with that status
 and {detail} (the API's own JSON 403, ...); one-shot.
 
@@ -136,7 +141,7 @@ class Store:
         self.control = {"offline": False, "commit": None, "race": None, "gate": None, "fetch_page": None,
                         "inbox_race": None, "break": None, "slow": 0, "drip": 0, "drip_route": None,
                         "rate": 0, "feedback_limit": 2, "design_answer": None,
-                        "block": None, "workspace_answer": None, "no_release": False}
+                        "block": None, "block_form": "text", "workspace_answer": None, "no_release": False}
         self.gate = threading.Condition()
         self.gate_seen = 0
 
@@ -451,10 +456,10 @@ def make_handler(store: Store, key: str, log_path: str):
             except OSError:  # the client gave up: nothing more to send
                 self.close_connection = True
 
-        def _send_text(self, status: int, text: str) -> None:
+        def _send_text(self, status: int, text: str, content_type: str = "text/plain; charset=UTF-8") -> None:
             data = text.encode("utf-8")
             self.send_response(status)
-            self.send_header("Content-Type", "text/plain; charset=UTF-8")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -479,9 +484,31 @@ def make_handler(store: Store, key: str, log_path: str):
             elif length:
                 self.close_connection = True
             with store.lock:
+                form = store.control.get("block_form") or "text"
+            accept = (self.headers.get("Accept") or "").lower()
+            if form == "json" and ("application/json" in accept or "application/problem+json" in accept):
+                kind = "application/json" if "application/json" in accept else "application/problem+json"
+                ray = "8e1f0c2b3a4d5e6f"
+                problem = {
+                    "type": "https://developers.cloudflare.com/support/troubleshooting/http-status-codes/"
+                            "cloudflare-1xxx-errors/error-1010/",
+                    "title": "Error 1010: Access denied", "status": 403,
+                    "detail": "The site owner has blocked access based on your browser's signature.",
+                    "instance": ray, "error_code": 1010, "error_name": "browser_signature_banned",
+                    "error_category": "access_denied", "ray_id": ray, "timestamp": "2026-11-25T00:00:00Z",
+                    "zone": self.headers.get("Host") or "127.0.0.1", "cloudflare_error": True, "retryable": False,
+                    "owner_action_required": True, "what_you_should_do": "Contact the site owner.",
+                    "footer": "Cloudflare"}
+                answer = (json.dumps(problem), f"{kind}; charset=utf-8")
+            elif form == "echo":
+                answer = ("refused at the edge; it carried Authorization: " + (self.headers.get("Authorization") or "")
+                          + " and nothing else", "text/html; charset=UTF-8")
+            else:
+                form, answer = "text", ("error code: 1010", "text/plain; charset=UTF-8")
+            with store.lock:
                 self._log({"method": method, "path": url.path, "route": "blocked", "agent": agent, "forced": bool(forced),
-                           "status": 403})
-            self._send_text(403, "error code: 1010")
+                           "form": form, "accept": accept, "status": 403})
+            self._send_text(403, *answer)
             return True
 
         def _install_route(self, path: str, body: dict) -> tuple:

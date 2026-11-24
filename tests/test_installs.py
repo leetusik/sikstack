@@ -679,6 +679,74 @@ def test_a_release_that_is_not_a_boolean_is_refused_and_changes_nothing(db):
     assert _poll(client, older).json() == {"status": "pending"}
 
 
+@pytest.mark.parametrize("verb", ["approve", "decline"])
+def test_an_approval_or_decline_that_waited_on_a_release_finds_its_code_ended(db, monkeypatch, verb):
+    """A Connect or a decline that reached the code while a release held it reads the time after the lock, so the
+    release's end of the code holds: 410, the claim stays clear and the code stays as the release left it. The
+    release is replayed by hand in a transaction of the test's own: the code's lock, then the install's (the
+    release's order), its expiry and its cleared claim, committed only once the request waits on the lock."""
+
+    import threading
+    import time
+
+    import server.installs_api as installs_api
+
+    client, engine = db
+    real_now = installs_api.utc_now
+    sent = _register(client)
+    owner = _signup(client)
+    _approve(client, _start(client, sent["install_id"]), owner)
+    started = _start(client, sent["install_id"])
+    code = started["code"].replace("-", "")
+    t0 = real_now()
+    clock = {"now": t0}
+    monkeypatch.setattr(installs_api, "utc_now", lambda: clock["now"])
+    answers: dict[str, object] = {}
+    with engine.connect() as release:
+        held = release.begin()
+        release.execute(text("SELECT id FROM install_sign_ins WHERE code = :c FOR UPDATE"), {"c": code})
+        release.execute(
+            text("SELECT id FROM installs WHERE install_id = :i FOR UPDATE"), {"i": sent["install_id"]}
+        )
+
+        def act() -> None:
+            answers["res"] = client.post(f"/app/connect/{started['code']}/{verb}", json={}, headers=owner["session"])
+
+        worker = threading.Thread(target=act)
+        worker.start()
+        waiting, until = 0, time.monotonic() + 15
+        while waiting == 0 and time.monotonic() < until and worker.is_alive():
+            with engine.connect() as watch:
+                waiting = watch.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                ).scalar_one()
+            time.sleep(0.02)
+        assert waiting, f"the {verb} never waited on the release's lock"
+        clock["now"] = t0 + timedelta(milliseconds=50)  # the release read its clock after the request did
+        release.execute(
+            text("UPDATE install_sign_ins SET expires_at = :n WHERE code = :c AND expires_at > :n"),
+            {"n": clock["now"], "c": code},
+        )
+        release.execute(
+            text("UPDATE installs SET claimed_by = NULL, claimed_at = NULL WHERE install_id = :i"),
+            {"i": sent["install_id"]},
+        )
+        held.commit()
+    worker.join(30)
+    assert not worker.is_alive()
+    monkeypatch.setattr(installs_api, "utc_now", real_now)
+    res = answers["res"]
+    assert res.status_code == 410, (verb, res.status_code, res.text)
+    assert res.json() == {"detail": "this code no longer works"}
+    assert _install_row(engine, sent["install_id"])["claimed_by"] is None
+    row = _sign_in_rows(engine, sent["install_id"])[code]
+    assert row["state"] == "pending" and row["expires_at"] == clock["now"]
+    assert row["decided_by"] is None and row["project_id"] is None
+
+
 # --- an install's Feedback ----------------------------------------------------------
 
 
