@@ -11,10 +11,10 @@ memoized per head, with the open inbox entries laid over the agenda per request)
   "unlinked"}}``).
 - ``GET …/workspace/phases/{phase}``: a phase by full or short id.
 - ``GET …/workspace/slices/{full}``: a slice by full id, with its plan and result.
-- ``GET …/workspace/deferred/{id}``: a deferred job with its brief, and ``agenda``: the
-  item a fold entry carrying the job landed on (``agenda-fold``), else its own link. A
-  job the fold removed reads from that entry; a job no store or entry names is a 404
-  that still answers ``{detail, agenda: null}``, so an old link can land on the Agenda.
+- ``GET …/workspace/deferred/{id}``: the folded-job lookup, so an old job link can land
+  on the Agenda: ``{agenda}``, the item whose thread holds the entry ``agenda-fold``
+  wrote for the job; any other job, stored or unknown, is a 404 that answers ``{detail,
+  agenda: null}``. A job's own shape is not read.
 - ``GET …/workspace/docs/{doc}[?version=]``: a doc (current or retired) with its
   sections, at its latest version or the one named.
 - ``GET …/workspace/agenda/{item}``: an agenda item, with its thread (``entries``); an
@@ -209,18 +209,16 @@ async def get_workspace_slice(
 @router.get("/app/projects/{project_id}/workspace/deferred/{job_id}")
 async def get_workspace_job(
     project_id: UUID, job_id: str, ctx: AuthContext = Depends(require_user)
-) -> dict[str, Any]:
+) -> Any:
     reader = await _linked(project_id, ctx)
     try:
-        job = await reader.job(job_id)
+        aid = await reader.folded_job(job_id)
     except WorkspaceReadError as exc:
         raise _unavailable() from exc
-    if job is None:
-        # no store or fold entry names it: still a 404 (the job page reads Not found),
-        # and the folded-job lookup's answer, so an old link can land on the Agenda
+    if aid is None:
         return JSONResponse({"detail": "deferred job not found", "agenda": None},
                             status_code=404)
-    return _found(reader, job, "deferred job")
+    return {"agenda": aid}
 
 
 @router.get("/app/projects/{project_id}/workspace/docs/{doc_id}")

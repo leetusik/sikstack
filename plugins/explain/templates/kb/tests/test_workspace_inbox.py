@@ -787,6 +787,42 @@ def test_accept_is_one_entry_for_a_proposed_item_and_refused_otherwise(store):
     assert _inbox_count(client, project_id, key) == 2
 
 
+def test_a_waiting_accept_marks_its_item_accepting_in_both_reads(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    _proposed_item(client, project_id, key)
+    base = _base(project_id)
+
+    def accepting() -> dict:
+        return {row["id"]: row["accepting"] for row in _agenda(client, owner, project_id)}
+
+    def item(aid: str) -> dict:
+        res = client.get(f"{base}/agenda/{aid}", headers=_session(owner))
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    assert accepting() == {"A3-p7": False, "A2-k5": False, "A1-h7": False}
+    assert item("A3-p7")["accepting"] is False
+
+    minted = _add(client, owner, project_id, "Export is slow").json()["item"]
+    _change(client, owner, project_id, "solve", ["A2-k5"], {"outcome": "Fixed."})
+    accept = _change(client, owner, project_id, "accept", ["A3-p7"]).json()["entry"]
+
+    # the accept's item reads accepting in its row and its read; nothing else does
+    assert accepting() == {"A3-p7": True, minted: False, "A2-k5": False, "A1-h7": False}
+    marked = item("A3-p7")
+    assert marked["accepting"] is True and marked["sync"] == "waiting"
+    assert marked["state"] == "proposed"  # still Proposed until the engine applies it
+    assert item("A2-k5")["accepting"] is False and item(minted)["accepting"] is False
+
+    # a refused accept no longer marks it
+    res = _commit(client, project_id, key, inbox=[
+        {"id": accept["id"], "state": "refused", "reason": "refused: not Proposed", "exit": 1},
+    ])
+    assert res.status_code == 200, res.text
+    assert accepting()["A3-p7"] is False and item("A3-p7")["accepting"] is False
+
+
 def test_the_inbox_kinds_are_pinned_to_the_routes_fields():
     from server.workspace.types import INBOX_KINDS
     from server.workspace_web_api import _KIND_FIELDS

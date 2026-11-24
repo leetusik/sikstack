@@ -7,9 +7,9 @@ never reimplements the engine's selection. Nothing here writes a truth file.
 
 The shapes (the web's Workspace pages draw every field):
 
-- **Workspace** ``{project, linked, version, sync, streams, pointer, phases, deferred,
-  docs, retired, agenda}``: lists only, no bodies (a phase row has no intent, notebook
-  or slices; a job no brief; a doc no sections). Each slice id it names (a stream's
+- **Workspace** ``{project, linked, version, sync, streams, pointer, phases, docs,
+  retired, agenda}``: lists only, no bodies (a phase row has no intent, notebook or
+  slices; a doc no sections). Each slice id it names (a stream's
   ``slice``, the pointer's ``slice`` and ``next``, a stop's ``slice``, a phase row's
   ``current``) has a ``…Ref`` sibling ``{id, full, name, status}`` from the stored
   ``slice.json`` (``name`` and ``status`` ``None`` when there is none), or ``None``.
@@ -20,16 +20,17 @@ The shapes (the web's Workspace pages draw every field):
   ``explainedIn``: :func:`project_explain_links`), resolved per request.
 - **Slice** ``{id, full, phase, name, kind, status, risk, deps, started, completed,
   outcome, plan, result, stop}``.
-- **Deferred job** ``{id, title, lang, status, source, trigger, created, reason, brief,
-  promotedTo, dropped, agenda}``: a stored one, or one ``agenda-fold`` carried onto an
-  item, read from the entry that carries it (:meth:`WorkspaceReader.job`).
+- **Folded-job lookup**: the item whose thread holds the entry ``agenda-fold`` wrote for
+  a job (its ``job.id``), or ``None`` (:meth:`WorkspaceReader.folded_job`). A job's own
+  shape is not read: the deferred jobs folded into the agenda.
 - **Doc** ``{id, title, state, version, ordinal, versioned, from, stale, sections,
   versions}``: ``version`` is the stored id's leading token (``?version=`` takes it or
   the whole id), ``ordinal`` the version's place in the doc's history, 1 the oldest.
-- **Agenda item** ``{id, title, lang, note, state, created, changed, phases, deferred,
-  outcome, reason, proposed, entryCount, latest, sync}``; ``state`` may read
-  ``proposed`` (apart from Open and listed before it); the item read adds its thread,
-  ``entries``, and ``deleting`` (:meth:`WorkspaceReader.item`).
+- **Agenda item** ``{id, title, lang, note, state, created, changed, phases, outcome,
+  reason, proposed, entryCount, latest, sync, accepting}``; ``state`` may read
+  ``proposed`` (apart from Open and listed before it); ``accepting`` is true while a
+  pending web ``accept`` names the item (:meth:`WorkspaceReader._overlay`); the item
+  read adds its thread, ``entries``, and ``deleting`` (:meth:`WorkspaceReader.item`).
 
 A phase's ``branches`` are ``{repo, branch, pr}``, ``pr`` ``{number, state, url}`` or
 ``None`` with no URL (:func:`pull_request`).
@@ -85,6 +86,7 @@ from server.persistence.engine import get_session_maker
 from server.workspace import WorkspaceReadError
 from server.workspace.repository import WorkspaceRepository
 from server.workspace.types import (
+    INBOX_ACCEPT,
     INBOX_ADD,
     INBOX_DELETE,
     INBOX_ENTRY,
@@ -110,7 +112,6 @@ INDEX_JSON = "works/index.json"
 DOCS_INDEX = "docs/index.json"
 ACTIVE = "works/phases/active/"
 ARCHIVED = "works/phases/archived/"
-DEFERRED = "works/deferred/"
 AGENDA = "works/agenda/"
 
 #: The durable docs, in the order a listing gives them, and the six retired ones.
@@ -852,99 +853,23 @@ class WorkspaceReader:
 
         return await self._memoized(("slice", pid, suffix), build)
 
-    # -- deferred jobs ------------------------------------------------------------------
+    # -- the folded-job lookup ---------------------------------------------------------
 
-    async def _job_records(self) -> dict[str, dict[str, Any]]:
-        async def build():
-            paths = self._paths(DEFERRED, "/deferred.json", depth=2)
-            texts = await self.texts(paths)
-            out = {}
-            for path in paths:
-                data = _json_object(texts.get(path))
-                if data is None:
-                    continue
-                did = _str(data.get("id")) or path.split("/")[-2]
-                out[did] = {"folder": path[: -len("deferred.json")], "data": data}
-            return out
-
-        return await self._memoized(("job-records",), build)
-
-    @staticmethod
-    def _job_row(did: str, data: dict[str, Any]) -> dict[str, Any]:
-        promoted = data.get("promoted_to")
-        if isinstance(promoted, dict):
-            promoted = _str(promoted.get("phase_id"))
-        title = _str(data.get("title"))
-        return {
-            "id": did,
-            "title": title,
-            "lang": _lang(title),
-            "status": _str(data.get("status")),
-            "source": _str(data.get("source")),
-            "trigger": _str(data.get("trigger")),
-            "created": _day(data.get("created_at")),
-            "reason": _str(data.get("reason")),
-            "promotedTo": _str(promoted),
-            "dropped": _str(data.get("dropped_reason")),
-            "agenda": _str(data.get("agenda")) or None,
-        }
-
-    async def job_rows(self) -> list[dict[str, Any]]:
-        records = await self._job_records()
-        rows = [self._job_row(did, rec["data"]) for did, rec in records.items()]
-        rows.sort(key=lambda r: (r["created"] or "", _number(r["id"]), r["id"]), reverse=True)
-        return rows
-
-    async def job(self, did: str) -> dict[str, Any] | None:
-        """A deferred job with its brief, or ``None`` when neither the store nor a fold
-        entry names it.
-
-        A stored job reads as before; its ``agenda`` is the item a fold entry carrying it
-        landed on, when one does, else its own link. A job the engine folded
-        (``agenda-fold``: its folder is gone, the first entry of an item carries it as
-        ``job``) reads from that entry: its id, title, source, reason, trigger and
-        created date as the fold kept them, the entry's body as its brief, status
-        ``folded`` and ``agenda`` the item.
-        """
-
-        folded = await self.folded_job(did)
-        records = await self._job_records()
-        record = records.get(did)
-        if record is None:
-            if folded is None:
-                return None
-            aid, entry = folded
-            carried = entry.get("jobData") or {}
-            title = _str(carried.get("title"))
-            return {
-                "id": did, "title": title, "lang": _lang(title), "status": "folded",
-                "source": _str(carried.get("source")), "trigger": _str(carried.get("trigger")),
-                "created": _day(carried.get("created_at")), "reason": _str(carried.get("reason")),
-                "brief": entry["body"], "promotedTo": None, "dropped": None, "agenda": aid,
-            }
-        row = self._job_row(did, record["data"])
-        brief = await self.text(record["folder"] + "brief.md")
-        out = {key: row[key] for key in (
-            "id", "title", "lang", "status", "source", "trigger", "created", "reason")}
-        out["brief"] = brief
-        out.update({key: row[key] for key in ("promotedTo", "dropped", "agenda")})
-        if folded is not None:
-            out["agenda"] = folded[0]
-        return out
-
-    async def folded_job(self, did: str) -> tuple[str, dict[str, Any]] | None:
-        """``(item, entry)``: the item whose thread holds the entry carrying job ``did``
-        (its ``job.id``), the first in the agenda's order, or ``None``."""
+    async def folded_job(self, did: str) -> str | None:
+        """The item whose thread holds the entry carrying job ``did`` (its ``job.id``,
+        written by ``agenda-fold``), the first in the agenda's order, or ``None``: a
+        stored job no entry carries reads ``None`` too (the store's deferred jobs are
+        not read)."""
 
         entries = await self._agenda_entries()
         for row in await self._agenda_rows():
             for entry in entries.get(row["id"], ()):
                 if entry["job"] == did:
-                    return row["id"], entry
+                    return row["id"]
         for aid in sorted(entries):  # a thread whose agenda.json is gone
             for entry in entries[aid]:
                 if entry["job"] == did:
-                    return aid, entry
+                    return aid
         return None
 
     # -- docs -------------------------------------------------------------------------
@@ -1171,23 +1096,21 @@ class WorkspaceReader:
 
         return await self._memoized(("agenda-entries",), build)
 
-    async def _agenda_links(self) -> dict[str, dict[str, list[str]]]:
+    async def _agenda_links(self) -> dict[str, list[str]]:
+        """``{item: [phase]}``: the phases naming each item, for an item ``index.json``
+        does not list."""
+
         phases = await self._phase_records()
-        jobs = await self._job_records()
-        links: dict[str, dict[str, list[str]]] = {}
+        links: dict[str, list[str]] = {}
         for pid, rec in phases.items():
             aid = _str(rec["data"].get("agenda"))
             if aid:
-                links.setdefault(aid, {"phases": [], "deferred": []})["phases"].append(pid)
-        for did, rec in jobs.items():
-            aid = _str(rec["data"].get("agenda"))
-            if aid:
-                links.setdefault(aid, {"phases": [], "deferred": []})["deferred"].append(did)
+                links.setdefault(aid, []).append(pid)
         return links
 
     @staticmethod
     def _item(data: dict[str, Any], derived: dict[str, Any] | None,
-              links: dict[str, dict[str, list[str]]],
+              links: dict[str, list[str]],
               entries: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
         """One stored item as a row.
 
@@ -1205,15 +1128,13 @@ class WorkspaceReader:
         if derived is not None:
             state = _AGENDA_SHOWN.get(str(derived.get("shown_status")), _str(data.get("status")))
             phases = [str(p) for p in derived.get("phases") or []]
-            deferred = [str(d) for d in derived.get("deferred") or []]
             if isinstance(derived.get("proposed"), dict):
                 stored_proposed = derived["proposed"]
         else:
             state = _str(data.get("status"))
             if state == "open" and stored_proposed is not None:
                 state = "proposed"
-            own = links.get(aid, {"phases": [], "deferred": []})
-            phases, deferred = own["phases"], own["deferred"]
+            phases = list(links.get(aid, ()))
         proposed = None
         if state == "proposed":
             block = stored_proposed if isinstance(stored_proposed, dict) else {}
@@ -1230,13 +1151,13 @@ class WorkspaceReader:
             "created": _day(data.get("created_at")),
             "changed": changed,
             "phases": phases,
-            "deferred": deferred,
             "outcome": _str(data.get("outcome")) or "",
             "reason": _str(data.get("reason")) or "",
             "proposed": proposed,
             "entryCount": len(thread),
             "latest": max(days) if days else None,
             "sync": None,
+            "accepting": False,
         }
 
     async def item(self, aid: str) -> dict[str, Any] | None:
@@ -1253,8 +1174,7 @@ class WorkspaceReader:
         row = next((it for it in rows if it["id"] == aid), None)
         if row is None:
             return None
-        thread = [{k: v for k, v in entry.items() if k != "jobData"}
-                  for entry in (await self._agenda_entries()).get(aid, ())]
+        thread = [dict(entry) for entry in (await self._agenda_entries()).get(aid, ())]
         thread += [_pending_entry(entry) for entry in self._inbox
                    if entry.kind == INBOX_ENTRY and entry.items[:1] == (aid,)]
         deleting = any(entry.kind == INBOX_DELETE and entry.state == INBOX_PENDING
@@ -1285,18 +1205,22 @@ class WorkspaceReader:
         and Try again name, and the change's kind, for Try again's label). A pending add
         is its own row, first in the open part (after the Proposed items, which stand
         apart); a pending delete hides its item unless ``hide_deleting`` is false (the
-        item read). A marked row is a copy: the memoized rows are never changed.
+        item read); a pending ``accept`` marks its item ``accepting`` (so a reload stops
+        offering Accept). A marked row is a copy: the memoized rows are never changed.
         """
 
         if not self._inbox:
             return list(rows)
         latest: dict[str, InboxEntry] = {}
         deleting: set[str] = set()
+        accepting: set[str] = set()
         for entry in self._inbox:
             for aid in entry.items:
                 latest[aid] = entry
                 if hide_deleting and entry.kind == INBOX_DELETE and entry.state == INBOX_PENDING:
                     deleting.add(aid)
+                if entry.kind == INBOX_ACCEPT and entry.state == INBOX_PENDING:
+                    accepting.add(aid)
         stored = {row["id"] for row in rows}
         added: list[dict[str, Any]] = []
         for entry in reversed(self._inbox):  # newest first: each add goes first
@@ -1314,7 +1238,10 @@ class WorkspaceReader:
             if aid in deleting:
                 continue
             entry = latest.get(aid)
-            out.append(row if entry is None else {**row, "sync": _sync_mark(entry)})
+            if entry is None:
+                out.append(row)
+                continue
+            out.append({**row, "sync": _sync_mark(entry), "accepting": aid in accepting})
         return out + added
 
     def _unplaced(self, rows: list[dict[str, Any]],
@@ -1396,7 +1323,6 @@ class WorkspaceReader:
                             "nextRef": self._named_slice(records, following),
                             "waiting": await self._waiting()},
                 "phases": phase_rows,
-                "deferred": await self.job_rows(),
                 "docs": docs,
                 "retired": retired,
                 "agenda": await self._agenda_rows(),
@@ -1686,13 +1612,13 @@ def _added_item(entry: InboxEntry, sync: str | dict[str, Any]) -> dict[str, Any]
         "created": day,
         "changed": day,
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "proposed": None,
         "entryCount": 0,
         "latest": day,
         "sync": sync,
+        "accepting": False,
     }
 
 
@@ -1713,7 +1639,6 @@ def _thread_entry(name: str, data: dict[str, Any] | None) -> dict[str, Any] | No
         "created": _str(data.get("created_at")),
         "body": data["body"],
         "job": _str(job.get("id")) if job else None,
-        "jobData": job,  # the fold's whole carry, for the folded job's read; never shown
         "sync": None,
     }
 

@@ -170,7 +170,6 @@ def _routes(project_id: str) -> list[str]:
         f"{base}/phases/P8-q4",
         f"{base}/phases/P8",
         f"{base}/slices/P8-q4.S1",
-        f"{base}/deferred/D20-a3",
         f"{base}/docs/product",
         f"{base}/docs/product?version=v0001",
         f"{base}/agenda/A2-k5",
@@ -191,6 +190,7 @@ def test_shapes_come_back_field_for_field(store):
     sync = ws.pop("sync")
     assert sync["state"] == "fresh" and sync["at"].endswith("Z")
     assert ws == expected["workspace"]
+    assert "deferred" not in ws  # the deferred list retired
 
     head = {"version": "v99", "sync": sync}
 
@@ -202,13 +202,13 @@ def test_shapes_come_back_field_for_field(store):
     assert record(f"{base}/phases/P8-q4") == expected["phase"]
     assert record(f"{base}/phases/P8") == expected["phase"]  # by short id
     assert record(f"{base}/slices/P8-q4.S1") == expected["slice"]
-    assert record(f"{base}/deferred/D20-a3") == expected["job"]
     assert record(f"{base}/docs/product") == expected["doc"]
     assert record(f"{base}/docs/product?version=v0001") == expected["doc_v0001"]
     # the address keeps the stored id; its leading token names the same version
     assert record(f"{base}/docs/product?version=v0001_bootstrap") == expected["doc_v0001"]
     assert record(f"{base}/docs/product?version=v2611020550_the_retry_queue") == expected["doc"]
-    assert record(f"{base}/agenda/A2-k5") == expected["item"]
+    item = record(f"{base}/agenda/A2-k5")
+    assert item == expected["item"] and "deferred" not in item
 
     planned = _get(client, owner, f"{base}/phases/P9-r5")
     assert planned["explain"] == {"title": "How export works", "documents": []}
@@ -307,7 +307,7 @@ def test_a_renamed_slice_reads_its_new_name_at_the_new_head(store):
 
 def _item_routes(project_id: str) -> list[str]:
     base = f"/app/projects/{project_id}/workspace"
-    return [f"{base}/phases/P8-q4", f"{base}/slices/P8-q4.S1", f"{base}/deferred/D20-a3",
+    return [f"{base}/phases/P8-q4", f"{base}/slices/P8-q4.S1",
             f"{base}/docs/product", f"{base}/docs/product?version=v0001", f"{base}/agenda/A2-k5"]
 
 
@@ -609,23 +609,25 @@ def test_a_folded_job_leads_to_the_item_whose_entry_carries_it(store):
                     source="phase:P8-q4", job=job),
     ])
 
-    folded = _get(client, owner, f"{base}/deferred/D31-x9")
-    assert folded.pop("workspace")["version"] == "v99"
-    assert folded == {"id": "D31-x9", "title": "Retry the upload queue", "lang": "en",
-                      "status": "folded", "source": "P8-q4", "trigger": "When uploads fail again.",
-                      "created": "2026-11-01", "reason": "Not now.", "brief": body,
-                      "promotedTo": None, "dropped": None, "agenda": "A2-k5"}
+    # the lookup answers only the item, never the job's own shape
+    found = client.get(f"{base}/deferred/D31-x9", headers=_session(owner))
+    assert found.status_code == 200, found.text
+    assert found.json() == {"agenda": "A2-k5"}
     item = _get(client, owner, f"{base}/agenda/A2-k5")
     assert item["entries"][0]["job"] == "D31-x9"
+    assert "deferred" not in item
 
-    gone = client.get(f"{base}/deferred/D77-zz", headers=_session(owner))
-    assert gone.status_code == 404 and gone.json()["agenda"] is None
+    # a stored job no entry carries, and a job nothing names: both 404, agenda null
+    for job_id in ("D20-a3", "D77-zz"):
+        gone = client.get(f"{base}/deferred/{job_id}", headers=_session(owner))
+        assert gone.status_code == 404, (job_id, gone.text)
+        assert gone.json()["agenda"] is None and set(gone.json()) == {"detail", "agenda"}
 
-    # the old reads still answer: a stored job and the deferred list
-    old = _get(client, owner, f"{base}/deferred/D20-a3")
-    old.pop("workspace")
-    assert old == _expected()["job"]
-    assert _get(client, owner, base)["deferred"] == _expected()["workspace"]["deferred"]
+    # another account's lookup is the tenant's 404, the item never named
+    stranger = _signup(client)
+    res = client.get(f"{base}/deferred/D31-x9", headers=_session(stranger))
+    assert res.status_code == 404 and "A2-k5" not in res.text
+    assert "deferred" not in _get(client, owner, base)
 
 
 def test_the_published_section_parses_in_all_three_shapes():
