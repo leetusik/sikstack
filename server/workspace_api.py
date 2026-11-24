@@ -19,6 +19,12 @@ as the bearer, and every request names the checkout and the engine's version
   sha256, encoding: utf8|base64, content}], rest}``, the live files among
   ``paths`` in their order, one page at a time: ``rest`` are the asked paths
   left for the next request (``server.workspace.service.FETCH_PAGE_BUDGET``).
+- ``POST /api/workspace/{project_id}/search {query, prefix?, limit?}`` → ``{head,
+  hits: [{path, line, snippet}], truncated}``: the head's live text records under
+  ``prefix`` scanned for ``query`` (2 to 200 characters after stripping, else 422),
+  case-insensitive, one hit per matching line (1-based), by path then line; binary
+  records (a NUL in the first 8 KB, or not UTF-8) are skipped. ``limit`` defaults to
+  50 and is held to 200 (under 1: 422); ``truncated`` says the limit cut the hits.
 - ``POST /api/workspace/{project_id}/commit {batch_id, command, origin, ops, events,
   derived, inbox}`` → 200 ``{head, revs}`` or 409 ``{conflicts}``, all or nothing
   and idempotent by ``batch_id`` (``server.workspace.service``). ``ops`` are
@@ -71,6 +77,7 @@ from server.workspace import (
     Writer,
     get_workspace_service,
 )
+from server.workspace.service import SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT
 from server.workspace.types import (
     INBOX_REFUSED,
     INBOX_RESULT_STATES,
@@ -89,6 +96,8 @@ MAX_BODY_BYTES = 8 * 1024 * 1024
 _MAX_PATH = 1024
 _MAX_HEADER = 200
 _MAX_FETCH_PATHS = 20_000
+_MIN_QUERY = 2
+_MAX_QUERY = 200
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 #: A path that names no project: a malformed ``project_id`` still goes through the
 #: resolver (401 / 403 as usual) and ends in its 404.
@@ -437,6 +446,52 @@ async def workspace_fetch(
             "content": content,
         })
     return JSONResponse({"files": files, "rest": list(page.rest)})
+
+
+@router.post("/api/workspace/{project_id}/search")
+async def workspace_search(
+    project_id: str, request: Request, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """The head's text lines holding ``query`` (case-insensitive), by path then line."""
+
+    ctx, _writer = await _caller(request, project_id, background_tasks)
+    assert ctx.project_id is not None
+    body = await _json_body(request)
+    query = body.get("query")
+    if not isinstance(query, str) or not (
+        _MIN_QUERY <= len(query.strip()) <= _MAX_QUERY
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"query must be {_MIN_QUERY} to {_MAX_QUERY} characters",
+        )
+    raw_prefix = body.get("prefix")
+    prefix = ""
+    if raw_prefix is not None and raw_prefix != "":
+        if not isinstance(raw_prefix, str):
+            raise _bad("prefix must be a relative path prefix")
+        # A prefix may end in "/" (a folder); the rest is checked like any path.
+        _path(raw_prefix[:-1] if raw_prefix.endswith("/") else raw_prefix, "prefix")
+        prefix = raw_prefix
+    limit = body.get("limit")
+    if limit is None:
+        limit = SEARCH_DEFAULT_LIMIT
+    elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise HTTPException(status_code=422, detail="limit must be a positive number")
+    limit = min(limit, SEARCH_MAX_LIMIT)
+    try:
+        result = await get_workspace_service().search(
+            ctx.project_id, query.strip(), prefix=prefix, limit=limit
+        )
+    except WorkspaceReadError as exc:
+        raise _store_unavailable(exc) from exc
+    return JSONResponse({
+        "head": result.head,
+        "hits": [
+            {"path": hit.path, "line": hit.line, "snippet": hit.snippet} for hit in result.hits
+        ],
+        "truncated": result.truncated,
+    })
 
 
 @router.get("/api/workspace/{project_id}/inbox")

@@ -31,8 +31,10 @@ Errors from SQLAlchemy surface as ``WorkspacePersistenceError`` (writes) or
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -72,6 +74,30 @@ from server.workspace.types import (
 #: The content bytes one fetch page aims to stay under, counted as if every file
 #: were base64 (4/3 of its size), so the JSON answer stays under the protocol's 8 MB.
 FETCH_PAGE_BUDGET = 6_000_000
+
+#: The search answer's hit cap: ``limit`` defaults to the first and is held to the second.
+SEARCH_DEFAULT_LIMIT = 50
+SEARCH_MAX_LIMIT = 200
+#: A hit's snippet: the matching line, stripped, cut to this many characters around the match.
+SEARCH_SNIPPET = 240
+#: A record whose first bytes hold a NUL is binary and never searched.
+_BINARY_PROBE = 8192
+#: Records whose contents one search query reads at once.
+_SEARCH_CHUNK = 256
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SearchHit:
+    path: str
+    line: int
+    snippet: str
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SearchResult:
+    head: int
+    hits: tuple[SearchHit, ...]
+    truncated: bool
 
 
 class WorkspaceInputError(ValueError):
@@ -124,6 +150,44 @@ def _writer_label(revision: RevisionRecord | None) -> str | None:
 
 def _encoded_estimate(size: int) -> int:
     return (size + 2) // 3 * 4 + 256
+
+
+def _search_text(data: bytes) -> str | None:
+    """A record's text, or ``None`` when it is binary (a NUL in its first 8 KB, or not UTF-8)."""
+
+    if b"\x00" in data[:_BINARY_PROBE]:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _snippet(line: str, needle: str) -> str:
+    """The matching line, stripped, cut to ``SEARCH_SNIPPET`` characters around the match."""
+
+    text = line.strip()
+    if len(text) <= SEARCH_SNIPPET:
+        return text
+    at = max(text.casefold().find(needle), 0)
+    start = max(0, min(at - (SEARCH_SNIPPET - len(needle)) // 2, len(text) - SEARCH_SNIPPET))
+    return text[start:start + SEARCH_SNIPPET]
+
+
+def _search_chunk(contents: Sequence[tuple[str, bytes]], needle: str, room: int) -> list[SearchHit]:
+    """Up to ``room`` hits in ``contents`` (``(path, bytes)`` in path order)."""
+
+    hits: list[SearchHit] = []
+    for path, data in contents:
+        text = _search_text(data)
+        if text is None or needle not in text.casefold():
+            continue
+        for number, line in enumerate(text.split("\n"), start=1):
+            if needle in line.casefold():
+                hits.append(SearchHit(path=path, line=number, snippet=_snippet(line, needle)))
+                if len(hits) >= room:
+                    return hits
+    return hits
 
 
 class WorkspaceService:
@@ -217,6 +281,54 @@ class WorkspaceService:
                     return await repository.history(project_id, path)
             except SQLAlchemyError as exc:
                 raise WorkspaceReadError("failed to read a workspace history") from exc
+
+    # -- search (the engine's look into history it holds no copy of) ------------------
+
+    async def search(
+        self, project_id: UUID, query: str, *, prefix: str = "", limit: int = SEARCH_DEFAULT_LIMIT
+    ) -> SearchResult:
+        """The head's text lines holding ``query``, case-insensitive, by path then line.
+
+        Scans the live records under ``prefix`` (an append record's content as a fetch
+        returns it), skipping binary ones (:func:`_search_text`). One hit per matching
+        line; the scan stops at ``limit`` hits and reports whether more were there. No
+        index: the blobs are read in chunks and scanned off the event loop.
+        """
+
+        needle = query.casefold()
+        hits: list[SearchHit] = []
+        truncated = False
+        async with self._session_maker() as session:
+            repository = WorkspaceRepository(session)
+            try:
+                async with session.begin():
+                    head = await repository.get_head(project_id)
+                    live = await repository.live_records(project_id)
+                    records = [live[path] for path in sorted(live) if path.startswith(prefix)]
+                    for start in range(0, len(records), _SEARCH_CHUNK):
+                        chunk = records[start:start + _SEARCH_CHUNK]
+                        blobs = await repository.get_blobs(project_id, {
+                            rec.blob_sha256 for rec in chunk
+                            if rec.kind != KIND_APPEND and rec.blob_sha256
+                        })
+                        contents: list[tuple[str, bytes]] = []
+                        for rec in chunk:
+                            if rec.kind == KIND_APPEND:
+                                data = await repository.record_content(project_id, rec)
+                            else:
+                                data = blobs.get(rec.blob_sha256 or "", b"")
+                            contents.append((rec.path, data))
+                        found = await asyncio.to_thread(
+                            _search_chunk, contents, needle, limit + 1 - len(hits)
+                        )
+                        hits.extend(found)
+                        if len(hits) > limit:
+                            truncated = True
+                            del hits[limit:]
+                            break
+            except SQLAlchemyError as exc:
+                raise WorkspaceReadError("failed to search the workspace") from exc
+        return SearchResult(head=head, hits=tuple(hits), truncated=truncated)
 
     # -- the web's inbox ----------------------------------------------------------------
 
