@@ -6,14 +6,14 @@ allowed-tools: Bash(curl:*), Read
 
 # vocky-feedback
 
-Capture one piece of end-user feedback into vocky, the shared feedback-ingest service. Vocky is now the Feedback part of `https://hi2vi.com`. Every command below is meant to be copied and run exactly as written, substituting only the bracketed values.
+Capture one piece of end-user feedback into vocky, the shared feedback-ingest service. Vocky is now the Feedback part of `https://sikstack.com`. Every command below is meant to be copied and run exactly as written, substituting only the bracketed values.
 
 ## 1. Set up the two-variable contract
 
 Every capture path below — REST or MCP — needs exactly two environment variables:
 
 ```bash
-export VOCKY_BASE_URL="https://hi2vi.com"
+export VOCKY_BASE_URL="https://sikstack.com"
 export VOCKY_API_TOKEN="vk_..."
 ```
 
@@ -21,9 +21,9 @@ Put these in `~/.zshenv`, never a repo `.env`:
 
 - A repo `.env` is **never** auto-loaded by Claude Code or Codex, and a secret committed to a repo risks an accidental leak. `~/.zshenv` is sourced by every zsh invocation, so every Bash call, every Codex `exec`, and every repo you work in inherits it — the key never touches a repo.
 - **Codex only**: the `workspace-write` sandbox denies outbound network by default, so the POST below would silently fail. Add `[sandbox_workspace_write] network_access = true` to `~/.codex/config.toml`. Claude Code needs no equivalent change.
-- If `VOCKY_API_TOKEN` is not set yet, ask the operator for one. A key is minted in the web app at `https://hi2vi.com`, never with a CLI: the **Org API keys** panel on the **Dashboard** mints an org-level key, and the **API keys** panel on a project's page mints a key bound to that project. The form's **Access** choice sets what the key can do, and the key is shown only once — copy it then.
+- If `VOCKY_API_TOKEN` is not set yet, ask the operator for one. A key is minted in the web app at `https://sikstack.com`, never with a CLI: the **Org API keys** panel on the **Dashboard** mints an org-level key, and the **API keys** panel on a project's page mints a key bound to that project. The form's **Access** choice sets what the key can do, and the key is shown only once — copy it then.
 - **Know what the key can do.** **Capture only** can send feedback and its attachments (`POST /api/feedback`, `POST /api/feedback/attachments`, the MCP capture tool) and nothing else — it cannot even create a project (step 4); every other key route answers it `403`. **Full access** can also read, edit (PATCH) and delete feedback **and** read and write the org's Library. A key's reach is fixed when it is minted: a project's key lands every capture in exactly that project, while an org-level key reaches every project in the org. For anything running as an agent runtime, or on a machine the operator does not control, use a **Capture only** key, bound to one project where the caller is one product, and store it as you would any API secret.
-- A key minted on the old `vocky.hi2vi.com` no longer works; mint a new one.
+- A key minted on the old `vocky.hi2vi.com` no longer works; mint a new one. A key minted on the old apex `hi2vi.com` still works, but a `VOCKY_BASE_URL` naming that old host only gets a `308` redirect: set it to `https://sikstack.com`.
 
 ## 2. Verify before you capture anything
 

@@ -7,33 +7,20 @@ scripts/name_guard.py | *
 scripts/name_guard_allow.txt | *
 .github/workflows/name-guard.yml | *
 
-# The live box's config. Production stays on hi2vi.com until P70-bp moves the domain and DNS;
-# main must stay deployable there until then. P70-bp rewrites these (vhosts, deploy scripts, the
-# runbooks' host lines, the compose domain values and env names, the deploy workflow's smoke hosts).
-deploy/* | *
-compose.prod.yml | *
-.github/workflows/deploy-production.yml | *
-CLAUDE.md | the apex `hi2vi\.conf`|^- Name guard:
-server/feedback_api.py | deploy/hi2vi\.conf
-plugins/explain/templates/kb/server/feedback_api.py | deploy/hi2vi\.conf
-web/src/app/api/auth/org/route.ts | deploy/hi2vi\.conf
-web/src/lib/knowledge/connect.ts | deploy/hi2vi\.conf
-
-# The hosted address while only it serves: the box answers on hi2vi.com until the domain moves to
-# sikstack.com with DNS, and a key must never go to a host that does not serve yet. So the CLI's
-# hosted default, the explain resolver's old-host mapping (its three copies), explain's setup, the
-# Feedback skill's base URL (both copies) and their tests stay on hi2vi.com; the domain move flips
-# each of them with DNS and drops this group.
-cli/src/knowledge_cli/config.py | hi2vi\.com
-cli/src/knowledge_cli/guide.py | https://hi2vi\.com|\(hi2vi\.com does\)
-cli/tests/test_config.py | hi2vi\.com
-.agents/skills/explain/SKILL.md | knowledge\.hi2vi\.com|https://hi2vi\.com
-plugins/explain/skills/explain/SKILL.md | knowledge\.hi2vi\.com|https://hi2vi\.com
-web/public/SKILL.md | knowledge\.hi2vi\.com|https://hi2vi\.com
-plugins/explain/skills/setup/SKILL.md | https://hi2vi\.com
-tests/test_explain_resolver.py | knowledge\.hi2vi\.com|https://hi2vi\.com
-skills/vocky-feedback/SKILL.md | https://hi2vi\.com
-web/public/feedback/SKILL.md | https://hi2vi\.com
+# The old domain's hosts. The platform serves sikstack.com; hi2vi.com, knowledge.hi2vi.com and
+# vocky.hi2vi.com only answer 308 redirects to it. Their three vhosts, the runbooks' lines about
+# them (the redirects, their cert pair, the landing order, the rollback, the fallback sender), the
+# MCP allowlist's `hi2vi.com` entry and the deploy workflow's `hi2vi.com` smoke choice, both kept
+# for the deploy that ships the move (its smoke runs on hi2vi.com before the edge serves
+# sikstack.com; they go once the redirect is live), and the pointer lines that name them.
+deploy/hi2vi.conf | *
+deploy/knowledge.conf | *
+deploy/vocky.conf | *
+deploy/README.md | hi2vi\.(com|conf|crt)|hi2vi\.\{crt|live-hi2vi|HI2VI_FEEDBACK_
+deploy/SECRETS.md | hi2vi\.(com|conf)|hi2vi\.\{crt|HI2VI_FEEDBACK_
+compose.prod.yml | hi2vi\.com|deploy/hi2vi\.conf
+.github/workflows/deploy-production.yml | hi2vi\.com
+CLAUDE.md | the old domain's `hi2vi\.conf`|^- Name guard:
 
 # Old records: the design rounds of the knowledge app, frozen as drawn.
 web/design/* | *
@@ -42,10 +29,17 @@ web/design/* | *
 *CHANGELOG.md | *
 
 # Compatibility reads of old names: the old hosts (they only redirect, and a client never follows
-# a redirect), the request headers an older engine or web build sends, the box's older env names.
+# a redirect, so the CLI and the explain resolver read a saved old host as sikstack.com, and the
+# skills say so), the request headers an older engine or web build sends, the box's older env names.
 mcp-server/CONTRACT.md | old public host `knowledge\.hi2vi\.com`
-skills/vocky-feedback/SKILL.md | old `vocky\.hi2vi\.com`
-web/public/feedback/SKILL.md | old `vocky\.hi2vi\.com`
+skills/vocky-feedback/SKILL.md | old `vocky\.hi2vi\.com`|old apex `hi2vi\.com`
+web/public/feedback/SKILL.md | old `vocky\.hi2vi\.com`|old apex `hi2vi\.com`
+cli/src/knowledge_cli/config.py | knowledge\.hi2vi\.com|old apex hi2vi\.com
+cli/tests/test_config.py | hi2vi\.com
+.agents/skills/explain/SKILL.md | knowledge\.hi2vi\.com
+plugins/explain/skills/explain/SKILL.md | knowledge\.hi2vi\.com
+web/public/SKILL.md | knowledge\.hi2vi\.com
+tests/test_explain_resolver.py | hi2vi\.com
 server/accounts/auth.py | X-Hi2vi-|named hi2vi before sikstack
 plugins/explain/templates/kb/server/accounts/auth.py | X-Hi2vi-|named hi2vi before sikstack
 server/workspace_api.py | ``X-Hi2vi-\*`` names are read the same

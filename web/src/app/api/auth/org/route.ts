@@ -16,7 +16,7 @@ import {
 } from "@/lib/session";
 
 // The active org: switch (POST) and reset (GET). Under `/api/auth/` because the edge
-// sends only that part of `/api/` to the web app (`deploy/hi2vi.conf`).
+// sends only that part of `/api/` to the web app (`deploy/sikstack.conf`).
 //
 // POST is the org menu's plain form post (it works with no JS). It sets the
 // `__Host-sikstack_org` cookie ONLY to an org the API has just confirmed the user is a member

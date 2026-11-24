@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Wire /explain:explain to a knowledge base — either connect to the hosted KB at https://hi2vi.com (sign up, mint a key, paste it; zero infrastructure) or scaffold your own self-hosted KB (MkDocs site + document API + knowledge graph + Pages workflow). Run once after installing the plugin, or re-run to reconfigure.
+description: Wire /explain:explain to a knowledge base — either connect to the hosted KB at https://sikstack.com (sign up, mint a key, paste it; zero infrastructure) or scaffold your own self-hosted KB (MkDocs site + document API + knowledge graph + Pages workflow). Run once after installing the plugin, or re-run to reconfigure.
 argument-hint: [target-dir]
 disable-model-invocation: true
 allowed-tools: Read, Glob, Bash(python3 -c:*), Bash(curl -sS --max-time 5:*)
@@ -12,7 +12,7 @@ Wire `/explain:explain` to a knowledge base. There are **two modes**, and the fi
 thing this skill does is ask which one the user wants:
 
 - **Connect** (recommended for most plugin users) — link to the **hosted** knowledge base
-  at `https://hi2vi.com`. No Docker, no server to run: the user signs up in
+  at `https://sikstack.com`. No Docker, no server to run: the user signs up in
   their browser, mints one org-level ingest key, pastes it here, and is done. Their
   chapters post to their own org and render in the web app.
 - **Scaffold** — stand up the user's **own self-hosted** knowledge base from the plugin's
@@ -40,7 +40,7 @@ plugin user who just wants `/explain:explain` to work with zero infrastructure;
 ## Connect mode — link to the hosted knowledge base
 
 Connect mode wires `/explain:explain` to the hosted knowledge base at
-`https://hi2vi.com` — no Docker, no scaffold, no site to run. The user signs up
+`https://sikstack.com` — no Docker, no scaffold, no site to run. The user signs up
 in their browser, mints one org-level ingest key, and pastes it here; from then on
 `/explain:explain` posts explainers to **their own org**, and they render in the web
 app. This is the zero-infrastructure default for plugin users.
@@ -61,11 +61,11 @@ at all.
 
 ### C1. Sign up (or sign in) in the browser
 
-Tell the user to open `https://hi2vi.com/signup` and **Create your account** with
+Tell the user to open `https://sikstack.com/signup` and **Create your account** with
 an email and a password of at least 8 characters (the form's hint is *"At least 8
 characters"*). A **default** org and a **default** project are created for them
 automatically. If they already have an account, they open
-`https://hi2vi.com/login` and **Sign in** instead.
+`https://sikstack.com/login` and **Sign in** instead.
 
 The user does this in their own browser. **Do not** ask the user to type their email or
 password to the agent — authentication happens entirely in the browser, and only the
@@ -101,11 +101,11 @@ remote-only, so there is no local KB and therefore no file fallback):
 
     {
       "api": {
-        "base_url": "https://hi2vi.com",
+        "base_url": "https://sikstack.com",
         "token": "<the pasted vk_ key>"
       },
       "site": {
-        "base_url": "https://hi2vi.com"
+        "base_url": "https://sikstack.com"
       }
     }
 
@@ -134,8 +134,8 @@ in this order:
        import json, sys
        token = open(sys.argv[1]).read().strip()
        cfg = {
-           "api": {"base_url": "https://hi2vi.com", "token": token},
-           "site": {"base_url": "https://hi2vi.com"},
+           "api": {"base_url": "https://sikstack.com", "token": token},
+           "site": {"base_url": "https://sikstack.com"},
        }
        json.dump(cfg, open(sys.argv[2], "w"), indent=2)
        ' /tmp/kb-connect/vk.txt "<config path from step 1>"
@@ -146,7 +146,7 @@ in this order:
    plaintext key survives only inside the private config.
 
 **Env-var escape hatch.** For a one-off or a per-shell override, the user can skip the file
-and export `KB_API_BASE_URL=https://hi2vi.com` and `KB_API_TOKEN=<vk_>` in their
+and export `KB_API_BASE_URL=https://sikstack.com` and `KB_API_TOKEN=<vk_>` in their
 shell — `/explain:explain`'s resolver honors those over the config file. The config file
 is the durable, machine-wide setting; the env vars are the transient override.
 
@@ -156,11 +156,11 @@ Confirm the key works with one authenticated read (safe — it lists at most one
 writes nothing), substituting the pasted key:
 
     curl -sS --max-time 5 -H "Authorization: Bearer <vk_>" \
-      "https://hi2vi.com/api/documents?limit=1"
+      "https://sikstack.com/api/documents?limit=1"
 
 - **HTTP 200** (a JSON `{total, items}` body) → **connected.** Report to the user:
   `/explain:explain` now saves to **their** org from **any** repo, and their documents
-  render in the web app under **Documents** (`https://hi2vi.com/documents`).
+  render in the web app under **Documents** (`https://sikstack.com/documents`).
 - **HTTP 401** → the key is wrong or was revoked. Have the user re-check they pasted the
   whole `vk_…` string, or mint a fresh key (**Dashboard** → **Org API keys** → **New key**)
   and re-run connect mode. Do **not** fall back to anything.

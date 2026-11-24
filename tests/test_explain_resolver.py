@@ -6,9 +6,8 @@ with ``HOME`` and the XDG folders in a tmp dir, so it reads only a fake config:
 * with a token, stdout never carries it, and ``KB_AUTH_HEADER`` names a ``0600``
   file holding the bearer line;
 * with no token, ``KB_AUTH_HEADER=`` is empty and a stale header file is removed;
-* a base URL on the old host ``knowledge.hi2vi.com`` resolves to the apex
-  ``https://hi2vi.com``, and every other base URL, ``https://hi2vi.com`` itself among
-  them, is left exactly as given (the domain move flips this with DNS).
+* a base URL on an old host, ``knowledge.hi2vi.com`` or the old apex ``hi2vi.com``,
+  resolves to ``https://sikstack.com``, and every other base URL is left exactly as given.
 
 No network, no server.
 """
@@ -89,24 +88,26 @@ def test_no_token_leaves_no_header_file(tmp_path):
     assert not stale.exists()
 
 
-def test_old_host_in_config_resolves_to_the_apex(tmp_path):
-    vals = _run(tmp_path, None, base_url="https://knowledge.hi2vi.com")
-    assert vals["KB_API_BASE_URL"] == "https://hi2vi.com"
+@pytest.mark.parametrize("old", ["https://knowledge.hi2vi.com", "https://hi2vi.com"])
+def test_old_host_in_config_resolves_to_the_apex(tmp_path, old):
+    vals = _run(tmp_path, None, base_url=old)
+    assert vals["KB_API_BASE_URL"] == "https://sikstack.com"
 
 
-def test_old_host_in_env_resolves_to_the_apex(tmp_path):
-    vals = _run(tmp_path, None, env_base_url="https://knowledge.hi2vi.com/")
-    assert vals["KB_API_BASE_URL"] == "https://hi2vi.com"
+@pytest.mark.parametrize("old", ["https://knowledge.hi2vi.com/", "https://hi2vi.com/"])
+def test_old_host_in_env_resolves_to_the_apex(tmp_path, old):
+    vals = _run(tmp_path, None, env_base_url=old)
+    assert vals["KB_API_BASE_URL"] == "https://sikstack.com"
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "https://hi2vi.com",
         "https://sikstack.com",
         "https://kb.example.org/api",
         "http://localhost:8766",
         "https://knowledge.hi2vi.com.example.org",
+        "https://www.hi2vi.com",
         "https://example.org/knowledge.hi2vi.com",
     ],
 )

@@ -709,8 +709,8 @@ CLI reads the key itself. Never read, print or pass that file's contents or the 
         b_root = b_api = b_token = b_site = None
     kb_root = env_root or b_root or ""
     api_base = env_api or b_api or "http://localhost:8766"
-    if urlsplit(api_base).hostname == "knowledge.hi2vi.com":
-        api_base = "https://hi2vi.com"
+    if urlsplit(api_base).hostname in ("knowledge.hi2vi.com", "hi2vi.com"):
+        api_base = "https://sikstack.com"
     token = env_token or b_token or ""
     site_base = b_site or "http://localhost:8765"
     kb_root = os.path.expanduser(kb_root) if kb_root else ""
@@ -773,8 +773,8 @@ Read the output:
 For reference, per key: the env var wins, then the config file `/explain:setup` writes
 (`kb_root`, `api.base_url`, `api.token`, `site.base_url`; `kb_root` may be absent), then the
 legacy `~/projects/personal/knowledge/mkdocs.yml` convention; nothing → unconfigured. An API
-base on the old host `knowledge.hi2vi.com` resolves to `https://hi2vi.com`, which serves until the
-domain moves: that host only redirects, and a redirect carries neither the bearer nor the POST.
+base on an old host, `knowledge.hi2vi.com` or the old apex `hi2vi.com`, resolves to
+`https://sikstack.com`: those hosts only redirect, and a redirect carries neither the bearer nor the POST.
 
 **The run's dossier.** Every run keeps its files in one folder, `<DOSSIER>`: the folder
 its explain phase names, `doc/` in the phase folder for a document or a chapter

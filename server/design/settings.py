@@ -4,8 +4,8 @@
   production), else ``KB_ROOT/data/design-builds``.
 - ``KB_DESIGN_ORIGIN``: the pattern of a build's own origin, with ``{build}`` where the
   build id goes: ``http://{build}.design.sikstack.localhost:8767`` locally; in
-  production one level (``https://d-{build}.sikstack.com``) or two
-  (``https://{build}.design.sikstack.com``), whichever the edge serves. Unset: builds
+  production one level, ``https://d-{build}.sikstack.com``, the host the edge's
+  ``deploy/sikstack-design.conf`` serves (any shape works here). Unset: builds
   are stored and listed, but have no address and nothing serves them.
 - ``KB_DESIGN_APP_ORIGIN``: the app's origin, the only one that may frame a build
   (``frame-ancestors``), else ``KB_PUBLIC_BASE_URL``.

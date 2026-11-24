@@ -1,7 +1,7 @@
 name: name guard
 
 # The product is sikstack (it was hi2vi). Every line that still names hi2vi must be held by
-# scripts/name_guard_allow.txt (the live box's config until the domain moves, old records,
+# scripts/name_guard_allow.txt (the old domain's redirect hosts, old records,
 # compatibility reads, history notes); any other fails this job.
 
 on:

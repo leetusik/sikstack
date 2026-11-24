@@ -7,7 +7,7 @@ set -Eeuo pipefail
 # (oracle-production-deploy-remote.sh), which owns verify -> deploy/deploy.sh -> artifacts (it installs no
 # edge vhost: those land through the edge repo, by the operator, deploy/README.md §3a). Mirrors
 # hi2vi_web/deploy/github-actions-production-deploy.sh almost verbatim; the only knowledge specifics are
-# the repo path (/opt/knowledge) and the /tmp script/artifact names. Never touches hi2vi's or changple's
+# the repo path (/opt/knowledge) and the /tmp script/artifact names. Never touches hi2vi_web's or changple's
 # checkout or project. First real run is P9.S5 (this slice authors + statically validates only).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

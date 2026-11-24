@@ -41,7 +41,7 @@ GUIDE = f"""\
 # knowledge — the agent-readable contract
 
 `knowledge` is a standalone CLI for a personal knowledge base on the hosted service
-at https://hi2vi.com. It signs up, configures credentials, and saves and
+at https://sikstack.com. It signs up, configures credentials, and saves and
 searches knowledge from a terminal — the website is never required. This is the full
 machine-readable contract: if you are a coding agent driving this on a user's behalf,
 everything you need to run the whole lifecycle unattended is below.
@@ -58,7 +58,7 @@ This puts a `knowledge` executable on PATH. Requires Python 3.12+ and `uv`. The 
 runtime dependency is `httpx`; there is no PyPI, npm, or brew package — the git URL is
 the distribution channel. Re-run the same command with `--reinstall` to upgrade
 (`--force` reuses the cached wheel and does not rebuild). A human can instead run the
-one-liner `curl -fsSL https://hi2vi.com/install.sh | bash`, which bootstraps
+one-liner `curl -fsSL https://sikstack.com/install.sh | bash`, which bootstraps
 `uv` and then runs exactly this command.
 
 ## 2. Onboard — one command
@@ -70,7 +70,7 @@ already exists) → create a project → mint an API key → write the local con
 verify it resolves. It is **idempotent** — re-running logs in, reuses the existing
 project, and keeps the existing key. Safe to run twice.
 
-If the service holds new sign-ups on a **waitlist** (hi2vi.com does), `init`,
+If the service holds new sign-ups on a **waitlist** (sikstack.com does), `init`,
 `signup` and `login` stop with one `error: … on the sikstack waitlist …` line and exit
 `1`, saving nothing; the account opens later by mail, and then `init` runs as above.
 

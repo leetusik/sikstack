@@ -7,7 +7,7 @@ import { ApiError, getRaw, sendJson } from "./client";
 // - `readConnect` (`GET /app/connect/{code}`): with the session's token when there is one,
 //   without it otherwise. The API limits a signed-out read per client address (it shows the
 //   setup email), so the visitor's address goes with it as `X-Real-IP`: the one the edge set
-//   on the request being served (`deploy/hi2vi.conf` overwrites any a client sends).
+//   on the request being served (`deploy/sikstack.conf` overwrites any a client sends).
 // - `approveConnect` and `declineConnect` (`POST /app/connect/{code}/approve|decline`): the
 //   session's token, called by the BFF route `/api/auth/connect`.
 //

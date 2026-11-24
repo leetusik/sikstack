@@ -10,7 +10,7 @@ tripwire, not a coverage exercise.
 
 import re
 
-from knowledge_cli import guide, main
+from knowledge_cli import config, guide, main
 
 
 def test_guide_covers_the_load_bearing_constraints(capsys):
@@ -28,6 +28,8 @@ def test_guide_covers_the_load_bearing_constraints(capsys):
     assert "auth.session_token" in out and "api.token" in out  # the two-token split
     assert "--json" in out and "exit code" in out.lower()      # the agent protocol
     assert guide.INSTALL_COMMAND in out                   # the git install form (D-P13-1)
+    assert f"{config.HOSTED_BASE_URL}." in out            # the hosted service it names
+    assert f"{config.HOSTED_BASE_URL}/install.sh" in out  # is the CLI's own default
 
     # Nothing that looks like a real minted secret ever ships in the bundled string.
     assert not re.search(r"vk_[A-Za-z0-9_-]{20,}", out)
