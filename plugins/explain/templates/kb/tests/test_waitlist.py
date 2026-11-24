@@ -136,11 +136,12 @@ def test_switch_on_signup_answers_waitlisted_and_mints_no_token(wl, monkeypatch)
             {"e": email.lower()},
         ).scalar_one()
     assert orgs == 1
-    # One waitlist mail, after the response.
-    assert len(wl.sent) == 1
+    # One waitlist mail to the account and one alert to the operator, after the response.
+    assert len(wl.sent) == 2
     mail = wl.sent[0]
     assert mail["To"] == email.lower() and mail["From"] == "hi@example.com"
     assert "waitlist" in mail.get_content()
+    assert wl.sent[1]["To"] == "info@sikstack.com"
     # A taken email answers as today, waitlisted or not.
     again = wl.post("/auth/signup", json={"email": email, "password": PASSWORD})
     assert again.status_code == 409
@@ -276,6 +277,52 @@ def test_a_failed_approval_mail_keeps_the_approval(wl, monkeypatch, capsys):
     assert code != 0
     assert _status(wl, email) == "approved"
     assert "mail" in capsys.readouterr().err
+
+
+def test_a_waitlisted_signup_alerts_the_operator_once(wl, monkeypatch):
+    """One alert to info@sikstack.com naming the address and the approve command; the
+    account's own mail is unchanged; an approved sign-up sends no alert."""
+
+    from server import waitlist
+
+    monkeypatch.setenv("KB_SIGNUP_WAITLIST", "on")
+    email = _email().lower()
+    res = wl.post("/auth/signup", json={"email": email, "password": PASSWORD})
+    assert res.status_code == 202, res.text
+
+    alerts = [m for m in wl.sent if m["To"] == "info@sikstack.com"]
+    own = [m for m in wl.sent if m["To"] == email]
+    assert len(alerts) == 1 and len(own) == 1 and len(wl.sent) == 2
+    alert = alerts[0]
+    assert alert["From"] == "hi@example.com"
+    body = alert.get_content()
+    assert email in body
+    assert f"docker compose exec api python -m server.waitlist approve {email}" in body
+    # The account's mail is the one it got before the alert existed.
+    expected = waitlist.render_waitlist_message(email)
+    assert own[0]["Subject"] == expected["Subject"]
+    assert own[0].get_content() == expected.get_content()
+
+    wl.sent.clear()
+    monkeypatch.delenv("KB_SIGNUP_WAITLIST")
+    approved = wl.post("/auth/signup", json={"email": _email(), "password": PASSWORD})
+    assert approved.status_code == 201
+    assert wl.sent == []
+
+
+def test_a_failed_alert_never_fails_the_signup(wl, monkeypatch):
+    import server.feedback.notify as notify
+
+    def boom(message):
+        if message["To"] == "info@sikstack.com":
+            raise OSError("smtp down")
+
+    monkeypatch.setattr(notify, "send_message", boom)
+    monkeypatch.setenv("KB_SIGNUP_WAITLIST", "on")
+    email = _email()
+    res = wl.post("/auth/signup", json={"email": email, "password": PASSWORD})
+    assert res.status_code == 202, res.text
+    assert _status(wl, email) == "waitlisted"
 
 
 def test_a_failed_waitlist_mail_never_fails_the_signup(wl, monkeypatch):
@@ -426,7 +473,7 @@ def test_signup_accepts_one_plain_address_and_mails_only_it(
 
     assert res.status_code == (202 if switch else 201), res.text
     assert _user_count(wl, stored) == 1
-    assert rcpt == ([[stored]] if switch else [])
+    assert rcpt == ([[stored], ["info@sikstack.com"]] if switch else [])
 
 
 LEGACY_ROWS = [

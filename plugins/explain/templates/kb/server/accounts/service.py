@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from server.accounts.repository import AccountsRepository
 from server.accounts.slugs import InvalidOrgSlugError, normalize_org_slug
 from server.accounts.types import (
+    ROLE_OWNER,
     AuthTokenRecord,
     CreateAuthToken,
     CreateProject,
     CreateProjectCredential,
     CreateUser,
+    OrgMemberRecord,
     ProjectCredentialRecord,
     ProjectRecord,
     TenantMemberRecord,
@@ -219,14 +221,27 @@ class AccountsService:
         into, so signup and the fresh-database seed share this one primitive.
         """
 
+        return await self.create_org(user_id, DEFAULT_ORG_NAME)
+
+    async def create_org(
+        self,
+        user_id: UUID,
+        name: str,
+    ) -> tuple[TenantRecord, TenantMemberRecord, ProjectRecord]:
+        """Make an org named ``name``: the tenant, ``user_id`` as its ``owner`` and one
+        project ``"default"``, in one transaction (sign-up's ``"default"`` org is one).
+
+        The caller validates ``name`` (``server.orgs_api``).
+        """
+
         async with self._session_maker() as session:
             repository = AccountsRepository(session)
             try:
-                tenant = await repository.create_tenant(DEFAULT_ORG_NAME)
+                tenant = await repository.create_tenant(name)
                 member = await repository.add_tenant_member(
                     tenant_id=tenant.id,
                     user_id=user_id,
-                    role="owner",
+                    role=ROLE_OWNER,
                 )
                 project = await repository.create_project(
                     CreateProject(tenant_id=tenant.id, name=DEFAULT_PROJECT_NAME)
@@ -235,10 +250,46 @@ class AccountsService:
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise AccountsPersistenceError(
-                    "failed to provision signup workspace"
+                    "failed to create the org"
                 ) from exc
 
         return tenant, member, project
+
+    async def set_tenant_name(self, tenant_id: UUID, name: str) -> TenantRecord | None:
+        """Rename a tenant (its display name; the slug is its own route); None when missing."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                record = await repository.set_tenant_name(tenant_id, name)
+                await session.commit()
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsPersistenceError("failed to rename tenant") from exc
+
+        return record
+
+    async def get_member_role(self, tenant_id: UUID, user_id: UUID) -> str | None:
+        """The user's role in the tenant (``owner``/``member``), or None for a non-member."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                return await repository.get_member_role(tenant_id, user_id)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsReadError("failed to read membership") from exc
+
+    async def list_org_members(self, tenant_id: UUID) -> tuple[OrgMemberRecord, ...]:
+        """A tenant's members with their addresses, in the order they joined."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                return await repository.list_org_members(tenant_id)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsReadError("failed to read members") from exc
 
     async def get_tenant(self, tenant_id: UUID) -> TenantRecord | None:
         """Return one tenant by id, or None when missing."""

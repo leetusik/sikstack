@@ -109,6 +109,23 @@ class TenantMemberRecord:
     created_at: datetime
 
 
+#: ``tenant_members.role``: an org's owner (made it, renames it, invites and revokes)
+#: and a member (joined by an invite). App-validated, like the values above.
+ROLE_OWNER = "owner"
+ROLE_MEMBER = "member"
+
+
+@dataclass(slots=True, kw_only=True)
+class OrgMemberRecord:
+    """One member of an org as its members list shows it: the address and the role."""
+
+    id: UUID
+    user_id: UUID
+    email: str
+    role: str
+    joined_at: datetime
+
+
 @dataclass(slots=True, kw_only=True)
 class CreateProject:
     """Input for creating a project under a tenant.

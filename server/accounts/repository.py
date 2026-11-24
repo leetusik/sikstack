@@ -18,6 +18,7 @@ from server.accounts.types import (
     CreateProject,
     CreateProjectCredential,
     CreateUser,
+    OrgMemberRecord,
     ProjectCredentialRecord,
     ProjectRecord,
     TenantMemberRecord,
@@ -159,6 +160,47 @@ class AccountsRepository:
         await self._session.flush()
         await self._session.refresh(model)
         return self._to_tenant_record(model)
+
+    async def set_tenant_name(self, tenant_id: UUID, name: str) -> TenantRecord | None:
+        """Set a tenant's display ``name`` by id; None when the tenant is missing."""
+
+        model = await self._session.get(TenantModel, tenant_id)
+        if model is None:
+            return None
+        model.name = name
+        await self._session.flush()
+        await self._session.refresh(model)
+        return self._to_tenant_record(model)
+
+    async def get_member_role(self, tenant_id: UUID, user_id: UUID) -> str | None:
+        """The user's role in the tenant, or None when the user is not a member."""
+
+        statement = select(TenantMemberModel.role).where(
+            TenantMemberModel.tenant_id == tenant_id,
+            TenantMemberModel.user_id == user_id,
+        )
+        return (await self._session.execute(statement)).scalar_one_or_none()
+
+    async def list_org_members(self, tenant_id: UUID) -> tuple[OrgMemberRecord, ...]:
+        """A tenant's members with their addresses, in the order they joined."""
+
+        statement = (
+            select(TenantMemberModel, UserModel.email)
+            .join(UserModel, UserModel.id == TenantMemberModel.user_id)
+            .where(TenantMemberModel.tenant_id == tenant_id)
+            .order_by(TenantMemberModel.created_at, TenantMemberModel.id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return tuple(
+            OrgMemberRecord(
+                id=member.id,
+                user_id=member.user_id,
+                email=email,
+                role=member.role,
+                joined_at=member.created_at,
+            )
+            for member, email in rows
+        )
 
     async def list_tenants_for_user(self, user_id: UUID) -> tuple[TenantRecord, ...]:
         """Return the tenants a user is a member of, in the order the user joined them.

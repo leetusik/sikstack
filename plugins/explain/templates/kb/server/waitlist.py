@@ -27,6 +27,10 @@ Both mails go from ``KB_SMTP_FROM`` over ``server.feedback.notify.send_message``
 plain text. The waitlist mail is sent by sign-up after its response, best-effort
 (:func:`notify_waitlisted` never raises). With SMTP unconfigured no mail is sent and
 everything else works.
+
+Each new waitlisted sign-up also sends the operator one alert (``ALERT_TO``,
+``info@sikstack.com``), naming the address and the ``approve`` command above, after
+the response and best-effort (:func:`alert_waitlist_signup` never raises).
 """
 
 from __future__ import annotations
@@ -59,6 +63,21 @@ APPROVAL_BODY = """\
 Hi,
 
 Your sikstack account for {email} is open. Sign in at {login_url}
+
+sikstack
+"""
+
+
+#: Where each new waitlisted sign-up is announced to the operator. A code default, not
+#: a setting: the box needs no new name in its env.
+ALERT_TO = "info@sikstack.com"
+ALERT_SUBJECT = "Waitlist sign-up: {email}"
+ALERT_BODY = """\
+{email} signed up and is on the waitlist.
+
+Approve it on the box:
+
+    docker compose exec api python -m server.waitlist approve {email}
 
 sikstack
 """
@@ -131,6 +150,34 @@ async def notify_waitlisted(email: str) -> None:
         await asyncio.to_thread(notify.send_message, render_waitlist_message(email))
     except Exception:  # best-effort: a mail never fails or delays a sign-up
         logger.exception("Waitlist mail to %s failed; dropped", email)
+
+
+def render_waitlist_alert(email: str) -> EmailMessage:
+    """The operator's alert for one waitlisted sign-up: the address and the approve command."""
+
+    shown = _shown(email)
+    return _message(
+        ALERT_SUBJECT.format(email=shown), ALERT_BODY.format(email=shown), ALERT_TO
+    )
+
+
+async def alert_waitlist_signup(email: str) -> None:
+    """Send the operator one alert for a new waitlisted sign-up; never raises.
+
+    Scheduled by sign-up after its response, beside :func:`notify_waitlisted`; a
+    failure is logged and dropped, so it never fails or delays the sign-up.
+    """
+
+    if not config.smtp_configured():
+        # A warning: the operator hears of this sign-up from nowhere else.
+        logger.warning(
+            "SMTP is not configured; no waitlist alert to %s for %s", ALERT_TO, _shown(email)
+        )
+        return
+    try:
+        await asyncio.to_thread(notify.send_message, render_waitlist_alert(email))
+    except Exception:  # best-effort, like the waitlist mail
+        logger.exception("Waitlist alert for %s failed; dropped", _shown(email))
 
 
 # --- the operator's command -------------------------------------------------------
