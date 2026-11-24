@@ -283,9 +283,12 @@ ENTRY_KINDS = ("note", "issue", "feedback", "question", "decision")
 ENTRY_KEYS = ("kind", "author", "source", "created_at", "body")
 ENTRY_NAME_RE = re.compile(rf"([0-9]{{8}}T[0-9]{{6}})\.[0-9]{{6}}Z-{ID_TOKEN_PATTERN}\.json")
 ENTRY_NAME_FORM = "<YYYYMMDD>T<HHMMSS>.<6 digits>Z-<4 symbols>.json, the UTC second of its created_at"
-ENTRY_AUTHOR_RE = re.compile(r"(?:person|agent):[^\s:][^\r\n]{0,118}")
+# An author or a source is one line by `str.splitlines()`, as a title is: ENTRY_ONE_LINE leaves out every character
+# it breaks on, not only \r and \n. The author's lookahead holds its whole length to 120.
+ENTRY_ONE_LINE = r"[^\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]"
+ENTRY_AUTHOR_RE = re.compile(rf"(?=.{{1,120}}\Z)(?:person|agent):[^\s:]{ENTRY_ONE_LINE}*", re.DOTALL)
 ENTRY_AUTHOR_FORM = "person:<name> or agent:<name> (agent:claude-opus-5-5), one line of at most 120 characters"
-ENTRY_SOURCE_RE = re.compile(r"[a-z][a-z0-9-]{0,19}:[^\s][^\r\n]{0,298}")
+ENTRY_SOURCE_RE = re.compile(rf"[a-z][a-z0-9-]{{0,19}}:[^\s]{ENTRY_ONE_LINE}{{0,298}}")
 ENTRY_SOURCE_FORM = ("<kind>:<ref> (phase:P7-k2, slice:P7-k2.S1, feedback:<id>, pr:<url>), one line of at most 320"
                      " characters")
 ENTRY_UNFOLDED = "agenda-fold"  # the command validate names while works/deferred/ is left
@@ -345,6 +348,9 @@ def _entry_problems(name: str, data) -> list:
         stamp_problem = _agenda_stamp_problem(data["created_at"])
         if stamp_problem:
             problems.append(f"created_at {stamp_problem}")
+        elif _entry_second(data["created_at"]) is None:
+            problems.append(f"created_at {data['created_at']} names an instant outside the years 0001-9999 in UTC, so no "
+                            "entry file name can hold its second")
         elif match is not None and _entry_second(data["created_at"]) != match.group(1):
             problems.append(f"its file name's second {match.group(1)} is not its created_at {data['created_at']} in UTC, "
                             "so name order would not be time order")
@@ -355,9 +361,13 @@ def _entry_problems(name: str, data) -> list:
     return problems
 
 
-def _entry_second(stamp: str) -> str:
-    """The UTC second of a stamp `_agenda_instant` reads, as an entry name's time (`20261124T011500`)."""
-    return datetime.fromtimestamp(int(_agenda_instant(stamp) // 1), timezone.utc).strftime("%Y%m%dT%H%M%S")
+def _entry_second(stamp: str):
+    """The UTC second of a stamp `_agenda_instant` reads, as an entry name's time (`20261124T011500`), or None when
+    that second falls outside the years 0001-9999 (`9999-12-31T23:59:59-01:00`): pure arithmetic, never raising."""
+    try:
+        return (_AGENDA_EPOCH + timedelta(seconds=int(_agenda_instant(stamp) // 1))).strftime("%Y%m%dT%H%M%S")
+    except (OverflowError, ValueError):
+        return None
 
 
 def _entry_write(aid: str, kind: str, author: str, source: str, body: str, stamp: str, extra=None) -> str:
@@ -1024,9 +1034,23 @@ DEFERRED_BRIEF = "# Deferred: __DEFERRED_ID__ __TITLE__\n\n## Context\n\n## Why 
 FOLD_AUTHOR = "agent:fold"
 
 
+def _fold_read(path):
+    """`(text, why)`: a text file the fold reads, `(None, None)` when it is absent, or `(None, why)` when it cannot
+    be read as UTF-8 text, so the fold refuses before its first write."""
+    if not path.is_file():
+        return None, None
+    try:
+        return path.read_text(encoding="utf-8"), None
+    except UnicodeDecodeError:
+        return None, "is not UTF-8 text"
+    except OSError as exc:
+        return None, f"is not readable ({exc.__class__.__name__})"
+
+
 def _deferred_left() -> tuple:
     """`(jobs, problems)`: every job folder under works/deferred/<place>/, as `{place, id, path, data, brief}` in
-    id order (open first), and `(path, why)` for a folder whose deferred.json is missing or not a JSON object."""
+    id order (open first), and `(path, why)` for a folder whose deferred.json is missing or not a JSON object, or
+    whose brief.md is not UTF-8 text, and for a works/templates/deferred_brief.md that is not."""
     jobs, problems = [], []
     for place in DEFERRED_PLACES:
         base = DEFERRED / place
@@ -1039,8 +1063,14 @@ def _deferred_left() -> tuple:
             if not isinstance(data, dict):
                 problems.append((ddir / "deferred.json", "is not a JSON object"))
                 continue
-            brief = (ddir / "brief.md").read_text(encoding="utf-8") if (ddir / "brief.md").is_file() else None
+            brief, why = _fold_read(ddir / "brief.md")
+            if why:
+                problems.append((ddir / "brief.md", why))
+                continue
             jobs.append({"place": place, "id": ddir.name, "path": ddir, "data": data, "brief": brief})
+    _template, why = _fold_read(WORKS / "templates" / "deferred_brief.md")
+    if why:
+        problems.append((WORKS / "templates" / "deferred_brief.md", why))
     order = {place: i for i, place in enumerate(DEFERRED_PLACES)}
     jobs.sort(key=lambda job: (order[job["place"]], id_sort_key(job["id"], job["data"].get("created_at"))))
     return jobs, problems
@@ -1057,7 +1087,7 @@ def _fold_brief(job: dict):
     if brief is None or not brief.strip():
         return None
     own = WORKS / "templates" / "deferred_brief.md"
-    for template in (DEFERRED_BRIEF, own.read_text(encoding="utf-8") if own.is_file() else None):
+    for template in (DEFERRED_BRIEF, _fold_read(own)[0]):  # _deferred_left refused an unreadable one
         if template is None:
             continue
         text = template.replace("__DEFERRED_ID__", job["id"]).replace("__TITLE__", str(data.get("title")))

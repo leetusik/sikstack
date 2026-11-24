@@ -1185,6 +1185,49 @@ for f in "$tvd"/*aaa* "$tvd/entry-five.json"; do rm -f "$f"; done; tvc2=$(th che
   && [ "$tvc2_rc" -eq 0 ] \
   && ok "check fails on a malformed entry with one line each (kind, author, source, stamp, file name, empty body) and passes on valid ones" \
   || bad "entry validation wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl -- $(printf '%s\n' "$tvc" | grep 'entry ' | head -6)"
+# (e2) every entry input check names a bad value in one line and never raises: a created_at whose UTC second falls
+# outside the years 0001-9999, an author past 120 characters, an author or source holding a line break by
+# splitlines() (\x0b, \x0c, \x85, U+2028), a Proposed item's `by` holding one; an author of exactly 120 passes. The
+# same form holds at agenda-entry and agenda-add.
+python3 - "$tvd/$tv" "$TH/works/agenda/$tq_id/agenda.json" <<'PY'
+import json, sys, os
+src, item = sys.argv[1:]; d = json.load(open(src)); folder = os.path.dirname(src); second = os.path.basename(src).split(".")[0]
+def put(n, **change):
+    open(os.path.join(folder, f"{second}.{n:06d}Z-bb{n:02d}.json"), "w").write(json.dumps({**d, **change}) + "\n")
+put(1, created_at="9999-12-31T23:59:59-01:00"); put(2, created_at="0001-01-01T00:00:00+01:00")
+put(3, author="person:" + "x" * 119); put(4, author="person:" + "x" * 114)
+for n, brk in enumerate(("\x0b", "\x0c", "\x85", " "), 5):
+    put(n, author=f"person:a{brk}b"); put(n + 4, source=f"phase:a{brk}b")
+put(13, author="person:" + "x" * 113)
+i = json.load(open(item)); i["status"], i["proposed"] = "open", {"by": "agent:a\x0bb", "at": "2026-11-24T00:00:00Z"}
+open(item, "w").write(json.dumps(i) + "\n")
+PY
+tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: entry .*-bb[0-9]*\.json: ")
+tvn=""; for n in 01 02 03 04 05 06 07 08 09 10 11 12; do [ "$(printf '%s\n' "$tvc" | grep -c "0000${n}Z-bb$n\.json: ")" = 1 ] || tvn="$tvn $n"; done
+tvp=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tq_id.*proposed must be")
+python3 - "$TH/works/agenda/$tq_id/agenda.json" <<'PY'
+import json, sys
+i = json.load(open(sys.argv[1])); i["status"] = "dropped"; i.pop("proposed", None); open(sys.argv[1], "w").write(json.dumps(i) + "\n")
+PY
+for f in "$tvd"/*-bb0[1-9].json "$tvd"/*-bb1[0-2].json; do rm -f "$f"; done; tvc2=$(th check --no-rebuild 2>&1); tvc2_rc=$?
+[ "$tvc_rc" -eq 1 ] && ! printf '%s\n' "$tvc" | grep -q Traceback && [ "$tvl" = 12 ] && [ -z "$tvn" ] && [ "$tvp" = 1 ] \
+  && printf '%s\n' "$tvc" | grep -q "bb01.json: created_at .* outside the years 0001-9999" && ! printf '%s\n' "$tvc" | grep -q "bb13.json" \
+  && [ "$tvc2_rc" -eq 0 ] \
+  && ok "check names each entry stamp outside the years 0001-9999 in UTC, each author past 120 characters and each author, source or proposed-by holding a splitlines() break in one line, never raising; a 120-character author passes" \
+  || bad "entry input checks wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl missing:$tvn proposed=$tvp -- $(printf '%s\n' "$tvc" | grep -E 'Error|entry |proposed' | head -8)"
+tvx=$(printf 'x%.0s' $(seq 113)); tl2028=$(printf 'phase:a\342\200\250b')
+th_bad=""; for tb in "agenda-entry $tm --kind note --author person:xx$tvx --source phase:P1 --body b" \
+    "agenda-entry $tm --kind note --author \$'person:a\\vb' --source phase:P1 --body b" \
+    "agenda-entry $tm --kind note --author person:x --source \"\$tl2028\" --body b" \
+    "agenda-add --title t --author \$'agent:a\\fb'"; do
+  tt0=$(th_tree); eval "th $tb" > "$THW/tb.txt" 2>&1; tb_rc=$?
+  { [ "$tb_rc" -ne 0 ] && [ "$(grep -c '' "$THW/tb.txt")" = 1 ] && ! grep -q Traceback "$THW/tb.txt" && [ "$(th_tree)" = "$tt0" ]; } \
+    || th_bad="$th_bad [$tb: rc=$tb_rc $(head -2 "$THW/tb.txt")]"
+done
+tv120=$(th agenda-entry "$tm" --kind note --author "person:$tvx" --source phase:P1 --body "a 120-character author" 2>&1); tv120_rc=$?
+[ -z "$th_bad" ] && [ "$tv120_rc" -eq 0 ] && th check --no-rebuild >/dev/null 2>&1 \
+  && ok "agenda-entry and agenda-add refuse an author past 120 characters or an author or source holding a line break in one line, nothing written; a 120-character author is taken" \
+  || bad "the entry flags' form is not the stated one --$th_bad / $tv120"
 # (f) agenda-fold on an install with open, promoted and dropped jobs as an older engine wrote them: check names the
 # fold first; then one Proposed item per open job (an entry on its linked item for a linked one) whose first entry
 # carries the job, one deferred_folded event per job, works/deferred/ and deferred.md gone; a second run folds nothing.
@@ -1330,6 +1373,32 @@ fwf=$(fw agenda-fold 2>&1); fwf_rc=$?; fwf2=$(fw agenda-fold 2>&1)
   && [ "$fwf2" = "nothing to fold: works/deferred/ is gone" ] \
   && ok "on the default checkout agenda-fold folds the job once; a second run has nothing to fold" \
   || bad "agenda-fold on the default checkout wrong -- rc=$fwf_rc $fwf / $fwf2"
+# (f4) the fold reads every input before its first write: a brief.md or a works/templates/deferred_brief.md that is
+# not UTF-8 refuses in one line naming the file, nothing written; a job stamp whose UTC instant falls outside the
+# years 0001-9999 never raises (the fold sorts the jobs by it) and folds.
+newtmp FNW; FN="$FNW/ws"; mkws FN >/dev/null 2>&1 || bad "fold-input probe: fresh install failed"
+fn_tree() { ( cd "$FN" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
+python3 - "$FN/works" <<'PY'
+import json, os, sys
+for did, at in (("D-m3xa", "9999-12-31T23:59:59-01:00"), ("D-m4xb", "0001-01-01T00:00:00+01:00"), ("D1-ab", "2026-10-01T09:00:00+09:00")):
+    d = os.path.join(sys.argv[1], "deferred", "open", did); os.makedirs(d)
+    json.dump({"id": did, "title": f"job {did}", "status": "deferred", "source": "P4", "reason": "why", "trigger": "when",
+               "created_at": at}, open(os.path.join(d, "deferred.json"), "w"), indent=2)
+open(os.path.join(sys.argv[1], "deferred", "open", "D1-ab", "brief.md"), "wb").write(b"# Deferred \xff\xfe not UTF-8\n")
+PY
+fn_t1=$(fn_tree); fnb=$( cd "$FN" && python3 "$ENG" agenda-fold 2>&1 ); fnb_rc=$?; fn_t2=$(fn_tree)
+printf '# Deferred: a brief\n' > "$FN/works/deferred/open/D1-ab/brief.md"; mkdir -p "$FN/works/templates"
+printf '# Deferred \377 template\n' > "$FN/works/templates/deferred_brief.md"
+fn_t3=$(fn_tree); fnt=$( cd "$FN" && python3 "$ENG" agenda-fold 2>&1 ); fnt_rc=$?; fn_t4=$(fn_tree)
+rm -f "$FN/works/templates/deferred_brief.md"; fnf=$( cd "$FN" && python3 "$ENG" agenda-fold 2>&1 ); fnf_rc=$?
+[ "$fnb_rc" -eq 1 ] && [ "$(printf '%s\n' "$fnb" | grep -c '')" = 1 ] && [ "$fn_t1" = "$fn_t2" ] \
+  && printf '%s\n' "$fnb" | grep -qE '^agenda-fold refused, nothing was written: .*works/deferred/open/D1-ab/brief\.md is not UTF-8 text' \
+  && [ "$fnt_rc" -eq 1 ] && [ "$(printf '%s\n' "$fnt" | grep -c '')" = 1 ] && [ "$fn_t3" = "$fn_t4" ] \
+  && printf '%s\n' "$fnt" | grep -qE '^agenda-fold refused, nothing was written: .*works/templates/deferred_brief\.md is not UTF-8 text' \
+  && [ "$fnf_rc" -eq 0 ] && printf '%s\n' "$fnf" | head -1 | grep -q '^folded 3 open jobs into the agenda (3 new Proposed items, ' \
+  && ( cd "$FN" && python3 "$ENG" check >/dev/null 2>&1 ) \
+  && ok "agenda-fold refuses a brief.md or a deferred_brief.md template that is not UTF-8 in one line naming it, nothing written; jobs stamped outside the years 0001-9999 in UTC fold, never raising" \
+  || bad "the fold's input checks wrong -- rc=$fnb_rc/$fnt_rc/$fnf_rc [$(printf '%s\n' "$fnb" | tail -1)] [$(printf '%s\n' "$fnt" | tail -1)] [$(printf '%s\n' "$fnf" | tail -1)] $( [ "$fn_t1" = "$fn_t2" ] || echo 'brief case wrote'; [ "$fn_t3" = "$fn_t4" ] || echo 'template case wrote')"
 # (g) two clones each add an entry to one item: no truth file conflicts (each entry is its own new file), the
 # generated files are regenerated by check, and both entries are on the merged item.
 newtmp TGW; TG="$TGW/ws"; mkws TG >/dev/null 2>&1 || bad "two-clone probe: fresh install failed"

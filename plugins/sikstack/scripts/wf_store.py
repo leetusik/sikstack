@@ -774,7 +774,7 @@ def _created_sort_stamp(created_at) -> str:
         return ""
     try:
         return datetime.fromisoformat(str(created_at)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an instant past the years 0001-9999 in UTC
         return str(created_at)
 
 
