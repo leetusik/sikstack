@@ -1,31 +1,28 @@
-"""The agenda and deferred jobs (agenda*, defer-job, deferred, promote-deferred, drop-deferred), moved as is
-from the one-file engine. Imports only wf_store."""
+"""The agenda (agenda, agenda-*): items, each item's thread of entries, Proposed, the merge, and agenda-fold, the
+one carry of an older install's deferred jobs onto the agenda (retired in 0.3.0). Imports only wf_store."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from wf_store import (  # noqa: E402
-    _auto_order, _default_checkout_root, _git, _git_available, _id_token, _ls_tree, _one_line_usage_errors,
-    _phase_json_at_ref, _repo_prefix, _rev_parse, ACTIVE, AGENDA, agenda_folder_ids, AGENDA_ID_RE, AGENDA_KEYS,
-    AGENDA_SHOWN, AGENDA_STATUSES, AGENDA_TITLE_MAX, AGENDA_TITLE_REFUSAL, all_active_phases, append_event,
-    ARCHIVE_FOLDER_ID_RE, ARCHIVED, archived_phase_ids, clean_cell, create_slice, current_stream,
-    declared_dependencies, declared_slice_lines, DEFERRED_DROPPED, deferred_folder_ids, DEFERRED_ID_RE,
-    deferred_jobs, DEFERRED_OPEN, DEFERRED_PROMOTED, DEPENDS_ON_HELP, full_slice_id, HOST_ROOT, id_sort_key,
-    id_token_refusal, load_template, MAIN_HOST, mint_id, mint_phase_id, NESTED, new_phase, now_iso,
-    parse_depends_on, PHASE_ARG_HELP, phase_dirs, phase_execution, phase_in_flight, read_json,
-    rebuild_index_and_state, require_phase, require_slice_kind, ROOT, shown, WORKFLOW_CMD, WORKS, write_json,
-    write_text,
+    _default_checkout_root, _git, _git_available, _ls_tree, _one_line_usage_errors, _phase_json_at_ref, _repo_prefix,
+    _rev_parse, ACTIVE, AGENDA, agenda_folder_ids, AGENDA_ID_RE, AGENDA_KEYS, AGENDA_SHOWN, AGENDA_STATUSES,
+    AGENDA_TITLE_MAX, AGENDA_TITLE_REFUSAL, all_active_phases, append_event, ARCHIVE_FOLDER_ID_RE, ARCHIVED,
+    archived_phase_ids, clean_cell, current_stream, git_current_branch, HOST_ROOT, id_sort_key, ID_TOKEN_ALPHABET, ID_TOKEN_PATTERN,
+    MAIN_HOST, mint_id, NESTED, now_iso, PHASE_ARG_HELP, PHASE_ID_RE, phase_dirs, phase_execution, phase_in_flight,
+    read_json, rebuild_index_and_state, ROOT, shown, SLICE_ID_RE, WORKFLOW_CMD, WORKS, write_json, write_text,
 )
 
 
-# The agenda's read side (P66 F4): agenda.json, and the `agenda` key of a phase.json or deferred.json, are hand-
+# The agenda's read side (P66 F4): agenda.json, its entries, and the `agenda` key of a phase.json, are hand-
 # editable, so any JSON value can sit in any field (a half-resolved merge, a sync, a person). Every reader takes a
 # field through one of the accessors below, which never raise and read a value of the wrong type as absent (None):
 # a list or an object is unhashable, an int past the float range overflows `float()`, a bool is an int. They never
@@ -57,7 +54,7 @@ def _agenda_str(item, key):
 
 
 def _agenda_link_value(data):
-    """A phase's or job's agenda link: the item id when `agenda` holds a non-empty string, else None."""
+    """A phase's agenda link: the item id when `agenda` holds a non-empty string, else None."""
     value = data.get("agenda")
     return value if isinstance(value, str) and value else None
 
@@ -132,19 +129,26 @@ def _agenda_changed(item) -> tuple:
     return (False, 0.0) if instant is None else (True, instant)
 
 
+def _agenda_proposed(item) -> bool:
+    """True when the item reads Proposed: stored `open` and carrying a `proposed` value (an agent opened it, and no
+    one has accepted it yet). Its `order` is kept a number only so an older engine's validate still passes."""
+    return _agenda_status(item) == "open" and item.get("proposed") is not None
+
+
 def agenda_sorted(items) -> list:
-    """The ONE listing order of agenda items: the open part (stored `open`, so In progress too) by `order`, a tie
-    broken by id (`id_sort_key`); then Deferred; then Solved and Dropped together; each of those two newest first
-    by `changed_at`, a tie by id. An item whose order is unset sorts after the ordered open items, and one of an
-    unknown status last, by id."""
+    """The ONE listing order of agenda items: Proposed first, by id; then the open part (stored `open`, so In
+    progress too) by `order`, a tie broken by id (`id_sort_key`); then Deferred; then Solved and Dropped together;
+    each of those two newest first by `changed_at`, a tie by id. An item whose order is unset sorts after the
+    ordered open items, and one of an unknown status last, by id."""
     by_id = sorted(items, key=lambda d: id_sort_key(d.get("id")))
     inf = float("inf")
-    open_part = sorted((d for d in by_id if _agenda_status(d) == "open"),
+    proposed = [d for d in by_id if _agenda_proposed(d)]
+    open_part = sorted((d for d in by_id if _agenda_status(d) == "open" and not _agenda_proposed(d)),
                        key=lambda d: inf if _agenda_order(d) is None else _agenda_order(d))
     # reverse=True keeps a stable sort stable: items of one changed_at stay in id order
     deferred = sorted((d for d in by_id if _agenda_status(d) == "deferred"), key=_agenda_changed, reverse=True)
     ended = sorted((d for d in by_id if _agenda_status(d) in ("solved", "dropped")), key=_agenda_changed, reverse=True)
-    return open_part + deferred + ended + [d for d in by_id if _agenda_status(d) is None]
+    return proposed + open_part + deferred + ended + [d for d in by_id if _agenda_status(d) is None]
 
 
 def agenda_read_all(strict: bool = False) -> tuple:
@@ -188,20 +192,18 @@ def agenda_items() -> list:
     return agenda_read_all(strict=True)[0]
 
 
-# Agenda links (P66 D4): a phase's phase.json and a deferred job's deferred.json may each hold ONE item id,
-# `"agenda": "<AID>"`. The key is present only while linked (an unlinked phase or job has none, and unlinking
-# removes it), so a phase or job made without --agenda is written exactly as before. An item's phases and jobs
-# are never stored on the item: `agenda_links` derives them. Writers of a link: phase new --agenda, defer-job
-# --agenda, promote-deferred --create-phase (the job's id), agenda-link, agenda-unlink, agenda-delete (clears).
+# Agenda links (P66 D4): a phase's phase.json may hold ONE item id, `"agenda": "<AID>"`. The key is present only
+# while linked (an unlinked phase has none, and unlinking removes it), so a phase made without --agenda is written
+# exactly as before. An item's phases are never stored on the item: `agenda_links` derives them. Writers of a
+# link: phase new --agenda, agenda-link, agenda-unlink, agenda-merge (moves), agenda-delete (clears).
 def _agenda_link_holders(skipped=None) -> list:
-    """Every phase and deferred job that can hold an agenda link, one dict each: `kind` ("phase" | "deferred"),
-    `id`, `path` (its phase.json or deferred.json), `place` ("active" | "archived" | "open" | "promoted" |
-    "dropped"), `status` (an archived phase counts as "done"), `agenda` (the link, `_agenda_link_value`: None
-    unless a non-empty string), `value` (the raw `.get("agenda")`, for validate only) and `linked` (the key is
-    present, whatever its value). Active phases in selection order (`phase_dirs`, the backlog's), then
-    archived ones in archive order (the folder name starts with the archive stamp); then jobs in id order across
-    open/, promoted/ and dropped/. An archived phase.json or a deferred.json that does not read as a JSON object
-    is skipped, never fatal; its path goes into `skipped` when the caller passes a list (validate reports it)."""
+    """Every phase that can hold an agenda link, one dict each: `kind` ("phase"), `id`, `path` (its phase.json),
+    `place` ("active" | "archived"), `status` (an archived phase counts as "done"), `agenda` (the link,
+    `_agenda_link_value`: None unless a non-empty string), `value` (the raw `.get("agenda")`, for validate only)
+    and `linked` (the key is present, whatever its value). Active phases in selection order (`phase_dirs`, the
+    backlog's), then archived ones in archive order (the folder name starts with the archive stamp). An archived
+    phase.json that does not read as a JSON object is skipped, never fatal; its path goes into `skipped` when the
+    caller passes a list (validate reports it)."""
     holders = []
     for pdir in phase_dirs():
         data = read_json(pdir / "phase.json")
@@ -219,105 +221,179 @@ def _agenda_link_holders(skipped=None) -> list:
                             "value": data.get("agenda"), "linked": "agenda" in data})
         elif skipped is not None and (adir / "phase.json").exists():
             skipped.append(adir / "phase.json")
-    jobs = []
-    for place, base in (("open", DEFERRED_OPEN), ("promoted", DEFERRED_PROMOTED), ("dropped", DEFERRED_DROPPED)):
-        for ddir in (d for d in (base.iterdir() if base.is_dir() else []) if d.is_dir()):
-            try:
-                data = read_json(ddir / "deferred.json")
-            except (OSError, ValueError):
-                data = None
-            if isinstance(data, dict):
-                jobs.append({"kind": "deferred", "id": ddir.name, "path": ddir / "deferred.json", "place": place,
-                             "status": data.get("status"), "agenda": _agenda_link_value(data),
-                             "value": data.get("agenda"), "linked": "agenda" in data, "created": data.get("created_at")})
-            elif skipped is not None and (ddir / "deferred.json").exists():
-                skipped.append(ddir / "deferred.json")
-    jobs.sort(key=lambda job: id_sort_key(job["id"], job.pop("created")))
-    return holders + jobs
+    return holders
 
 
 def agenda_links(holders=None) -> dict:
-    """The derived side of every item's links, at once: `{AID: {"phases": [holder...], "deferred": [holder...]}}`
-    (`_agenda_link_holders`' dicts, in its order). An item no phase or job names is absent. Keyed by the id the
-    link holds, so a link to a deleted item shows here too (validate's to report)."""
+    """The derived side of every item's links, at once: `{AID: {"phases": [holder...]}}` (`_agenda_link_holders`'
+    dicts, in its order). An item no phase names is absent. Keyed by the id the link holds, so a link to a
+    deleted item shows here too (validate's to report)."""
     links = {}
     for holder in _agenda_link_holders() if holders is None else holders:
         aid = holder["agenda"]
         if isinstance(aid, str) and aid:
-            entry = links.setdefault(aid, {"phases": [], "deferred": []})
-            entry["phases" if holder["kind"] == "phase" else "deferred"].append(holder)
+            links.setdefault(aid, {"phases": []})["phases"].append(holder)
     return links
 
 
 def agenda_item_links(item, links=None) -> dict:
-    """One item's `{"phases": [...], "deferred": [...]}` from `links` (`agenda_links`; read now when None)."""
+    """One item's `{"phases": [...]}` from `links` (`agenda_links`; read now when None)."""
     links = agenda_links() if links is None else links
-    return links.get(item.get("id"), {"phases": [], "deferred": []})
+    return links.get(item.get("id"), {"phases": []})
 
 
 def agenda_shown_status(item, links=None) -> str:
-    """The signed word for an item's status (AGENDA_SHOWN). The stored four map to their words; In progress is
-    derived (D2; frame F37, F301): an item stored `open` with at least one linked phase that is not `done` (a
-    `planned` one counts; an archived one is done). Deferred, Solved and Dropped never read In progress.
-    `links` is `agenda_links()` when the caller holds it (a listing); else it is read for this one item."""
+    """The signed word for an item's status (AGENDA_SHOWN). The stored four map to their words; Proposed and In
+    progress are derived from a stored `open`: Proposed while it carries `proposed` (`_agenda_proposed`), else In
+    progress (D2; frame F37, F301) with at least one linked phase that is not `done` (a `planned` one counts; an
+    archived one is done). Deferred, Solved and Dropped never read either. `links` is `agenda_links()` when the
+    caller holds it (a listing); else it is read for this one item."""
     status = _agenda_status(item)
     if status is None:  # an unusable stored value: shown as it is, for validate and the operator to fix
         return str(item.get("status"))
-    if status == "open" and any(phase["status"] != "done" for phase in agenda_item_links(item, links)["phases"]):
+    if _agenda_proposed(item):
+        status = "proposed"
+    elif status == "open" and any(phase["status"] != "done" for phase in agenda_item_links(item, links)["phases"]):
         status = "in_progress"
     return AGENDA_SHOWN[status]
 
 
-def agenda_counts_line(item_links: dict) -> str:
-    """The signed row's counts (frame F43's end cell): `1 of 4 phases done, 3 deferred jobs`, either part alone,
-    or "" when the item has neither."""
-    phases, jobs = item_links["phases"], item_links["deferred"]
-    parts = []
+def agenda_counts_line(item_links: dict, thread=(0, None)) -> str:
+    """The signed row's counts (frame F43's end cell): `1 of 4 phases done, 3 entries`, either part alone, or ""
+    when the item has neither. `thread` is `agenda_thread_summary`'s `(count, latest)`."""
+    phases, parts = item_links["phases"], []
     if phases:
         done = sum(1 for phase in phases if phase["status"] == "done")
         parts.append(f"{done} of {len(phases)} phase{'s' if len(phases) != 1 else ''} done")
-    if jobs:
-        parts.append(f"{len(jobs)} deferred job{'s' if len(jobs) != 1 else ''}")
+    if thread[0]:
+        parts.append(f"{thread[0]} entr{'y' if thread[0] == 1 else 'ies'}")
     return ", ".join(parts)
 
 
-def rebuild_deferred_dashboard(groups=None) -> None:
-    groups = groups or deferred_jobs()
-    open_count = len(groups.get("open", []))
-    promoted_count = len(groups.get("promoted", []))
-    dropped_count = len(groups.get("dropped", []))
-    lines = [
-        "# Deferred Jobs", "", "> Generated dashboard. Do not put detailed deferred context here; edit each `works/deferred/<state>/<DID>/` folder instead.", "",
-        "## Summary", "",
-        f"- Open: `{open_count}`", f"- Promoted: `{promoted_count}`", f"- Dropped: `{dropped_count}`", "",
-        "## Open", "", "| ID | Status | Title | Source | Trigger | Path |", "|---|---|---|---|---|---|",
-    ]
-    if not groups.get("open"):
-        lines.append("| - | - | - | - | - | - |")
-    for d in groups.get("open", []):
-        lines.append(f"| `{clean_cell(d.get('id'))}` | `{clean_cell(d.get('status'))}` | {clean_cell(d.get('title'))} | {clean_cell(d.get('source'))} | {clean_cell(d.get('trigger'))} | `{clean_cell(d.get('path'))}` |")
-    lines.extend(["", "## Promoted", "", "| ID | Status | Title | Promoted To | Path |", "|---|---|---|---|---|"])
-    if not groups.get("promoted"):
-        lines.append("| - | - | - | - | - |")
-    for d in groups.get("promoted", []):
-        lines.append(f"| `{clean_cell(d.get('id'))}` | `{clean_cell(d.get('status'))}` | {clean_cell(d.get('title'))} | `{clean_cell(d.get('promoted_to'))}` | `{clean_cell(d.get('path'))}` |")
-    lines.extend(["", "## Dropped", "", "| ID | Status | Title | Reason | Path |", "|---|---|---|---|---|"])
-    if not groups.get("dropped"):
-        lines.append("| - | - | - | - | - |")
-    for d in groups.get("dropped", []):
-        lines.append(f"| `{clean_cell(d.get('id'))}` | `{clean_cell(d.get('status'))}` | {clean_cell(d.get('title'))} | {clean_cell(d.get('dropped_reason'))} | `{clean_cell(d.get('path'))}` |")
-    lines.append("")
-    write_text(WORKS / "deferred.md", "\n".join(lines))
+# An item's thread (P72): one JSON file per entry under works/agenda/<AID>/entries/, written once (agenda-entry,
+# agenda-fold) or moved whole (agenda-merge), never rewritten: two writers adding to one item never touch one path,
+# so git merges them clean and the store never conflicts (each put is its own path). Adding an entry never rewrites
+# agenda.json either, whose changed_at would collide again; a view derives the item's latest activity from its
+# newest entry. The file name is the entry's id and time, so name order is time order:
+# `<YYYYMMDD>T<HHMMSS>.<micro>Z-<4 symbols>.json`: the UTC second of its `created_at` (which, like every engine
+# stamp, keeps no fraction), the microsecond it was written in that second, and a random tail (v73's alphabet)
+# that keeps two writers in one microsecond apart. Its keys (ENTRY_KEYS) are all required; any other key is kept (the
+# fold's `job`, an object).
+ENTRY_KINDS = ("note", "issue", "feedback", "question", "decision")
+ENTRY_KEYS = ("kind", "author", "source", "created_at", "body")
+ENTRY_NAME_RE = re.compile(rf"([0-9]{{8}}T[0-9]{{6}})\.[0-9]{{6}}Z-{ID_TOKEN_PATTERN}\.json")
+ENTRY_NAME_FORM = "<YYYYMMDD>T<HHMMSS>.<6 digits>Z-<4 symbols>.json, the UTC second of its created_at"
+# An author or a source is one line by `str.splitlines()`, as a title is: ENTRY_ONE_LINE leaves out every character
+# it breaks on, not only \r and \n. The author's lookahead holds its whole length to 120.
+ENTRY_ONE_LINE = r"[^\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]"
+ENTRY_AUTHOR_RE = re.compile(rf"(?=.{{1,120}}\Z)(?:person|agent):[^\s:]{ENTRY_ONE_LINE}*", re.DOTALL)
+ENTRY_AUTHOR_FORM = "person:<name> or agent:<name> (agent:claude-opus-5-5), one line of at most 120 characters"
+ENTRY_SOURCE_RE = re.compile(rf"[a-z][a-z0-9-]{{0,19}}:[^\s]{ENTRY_ONE_LINE}{{0,298}}")
+ENTRY_SOURCE_FORM = ("<kind>:<ref> (phase:P7-k2, slice:P7-k2.S1, feedback:<id>, pr:<url>), one line of at most 320"
+                     " characters")
+ENTRY_UNFOLDED = "agenda-fold"  # the command validate names while works/deferred/ is left
+
+
+def _entry_value(raw, pattern, form: str, flag: str) -> str:
+    """`--author` or `--source` as stored (stripped), or the one-line refusal naming its form."""
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not pattern.fullmatch(text):
+        raise SystemExit(f"{flag} must be {form}, got {_agenda_value_text(raw)}")
+    return text
+
+
+def agenda_entries(aid: str) -> list:
+    """`[(name, data)]`: the item's entry files in name (so time) order, `data` None when the file is not a readable
+    JSON object. Hidden files (a write's temporary) and folders are skipped here; validate names the folders."""
+    folder = AGENDA / aid / "entries"
+    found = []
+    for path in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if path.name.startswith(".") or not path.is_file():
+            continue
+        try:
+            data = read_json(path)
+        except (OSError, ValueError):
+            data = None
+        found.append((path.name, data if isinstance(data, dict) else None))
+    return found
+
+
+def agenda_thread_summary(aid: str) -> tuple:
+    """`(count, latest)`: how many entries the item holds, and its newest readable entry's `created_at` as stored
+    (None when it has none)."""
+    entries = agenda_entries(aid)
+    latest = next((data.get("created_at") for _name, data in reversed(entries)
+                   if data is not None and _agenda_instant(data.get("created_at")) is not None), None)
+    return len(entries), latest
+
+
+def _entry_problems(name: str, data) -> list:
+    """What is wrong with one entry file (each a validate line's tail), or []."""
+    problems = []
+    match = ENTRY_NAME_RE.fullmatch(name)
+    if match is None:
+        problems.append(f"its file name is not {ENTRY_NAME_FORM}")
+    if data is None:
+        return problems + ["is not a readable JSON object"]
+    missing = [key for key in ENTRY_KEYS if key not in data]
+    if missing:
+        problems.append(f"missing key{'s' if len(missing) != 1 else ''} {', '.join(missing)}")
+    if "kind" in data and data["kind"] not in ENTRY_KINDS:
+        problems.append(f"kind {_agenda_value_text(data['kind'])} is not one of {', '.join(ENTRY_KINDS)}")
+    for key, pattern, form in (("author", ENTRY_AUTHOR_RE, ENTRY_AUTHOR_FORM), ("source", ENTRY_SOURCE_RE, ENTRY_SOURCE_FORM)):
+        value = data.get(key)
+        if key in data and not (isinstance(value, str) and value == value.strip() and pattern.fullmatch(value)):
+            problems.append(f"{key} must be {form}, got {_agenda_value_text(value)}")
+    if "created_at" in data:
+        stamp_problem = _agenda_stamp_problem(data["created_at"])
+        if stamp_problem:
+            problems.append(f"created_at {stamp_problem}")
+        elif _entry_second(data["created_at"]) is None:
+            problems.append(f"created_at {data['created_at']} names an instant outside the years 0001-9999 in UTC, so no "
+                            "entry file name can hold its second")
+        elif match is not None and _entry_second(data["created_at"]) != match.group(1):
+            problems.append(f"its file name's second {match.group(1)} is not its created_at {data['created_at']} in UTC, "
+                            "so name order would not be time order")
+    if "body" in data and not (isinstance(data["body"], str) and data["body"].strip()):
+        problems.append(f"body must be a non-empty string, got {_agenda_value_text(data['body'])}")
+    if data.get("job") is not None and not isinstance(data.get("job"), dict):
+        problems.append(f"job must be an object, got {_agenda_value_text(data.get('job'))}")
+    return problems
+
+
+def _entry_second(stamp: str):
+    """The UTC second of a stamp `_agenda_instant` reads, as an entry name's time (`20261124T011500`), or None when
+    that second falls outside the years 0001-9999 (`9999-12-31T23:59:59-01:00`): pure arithmetic, never raising."""
+    try:
+        return (_AGENDA_EPOCH + timedelta(seconds=int(_agenda_instant(stamp) // 1))).strftime("%Y%m%dT%H%M%S")
+    except (OverflowError, ValueError):
+        return None
+
+
+def _entry_write(aid: str, kind: str, author: str, source: str, body: str, stamp: str, extra=None) -> str:
+    """Write one new entry file into the item's thread and return its name; nothing else is written. `stamp` is
+    its created_at (now_iso, taken by the caller); the name's microsecond is the clock's now when it is still in
+    that second, else the second's last one."""
+    folder, second, now = AGENDA / aid / "entries", _entry_second(stamp), datetime.now(timezone.utc)
+    micro = now.microsecond if now.strftime("%Y%m%dT%H%M%S") == second else 999999
+    while True:
+        name = f"{second}.{micro:06d}Z-{''.join(secrets.choice(ID_TOKEN_ALPHABET) for _ in range(4))}.json"
+        if not (folder / name).exists():
+            break
+    write_json(folder / name, {"kind": kind, "author": author, "source": source, "created_at": stamp, "body": body,
+                               **(extra or {})})
+    return name
 
 
 # The agenda's generated views (P66 D2, D8): `works/agenda.md` and works/index.json's `agenda_counts` and `agenda`,
 # both built at every rebuild from `agenda_index` -- the one answer the sync and the web read. Each is a pure
-# function of the item, phase and job files (no rebuild time in either), so a rebuild with nothing changed
+# function of the item, entry and phase files (no rebuild time in either), so a rebuild with nothing changed
 # rewrites the same bytes. An item of an unknown stored status is left out of both (validate reports it).
 def agenda_index(items: list, links: dict) -> tuple:
-    """`(counts, rows)` for works/index.json: `counts` the five shown statuses (AGENDA_SHOWN's keys) each a
-    number, and one row per item in the listing order: id, title, status as stored, shown_status (the signed
-    word), order, created_at, changed_at, outcome, reason, phases, phases_done, deferred; never the note."""
+    """`(counts, rows)` for works/index.json: `counts` the six shown statuses (AGENDA_SHOWN's keys) each a number,
+    and one row per item in the listing order: id, title, status as stored, shown_status (the signed word), order,
+    created_at, changed_at, outcome, reason, proposed (who opened it and when, or null), phases, phases_done,
+    entries (the thread's count) and latest_entry (its newest entry's created_at, or null); never the note."""
     counts = {key: 0 for key in AGENDA_SHOWN}
     rows = []
     for item in items:
@@ -325,14 +401,16 @@ def agenda_index(items: list, links: dict) -> tuple:
             continue
         own = agenda_item_links(item, links)
         shown_word = agenda_shown_status(item, links)
+        entries, latest = agenda_thread_summary(item["id"])
         counts[next(key for key, word in AGENDA_SHOWN.items() if word == shown_word)] += 1
         rows.append({"id": item["id"], "title": _agenda_str(item, "title"), "status": _agenda_status(item),
                      "shown_status": shown_word, "order": _agenda_order_stored(item),
                      "created_at": _agenda_str(item, "created_at"), "changed_at": _agenda_str(item, "changed_at"),
                      "outcome": _agenda_str(item, "outcome"), "reason": _agenda_str(item, "reason"),
+                     "proposed": item.get("proposed") if _agenda_proposed(item) else None,
                      "phases": [phase["id"] for phase in own["phases"]],
                      "phases_done": sum(1 for phase in own["phases"] if phase["status"] == "done"),
-                     "deferred": [job["id"] for job in own["deferred"]]})
+                     "entries": entries, "latest_entry": latest})
     return counts, rows
 
 
@@ -342,38 +420,39 @@ def _agenda_day(stamp) -> str:
     return text[:10] if re.match(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text) else clean_cell(stamp)
 
 
+def _agenda_thread_cell(row: dict) -> str:
+    """A dashboard row's thread: `2 (2026-11-24)`, its entry count and latest entry's day, or `-`."""
+    return f"{row['entries']} ({_agenda_day(row['latest_entry'])})" if row["entries"] else "-"
+
+
 def rebuild_agenda_dashboard(counts: dict, rows: list, links: dict) -> None:
     """works/agenda.md, written on every rebuild, with no item too (the installer relies on `rebuild` for it).
-    The signed parts and order (D2, D3): Summary (the five counts), Open (Open and In progress, in the
-    operator's order), Deferred (newest first), Solved and dropped (newest first). The note is not shown: the
-    detail is the item's folder."""
+    The signed parts and order (D2, D3; P72): Summary (the six counts), Proposed (by id, waiting for an accept or a
+    drop), Open (Open and In progress, in the operator's order), Deferred (newest first), Solved and dropped
+    (newest first); every row with its thread (entry count and latest entry's day). The note and the entries are
+    not shown: the detail is the item's folder (`agenda-show`)."""
+    def table(head: str, picked: list, cells) -> list:
+        out = [head, "|" + "---|" * head.count(" | ") + "---|"]
+        out += [cells(position, row) for position, row in enumerate(picked, 1)] or ["|" + " - |" * (head.count(" | ") + 1)]
+        return out
+
+    def links_cell(row: dict) -> str:
+        return clean_cell(agenda_counts_line(agenda_item_links(row, links)))
+
+    pick = lambda test: [row for row in rows if test(row)]  # noqa: E731
     lines = [
         "# Agenda", "", "> Generated dashboard. Do not put detailed agenda context here; edit each `works/agenda/<AID>/` folder instead.", "",
-        "## Summary", "",
-        *(f"- {word}: `{counts.get(key, 0)}`" for key, word in AGENDA_SHOWN.items()), "",
-        "## Open", "", "| # | ID | Status | Title | Links |", "|---|---|---|---|---|",
+        "## Summary", "", *(f"- {word}: `{counts.get(key, 0)}`" for key, word in AGENDA_SHOWN.items()), "",
+        "## Proposed", "", *table("| ID | Title | Proposed by | Thread |", pick(lambda r: r["proposed"] is not None), lambda i, r:
+            f"| `{clean_cell(r['id'])}` | {clean_cell(r['title'])} | {clean_cell(r['proposed'].get('by') if isinstance(r['proposed'], dict) else '')} | {_agenda_thread_cell(r)} |"), "",
+        "## Open", "", *table("| # | ID | Status | Title | Links | Thread |", pick(lambda r: r["status"] == "open" and r["proposed"] is None), lambda i, r:
+            f"| {i} | `{clean_cell(r['id'])}` | {r['shown_status']} | {clean_cell(r['title'])} | {links_cell(r)} | {_agenda_thread_cell(r)} |"), "",
+        "## Deferred", "", *table("| ID | Title | Changed | Links | Thread |", pick(lambda r: r["status"] == "deferred"), lambda i, r:
+            f"| `{clean_cell(r['id'])}` | {clean_cell(r['title'])} | {_agenda_day(r['changed_at'])} | {links_cell(r)} | {_agenda_thread_cell(r)} |"), "",
+        "## Solved and dropped", "", *table("| ID | Status | Title | Outcome or reason | Changed | Thread |", pick(lambda r: r["status"] in ("solved", "dropped")), lambda i, r:
+            f"| `{clean_cell(r['id'])}` | {r['shown_status']} | {clean_cell(r['title'])} | {clean_cell(r['outcome'] if r['status'] == 'solved' else r['reason'])} | {_agenda_day(r['changed_at'])} | {_agenda_thread_cell(r)} |"),
+        "",
     ]
-    open_rows = [row for row in rows if row["status"] == "open"]
-    if not open_rows:
-        lines.append("| - | - | - | - | - |")
-    for position, row in enumerate(open_rows, 1):
-        counts_line = agenda_counts_line(agenda_item_links(row, links))
-        lines.append(f"| {position} | `{clean_cell(row['id'])}` | {row['shown_status']} | {clean_cell(row['title'])} | {clean_cell(counts_line)} |")
-    lines.extend(["", "## Deferred", "", "| ID | Title | Changed | Links |", "|---|---|---|---|"])
-    deferred_rows = [row for row in rows if row["status"] == "deferred"]
-    if not deferred_rows:
-        lines.append("| - | - | - | - |")
-    for row in deferred_rows:
-        counts_line = agenda_counts_line(agenda_item_links(row, links))
-        lines.append(f"| `{clean_cell(row['id'])}` | {clean_cell(row['title'])} | {_agenda_day(row['changed_at'])} | {clean_cell(counts_line)} |")
-    lines.extend(["", "## Solved and dropped", "", "| ID | Status | Title | Outcome or reason | Changed |", "|---|---|---|---|---|"])
-    ended_rows = [row for row in rows if row["status"] in ("solved", "dropped")]
-    if not ended_rows:
-        lines.append("| - | - | - | - | - |")
-    for row in ended_rows:
-        why = row["outcome"] if row["status"] == "solved" else row["reason"]
-        lines.append(f"| `{clean_cell(row['id'])}` | {row['shown_status']} | {clean_cell(row['title'])} | {clean_cell(why)} | {_agenda_day(row['changed_at'])} |")
-    lines.append("")
     write_text(WORKS / "agenda.md", "\n".join(lines))
 
 
@@ -390,13 +469,17 @@ def validate_agenda(errors: list, warnings: list) -> None:
     """The agenda's checks (P66). ERRORS, each naming the item's folder: no readable agenda.json, an `id` other
     than the folder name, a folder name not shaped `A<n>-<tail>`, a missing AGENDA_KEYS key, a stored status
     outside the four, a title not 1-200 characters on one line, `order` not a number on an Open item or not null
-    on any other, an outcome off Solved, a reason off Dropped; and an `agenda` value on a phase or job that is not
-    an item id (a non-empty string). WARNINGS (validation still passes): a link naming no item (a merge can leave
-    one honestly: an item deleted on one stream while another stream's phase linked it), with what clears it,
-    and an archived phase.json or a deferred.json too unreadable for agenda-delete to clear a link in. Every key's
-    TYPE is checked too (P66 F4): `note`, `outcome` and `reason` a string or null, `created_at` and `changed_at`
-    stamps `_agenda_instant` reads (AGENDA_STAMP_FORM, an offset required; P66 F7), `order` a finite number (a
-    bool is not one)."""
+    on any other, an outcome off Solved, a reason off Dropped, a `proposed` that is not `{by, at}` or sits off an
+    Open item; each entry of its thread that is malformed (`_entry_problems`: its file name, a missing key, its
+    kind, author, source, stamp or an empty body), one line each, and a folder inside `entries/`; an `agenda` value
+    on a phase that is not an item id (a non-empty string); and open deferred jobs left under works/deferred/,
+    which name agenda-fold. WARNINGS (validation still passes): a link naming no item (a merge can leave one
+    honestly: an item deleted on one stream while another stream's phase linked it), with what clears it, an
+    archived phase.json too unreadable for agenda-delete to clear a link in, and a works/deferred/ (or deferred.md)
+    holding no open job. Every key's TYPE is checked too (P66 F4): `note`, `outcome` and `reason` a string or
+    null, `created_at` and `changed_at` stamps `_agenda_instant` reads (AGENDA_STAMP_FORM, an offset required; P66
+    F7), `order` a finite number (a bool is not one)."""
+    _validate_unfolded(errors, warnings)
     _items, problems = agenda_read_all()
     for folder, why in problems:
         errors.append(f"agenda item {shown(folder)}: {why}")
@@ -438,6 +521,21 @@ def validate_agenda(errors: list, warnings: list) -> None:
             errors.append(f"{where}: outcome is set but the item is not Solved")
         if data.get("reason") is not None and status != "dropped":
             errors.append(f"{where}: reason is set but the item is not Dropped")
+        proposed = data.get("proposed")
+        if proposed is not None:
+            if not (isinstance(proposed, dict) and isinstance(proposed.get("by"), str) and ENTRY_AUTHOR_RE.fullmatch(proposed["by"])
+                    and _agenda_instant(proposed.get("at")) is not None):
+                errors.append(f"{where}: proposed must be {{\"by\": <{ENTRY_AUTHOR_FORM}>, \"at\": <a stamp>}} or null, got {_agenda_value_text(proposed, json_form=True)}")
+            if status != "open":
+                errors.append(f"{where}: proposed is set but the item is not Open (accept clears it, and so does every status change)")
+        entries = folder / "entries"
+        if entries.exists() and not entries.is_dir():
+            errors.append(f"{where}: entries is a file, not the folder of its thread")
+        for sub in (sorted(p for p in entries.iterdir() if p.is_dir()) if entries.is_dir() else []):
+            errors.append(f"{where}: entries/{sub.name} is a folder; a thread holds entry files only")
+        for name, entry in agenda_entries(aid):
+            errors.extend(f"{where}: entry {name} {problem}" if problem.startswith("is ") else f"{where}: entry {name}: {problem}"
+                          for problem in _entry_problems(name, entry))
     skipped = []
     holders = _agenda_link_holders(skipped)
     for path in skipped:
@@ -446,16 +544,14 @@ def validate_agenda(errors: list, warnings: list) -> None:
     for holder in holders:
         if not holder["linked"]:
             continue
-        aid, kind, hid = holder["agenda"], holder["kind"], holder["id"]
-        label = f"{'phase' if kind == 'phase' else 'deferred job'} {hid} ({shown(holder['path'])})"
+        aid, hid = holder["agenda"], holder["id"]
+        label = f"phase {hid} ({shown(holder['path'])})"
         if aid is None:  # linked, but not a non-empty string (`_agenda_link_value`)
             errors.append(f"{label}: `agenda` is {_agenda_value_text(holder['value'], json_form=True)}, not an agenda item id (a string); remove the key or set an item's id")
             continue
         if agenda_item_exists(aid):
             continue
-        if kind == "deferred":
-            fix = f"{WORKFLOW_CMD} agenda-unlink --deferred {hid}"
-        elif holder["place"] == "archived":
+        if holder["place"] == "archived":
             fix = f"an archived phase takes no agenda-unlink: remove the `agenda` key from {shown(holder['path'])} by hand"
         else:
             if stream == "unset":
@@ -469,137 +565,13 @@ def validate_agenda(errors: list, warnings: list) -> None:
         warnings.append(f"{label} links agenda item {aid}, which does not exist (a merge can leave such a link); clear it: {fix}")
 
 
-def cmd_deferred(args: argparse.Namespace) -> None:
-    rebuild_index_and_state()
-    groups = deferred_jobs()
-    print(f"open={len(groups.get('open', []))}")
-    print(f"promoted={len(groups.get('promoted', []))}")
-    print(f"dropped={len(groups.get('dropped', []))}")
-    print(f"dashboard={shown(WORKS / 'deferred.md')}")
-
-
-def mint_deferred_id() -> str:
-    """`D<n>-<tail>`: `defer-job` without `--id`. It supersedes v73's `D-<token>`, which no one could say."""
-    return mint_id("D")
-
-
-def explicit_deferred_id(did: str) -> str:
-    """An explicit `defer-job --id`, checked before anything is written: any of the three shapes (`D92-x4`
-    with a valid tail, an old `D12`, or a v73 `D-` token), never an id with a folder in open/, promoted/ or
-    dropped/, and a v73 token only as v73's mint would have drawn it (`id_token_refusal`). SystemExit otherwise."""
-    if not DEFERRED_ID_RE.fullmatch(did):
-        raise SystemExit(f"deferred id must look like D92-x4 (a number and a two-symbol tail with a letter), D12 or D-m3xa"
-                         f" (got {did!r}); omit --id and the engine mints one")
-    if did in deferred_folder_ids():
-        raise SystemExit(f"deferred job already exists: {did}")
-    token = _id_token(did)
-    reason = id_token_refusal(token) if token else None
-    if reason:
-        raise SystemExit(f"deferred id {did} refused: {reason}; omit --id and the engine mints one")
-    return did
-
-
-def defer_job(args: argparse.Namespace) -> None:
-    agenda = getattr(args, "agenda", None)
-    if agenda is not None:
-        agenda_require_item(agenda)  # P66: refused before an id is minted or anything is written
-    did = explicit_deferred_id(args.id) if args.id else mint_deferred_id()
-    ddir = DEFERRED_OPEN / did
-    created = now_iso()
-    data = {"id": did, "title": args.title, "status": "deferred", "source": args.source, "reason": args.reason, "trigger": args.trigger, "created_at": created, "promoted_to": None, "dropped_reason": None}
-    if agenda is not None:
-        data["agenda"] = agenda  # P66 D4: present only while linked
-    write_json(ddir / "deferred.json", data)
-    text = load_template("deferred_brief.md").replace("__DEFERRED_ID__", did).replace("__TITLE__", args.title)
-    text = text.replace("## Why Deferred\n", f"## Why Deferred\n\n{args.reason}\n")
-    text = text.replace("## Trigger to Promote\n", f"## Trigger to Promote\n\n{args.trigger}\n")
-    write_text(ddir / "brief.md", text)
-    append_event("deferred_created", deferred=did, source=args.source, **({"agenda": agenda} if agenda is not None else {}))
-    rebuild_index_and_state()
-    print(f"created deferred job {did}: {shown(ddir)}")
-    if agenda is not None:
-        print(f"linked {did} to {agenda}")
-
-
-def promote_deferred(args: argparse.Namespace) -> None:
-    did = args.deferred_id
-    ddir = DEFERRED_OPEN / did
-    if not (ddir / "deferred.json").exists():
-        raise SystemExit(f"open deferred job not found: {did}")
-    data = read_json(ddir / "deferred.json")
-    require_slice_kind(args.kind)  # before --create-phase, so a bad kind leaves no half-created phase
-    if args.phase is None and not args.create_phase:
-        raise SystemExit("promote-deferred needs --phase <id>, or --create-phase to create a phase (without --phase the engine "
-                         "mints its id; name the slice by its bare suffix, e.g. --slice S1); refused, nothing was written")
-    phase_id = args.phase if args.phase is not None else mint_phase_id()
-    slice_id = full_slice_id(phase_id, args.slice)
-    if not slice_id.startswith(f"{phase_id}."):  # before --create-phase, likewise
-        why = ("the phase --create-phase mints has no id yet, so name the slice by its bare suffix (e.g. --slice S1)" if args.phase is None
-               else f"a slice of {phase_id} is {phase_id}.<suffix>, or the bare suffix (e.g. --slice S1)")
-        raise SystemExit(f"--slice {args.slice}: {why}; refused, nothing was written")
-    if parse_depends_on(args.depends_on) and not (ACTIVE / phase_id / "phase.json").exists():  # P42, likewise
-        raise SystemExit(f"--depends-on: phase {phase_id} does not exist yet, so it has no slice to depend on (a new phase "
-                         "holds only its DECOMP and REVIEW, both barriers); use --depends-on none, or create the phase first; "
-                         "refused, nothing was written")
-    if not (ACTIVE / phase_id / "phase.json").exists():
-        if not args.create_phase:
-            raise SystemExit(f"phase does not exist: {phase_id}. Use --create-phase to create it.")
-        # P66 D4: the phase it creates takes the job's agenda link; promoting into an existing phase changes
-        # no phase's link, and the promoted job keeps its own either way.
-        agenda = data.get("agenda") or None
-        if agenda is not None and not agenda_item_exists(agenda):
-            raise SystemExit(f"{did} is linked to {_agenda_link_shown(agenda)}, which names no agenda item: {WORKFLOW_CMD} agenda-unlink --deferred {did} "
-                             "first; refused, nothing was written")
-        ns = argparse.Namespace(phase=phase_id, name=args.phase_name or data["title"], objective=args.phase_objective or data["title"], order=None, agenda=agenda)
-        new_phase(ns)
-    pdir = require_phase(phase_id)
-    order = _auto_order(pdir, args.order)
-    deps = declared_dependencies(phase_id, slice_id, order, args.depends_on)  # None: undeclared, as before
-    sdir = create_slice(phase_id, slice_id, args.name or data["title"], args.kind, order, args.risk, source={"type": "deferred", "id": did, "path": str(ddir.relative_to(ROOT))}, depends_on=deps or [], declared=deps is not None)
-    plan_path = sdir / "plan.md"
-    # plan.md has no template, so it may not exist yet; only prepend a separator when it does.
-    sep = "\n---\n\n" if plan_path.exists() and plan_path.read_text(encoding="utf-8").strip() else ""
-    with plan_path.open("a", encoding="utf-8") as f:
-        f.write(f"{sep}## Promoted Deferred Context\n\n")
-        f.write((ddir / "brief.md").read_text(encoding="utf-8"))
-    data["status"] = "promoted"
-    data["promoted_to"] = {"phase_id": phase_id, "slice_id": slice_id, "path": str(sdir.relative_to(ROOT))}
-    write_json(ddir / "deferred.json", data)
-    target = DEFERRED_PROMOTED / did
-    if target.exists():
-        raise SystemExit(f"promoted destination already exists: {shown(target)}")
-    shutil.move(str(ddir), str(target))
-    append_event("deferred_promoted", deferred=did, phase=phase_id, slice=slice_id)
-    rebuild_index_and_state()
-    print(f"promoted {did} -> {slice_id}: {shown(sdir)}")
-    for line in declared_slice_lines(args.kind, deps):
-        print(line)
-
-
-def drop_deferred(args: argparse.Namespace) -> None:
-    did = args.deferred_id
-    ddir = DEFERRED_OPEN / did
-    if not (ddir / "deferred.json").exists():
-        raise SystemExit(f"open deferred job not found: {did}")
-    data = read_json(ddir / "deferred.json")
-    data["status"] = "dropped"
-    data["dropped_reason"] = args.reason
-    write_json(ddir / "deferred.json", data)
-    target = DEFERRED_DROPPED / did
-    if target.exists():
-        raise SystemExit(f"dropped destination already exists: {shown(target)}")
-    shutil.move(str(ddir), str(target))
-    append_event("deferred_dropped", deferred=did, reason=args.reason)
-    rebuild_index_and_state()
-    print(f"dropped {did}: {shown(target)}")
-
-
 # The agenda's item commands (P66). Each either applies and prints one line per item changed, or exits non-zero
 # with exactly one line and writes nothing: every id is resolved and every transition checked before the first
 # write, so a bulk call is all or none (its refusal names the first item that fails). That line is what the web
 # shows as its "Change refused" text. After a write: one event per item, then one rebuild. Nothing here touches
-# `next` or the pointer. A phase or deferred job is written only for its `agenda` link (agenda-link,
-# agenda-unlink, and agenda-delete, which clears every link to the items it deletes); nothing else on it changes.
+# `next` or the pointer. A phase is written only for its `agenda` link (agenda-link, agenda-unlink, agenda-merge,
+# which moves the links of the items it merges, and agenda-delete, which clears every link to the items it
+# deletes); nothing else on it changes.
 AGENDA_ID_HELP = ("an agenda item, in any brief form: 7, A7 or a7 (its number), 7-m3 or A7-m3 (the tail, typed only"
                   " when two items share the number)")
 
@@ -655,15 +627,23 @@ def agenda_item_exists(aid) -> bool:
 
 
 def agenda_require_item(aid) -> None:
-    """Refuse a link to an item that does not exist (`phase new --agenda`, `defer-job --agenda`), in the item
-    commands' words, before anything is written."""
+    """Refuse a link to an item that does not exist (`phase new --agenda`), in the item commands' words, before
+    anything is written."""
     if not agenda_item_exists(aid):
         raise SystemExit(f"{aid} names no agenda item")
 
 
 def _agenda_open(items) -> list:
-    """The open part, in its order (In progress is stored `open`)."""
-    return [item for item in agenda_sorted(items) if _agenda_status(item) == "open"]
+    """The open part, in its order (In progress is stored `open`); a Proposed item is outside it."""
+    return [item for item in agenda_sorted(items) if _agenda_status(item) == "open" and not _agenda_proposed(item)]
+
+
+def _agenda_parked_order(items) -> float:
+    """The `order` a Proposed item is stored with: one past every stored Open item's. Nothing reads it while the
+    item is Proposed (agenda-accept places it); it is a number only because an older engine's validate requires
+    one on every item stored `open`."""
+    orders = [order for order in (_agenda_order(item) for item in items if _agenda_status(item) == "open") if order is not None]
+    return max(orders) + 1.0 if orders else 1.0
 
 
 def _agenda_place(others: list, item: dict, index: int) -> tuple:
@@ -731,15 +711,14 @@ def _agenda_refusal(item: dict, to_status: str) -> str:
 
 def agenda_list(args: argparse.Namespace) -> None:
     items = agenda_items()
-    links = agenda_links()  # read once: every item's phases and jobs, and so its derived In progress
+    links = agenda_links()  # read once: every item's phases, and so its derived In progress
     if args.json:
         rows = []
         for item in items:
-            own = agenda_item_links(item, links)
+            own, (entries, latest) = agenda_item_links(item, links), agenda_thread_summary(item["id"])
             rows.append({**_agenda_record(item), "phases": [phase["id"] for phase in own["phases"]],
                          "phases_done": sum(1 for phase in own["phases"] if phase["status"] == "done"),
-                         "deferred": [job["id"] for job in own["deferred"]],
-                         "shown_status": agenda_shown_status(item, links)})
+                         "entries": entries, "latest_entry": latest, "shown_status": agenda_shown_status(item, links)})
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
     if not items:
@@ -748,13 +727,17 @@ def agenda_list(args: argparse.Namespace) -> None:
     width = max(len(item["id"]) for item in items)
     status_width = max(len(word) for word in AGENDA_SHOWN.values())
     for item in items:
-        counts = agenda_counts_line(agenda_item_links(item, links))
+        counts = agenda_counts_line(agenda_item_links(item, links), agenda_thread_summary(item["id"]))
         print(f"{item['id']:<{width}}  {agenda_shown_status(item, links):<{status_width}}  {_agenda_str(item, 'title') or ''}"
               + (f"  ({counts})" if counts else ""))
 
 
 def agenda_add(args: argparse.Namespace) -> None:
+    """Add an item. Who opens it decides where it lands (P72): a person's (`--author person:...`) is Open at once,
+    first in the open order; an agent's (`agent:...`) is Proposed, outside the open order, until the operator's
+    agenda-accept or agenda-drop. `--author` is required, so no item is anonymous."""
     title = agenda_title(args.title)
+    author = _entry_value(args.author, ENTRY_AUTHOR_RE, ENTRY_AUTHOR_FORM, "--author")
     if args.id is not None:
         aid = args.id
         if not AGENDA_ID_RE.fullmatch(aid):
@@ -767,13 +750,18 @@ def agenda_add(args: argparse.Namespace) -> None:
     stamp = now_iso()
     item = {"id": aid, "title": title, "note": _agenda_text(args.note), "status": "open", "order": None,
             "created_at": stamp, "changed_at": stamp, "outcome": None, "reason": None}
-    others = _agenda_open(agenda_items())
-    writes, renumbered = _agenda_place(others, item, 0)  # a new item goes first (F79)
+    every, proposed = agenda_items(), author.startswith("agent:")
+    if proposed:
+        item.update(order=_agenda_parked_order(every), proposed={"by": author, "at": stamp})
+        writes, renumbered = [item], False
+    else:
+        writes, renumbered = _agenda_place(_agenda_open(every), item, 0)  # a new item goes first (F79)
     for each in writes:
         _agenda_write(each, stamp)
-    append_event("agenda_added", agenda=aid, **({"renumbered": True} if renumbered else {}))
+    append_event("agenda_added", agenda=aid, author=author, **({"proposed": True} if proposed else {}),
+                 **({"renumbered": True} if renumbered else {}))
     rebuild_index_and_state()
-    print(f"added {aid}: {title}")
+    print(f"added {aid}: {title}" + (" (Proposed: agenda-accept or agenda-drop it)" if proposed else ""))
     if renumbered:
         print(_agenda_renumbered_line(len(writes)))
 
@@ -804,6 +792,8 @@ def agenda_move(args: argparse.Namespace) -> None:
     aid = item["id"]
     if _agenda_unusable_status(item):  # P66 F8: "reopen it first" would be refused too
         raise SystemExit(_agenda_unusable_status(item))
+    if _agenda_proposed(item):
+        raise SystemExit(f"{aid} is Proposed: it has no place in the open order until {WORKFLOW_CMD} agenda-accept {aid}")
     if _agenda_status(item) != "open":
         raise SystemExit(f"{aid} is {agenda_shown_status(item)}: only an Open item moves; reopen it first")
     open_now = _agenda_open(every)
@@ -816,7 +806,7 @@ def agenda_move(args: argparse.Namespace) -> None:
             raise SystemExit(f"{target_id} names no agenda item")
         if _agenda_unusable_status(target):
             raise SystemExit(_agenda_unusable_status(target))
-        if _agenda_status(target) != "open":
+        if _agenda_status(target) != "open" or _agenda_proposed(target):
             raise SystemExit(f"{target_id} is {agenda_shown_status(target)}: an item moves only beside an Open item")
         index = others.index(target) + (1 if args.after_id is not None else 0)
         where = f"{'after' if args.after_id is not None else 'before'} {target_id}"
@@ -854,6 +844,7 @@ def _agenda_change_status(args: argparse.Namespace, to_status: str, allowed: set
     open_now = _agenda_open(every)
     for item in items:
         item.update(status=to_status, outcome=outcome, reason=reason)  # reopen clears both (F81)
+        item.pop("proposed", None)  # a status change ends Proposed: drop is its other way out
         if to_status == "open":  # a reopened item goes last in the open order (F303), in the order typed
             changed, again = _agenda_place(open_now, item, len(open_now))
             open_now = open_now + [item]
@@ -888,6 +879,365 @@ def agenda_drop(args: argparse.Namespace) -> None:
 
 def agenda_reopen(args: argparse.Namespace) -> None:
     _agenda_change_status(args, "open", {"deferred", "solved", "dropped"}, "agenda_reopened", "reopened")
+
+
+def agenda_accept(args: argparse.Namespace) -> None:
+    """Accept Proposed items, all or none: each leaves Proposed (its `proposed` key is removed) and takes its place
+    in the open order, first, the first typed first, the way a person's new item lands."""
+    items, every = _agenda_named(args.agenda_ids)
+    for item in items:
+        unusable = _agenda_unusable_status(item)
+        if unusable:
+            raise SystemExit(unusable)
+        if not _agenda_proposed(item):
+            raise SystemExit(f"{item['id']} is {agenda_shown_status(item)}: only a Proposed item is accepted")
+    open_now, writes, renumbered = _agenda_open(every), {}, False
+    for index, item in enumerate(items):
+        item.pop("proposed")
+        changed, again = _agenda_place(open_now, item, index)
+        open_now.insert(index, item)
+        renumbered = renumbered or again
+        writes.update({each["id"]: each for each in changed})
+        writes[item["id"]] = item
+    stamp = now_iso()
+    for each in writes.values():
+        _agenda_write(each, stamp)
+    for item in items:
+        append_event("agenda_accepted", agenda=item["id"])
+    rebuild_index_and_state()
+    for index, item in enumerate(items, 1):
+        print(f"accepted {item['id']}: Open, {index} in the open order")
+    if renumbered:
+        print(_agenda_renumbered_line(len(open_now)))
+
+
+def agenda_entry(args: argparse.Namespace) -> None:
+    """Add one entry to an item's thread, in any status: exactly one new file under its entries/, and nothing else
+    (agenda.json is never rewritten, so two writers on one item never touch one path). An agent's entry on an item
+    that exists is free: the item's status does not move."""
+    (item,), _every = _agenda_named(args.agenda_ids)
+    author = _entry_value(args.author, ENTRY_AUTHOR_RE, ENTRY_AUTHOR_FORM, "--author")
+    source = _entry_value(args.source, ENTRY_SOURCE_RE, ENTRY_SOURCE_FORM, "--source")
+    body = args.body.strip() if isinstance(args.body, str) else ""
+    if not body:
+        raise SystemExit("--body must be non-empty text")
+    name = _entry_write(item["id"], args.kind, author, source, body, now_iso())
+    append_event("agenda_entry", agenda=item["id"], entry=name, kind=args.kind, author=author)
+    rebuild_index_and_state()
+    print(f"added entry {item['id']}/{name}: {args.kind} by {author} ({source})")
+
+
+def agenda_show(args: argparse.Namespace) -> None:
+    """Print one item and its thread, oldest entry first. Writes nothing."""
+    (item,), _every = _agenda_named(args.agenda_ids)
+    own, entries = agenda_item_links(item), agenda_entries(item["id"])
+    if args.json:
+        print(json.dumps({**_agenda_record(item), "shown_status": agenda_shown_status(item),
+                          "phases": [phase["id"] for phase in own["phases"]],
+                          "entries": [{"name": name, **(data or {})} for name, data in entries]}, ensure_ascii=False, indent=2))
+        return
+    print(f"{item['id']}  {agenda_shown_status(item)}  {_agenda_str(item, 'title') or ''}")
+    proposed = item.get("proposed") if _agenda_proposed(item) else None
+    if isinstance(proposed, dict):
+        print(f"proposed by {proposed.get('by')} on {_agenda_day(proposed.get('at'))}: {WORKFLOW_CMD} agenda-accept {item['id']}, or agenda-drop it with a reason")
+    for key in ("note", "outcome", "reason"):
+        if _agenda_str(item, key):
+            print(f"{key}: {item[key]}")
+    if own["phases"]:
+        print("phases: " + ", ".join(f"{phase['id']} ({phase['status']})" for phase in own["phases"]))
+    print(f"entries: {len(entries)}")
+    for name, data in entries:
+        if data is None:
+            print(f"- {name}: not a readable JSON object (check names it)")
+            continue
+        print(f"- {_agenda_day(data.get('created_at'))} {data.get('kind')} by {data.get('author')} ({data.get('source')}) [{name}]")
+        for line in str(data.get("body") or "").splitlines():
+            print(f"  {line}" if line else "")
+
+
+def agenda_merge(args: argparse.Namespace) -> None:
+    """Merge items into one, all or none: every entry and every phase link of each from-item moves onto the target,
+    then each from-item is Dropped with the reason `merged into <target>` (its title and note stay on it). A
+    from-item is Open, Proposed, In progress or Deferred (a Solved or Dropped one is reopened first); the target is
+    any item. Refused, nothing written: an id twice, an unusable status, an active phase of another stream linked to
+    a from-item (link it from its own stream), or a phase whose stream this checkout cannot tell."""
+    ids = list(args.agenda_ids)
+    if len(ids) < 2:
+        raise SystemExit("agenda-merge needs the item to merge into, then one or more items to merge from")
+    twice = next((aid for aid in ids if ids.count(aid) > 1), None)
+    if twice:
+        raise SystemExit(f"agenda-merge names {twice} twice: an item merges once, and never into itself")
+    named, _every = _agenda_named(ids)
+    into, froms = named[0], named[1:]
+    for item in named:
+        unusable = _agenda_unusable_status(item)
+        if unusable:
+            raise SystemExit(unusable)
+    for item in froms:
+        if _agenda_status(item) not in ("open", "deferred"):
+            raise SystemExit(f"{item['id']} is {agenda_shown_status(item)}: only an Open, Proposed or Deferred item merges into another; reopen it first")
+    target_names = {name for name, _data in agenda_entries(into["id"])}
+    moves = {}
+    for item in froms:
+        moves[item["id"]] = [name for name, _data in agenda_entries(item["id"])]
+        clash = next((name for name in moves[item["id"]] if name in target_names), None)
+        if clash:
+            raise SystemExit(f"agenda-merge refused, nothing was written: {into['id']} already holds an entry named {clash}")
+        target_names.update(moves[item["id"]])
+    from_ids = {item["id"] for item in froms}
+    holders = [holder for holder in _agenda_link_holders() if holder["agenda"] in from_ids]
+    stream = current_stream(all_active_phases()) if any(h["place"] == "active" for h in holders) else None
+    for holder in holders:
+        if holder["place"] == "active":
+            where = agenda_phase_elsewhere(holder["id"], read_json(holder["path"]), stream)
+            if where is not None:
+                raise SystemExit(f"agenda-merge refused, nothing was written: {holder['id']} links {holder['agenda']}: "
+                                 + _agenda_elsewhere_fix(holder["id"], where, f"agenda-link {into['id']} --phase {holder['id']}"))
+    for holder in holders:
+        _agenda_set_link(holder, into["id"])
+    for aid, names in moves.items():
+        for name in names:
+            (AGENDA / into["id"] / "entries").mkdir(parents=True, exist_ok=True)
+            shutil.move(str(AGENDA / aid / "entries" / name), str(AGENDA / into["id"] / "entries" / name))
+        if (AGENDA / aid / "entries").is_dir() and not any((AGENDA / aid / "entries").iterdir()):
+            (AGENDA / aid / "entries").rmdir()
+    stamp = now_iso()
+    for item in froms:
+        item.update(status="dropped", order=None, outcome=None, reason=f"merged into {into['id']}")
+        item.pop("proposed", None)
+        _agenda_write(item, stamp)
+    for item in froms:
+        phases = [holder["id"] for holder in holders if holder["agenda"] == item["id"]]
+        append_event("agenda_merged", agenda=item["id"], into=into["id"], entries=len(moves[item["id"]]),
+                     **({"phases": phases} if phases else {}))
+    rebuild_index_and_state()
+    for item in froms:
+        phases = sum(1 for holder in holders if holder["agenda"] == item["id"])
+        count = len(moves[item["id"]])
+        print(f"merged {item['id']} into {into['id']}: {count} entr{'y' if count == 1 else 'ies'} and "
+              f"{_plural(phases, 'phase link')} moved; {item['id']} is Dropped (merged into {into['id']})")
+
+
+# The fold (P72): 0.3.0 retired deferred jobs, so an install's leftover works/deferred/ is carried onto the agenda
+# once, by agenda-fold, for any install. Each open job lands where the operator triages it, exactly once: linked to an
+# item still in an active view (Open, In progress, Proposed, or Deferred, which `agenda` lists and which the operator
+# chose to defer) it is an entry on that item; otherwise (no link, or a link to a Solved, Dropped or missing item) it
+# becomes its own Proposed item, its entry naming the old link. The first entry (kind issue, author agent:fold)
+# carries the job: its id, title, source, reason, trigger, created date (and old link) in `job` and in the body, and
+# its brief when it differs from the brief the old engine wrote. Each job, open or closed, leaves one
+# `deferred_folded` event naming its end; then works/deferred/ and works/deferred.md are removed. All or none: every
+# job is read before the first write. The fold runs only on the default checkout (`_fold_elsewhere`): a fold on
+# another branch or worktree would mint a second set of ids for the same jobs, so each would show twice after a merge.
+DEFERRED = WORKS / "deferred"
+DEFERRED_PLACES = ("open", "promoted", "dropped")
+DEFERRED_BRIEF = "# Deferred: __DEFERRED_ID__ __TITLE__\n\n## Context\n\n## Why Deferred\n\n## Trigger to Promote\n\n## Notes\n\n"
+FOLD_AUTHOR = "agent:fold"
+
+
+def _fold_read(path):
+    """`(text, why)`: a text file the fold reads, `(None, None)` when it is absent, or `(None, why)` when it cannot
+    be read as UTF-8 text, so the fold refuses before its first write."""
+    if not path.is_file():
+        return None, None
+    try:
+        return path.read_text(encoding="utf-8"), None
+    except UnicodeDecodeError:
+        return None, "is not UTF-8 text"
+    except OSError as exc:
+        return None, f"is not readable ({exc.__class__.__name__})"
+
+
+def _deferred_left() -> tuple:
+    """`(jobs, problems)`: every job folder under works/deferred/<place>/, as `{place, id, path, data, brief}` in
+    id order (open first), and `(path, why)` for a folder whose deferred.json is missing or not a JSON object, or
+    whose brief.md is not UTF-8 text, and for a works/templates/deferred_brief.md that is not."""
+    jobs, problems = [], []
+    for place in DEFERRED_PLACES:
+        base = DEFERRED / place
+        for ddir in (sorted(d for d in base.iterdir() if d.is_dir()) if base.is_dir() else []):
+            try:
+                data = read_json(ddir / "deferred.json")
+            except (OSError, ValueError) as exc:
+                problems.append((ddir / "deferred.json", f"is not readable JSON ({exc.__class__.__name__})"))
+                continue
+            if not isinstance(data, dict):
+                problems.append((ddir / "deferred.json", "is not a JSON object"))
+                continue
+            brief, why = _fold_read(ddir / "brief.md")
+            if why:
+                problems.append((ddir / "brief.md", why))
+                continue
+            jobs.append({"place": place, "id": ddir.name, "path": ddir, "data": data, "brief": brief})
+    _template, why = _fold_read(WORKS / "templates" / "deferred_brief.md")
+    if why:
+        problems.append((WORKS / "templates" / "deferred_brief.md", why))
+    order = {place: i for i, place in enumerate(DEFERRED_PLACES)}
+    jobs.sort(key=lambda job: (order[job["place"]], id_sort_key(job["id"], job["data"].get("created_at"))))
+    return jobs, problems
+
+
+def _fold_text(value) -> str:
+    return value.strip() if isinstance(value, str) else "" if value is None else json.dumps(value, ensure_ascii=False)
+
+
+def _fold_brief(job: dict):
+    """The job's brief when someone edited it (it differs from what the old engine wrote, from the plugin's template
+    or the workspace's own works/templates/deferred_brief.md), else None."""
+    brief, data = job["brief"], job["data"]
+    if brief is None or not brief.strip():
+        return None
+    own = WORKS / "templates" / "deferred_brief.md"
+    for template in (DEFERRED_BRIEF, _fold_read(own)[0]):  # _deferred_left refused an unreadable one
+        if template is None:
+            continue
+        text = template.replace("__DEFERRED_ID__", job["id"]).replace("__TITLE__", str(data.get("title")))
+        text = text.replace("## Why Deferred\n", f"## Why Deferred\n\n{data.get('reason')}\n")
+        if brief == text.replace("## Trigger to Promote\n", f"## Trigger to Promote\n\n{data.get('trigger')}\n"):
+            return None
+    return brief.rstrip()
+
+
+def _fold_entry(job: dict, was=None) -> tuple:
+    """`(source, body, job)`: the fold's first entry for an open job; `was` is `(link, word)` when the job was linked
+    to an item it does not land on (Solved, Dropped, or no such item), named in the body and kept in `job.agenda`."""
+    data, did = job["data"], job["id"]
+    raw = _fold_text(data.get("source"))
+    source = (f"slice:{raw}" if SLICE_ID_RE.fullmatch(raw) else f"phase:{raw}" if PHASE_ID_RE.fullmatch(raw)
+              else f"deferred:{did}")
+    carried = {key: data.get(key) for key in ("title", "source", "reason", "trigger", "created_at")}
+    if was is not None:
+        carried["agenda"] = was[0]
+    linked = f"; it was linked to {_agenda_link_shown(was[0])} ({was[1]})" if was is not None else ""
+    lines = [f"Folded from deferred job {did}, created {_fold_text(data.get('created_at')) or 'at an unrecorded time'}{linked}.",
+             f"Title: {_fold_text(data.get('title'))}", f"Source: {raw}", f"Reason: {_fold_text(data.get('reason'))}",
+             f"Trigger: {_fold_text(data.get('trigger'))}"]
+    brief = _fold_brief(job)
+    if brief:
+        lines += ["", "Brief:", "", brief]
+    return source, "\n".join(lines), {"id": did, **carried}
+
+
+def _fold_title(job: dict) -> str:
+    """The item's title: the job's, first line, cut to 200 characters (the whole of it is in the entry)."""
+    lines = _fold_text(job["data"].get("title")).splitlines()
+    title = lines[0].strip() if lines and lines[0].strip() else job["id"]
+    return title if len(title) <= AGENDA_TITLE_MAX else title[:AGENDA_TITLE_MAX - 1] + "…"
+
+
+def _fold_default_branch():
+    """The default branch's name for the fold: origin/HEAD's target, else a local main, else a local master, else
+    None (no git, or neither resolves: the branch rule is then not applied)."""
+    proc = _git(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], check=False)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip().split("/", 1)[-1]
+    for name in ("main", "master"):
+        if _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], check=False).returncode == 0:
+            return name
+    return None
+
+
+def _fold_elsewhere():
+    """`(why, place)` when this checkout is not the default one, else None. The fold runs once, on the default
+    checkout: on a parallel stream's branch (`current_stream`, which holds in a clone too), in a linked worktree (a
+    nested install's worktree set, or a worktree of the workflow repo) or on any branch other than the default one, a
+    fold would mint its own ids for jobs the default checkout folds too. No git: one checkout, so None."""
+    if not _git_available():
+        return None
+    default = _fold_default_branch()
+    place = _agenda_default_place(default)
+    stream = current_stream(all_active_phases())
+    if stream:
+        return f"this checkout is the parallel stream {stream}", place
+    in_set = HOST_ROOT is not None and MAIN_HOST is not None and os.path.realpath(str(HOST_ROOT)) != os.path.realpath(str(MAIN_HOST))
+    if in_set or _default_checkout_root() is not None:
+        return "this checkout is a linked worktree, not the default checkout", place
+    branch = git_current_branch()
+    if branch and default and branch != default:
+        return f"this checkout is on branch {branch}, not the default branch {default}", place
+    return None
+
+
+def _validate_unfolded(errors: list, warnings: list) -> None:
+    """An install that still holds works/deferred/: an ERROR while it holds an open job (this engine reads none,
+    so the work would be lost from every view until the fold), a WARNING when only closed jobs or the old
+    works/deferred.md are left. Both name the fold. Off the default checkout (`_fold_elsewhere`) it is one WARNING
+    naming where the fold runs: the default checkout holds the same jobs and fails there, and this checkout drops
+    works/deferred/ when it merges the default branch, so nothing here is lost and nothing here should fold."""
+    if not DEFERRED.exists() and not (WORKS / "deferred.md").exists():
+        return
+    base = DEFERRED / "open"
+    count = sum(1 for d in base.iterdir() if d.is_dir()) if base.is_dir() else 0
+    elsewhere = _fold_elsewhere()
+    if elsewhere is not None:
+        warnings.append(f"works/deferred/ is left from deferred jobs ({_plural(count, 'open job')}): run {WORKFLOW_CMD} "
+                        f"{ENTRY_UNFOLDED} once, on {elsewhere[1]}, never here ({elsewhere[0]}); this checkout drops "
+                        f"works/deferred/ when it merges the default branch")
+    elif count:
+        errors.append(f"works/deferred/ holds {count} open deferred job{'s' if count != 1 else ''}, which this engine "
+                      f"no longer reads (deferred jobs are retired): run {WORKFLOW_CMD} {ENTRY_UNFOLDED} once, on this "
+                      f"default checkout (each becomes a Proposed agenda item, or an entry on the open or deferred item it was linked to, whose first entry carries it)")
+    else:
+        warnings.append(f"works/deferred/ or works/deferred.md is left from deferred jobs, with no open job: run "
+                        f"{WORKFLOW_CMD} {ENTRY_UNFOLDED} on this default checkout to record the closed jobs as events and remove it")
+
+
+def agenda_fold(args: argparse.Namespace) -> None:
+    left_page = WORKS / "deferred.md"
+    if not DEFERRED.exists() and not left_page.exists():
+        print("nothing to fold: works/deferred/ is gone")
+        return
+    elsewhere = _fold_elsewhere()
+    if elsewhere is not None:
+        raise SystemExit(f"agenda-fold refused, nothing was written: {elsewhere[0]}; the fold runs once, on "
+                         f"{elsewhere[1]}, and this checkout drops works/deferred/ when it merges the default branch")
+    jobs, problems = _deferred_left()
+    if problems:
+        path, why = problems[0]
+        raise SystemExit(f"agenda-fold refused, nothing was written: {shown(path)} {why}: fix it by hand, or remove its "
+                         f"folder, then fold again")
+    every = agenda_items()  # strict: an unreadable agenda.json refuses here, before any write
+    by_id, links = {item["id"]: item for item in every}, agenda_links()
+    stamp, order = now_iso(), _agenda_parked_order(every)
+    folded = []
+    for job in (job for job in jobs if job["place"] == "open"):
+        linked, was = _agenda_link_value(job["data"]), None
+        target = by_id.get(linked) if linked is not None else None
+        if target is not None and _agenda_status(target) in ("open", "deferred"):  # an active view: Open/In progress/Proposed, Deferred
+            aid, new, word = linked, False, agenda_shown_status(target, links)
+        else:
+            if linked is not None:  # Solved, Dropped, an unusable status, or no such item: lands as Proposed, naming it
+                was = (linked, agenda_shown_status(target, links) if _agenda_status(target or {}) else
+                       f"status {_agenda_value_text(target.get('status'))}" if target is not None else "no such item")
+            word = None
+            aid, new = mint_id("A"), True
+            write_json(AGENDA / aid / "agenda.json", _agenda_record(
+                {"id": aid, "title": _fold_title(job), "note": None, "status": "open", "order": order,
+                 "created_at": stamp, "changed_at": stamp, "outcome": None, "reason": None,
+                 "proposed": {"by": FOLD_AUTHOR, "at": stamp}}))
+            order += 1.0
+        source, body, carried = _fold_entry(job, was)
+        name = _entry_write(aid, "issue", FOLD_AUTHOR, source, body, stamp, {"job": carried})
+        append_event("deferred_folded", deferred=job["id"], end="agenda", agenda=aid, entry=name,
+                     **({"was_linked": was[0]} if was is not None else {}))
+        folded.append((job["id"], aid, new, word, was))
+    for job in (job for job in jobs if job["place"] != "open"):
+        data = job["data"]
+        end = ({"promoted_to": data.get("promoted_to")} if job["place"] == "promoted"
+               else {"reason": data.get("dropped_reason")})
+        append_event("deferred_folded", deferred=job["id"], end=job["place"], title=data.get("title"), **end)
+    if DEFERRED.exists():
+        shutil.rmtree(DEFERRED)
+    if left_page.exists():
+        left_page.unlink()
+    rebuild_index_and_state()
+    closed = len(jobs) - len(folded)
+    made, onto = sum(1 for f in folded if f[2]), sum(1 for f in folded if not f[2])
+    print(f"folded {_plural(len(folded), 'open job')} into the agenda ({made} new Proposed item{'s' if made != 1 else ''}, "
+          f"{onto} entr{'y' if onto == 1 else 'ies'} on linked items); {_plural(closed, 'closed job')} left with a "
+          f"deferred_folded event; works/deferred/ removed")
+    for did, aid, new, word, was in folded:
+        print(f"{did} -> {aid} " + (f"(its linked item, {word})" if not new else
+                                     f"(Proposed; was linked to {_agenda_link_shown(was[0])} ({was[1]}))" if was else "(Proposed)"))
 
 
 def _agenda_set_link(holder: dict, aid) -> None:
@@ -1212,9 +1562,8 @@ def _agenda_elsewhere_fix(hid: str, elsewhere: dict, command: str) -> str:
 
 def agenda_delete(args: argparse.Namespace) -> None:
     """Delete items, all or none (every id is resolved first): clear the `agenda` key of every phase (active and
-    archived) and every job (open, promoted, dropped) that names one of them, THEN remove the items' folders --
-    links first, folder last, so a stop between the two leaves no link to a missing item. The phases and jobs
-    stay. An active phase of another stream (`agenda_phase_elsewhere`) is never written: its link is left, and the
+    archived) that names one of them, THEN remove the items' folders (their threads with them) -- links first,
+    folder last, so a stop between the two leaves no link to a missing item. The phases stay. An active phase of another stream (`agenda_phase_elsewhere`) is never written: its link is left, and the
     output names the command and the checkout that clears it, or says there is none to run (until then validate
     warns of it, dangling). A phase whose stream this checkout cannot tell (no cut in its history:
     `agenda_phase_elsewhere`, row 5) refuses the whole delete before anything is written (P66 F5, F6)."""
@@ -1248,123 +1597,114 @@ def agenda_delete(args: argparse.Namespace) -> None:
     for item in items:
         own = cleared[item["id"]]
         print(f"deleted {item['id']}: {_plural(len(own), 'link')} cleared"
-              + (" (its phases and jobs stay)" if own else ""))
+              + (" (its phases stay)" if own else ""))
         for holder in kept[item["id"]]:
             print(f"1 link left on {holder['id']} (another stream): "
                   + _agenda_elsewhere_fix(holder["id"], elsewhere[holder["id"]], f"agenda-unlink --phase {holder['id']}"))
 
 
 def _agenda_link_target(args: argparse.Namespace, cmd: str) -> dict:
-    """The one phase (`--phase`, active only) or deferred job (`--deferred`, open, promoted or dropped) that
-    agenda-link or agenda-unlink writes, as an `_agenda_link_holders` dict plus `linked` (the key is present);
-    refused in one line otherwise. An archived phase keeps the link it was archived with (only agenda-delete
-    rewrites it), and an active phase of another stream is refused (`agenda_phase_elsewhere`)."""
-    phase, did = getattr(args, "phase", None), getattr(args, "deferred_id", None)
-    if (phase is None) == (did is None):
-        raise SystemExit(f"{cmd} needs exactly one of --phase <phase> or --deferred <job>"
-                         + (" (got both)" if phase is not None else ""))
-    if phase is not None:
-        path = ACTIVE / phase / "phase.json"
-        if not path.is_file():
-            if phase in archived_phase_ids():
-                raise SystemExit(f"{phase} is archived: an archived phase keeps the link it was archived with")
-            raise SystemExit(f"{phase} names no phase")
-        kind, hid, place = "phase", phase, "active"
-    else:
-        found = [(where, base / did / "deferred.json") for where, base in
-                 (("open", DEFERRED_OPEN), ("promoted", DEFERRED_PROMOTED), ("dropped", DEFERRED_DROPPED))
-                 if (base / did / "deferred.json").is_file()]
-        if not found:
-            raise SystemExit(f"{did} names no deferred job")
-        (place, path), kind, hid = found[0], "deferred", did
+    """The one active phase (`--phase`) that agenda-link or agenda-unlink writes, as an `_agenda_link_holders` dict
+    plus `linked` (the key is present); refused in one line otherwise. An archived phase keeps the link it was
+    archived with (only agenda-merge and agenda-delete rewrite it), and an active phase of another stream is
+    refused (`agenda_phase_elsewhere`)."""
+    phase = getattr(args, "phase", None)
+    if phase is None:
+        raise SystemExit(f"{cmd} needs --phase <phase>")
+    path = ACTIVE / phase / "phase.json"
+    if not path.is_file():
+        if phase in archived_phase_ids():
+            raise SystemExit(f"{phase} is archived: an archived phase keeps the link it was archived with")
+        raise SystemExit(f"{phase} names no phase")
     try:
         data = read_json(path)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"{shown(path)} is not readable JSON ({exc.__class__.__name__}): fix it first")
     if not isinstance(data, dict):
         raise SystemExit(f"{shown(path)} is not a JSON object: fix it first")
-    where = agenda_phase_elsewhere(hid, data) if kind == "phase" else None
+    where = agenda_phase_elsewhere(phase, data)
     if where is not None:  # the stream rule: only this stream's own phases take a link (agenda_phase_elsewhere)
-        command = (f"agenda-link {args.agenda_ids[0]} --phase {hid}" if cmd == "agenda-link" else f"agenda-unlink --phase {hid}")
-        raise SystemExit(f"{cmd} refused, nothing was written: " + _agenda_elsewhere_fix(hid, where, command))
-    return {"kind": kind, "id": hid, "path": path, "place": place, "status": data.get("status"),
+        command = (f"agenda-link {args.agenda_ids[0]} --phase {phase}" if cmd == "agenda-link" else f"agenda-unlink --phase {phase}")
+        raise SystemExit(f"{cmd} refused, nothing was written: " + _agenda_elsewhere_fix(phase, where, command))
+    return {"kind": "phase", "id": phase, "path": path, "place": "active", "status": data.get("status"),
             "agenda": data.get("agenda"), "linked": "agenda" in data}
 
 
 def agenda_link(args: argparse.Namespace) -> None:
     target = _agenda_link_target(args, "agenda-link")
     (item,), _every = _agenda_named(args.agenda_ids)
-    aid, hid, key = item["id"], target["id"], target["kind"]
+    aid, hid = item["id"], target["id"]
     if target["agenda"] == aid:
         print(f"{hid} is linked to {aid} already; nothing changed")
         return
     if target["agenda"] is not None and _agenda_link_value(target) is None:  # P66 F8: not an id ("" or not a string)
         raise SystemExit(f"{hid}'s stored \"agenda\" in {shown(target['path'])} is {_agenda_value_text(target['agenda'])}, not an "
-                         f"agenda item id: {WORKFLOW_CMD} agenda-unlink --{'phase' if key == 'phase' else 'deferred'} {hid} "
-                         f"removes the key, then link again")
+                         f"agenda item id: {WORKFLOW_CMD} agenda-unlink --phase {hid} removes the key, then link again")
     if target["agenda"] is not None:
         raise SystemExit(f"{hid} is linked to {_agenda_link_shown(target['agenda'])}: unlink it first")
     _agenda_set_link(target, aid)
-    append_event("agenda_linked", agenda=aid, **{key: hid})
+    append_event("agenda_linked", agenda=aid, phase=hid)
     rebuild_index_and_state()
     print(f"linked {hid} to {aid}")
 
 
 def agenda_unlink(args: argparse.Namespace) -> None:
     target = _agenda_link_target(args, "agenda-unlink")
-    hid, key = target["id"], target["kind"]
+    hid = target["id"]
     if not target["linked"]:
         raise SystemExit(f"{hid} is linked to no agenda item")
     _agenda_set_link(target, None)
-    append_event("agenda_unlinked", agenda=target["agenda"], **{key: hid})
+    append_event("agenda_unlinked", agenda=target["agenda"], phase=hid)
     rebuild_index_and_state()
     print(f"unlinked {hid} from {_agenda_link_shown(target['agenda'])}")
 
 
 def add_agenda_parsers(sub) -> None:
-    """Defer-job, promote-deferred, drop-deferred, agenda, agenda-*: this part's commands, registered by the entry's build_parser in their place."""
-    p = sub.add_parser("defer-job", help="Create a deferred job folder")
-    p.add_argument("--id", help="the deferred id; omit it and the engine mints one (D92-x4: the next number and a random tail). Given, any shape (D92-x4, D12 or D-m3xa; 92-x4, 12 and m3xa are read as those); "
-                   "refused when any deferred folder holds it")
-    p.add_argument("--title", required=True)
-    p.add_argument("--reason", required=True)
-    p.add_argument("--trigger", required=True)
-    p.add_argument("--source", required=True)
-    p.add_argument("--agenda", metavar="ITEM", help="link the new job to this agenda item (" + AGENDA_ID_HELP + "); stored as `agenda` in deferred.json; refused, nothing written, when it names no item")
-    p.set_defaults(func=defer_job)
-
-    p = sub.add_parser("promote-deferred", help="Promote an open deferred job into an active slice")
-    p.add_argument("deferred_id", help="the deferred job, in any brief form (92, D92 or 92-x4; D12; m3xa or D-m3xa)")
-    p.add_argument("--phase", help="the target phase, in any brief form (46, P46 or 46-k2; P12; 7kq2 or P-7kq2); omit it with --create-phase and the engine mints the new phase's id")
-    p.add_argument("--slice", required=True, help="the new slice's id (P46-k2.S1), or its bare suffix (S1) -- the only way to name it in a phase being minted")
-    p.add_argument("--name")
-    p.add_argument("--kind", default="implementation", help="one of implementation, review, decomposition, research, fix, docs, qa, co-work (closed set; unknown kinds are rejected). research is findings-only: no product code, findings land in phase.md, and it always routes to the research row")
-    p.add_argument("--risk", default="high", help="low (the mid row for implementation, fix, docs and qa -- the default since v46, real code included) or high (the high row: only for a named trigger -- open design, a core invariant, an unlocated root cause, a wide blast radius -- or a fix to mid-row work); unset or unrecognized values route to high; kind decomposition, review, co-work and research route by kind whatever this says; the adapter's `route <slice>` prints the decision")
-    p.add_argument("--order", type=float, help="sort position within the phase; a fractional value (e.g. 4.5) inserts between two neighbors without renumbering (default: 10 past the last non-review slice)")
-    p.add_argument("--depends-on", action="append", metavar="ID|none", help=DEPENDS_ON_HELP)
-    p.add_argument("--create-phase", action="store_true")
-    p.add_argument("--phase-name")
-    p.add_argument("--phase-objective")
-    p.set_defaults(func=promote_deferred)
-
-    p = sub.add_parser("drop-deferred", help="Drop an open deferred job")
-    p.add_argument("deferred_id", help="the deferred job, in any brief form (92, D92 or 92-x4; D12; m3xa or D-m3xa)")
-    p.add_argument("--reason", required=True)
-    p.set_defaults(func=drop_deferred)
-
-    # The agenda (P66): works/agenda/<AID>/agenda.json, one folder per item, never moved. Every item command
-    # applies and prints one line per item changed, or exits non-zero with one line and writes nothing.
-    p = sub.add_parser("agenda", help="List the agenda: every item in the listing order (the open part in its order, then Deferred, then Solved and Dropped, each newest first), one line each: id, status (In progress derived: an Open item with a linked phase not done), title, then its links' counts when it has any (1 of 4 phases done, 3 deferred jobs). Writes nothing")
-    p.add_argument("--json", action="store_true", help="print the same list as JSON: each item's stored fields plus phases (ids), phases_done, deferred (ids) and shown_status")
+    """agenda, agenda-*: this part's commands, registered by the entry's build_parser in their place."""
+    # The agenda (P66): works/agenda/<AID>/agenda.json, one folder per item, never moved, and its thread in
+    # entries/ (P72). Every item command applies and prints one line per item changed, or exits non-zero with one
+    # line and writes nothing.
+    p = sub.add_parser("agenda", help="List the agenda: every item in the listing order (Proposed first, then the open part in its order, then Deferred, then Solved and Dropped, each newest first), one line each: id, status (Proposed: an agent opened it and no one accepted it yet; In progress derived: an Open item with a linked phase not done), title, then its counts when it has any (1 of 4 phases done, 3 entries). Writes nothing")
+    p.add_argument("--json", action="store_true", help="print the same list as JSON: each item's stored fields plus phases (ids), phases_done, entries, latest_entry and shown_status")
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_list)
 
-    p = sub.add_parser("agenda-add", help="Add an Open agenda item, first in the open order; prints its id")
+    p = sub.add_parser("agenda-add", help="Add an agenda item; prints its id. A person's item (--author person:<name>) is Open at once, first in the open order; an agent's (--author agent:<name>) is Proposed, outside the open order, until agenda-accept or agenda-drop")
     p.add_argument("--title", help="one line of 1 to 200 characters (required)")
+    p.add_argument("--author", required=True, help="who opens it: " + ENTRY_AUTHOR_FORM)
     p.add_argument("--note", help="an optional note")
     p.add_argument("--id", help="the item's id, minted elsewhere (A13-n1; 13-n1 is read as it); omit it and the engine mints one (the next A number and a random tail). Refused when malformed or when that item exists")
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_add)
+
+    p = sub.add_parser("agenda-accept", help="Accept Proposed agenda items: each becomes Open, first in the open order (the first typed first); all or none")
+    p.add_argument("agenda_ids", nargs="+", metavar="ITEM", help=AGENDA_ID_HELP)
+    _one_line_usage_errors(p)
+    p.set_defaults(func=agenda_accept)
+
+    p = sub.add_parser("agenda-entry", help="Add one entry to an agenda item's thread, in any status: writes exactly one new file under works/agenda/<item>/entries/ and never rewrites agenda.json, so two writers on one item never conflict")
+    p.add_argument("agenda_ids", nargs=1, metavar="ITEM", help=AGENDA_ID_HELP)
+    p.add_argument("--kind", required=True, choices=ENTRY_KINDS)
+    p.add_argument("--author", required=True, help=ENTRY_AUTHOR_FORM)
+    p.add_argument("--source", required=True, help="where it comes from: " + ENTRY_SOURCE_FORM)
+    p.add_argument("--body", required=True, help="the entry's text (several lines are kept); send one starting with - as --body=<text>")
+    _one_line_usage_errors(p)
+    p.set_defaults(func=agenda_entry)
+
+    p = sub.add_parser("agenda-show", help="Print one agenda item and its thread: status, note, links, then every entry oldest first with its date, kind, author and source. Writes nothing")
+    p.add_argument("agenda_ids", nargs=1, metavar="ITEM", help=AGENDA_ID_HELP)
+    p.add_argument("--json", action="store_true", help="the item's stored fields, shown_status, phases and its entries (each with its file name)")
+    _one_line_usage_errors(p)
+    p.set_defaults(func=agenda_show)
+
+    p = sub.add_parser("agenda-merge", help="Merge agenda items into the first one named: every entry and phase link of each later item moves onto it, and each later item is Dropped with the reason 'merged into <first>'; all or none")
+    p.add_argument("agenda_ids", nargs="+", metavar="ITEM", help="the item to merge into, then the items to merge from; " + AGENDA_ID_HELP)
+    _one_line_usage_errors(p)
+    p.set_defaults(func=agenda_merge)
+
+    p = sub.add_parser("agenda-fold", help="Carry an older install's deferred jobs onto the agenda, once: each open job becomes a Proposed item (or an entry on the Open or Deferred item it was linked to; a job linked to a Solved or Dropped item is its own Proposed item naming that link) whose first entry carries the job, each job leaves a deferred_folded event, then works/deferred/ and works/deferred.md are removed; all or none; a second run has nothing to fold; runs only on the default checkout")
+    _one_line_usage_errors(p)
+    p.set_defaults(func=agenda_fold)
 
     p = sub.add_parser("agenda-edit", help="Change an agenda item's title, note or both, in any status")
     p.add_argument("agenda_ids", nargs=1, metavar="ITEM", help=AGENDA_ID_HELP)
@@ -1393,7 +1733,7 @@ def add_agenda_parsers(sub) -> None:
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_solve)
 
-    p = sub.add_parser("agenda-drop", help="Drop agenda items (Open or Deferred -> Dropped), with an optional reason; all or none")
+    p = sub.add_parser("agenda-drop", help="Drop agenda items (Open, Proposed or Deferred -> Dropped), with an optional reason; all or none")
     p.add_argument("agenda_ids", nargs="+", metavar="ITEM", help=AGENDA_ID_HELP)
     p.add_argument("--reason", help="one optional line: why")
     _one_line_usage_errors(p)
@@ -1404,20 +1744,18 @@ def add_agenda_parsers(sub) -> None:
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_reopen)
 
-    p = sub.add_parser("agenda-delete", help="Delete agenda items for good: first every link to them is cleared (the `agenda` key leaves each phase, active or archived, and each deferred job, open, promoted or dropped; those stay), except on an active phase of another stream (in a phase worktree or a clone of its branch: one there at the cut, or that arrived by a merge commit; a rebase, a fast-forward or a squash of another branch makes no merge commit, so a phase it brings reads as created on the branch; a phase created on the branch is also the default checkout's own once a landing has carried it there while the branch's worktree lives on, as a loop's checkpoint does, so link or unlink it from one side only), whose link is left and named in the output; then their folders are removed (the agenda_deleted event is the record); all or none, and none when this checkout cannot tell whose a linked phase is (a shallow clone whose history stops before the worktree's cut)")
+    p = sub.add_parser("agenda-delete", help="Delete agenda items for good: first every link to them is cleared (the `agenda` key leaves each phase, active or archived; those stay), except on an active phase of another stream (in a phase worktree or a clone of its branch: one there at the cut, or that arrived by a merge commit; a rebase, a fast-forward or a squash of another branch makes no merge commit, so a phase it brings reads as created on the branch; a phase created on the branch is also the default checkout's own once a landing has carried it there while the branch's worktree lives on, as a loop's checkpoint does, so link or unlink it from one side only), whose link is left and named in the output; then their folders, threads included, are removed (the agenda_deleted event is the record); all or none, and none when this checkout cannot tell whose a linked phase is (a shallow clone whose history stops before the worktree's cut)")
     p.add_argument("agenda_ids", nargs="+", metavar="ITEM", help=AGENDA_ID_HELP)
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_delete)
 
-    p = sub.add_parser("agenda-link", help="Link one active phase (--phase) or one deferred job (--deferred: open, promoted or dropped) to an agenda item, in any status: writes `agenda` into its phase.json or deferred.json. A phase or job holds one item: refused when it is linked to another (unlink it first); a no-op when linked to this one")
+    p = sub.add_parser("agenda-link", help="Link one active phase (--phase) to an agenda item, in any status: writes `agenda` into its phase.json. An item takes many phases; a phase holds one item: refused when it is linked to another (unlink it first); a no-op when linked to this one")
     p.add_argument("agenda_ids", nargs=1, metavar="ITEM", help=AGENDA_ID_HELP)
     p.add_argument("--phase", help=PHASE_ARG_HELP)
-    p.add_argument("--deferred", dest="deferred_id", metavar="JOB", help="the deferred job, in any brief form (92, D92 or 92-x4; D12; m3xa or D-m3xa)")
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_link)
 
-    p = sub.add_parser("agenda-unlink", help="Remove the agenda link of one active phase (--phase) or one deferred job (--deferred): the `agenda` key leaves its file. An archived phase keeps its link")
+    p = sub.add_parser("agenda-unlink", help="Remove the agenda link of one active phase (--phase): the `agenda` key leaves its phase.json. An archived phase keeps its link")
     p.add_argument("--phase", help=PHASE_ARG_HELP)
-    p.add_argument("--deferred", dest="deferred_id", metavar="JOB", help="the deferred job, in any brief form (92, D92 or 92-x4; D12; m3xa or D-m3xa)")
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_unlink)

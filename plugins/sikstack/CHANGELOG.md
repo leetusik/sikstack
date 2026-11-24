@@ -7,6 +7,51 @@ Each entry says what changed and, when an install needs a manual step, a **Migra
 Before 1.0.0 the same engine shipped as the agentic workspace's installer (`bootstrap_agentic_workspace.sh`), one
 integer version per release, `## v<N>` below; that history continues here.
 
+The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
+install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
+
+## 0.3.0 — 2026-11-24
+
+- **The agenda is the one home for work not being done now; deferred jobs are retired.** An item is a thread of
+  entries: `agenda-entry <item> --kind note|issue|feedback|question|decision --author person:<name>|agent:<name>
+  --source <kind>:<ref> --body "…"` writes exactly one new file under `works/agenda/<item>/entries/` (named
+  `<UTC second>.<microsecond>Z-<tail>.json`, so name order is time order) and never rewrites `agenda.json`, so two
+  writers on one item merge clean in git and never conflict in the store. `agenda-show <item>` prints the item and
+  its thread; `check` validates every entry (file name, kind, author, source, stamp, body), one line each. An item
+  takes many phases.
+- **Proposed.** `agenda-add` needs `--author`: a person's item is Open at once, an agent's waits as **Proposed**,
+  outside the open order, until `agenda-accept` (Open, first in the order) or `agenda-drop --reason`. Proposed is
+  shown, never stored: an Open item carrying an optional `proposed` key, so the four stored statuses and
+  agenda.json's keys are unchanged and 2.x engines still validate the new state.
+- **`agenda-merge <into> <from…>`** moves every entry and phase link onto the first item and drops each other one
+  as `merged into <into>`; all or none.
+- **`agenda-fold`** carries an install's deferred jobs onto the agenda once: each open job becomes a Proposed item
+  whose first entry carries its id, title, source, reason, trigger, created date and its brief when edited. A job
+  linked to an Open, In progress, Proposed or Deferred item is an entry on that item instead (a Deferred item stays
+  Deferred and `agenda` lists it); one linked to a Solved or Dropped item, or to no item, becomes its own Proposed
+  item whose entry says `was linked to <item> (Solved)`, so no open job ends on a closed item. Every job leaves one
+  `deferred_folded` event; `works/deferred/` and `works/deferred.md` go. A second run has nothing to fold. The fold
+  runs only on the default checkout: on another branch, a parallel stream's branch or a linked worktree it refuses in
+  one line naming the default checkout and writes nothing, since a second fold would mint a second set of ids for
+  the same jobs. While open jobs remain, `check` fails naming it on the default checkout, and warns elsewhere where
+  to run it.
+- **Removed:** `defer-job`, `deferred`, `promote-deferred` and `drop-deferred` (each now refuses in one line pointing
+  at the agenda), their skills, the deferred dashboard and counts, and `agenda-link/unlink --deferred`.
+  `works/agenda.md`, `index.json` and `backlog.md` show Proposed apart and each item's entry count and latest entry
+  (`backlog.md`'s `Open deferred jobs` line became `Proposed agenda items`).
+- **Reviews file nothing:** a loose end is fixed now, dropped with a reason, or (the exception) an entry on an item
+  that says what would make it actionable, in the contract (a principle, **Nothing parks**; three phrases
+  trimmed to keep the session card under 4,096 B), `review-phase`, the review playbooks, `create-phase`, `read-code`
+  and the phase template.
+- The web inbox maps `entry` and `accept` (dormant until the server sends them); its `add` passes the web's writer
+  (`person:web`), so a web add stays Open at once.
+- **Migration notes:** install 0.3.0, run `sikstack agenda-fold` in each workspace once, on the default checkout (on
+  the default branch, not in a phase's worktree or on its branch; until then `check` fails there while open
+  deferred jobs remain; a phase branch drops `works/deferred/` when it merges the default branch), then triage the
+  Proposed items: `agenda-accept`, `agenda-merge` or `agenda-drop --reason`. A job that was linked to a Deferred
+  item is an entry on it and stays Deferred: reopen the item to take it up. Scripts calling `agenda-add` add
+  `--author`.
+
 ## 2.1.0 — 2026-11-23
 
 - **The design folder's build publishes to the project's Design service.** Three engine verbs, for a linked checkout:

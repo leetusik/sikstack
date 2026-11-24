@@ -1930,9 +1930,13 @@ def cloud_keep_check(session: CloudSession, paths: list) -> None:
 # so sikstack's 409 for an entry no longer pending (another checkout applied it) voids only that entry: its files
 # are dropped here and sikstack's copy pulled, never applied twice.
 CLOUD_INBOX_AT = ("next",)  # besides sync, the commands whose begin step applies the inbox
+# `entry` and `accept` (P72) wait for the server to send them: an entry's fields are its `kind`, `body`, and
+# optionally `author` and `source`; an add's and an entry's author is the web's writer, `person:web` unless the
+# entry names one, so a web add is Open at once, as before.
 CLOUD_INBOX_COMMANDS = {"add": "agenda-add", "edit": "agenda-edit", "move": "agenda-move", "defer": "agenda-defer",
                         "solve": "agenda-solve", "drop": "agenda-drop", "reopen": "agenda-reopen",
-                        "delete": "agenda-delete"}
+                        "delete": "agenda-delete", "entry": "agenda-entry", "accept": "agenda-accept"}
+CLOUD_INBOX_AUTHOR = "person:web"
 CLOUD_INBOX_MAX = 500  # entries tried in one step (a bound: the rest wait for the next sync)
 
 
@@ -1964,8 +1968,12 @@ def cloud_inbox_tokens(entry: dict, prog: str) -> tuple:
         value = fields.get(key)
         return [f"--{flag}={value}"] if isinstance(value, str) else []
 
+    author = [f"--author={fields['author'] if isinstance(fields.get('author'), str) else CLOUD_INBOX_AUTHOR}"]
     if kind == "add":
-        return [cmd, f"--id={entry['minted_id']}"] + text("title", "title") + text("note", "note"), None
+        return [cmd, f"--id={entry['minted_id']}"] + author + text("title", "title") + text("note", "note"), None
+    if kind == "entry":
+        source = [f"--source={fields['source'] if isinstance(fields.get('source'), str) else 'web:inbox'}"]
+        return [cmd] + items + author + source + text("kind", "kind") + text("body", "body"), None
     if kind == "edit":
         return [cmd] + items + text("title", "title") + text("note", "note"), None
     if kind == "move":

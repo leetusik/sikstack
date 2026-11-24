@@ -27,7 +27,8 @@ def _pay(rel):  # an old payload/ path, mapped into the plugin
     return root / rel
 root = Path(sys.argv[1])
 skills = {p.parent.name for p in (root / "skills").glob("*/SKILL.md")}
-assert len(skills) == 20, len(skills)  # 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added
+assert len(skills) == 17, len(skills)  # 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
+assert not skills & {"defer-job", "deferred", "promote-deferred"}, skills
 def engine_src():  # the engine's source: every module, payload/scripts/*.py (the shell's engine_src)
     return "".join(f.read_text(encoding="utf-8") for f in sorted((root / "scripts").glob("*.py")))
 def skill_dir_text(name):
@@ -355,7 +356,7 @@ for gone in ("MCP surface first", "scripted Playwright-style automation",
              "re-runs the whole cumulative"):
     assert gone not in review, gone
 never = [ln for ln in review.splitlines() if "you never run on a review slice" in ln]
-assert len(never) == 1 and "`gate`" in never[0] and "`defer-job`" in never[0], never
+assert len(never) == 1 and "`gate`" in never[0] and "`agenda-entry`" in never[0] and "defer-job" not in never[0], never
 ops = (root / "templates/docs/operations.md").read_text()
 assert "## Operator Runtime" in ops and "UNFILLED" in ops
 assert "- Browser instrument for the agent: playwright-cli (`@playwright/cli`" in ops
@@ -434,8 +435,7 @@ for _n in _caps:
     _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/") and "/explain-" not in k)
     for _gone in ("docs phase", "docs-phase", "docs-debt", "doc_impact", "doc_versions", "Doc impact list"):
         assert _gone not in _txt, (_n, _gone)
-_s6 = ("parallel-phase", "pr", "update-workspace", "rotate-backlog", "archive-phase", "retrofit", "agenda",
-       "promote-deferred", "defer-job", "deferred")
+_s6 = ("parallel-phase", "pr", "update-workspace", "rotate-backlog", "archive-phase", "retrofit", "agenda")
 assert sum(_size(_n) for _n in _s6) <= 70000, sum(_size(_n) for _n in _s6)
 for _n in _s6:
     _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/"))
@@ -557,6 +557,17 @@ for rel, n in (("commit/SKILL.md", 1), ("rotate-backlog/SKILL.md", 1),
     assert (root / "skills" / rel).read_text().count(cloud_waits) == n, f"{rel}: the linked waiting-commit sentence x{n}"
 assert "A linked checkout (`next` prints `store=cloud`) refuses `worktree start`" in (root / "skills/parallel-phase/SKILL.md").read_text()
 assert "In a linked checkout, changes made on the web arrive as inbox entries" in (root / "skills/agenda/SKILL.md").read_text()
+# 0.3.0: deferred jobs are retired, so nothing is filed: every loose end is fixed now, dropped with a reason, or
+# (the exception) an agenda entry that says what would make it actionable. The line, word for word, in each place
+# that routes one; no shipped text but the CHANGELOG and the old installer's manifest names defer-job.
+FILING = "fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable"
+for rel in ("contract.md", "skills/review-phase/SKILL.md", "skills/do-whole-phase/playbooks/review.md",
+            "skills/do-whole-phase/reference/review.md", "skills/create-phase/SKILL.md", "skills/agenda/SKILL.md",
+            "templates/works/phase.md"):
+    assert FILING in (root / rel).read_text(encoding="utf-8"), rel
+for k, v in LIVE.items():
+    for gone in ("defer-job", "promote-deferred", "drop-deferred", "deferred-job"):
+        assert gone not in v or (k == "scripts/workflow.py" and gone != "deferred-job"), (k, gone)  # the refusal table
 for gone in ("Prefer the **MCP** surface", "scripted Playwright-style automation",
              "runs through Aside, not a script", "re-runs the whole cumulative",
              # P-zqhy: Aside is retired from the contract, procedure and name alike.
@@ -619,7 +630,7 @@ checks = [
     (both("decomposition.md"), ["--base <that branch>"], []),
     (both("decomposition.md"), ["**Record the phase's PR branches** (PR rule v1)", "**Size never splits a phase:**"], []),
     ([sk("create-phase")], ["`Branches:` line", "Never split a phase for size"], push_stop),
-    ([(root / "skills/do-whole-phase/playbooks/review.md").read_text()], ["`pr_bodies`", "Never run `review`, `gate` or `defer-job`, and never push."], push_stop),
+    ([(root / "skills/do-whole-phase/playbooks/review.md").read_text()], ["`pr_bodies`", "Never run `review`, `gate`, `agenda-entry` or `agenda-add`, and never push."], push_stop),
     ([flat(sk("parallel-phase"))], ["By the close alone: `close <P>`'s `merge` and `teardown` steps (`${CLAUDE_PLUGIN_ROOT}/skills/pr/reference/close.md`)."], ["1. **Push the branch.**", "**Open the PR.**"] + push_stop),
     ([sk("pr")], ["## Open the drafts, when the review passes", "opened as drafts when the review passes, closed on the operator's accept.\"", "`git push -u origin <b>`, never `--force`."], push_stop),
     ([sk("commit")], ["A phase's pushes are the `pr` skill's, never this skill's: the draft opening when its review passes, the close's solo landing, and a fix round's or a stack merge's push to an open PR's branch."], push_stop + ["A phase's one push is"]),

@@ -18,6 +18,7 @@ You work this repo's sikstack workspace (`.sikstack/`) for its operator. Four in
 - **Stop what you start:** a slice stops the servers, containers and browsers it started.
 - **Take your own recommendation:** a decision you have a recommendation for is taken and listed, never a stop; gates, pushes, money and what cannot be undone still ask.
 - **Ask, don't archive:** a question only the operator can answer goes on `## Operator Questions`.
+- **Nothing parks:** fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable.
 
 **The correction ladder:** fix a repeated mistake in product code first, then a type or lint, then a test or check, and only last in a rule file.
 
@@ -28,7 +29,7 @@ You work this repo's sikstack workspace (`.sikstack/`) for its operator. Four in
 | A phase the operator can see passes after they walk it | `review --verdict pass` refuses until `gate <P> clear` |
 | Sign-offs carry literal words | `gate clear` and `design-sign` refuse an empty `--words`; `close` refuses a gate cleared without them |
 | A pending stop halts the run | `next` prints `WAITING ON OPERATOR`; `slice status` refuses a stop without `--stop-kind` and `--on-words` |
-| No force-push, no `rm -rf` | the plugin's guard hook denies them, with its reason; a plain push, and one that deletes a merged branch, pass |
+| No force-push, no `rm -rf` | the plugin's guard hook denies them, with its reason |
 | A branch switch never carries the operator's edits | `pr branch` refuses uncommitted tracked changes |
 | A linked checkout runs no streams | `worktree` commands (bar `status`) and `phase reopen` are refused in cloud mode |
 | Workflow state stays valid | `check` exits 1 on an invalid record; `check --no-rebuild` only reads |
@@ -38,8 +39,8 @@ You work this repo's sikstack workspace (`.sikstack/`) for its operator. Four in
 ## Where things live
 
 - Commands, IDs and statuses: `sikstack --help`; start with `next`.
-- Claude Code's side (executor routes, the meter, the resume hook): `sikstack-adapter --help`; the routes are `.sikstack/config.toml`'s.
-- Playbooks: the plugin's `skills/` and the executor card, its `agents/slice-executor.md` (beside `code-reader.md`); dispatch agents by their prefixed names (`sikstack:slice-executor`, `sikstack:Explore`).
+- Claude Code's side (executor routes, the meter, the resume hook): `sikstack-adapter --help`.
+- Playbooks: the plugin's `skills/` and `agents/slice-executor.md` (beside `code-reader.md`); dispatch agents by their prefixed names (`sikstack:slice-executor`, `sikstack:Explore`).
 - `/sikstack:sik-mode` is the entry. Asked to make a phase, use `/sikstack:create-phase`; product visual design follows `design-cowork`; commits follow `commit` (`type(scope): summary`).
 - An engine refusal or error ends with a `/sikstack:feedback` line: relay it once; send only on a yes.
 
