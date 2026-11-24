@@ -18,6 +18,7 @@ The pages sit at production's addresses for the recording's project (`00000000-0
 ```bash drive
 P=00000000-0000-4000-8000-000000000001
 AGENDA="$WEB/projects/$P/workspace/"
+T10="The export button says Download on my phone but Export on my laptop. Which one is it?"  # A10-3n, filed from feedback f1
 pw() { playwright-cli -s="$SESSION" "$@" >>"$EV/drive.log" 2>&1; }
 js() { playwright-cli -s="$SESSION" --raw eval "$1"; }
 q() { printf '%s' "$1" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))'; }
@@ -49,12 +50,14 @@ act() { pw click "role=region[name=\"$1\"] >> role=button[name=\"$2\"]"; }
 : >"$EV/network.log"; : >"$EV/console.log"
 printf '{"outputDir": "%s"}\n' "$EV/cli-output" >"$EV/cli.config.json"
 
-# 1. The Agenda from the recording, in the Shell, the clock pinned ("Synced 4m ago").
+# 1. The Agenda from the recording, in the Shell, the clock pinned ("Synced just now"): Proposed (A8-sf by fold, A9-hb
+#    by an agent) apart and before Open, whose first item is A10-3n, the item feedback f1 made.
 pw open "$AGENDA" --config="$EV/cli.config.json"
 pw resize 1440 900
 pw localstorage-clear
 pw reload
-see "$(shows "Synced 4m ago")" "$(open_is "Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
+see "$(shows "Synced just now")" "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
+  "$(inpart "Proposed" "Retry a sync once after a network error")" "$(inpart "Proposed" "Show who wrote each note on an item")" \
   "$(inpart "Deferred" "Draft the release note")" "$(inpart "Solved and dropped" "Try a darker sidebar")"
 shot 01-agenda
 logs
@@ -62,9 +65,9 @@ logs
 # 2. Reorder by keyboard (Space, ArrowDown, Space) and by drag.
 pw eval 'el => el.focus()' 'role=button[name="Reorder: Write the onboarding checklist"]'
 pw press Space; pw press ArrowDown; pw press Space
-see "$(open_is "Show the sync time in the header | Write the onboarding checklist | Check the empty state copy | Pick a name for the export button")"
+see "$(open_is "$T10 | Show the sync time in the header | Write the onboarding checklist | Check the empty state copy | Pick a name for the export button")"
 pw drag 'role=button[name="Reorder: Pick a name for the export button"]' 'role=button[name="Reorder: Show the sync time in the header"]'
-see "$(open_is "Pick a name for the export button | Show the sync time in the header | Write the onboarding checklist | Check the empty state copy")"
+see "$(open_is "$T10 | Pick a name for the export button | Show the sync time in the header | Write the onboarding checklist | Check the empty state copy")"
 shot 02-reordered
 
 # 3. Pick rows and Defer, Solve, Drop (with a reason), Reopen, Delete.
@@ -77,7 +80,7 @@ pw fill 'role=textbox[name="Reason (optional)"]' "Export reads best"
 pw click 'role=button[name="Yes, drop"]'
 see "$(inpart "Solved and dropped" "Pick a name for the export button")"
 pick "Draft the release note"; act Deferred Reopen
-see "$(open_is "Write the onboarding checklist | Draft the release note")"
+see "$(open_is "$T10 | Write the onboarding checklist | Draft the release note")"
 pw click 'role=button[name="Delete: Try a darker sidebar"]'
 pw click 'role=button[name="Yes, delete"]'
 see "$(norow "Try a darker sidebar")" "!($(shows "Waiting for sync"))"
@@ -85,7 +88,7 @@ shot 03-acted
 
 # 4. Every change survives a reload.
 pw reload
-see "$(open_is "Write the onboarding checklist | Draft the release note")" "$(inpart "Deferred" "Show the sync time in the header")" \
+see "$(open_is "$T10 | Write the onboarding checklist | Draft the release note")" "$(inpart "Deferred" "Show the sync time in the header")" \
   "$(inpart "Solved and dropped" "Check the empty state copy")" "$(inpart "Solved and dropped" "Pick a name for the export button")" \
   "$(norow "Try a darker sidebar")"
 shot 04-reloaded
@@ -96,9 +99,9 @@ pw click 'role=button[name="Add item"]'
 pw fill 'role=textbox[name="Title"]' "Plan the design review"
 pw fill 'role=textbox[name="Note (optional)"]' "$(printf 'Bring:\n\n- the **static build**\n- two screenshots')"
 pw click 'role=button[name="Add"]'
-see "$(open_is "Plan the design review | Write the onboarding checklist | Draft the release note")"
+see "$(open_is "Plan the design review | $T10 | Write the onboarding checklist | Draft the release note")"
 pw click 'role=link[name="Plan the design review"]'
-see 'location.pathname.includes("/agenda/A8-")' 'document.querySelector("h1")?.innerText.includes("Plan the design review")' \
+see 'location.pathname.includes("/agenda/A11-")' 'document.querySelector("h1")?.innerText.includes("Plan the design review")' \
   'document.querySelectorAll("main ul li").length === 2' 'document.querySelector("main strong")?.textContent === "static build"'
 shot 05-added-item
 
@@ -116,7 +119,7 @@ logs
 
 # 7. Back to the Agenda by its link; a recorded item's Markdown note; a page the design does not draw.
 pw click 'main >> role=link[name="Agenda"]'
-see "$(open_is "Plan the design review with the team | Write the onboarding checklist | Draft the release note")"
+see "$(open_is "Plan the design review with the team | $T10 | Write the onboarding checklist | Draft the release note")"
 pw click 'role=link[name="Write the onboarding checklist"]'
 see 'document.querySelectorAll("main ul li").length === 3' 'document.querySelector("main code")?.textContent === "sikstack link"'
 shot 07-recorded-item
@@ -128,10 +131,10 @@ logs
 pw goto "$AGENDA"
 pw click 'role=button[name^="Design states: "]'
 pw click 'role=button[name="Reset design data"]'
-see "$(open_is "Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
+see "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
   "$(inpart "Solved and dropped" "Try a darker sidebar")" "$(norow "Plan the design review with the team")"
 pw reload
-see "$(open_is "Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
+see "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
   "$(inpart "Deferred" "Draft the release note")"
 shot 08-reset
 logs
@@ -150,10 +153,11 @@ state() { # page tag, state key, then texts the state shows
 }
 pw goto "$AGENDA"
 widget
-states_are "recorded many empty waiting behind loading unlinked never failed not-found error"
+states_are "recorded many empty waiting web-waiting behind loading unlinked never failed not-found error"
 state agenda many "23 items" "Write tests for the reorder keys"
 state agenda empty "No items yet."
 state agenda waiting "A6-r2" "Plan the design review"
+state agenda web-waiting "Synced 1m ago" "A11-vz" "The Agenda list gets long. I would like to collapse the Solved part."
 state agenda behind "Last synced 3d ago"
 state agenda loading "Loading…"
 state agenda unlinked "No workspace linked yet."
@@ -161,7 +165,7 @@ state agenda never "Nothing has synced yet."
 state agenda failed "The agenda did not load."
 state agenda not-found "Project not found"
 state agenda error "This page did not load"
-state agenda recorded "Synced 4m ago" "Write the onboarding checklist"
+state agenda recorded "Synced just now" "$T10"
 pw goto "$AGENDA?state=never"
 see "$(shows "Nothing has synced yet.")"
 pw goto "$AGENDA?state=many"
@@ -174,8 +178,10 @@ ITEM="$WEB/projects/$P/workspace/agenda/A46-mr/"
 pw click 'role=link[name="Write tests for the reorder keys"]'
 see 'location.pathname.includes("/agenda/A46-mr")'
 widget
-states_are "open deferred solved dropped waiting loading not-found project-not-found failed error"
+states_are "open proposed note-waiting deferred solved dropped waiting loading not-found project-not-found failed error"
 see "document.querySelector('[data-design-state=open]').getAttribute('aria-pressed') === 'true'"
+state item proposed "Proposed by" "Accept"
+state item note-waiting "Waiting for sync"
 state item deferred "Reopen"
 state item solved "Outcome"
 state item dropped "Reason"
@@ -190,6 +196,56 @@ pw goto "$ITEM?state=solved"   # a reload of a state's address; the item's state
 see "$(shows "Outcome")"
 pw goto "$AGENDA"
 see "$(shows "22 items")" "$(inpart "Solved and dropped" "Write tests for the reorder keys")"
+logs
+
+# 9b. The entry item (A3-1z, the item with the longest thread): its six entries oldest first, each with its author
+#     and kind, the two feedback entries' kinds linking to their feedback. Then the feedback pages: f3 (on no item)
+#     and f1 (on A10-3n and A3-1z), each widget listing exactly its states, each state shown.
+before() { printf '(t => t.indexOf(%s) >= 0 && t.indexOf(%s) > t.indexOf(%s))(document.querySelector("main").innerText)' "$(q "$1")" "$(q "$2")" "$(q "$1")"; }
+FB="$WEB/projects/$P/feedback/00000000-0000-4000-8000-0000000000f"
+pw goto "$AGENDA?state=recorded"
+pw goto "$WEB/"
+pw click 'role=link[name="Agenda item"]'
+see 'location.pathname.endsWith("/agenda/A3-1z/")' "$(shows "6 entries")" \
+  "$(before "Folded from deferred job D1-k4" "Download reads like a file save")" "$(before "Download reads like a file save" "On a phone the button is an icon only")" \
+  "$(before "On a phone the button is an icon only" "Going with Export")" "$(before "Going with Export" "I could not find where to export")" \
+  "$(before "I could not find where to export" "$T10")" "$(before "Issue · P2-m7.S3" "Question · P2-m7.S4")" "$(shows "mina")" \
+  '[...document.querySelectorAll("main a")].filter(a => a.textContent === "Feedback" && /\/feedback\/0+-0000-4000-8000-0000000000f[12]\/$/.test(a.getAttribute("href"))).length === 2'
+shot 09b-entry-thread
+logs
+pw goto "${FB}3/"
+widget
+states_are "offered no-workspace confirm-new confirm-existing adding failed waiting no-project loading not-found error"
+see "document.querySelector('[data-design-state=offered]')?.getAttribute('aria-pressed') === 'true'" "$(shows "Add to agenda")"
+state feedback no-workspace "sample-product has no workspace linked, so it has no agenda to add this to."
+by_address() { # page tag, key, texts: the confirm is modal and covers the widget, so its states open by their address
+  local tag=$1 key=$2; shift 2
+  pw goto "${FB}3/?state=$key"
+  local e=("location.search.includes('state=$key')" 'document.querySelector("dialog")?.open === true'); for t in "$@"; do e+=("$(shows "$t")"); done
+  see "${e[@]}"
+  shot "09-$tag-$key"
+}
+by_address feedback confirm-new "A new item" "It becomes the first open item there"
+by_address feedback confirm-existing "It joins A3-1z’s thread"
+by_address feedback adding "Adding…"
+by_address feedback failed "Could not add this feedback to the agenda. Try again."
+pw goto "${FB}3/?state=waiting"
+see "$(shows "Added to agenda")" "$(shows "A11-vz")" "$(shows "Waiting for sync")"
+shot 09-feedback-waiting
+widget
+see "$(pressed waiting)"
+state feedback no-project "This feedback has no project, so there is no agenda to add it to."
+state feedback loading "Loading…"
+state feedback not-found "Feedback not found"
+state feedback error "This page did not load"
+state feedback offered "Add to agenda" "The Agenda list gets long."
+logs
+pw goto "${FB}1/"
+widget
+states_are "filed no-workspace"
+see "document.querySelector('[data-design-state=filed]')?.getAttribute('aria-pressed') === 'true'" "$(shows "Added to agenda")" "$(shows "A10-3n")" "$(shows "A3-1z")"
+state filed no-workspace "sample-product has no workspace linked, so it has no agenda to add this to."
+state filed filed "A10-3n" "A3-1z"
 logs
 
 # 10. By keyboard: Tab reaches the pill, Enter opens it, Tab and Space pick a state, Escape closes and gives
@@ -236,7 +292,7 @@ logs
 #     token itself, both dialogs open in place (not modal), the toast on its board, no sideways scroll; one
 #     screenshot a section at 1440 and 390.
 pw goto "$WEB/"
-pw click 'role=link[name="System · tokens and components"]'
+pw click 'role=link[name="System"]'
 see '[...new Set([...document.querySelectorAll("[data-token]")].map(e => e.dataset.token))].length >= 30' \
   'document.querySelectorAll("[data-component]").length > 40' \
   '(() => { const s = document.querySelector("[data-scheme=light] [data-token=\"--accent\"]"); return getComputedStyle(s.firstElementChild).backgroundColor !== "rgba(0, 0, 0, 0)"; })()' \
@@ -263,4 +319,4 @@ grep -E 'Errors: [1-9]' "$EV/console.log" && { echo "console errors: see $EV/con
 echo "design: PASS ($(grep -cE '^[0-9]+\. \[' "$EV/network.log") requests, all static files from $WEB; no console error)"
 ```
 
-**Proof:** the screenshots `design-01-agenda.png` to `design-08-reset.png`, `design-09-<page>-<state>.png` (one per state), `design-10-keyboard.png` and `design-11-<width>-<top|middle|bottom>.png`, `design-12-system-<width>-<section>.png` in `$EV`; the block ends `design: PASS`. `network.log` holds only `$WEB` requests answered 200 (HTML, `_next/static` chunks, the `__next.*.txt` route payloads); `console.log` reads `Errors: 0` for every page; `design:serve --log` shows the same requests from the server's side. Stop the server and check `playwright-cli list` shows no `$SESSION`.
+**Proof:** the screenshots `design-01-agenda.png` to `design-08-reset.png`, `design-09-<page>-<state>.png` (one per state, the feedback pages' too), `design-09b-entry-thread.png`, `design-10-keyboard.png` and `design-11-<width>-<top|middle|bottom>.png`, `design-12-system-<width>-<section>.png` in `$EV`; the block ends `design: PASS`. `network.log` holds only `$WEB` requests answered 200 (HTML, `_next/static` chunks, the `__next.*.txt` route payloads); `console.log` reads `Errors: 0` for every page; `design:serve --log` shows the same requests from the server's side. Stop the server and check `playwright-cli list` shows no `$SESSION`.
