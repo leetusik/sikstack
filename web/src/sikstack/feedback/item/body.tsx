@@ -6,14 +6,16 @@ import { cache } from "react";
 import { itemHeading, NOT_FOUND } from "@/content/feedback-frame";
 import { requireIdentity } from "@/lib/auth-guards";
 import { canAdd, sent } from "@/lib/feedback/agenda";
-import { getFeedbackDetail } from "@/lib/feedback/app";
+import { fileAgendaItem } from "@/lib/feedback/agenda-actions";
+import { getFeedbackAgenda, getFeedbackDetail } from "@/lib/feedback/app";
 import { zoneLabel } from "@/lib/feedback/format";
 import { feedbackBackHref, type FeedbackScope } from "@/lib/feedback/place";
-import type { FeedbackDetail } from "@/lib/feedback/types";
+import type { FeedbackAgenda, FeedbackDetail } from "@/lib/feedback/types";
 import { listProjects } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
 import type { KbProject } from "@/lib/knowledge/types";
 import { TIME_ZONE_COOKIE, viewerTimeZone } from "@/lib/time-zone";
+import { readWorkspace } from "@/lib/workspace/read";
 
 import {
   AddedToAgenda,
@@ -22,6 +24,8 @@ import {
   AgendaScope,
   AgendaSlot,
   agendaPageState,
+  pickable,
+  type PickItem,
 } from "../agenda";
 import { FeedbackItem } from "./item";
 import { feedbackItemView, inScope, isFeedbackId, zoneMetaOf } from "./model";
@@ -97,6 +101,29 @@ export async function feedbackItemMetadata(
   }
 }
 
+/**
+ * What the record became on its project's agenda (`GET /app/feedback/{id}/agenda`), or null for a record in no
+ * project. A failed read is the whole page's error (`error.tsx`), as the record's own read is.
+ */
+async function readAgenda(
+  record: FeedbackDetail,
+): Promise<FeedbackAgenda | null> {
+  if (!record.project_id) return null;
+  const { token } = await requireIdentity();
+  return getFeedbackAgenda(token, record.id);
+}
+
+/**
+ * The items the confirm offers beside a new one: the project's agenda (`GET …/workspace`), every item not ended,
+ * in the Agenda's order (`pickable`). A failed read offers a new item alone.
+ */
+async function pickableItems(record: FeedbackDetail): Promise<PickItem[]> {
+  if (!record.project_id) return [];
+  const { token } = await requireIdentity();
+  const ws = await readWorkspace(token, record.project_id);
+  return ws.state === "ready" ? pickable(ws.value.agenda, []) : [];
+}
+
 export async function FeedbackItemBody({
   scope,
   feedbackId,
@@ -116,17 +143,23 @@ export async function FeedbackItemBody({
     format: { timeZone: viewerTimeZone(store) },
   });
   const backHref = feedbackBackHref(scope, from);
-  // The two slots (P65-nh.S6): Add to agenda at the head's end and the Agenda part, from the agenda
-  // seam, in the board's order: filed, else waiting, else not offered, else the add. Today no project
-  // has a workspace linked, so the head's end stays empty and the part says why.
+  // The two slots (P65-nh.S6, P61-e9): Add to agenda at the head's end and the Agenda part, from the
+  // agenda seam over `GET /app/feedback/{id}/agenda`, in the board's order: filed, else waiting, else
+  // not offered, else the add. Once the record is on an item the head reads Added to agenda and offers
+  // no second add (as drawn).
+  const filed = await readAgenda(read.record);
   const agenda = agendaPageState(
-    canAdd(read.record, read.projectName),
-    sent(read.record),
+    canAdd(read.record, read.projectName, filed),
+    sent(read.record, filed),
   );
   if (agenda.kind === "offered") {
-    // Never today. The phase that links workspaces passes `add`: a server action over `fileAgendaItem`.
+    const items = await pickableItems(read.record);
     return (
-      <AgendaScope project={agenda.project}>
+      <AgendaScope
+        project={agenda.project}
+        items={items}
+        add={fileAgendaItem.bind(null, read.record.id)}
+      >
         <FeedbackItem
           view={view}
           backHref={backHref}

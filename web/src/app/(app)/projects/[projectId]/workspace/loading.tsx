@@ -10,7 +10,7 @@ import { REQUEST_PATH_HEADER } from "@/lib/next-path";
 
 // The Agenda while it loads (`Agenda.dc.html`, Loading; frame.md F49): the Shell is complete, `WsNav` stands with
 // its sync line as a bar, and the first part keeps its head over five skeleton rows. It reads nothing; the
-// project's id for the four places comes from the request's path (loading gets no params).
+// project's id for the three places comes from the request's path (loading gets no params).
 const LOADING_LINE: WsSyncLine = {
   state: "fresh",
   text: "",

@@ -20,7 +20,6 @@ import type { WsPlace } from "@/content/workspace/frame";
 import {
   agendaHref,
   backlogHref,
-  deferredHref,
   docHref,
   docsHref,
   phaseHref,
@@ -240,14 +239,13 @@ export function docView(
   };
 }
 
-// -- the four places ---------------------------------------------------------------------------
+// -- the three places ---------------------------------------------------------------------------
 
-/** The Workspace head's four places for a project (F41), each a real link. */
+/** The Workspace head's three places for a project (F41), each a real link. */
 export function placeHrefs(project: string): Record<WsPlace, string> {
   return {
     agenda: agendaHref(project),
     backlog: backlogHref(project),
-    deferred: deferredHref(project),
     docs: docsHref(project),
   };
 }

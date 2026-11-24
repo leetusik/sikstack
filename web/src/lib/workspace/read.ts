@@ -5,9 +5,11 @@
  * - `GET /app/projects/{id}/workspace`: the Workspace, lists only. A project with no linked
  *   workspace reads `unlinked`; a linked one with no batch landed reads `never` (F40: the page draws
  *   the Shell and `WsNav` alone).
- * - `GET …/workspace/phases/{phase}`, `…/slices/{full}`, `…/deferred/{job}`,
- *   `…/docs/{doc}[?version=]`, `…/agenda/{item}`: one record, with the Workspace's sync facts beside
- *   it (`workspace {version, sync}`), so an item page makes one read for its back row's sync line.
+ * - `GET …/workspace/phases/{phase}`, `…/slices/{full}`, `…/docs/{doc}[?version=]`,
+ *   `…/agenda/{item}`: one record, with the Workspace's sync facts beside it
+ *   (`workspace {version, sync}`), so an item page makes one read for its back row's sync line.
+ * - `GET …/workspace/deferred/{job}`: the folded-job lookup only (`{agenda}`, the item whose fold
+ *   entry carries the job), which an old deferred job's address redirects through.
  *
  * Each answers a state, never a throw, for what a page draws: `ready`; `not-found` (a 404: a
  * record the workspace does not hold, a project with no linked workspace, or another tenant's);
@@ -21,7 +23,7 @@ import { ApiError, getJson } from "@/lib/knowledge/client";
 import type {
   AgendaItem,
   Doc,
-  Job,
+  FoldedJob,
   Phase,
   Slice,
   WithHead,
@@ -107,13 +109,16 @@ export function readSlice(
   return read(token, path(project, "slices", slice), signal);
 }
 
-/** One deferred job, with its brief. */
-export function readJob(
+/**
+ * The agenda item an old deferred job's fold entry carries it onto (`{agenda}`); not found for a job
+ * no entry names (the route's 404, `{detail, agenda: null}`).
+ */
+export function readFoldedJob(
   token: string,
   project: string,
   job: string,
   signal?: AbortSignal,
-): Promise<Read<WithHead<Job>>> {
+): Promise<Read<FoldedJob>> {
   return read(token, path(project, "deferred", job), signal);
 }
 
@@ -131,7 +136,7 @@ export function readDoc(
   return read(token, `${path(project, "docs", doc)}${query}`, signal);
 }
 
-/** One agenda item, with its mark (a pending delete hides it: not found). */
+/** One agenda item, with its mark (a pending delete answers it marked `deleting`). */
 export function readItem(
   token: string,
   project: string,

@@ -12,11 +12,17 @@ import { Legacy } from "@/sikstack/ui/boundary";
 import { UiRoot } from "@/sikstack/ui/root";
 import {
   AgendaFailed,
+  AgendaList,
   AgendaLoading,
   deferredPageFrom,
   workspaceHrefs,
 } from "@/sikstack/workspace/agenda";
-import { AgendaItemLoading } from "@/sikstack/workspace/agenda-item";
+import {
+  AgendaItemLoading,
+  AgendaItemPage,
+  itemLines,
+} from "@/sikstack/workspace/agenda-item";
+import { itemProse } from "@/sikstack/workspace/agenda-item/prose";
 import { WsItemFailed, WsNav, wsSyncLine, type WsSyncLine } from "@/sikstack/workspace/frame";
 import { agendaHref, decodeWorkspaceFrom } from "@/lib/workspace/address";
 import { itemState } from "@/lib/workspace/model";
@@ -27,12 +33,6 @@ import AgendaItemRouteLoading from "@/app/(app)/projects/[projectId]/workspace/a
 import { agendaItemBack } from "@/app/(app)/projects/[projectId]/workspace/agenda/[item]/back";
 
 import { Shell } from "@/sikstack/shell/shell";
-
-// P61-e9: the next versions this design draws in place of production's (`next/`, through their importer chain).
-import { AgendaList } from "../next/workspace/agenda/agenda-list";
-import { AgendaItemPage } from "../next/workspace/agenda-item/item-page";
-import { itemLines } from "../next/workspace/agenda-item/model";
-import { itemProse } from "../next/workspace/agenda-item/prose";
 
 import { DATA_SETS, HEADS, ME, WAITING_NOTE, type DataName } from "./answers";
 import { DESIGN_MARK } from "./mark";

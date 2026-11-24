@@ -3,21 +3,24 @@
  * draws from the agenda as the page shows it (the read with the page's own changes laid over it). No React and
  * no I/O, so server pages, the client list and the tests share it.
  *
- * - The three parts: **Open and in progress** in the operator's order; **Deferred** newest first by `changed`,
+ * - The four parts: **Proposed** (P61-e9: the items an agent opened that no one accepted yet, the read's
+ *   `state: "proposed"`, listed first) in the read's order, each row's end cell who proposed it and the day;
+ *   **Open and in progress** in the operator's order, an accepted item that waits for the sync (`accepting`) first;
+ *   **Deferred** newest first by `changed`,
  *   ten a page; **Solved and dropped** newest first, five and **Show all N**. An item's part is its state
  *   (`itemState`): deferred, solved and dropped are its own, so a deferred item stays Deferred while a phase it
  *   holds runs (F301).
  * - A row: its id, title, `lang`, status word, mark (Waiting for sync, Change refused) and end cell (an open
- *   item's `1 of 4 phases done, 3 deferred jobs`, or nothing; the other parts' the day it last changed).
+ *   item's `1 of 4 phases done`, or nothing; the other parts' the day it last changed).
  * - The Deferred part's page from the address (`?deferred=N`, 1-based): a value that is not a page, or past the
  *   last page, reads page 1.
+ * - Add item is primary only while no part holds an item.
  */
 import type { WsStatusWord } from "@/sikstack/workspace/frame/status-model";
 import { wsStatus } from "@/sikstack/workspace/frame/status-model";
 import {
   agendaHref,
   backlogHref,
-  deferredHref,
   docsHref,
   type WorkspaceList,
 } from "@/lib/workspace/address";
@@ -25,7 +28,10 @@ import { itemEnd, itemState, type PhaseLookup } from "@/lib/workspace/model";
 import type { AgendaItem, ItemState, WriteAnswer } from "@/lib/workspace/types";
 
 import { AGENDA } from "@/content/workspace/agenda";
+import { PROPOSED } from "@/content/workspace/agenda-thread";
 import type { WsPlace } from "@/content/workspace/frame";
+
+import { authorOf, type AuthorName } from "../frame/author-model";
 
 /** The Deferred part's rows a page (F300). */
 export const AGENDA_PER = AGENDA.pager.per;
@@ -44,9 +50,13 @@ export interface AgendaRowModel {
   mark: "waiting" | "refused" | null;
   /** The end cell's text; `''` draws no cell. */
   end: string;
+  /** A Proposed row: who proposed it and the day (its end cell), else absent. */
+  proposed?: { by: AuthorName | null; day: string } | null;
 }
 
 export interface AgendaParts {
+  /** The items an agent proposed, before the open work (P61-e9). */
+  proposed: AgendaRowModel[];
   open: AgendaRowModel[];
   deferred: AgendaRowModel[];
   ended: AgendaRowModel[];
@@ -65,17 +75,25 @@ function newest(a: AgendaItem, b: AgendaItem): number {
   return x < y ? 1 : x > y ? -1 : 0;
 }
 
-/** The agenda (in the operator's order) as its three parts. `dateOf` writes a day as F2 does (`Nov 12`). */
+/**
+ * The agenda (in the operator's order) as its four parts. An accepted item that waits for the sync (`accepting`)
+ * is Open already, first in the open order, as the engine will place it. `dateOf` writes a day as F2 does (`Nov 12`). */
 export function agendaParts(
   agenda: readonly AgendaItem[],
   phaseOf: PhaseLookup,
   dateOf: (day: string | null) => string,
 ): AgendaParts {
+  const proposed: AgendaItem[] = [];
   const open: AgendaItem[] = [];
   const deferred: AgendaItem[] = [];
   const ended: AgendaItem[] = [];
   const states = new Map<string, ItemState>();
   for (const item of agenda) {
+    if (item.state === "proposed" && !item.accepting) {
+      proposed.push(item);
+      states.set(item.id, "open");
+      continue;
+    }
     const state = itemState(item, phaseOf);
     states.set(item.id, state);
     if (state === "deferred") deferred.push(item);
@@ -95,6 +113,14 @@ export function agendaParts(
     };
   };
   return {
+    proposed: proposed.map((it) => ({
+      ...row(it, ""),
+      status: { word: PROPOSED.word, cls: PROPOSED.cls },
+      proposed: {
+        by: authorOf(it.proposed?.by),
+        day: dateOf(it.proposed?.at ?? it.created),
+      },
+    })),
     open: open.map((it) => row(it, itemEnd(it, phaseOf).text)),
     deferred: [...deferred]
       .sort(newest)
@@ -154,7 +180,7 @@ export function endedShown<T>(
 
 /** The open part's empty sentence: none at all, or none open while others are deferred or ended. */
 export function emptyText(parts: AgendaParts): string {
-  return parts.deferred.length || parts.ended.length
+  return parts.proposed.length || parts.deferred.length || parts.ended.length
     ? AGENDA.empty.noOpen
     : AGENDA.empty.none;
 }
@@ -162,6 +188,7 @@ export function emptyText(parts: AgendaParts): string {
 /** Add item is the primary button only while the agenda holds no item at all. */
 export function addIsPrimary(parts: AgendaParts): boolean {
   return (
+    parts.proposed.length === 0 &&
     parts.open.length === 0 &&
     parts.deferred.length === 0 &&
     parts.ended.length === 0
@@ -173,12 +200,11 @@ export function agendaFrom(page: number): WorkspaceList | null {
   return page > 1 ? { list: "agenda", deferred: page } : null;
 }
 
-/** The four places' addresses, for `WsNav`. */
+/** The three places' addresses, for `WsNav`. */
 export function workspaceHrefs(project: string): Record<WsPlace, string> {
   return {
     agenda: agendaHref(project),
     backlog: backlogHref(project),
-    deferred: deferredHref(project),
     docs: docsHref(project),
   };
 }

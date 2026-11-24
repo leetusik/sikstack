@@ -73,13 +73,6 @@ const SIGNED: Record<string, Record<string, [string, string]>> = {
     blocked: ["Blocked", "status-blocked"],
     done: ["Done", "status-done"],
   },
-  job: {
-    deferred: ["Deferred", "status-idle"],
-    ready: ["Ready", "status-ready"],
-    promoted: ["Promoted", ""],
-    done: ["Done", "status-done"],
-    dropped: ["Dropped", "status-revoked"],
-  },
   verdict: {
     pending: ["Not reviewed", "status-idle"],
     pass: ["Pass", "status-done"],
@@ -125,7 +118,6 @@ const STORED: Record<string, string[]> = {
     "blocked",
     "done",
   ],
-  job: ["deferred", "ready", "promoted", "done", "dropped"],
   verdict: ["pending", "pass", "changes_requested", "blocked"],
   item: ["open", "in_progress", "deferred", "solved", "dropped"],
   pr: ["draft", "open", "merged", "closed"],
@@ -269,11 +261,11 @@ describe("a Workspace row (F43)", () => {
           }),
         }),
         createElement(WsRow, {
-          id: "D141-4r",
+          id: "A141-4r",
           name: "하이라이트 색을 직접 고르고 싶어요",
           lang: "ko",
-          href: "/projects/platform/workspace/deferred/D141-4r",
-          status: wsStatus("job", "deferred"),
+          href: "/projects/platform/workspace/agenda/A141-4r",
+          status: wsStatus("item", "deferred"),
           end: "Nov 9",
         }),
       ),
@@ -366,7 +358,6 @@ describe("the Workspace head (F41, F40)", () => {
   const hrefs = {
     agenda: "/projects/platform/workspace",
     backlog: "/projects/platform/workspace/backlog",
-    deferred: "/projects/platform/workspace/deferred",
     docs: "/projects/platform/workspace/docs",
   };
   const fresh = wsSyncLine(
@@ -375,7 +366,7 @@ describe("the Workspace head (F41, F40)", () => {
     { now: NOW },
   );
 
-  it("draws the title, the sync line and four real links, the current one marked", () => {
+  it("draws the title, the sync line and three real links, the current one marked, no Deferred (P61-e9)", () => {
     const out = html(
       createElement(WsNav, { current: "backlog", line: fresh, hrefs }),
     );
@@ -386,7 +377,6 @@ describe("the Workspace head (F41, F40)", () => {
       '<nav class="subnav" aria-label="Workspace">' +
         '<a class="subnav-item" href="/projects/platform/workspace">Agenda</a>' +
         '<a class="subnav-item" aria-current="page" href="/projects/platform/workspace/backlog">Backlog</a>' +
-        '<a class="subnav-item" href="/projects/platform/workspace/deferred">Deferred</a>' +
         '<a class="subnav-item" href="/projects/platform/workspace/docs">Docs</a></nav>',
     );
     expect(out.match(/aria-current/g)).toHaveLength(1);
@@ -593,14 +583,6 @@ describe("not found and error on an item's page (F49, F84)", () => {
       ],
       reference: null,
     });
-    expect(
-      wsNotFoundState("job", "platform", { href: "/x", label: "Deferred" })
-        .title,
-    ).toBe("Deferred job not found");
-    expect(
-      wsNotFoundState("job", "platform", { href: "/x", label: "Deferred" })
-        .text,
-    ).toBe("This deferred job doesn’t exist, or it isn’t part of platform.");
     expect(wsNotFoundState("slice", "vocky", back).title).toBe(
       "Slice not found",
     );

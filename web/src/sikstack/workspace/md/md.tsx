@@ -5,6 +5,7 @@ import {
   MD_DEFAULT_ANCHOR,
   MD_DEFAULT_LEVEL,
   mdHasOutline,
+  mdImageSrc,
   type MdSection,
   mdSections,
   remarkWorkspaceMd,
@@ -60,6 +61,11 @@ const COMPONENTS: Components = {
     </div>
   ),
   th: ({ node: _node, ...rest }) => <th scope="col" {...rest} />,
+  img: ({ node: _node, src, alt, ...rest }) => {
+    const own = mdImageSrc(typeof src === "string" ? src : undefined);
+    // eslint-disable-next-line @next/next/no-img-element
+    return own ? <img {...rest} src={own} alt={alt ?? ""} /> : <>{alt ?? ""}</>;
+  },
   a: ({ node: _node, href, children, ...rest }) =>
     mdLinkHref(href) ? (
       <a {...rest} href={href}>
@@ -89,7 +95,7 @@ function SectionList({ sections }: { sections: readonly MdSection[] }) {
  * and docs, drawn by a real renderer (`react-markdown` with GitHub's tables, `remark-gfm`) with the `.md`
  * classes. It always sits in a `.panel-body` under a head that names it. Raw HTML in a source is never
  * rendered: it shows as the text it is. A link to an absolute web address is an ordinary link to it; any other
- * link is its text (`mdLinkHref`).
+ * link is its text (`mdLinkHref`). An image from another host is its alt text (`mdImageSrc`, D310).
  *
  * With `outline` and three or more first-step headings, the way to a section: a closed **Sections**
  * disclosure above the text, and a list beside it that stays in view from 60em of the body's box (the sheet

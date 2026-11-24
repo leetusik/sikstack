@@ -3,10 +3,12 @@
 //
 // - `Md`: the body, its three heading steps, its scroll boxes for code and tables, the way to a section.
 // - `mdSections`, `mdHasOutline`, `prepareMd`: the steps, the section ids and the outline's rule.
+// - `mdImageSrc`: an image's address when it stays on this site; one from another host draws its alt text (D310).
 export { Md, type MdProps } from "./md";
 export {
   MD_OUTLINE_MIN,
   mdHasOutline,
+  mdImageSrc,
   mdSections,
   prepareMd,
   remarkWorkspaceMd,

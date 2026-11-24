@@ -5,12 +5,7 @@
  * - An agenda item's state (F301, the canvas's `WS.itemState`): deferred, solved and dropped are
  *   the item's own; otherwise In progress while a phase it holds is not done, else Open. A state
  *   the read model already derived as In progress stays so.
- * - An agenda item's end cell (F79): `1 of 4 phases done, 3 deferred jobs`, either part alone, or
- *   nothing.
- * - A phase's progress (F39): `1/7`, its track's name `1 of 7 slices done, 1 in progress` and one
- *   segment a slice.
- * - The open deferred jobs (F42: `12 open`, project home's `12 deferred`): status deferred or ready;
- *   and each status filter's count.
+ * - An agenda item's end cell (F79): `1 of 4 phases done`, or nothing.
  * - A stale doc's notes (F42): `4 notes from P7-m3 and P8-q4`; a doc's `v<ordinal>`.
  * - Dates (F2) in the viewer's zone: `dates(timeZone)` binds the page's zone once.
  *
@@ -19,8 +14,7 @@
 
 import { date, plural, when, type FormatOptions } from "@/lib/format";
 
-import type { JobFilter } from "./address";
-import type { AgendaItem, DocRow, ItemState, JobRow, PhaseRow } from "./types";
+import type { AgendaItem, DocRow, ItemState, PhaseRow } from "./types";
 
 // -- an agenda item --------------------------------------------------------------------------
 
@@ -67,27 +61,26 @@ export interface ItemEnd {
   /** The item's phases the Workspace holds, and how many of them are done. */
   phases: number;
   done: number;
-  /** The deferred jobs it holds. */
-  jobs: number;
-  /** `1 of 4 phases done, 3 deferred jobs`; `''` when it holds neither. */
+  /** `1 of 4 phases done`; `''` when it holds none. */
   text: string;
 }
 
-/** An open item's end cell (F79): how far its phases are, and its deferred jobs. */
+/** An open item's end cell (F79): how far its phases are. */
 export function itemEnd(
-  item: Pick<AgendaItem, "phases" | "deferred">,
+  item: Pick<AgendaItem, "phases">,
   phaseOf: PhaseLookup,
 ): ItemEnd {
   const known = item.phases
     .map((id) => phaseOf(id))
     .filter((p): p is Pick<PhaseRow, "status"> => p !== null);
   const done = known.filter((p) => p.status === "done").length;
-  const jobs = item.deferred.length;
-  const parts = [
-    known.length ? `${done} of ${plural(known.length, "phase")} done` : "",
-    jobs ? plural(jobs, "deferred job") : "",
-  ].filter(Boolean);
-  return { phases: known.length, done, jobs, text: parts.join(", ") };
+  return {
+    phases: known.length,
+    done,
+    text: known.length
+      ? `${done} of ${plural(known.length, "phase")} done`
+      : "",
+  };
 }
 
 /** Whether every phase the item holds is done (the item page's primary Solve). */
@@ -103,76 +96,11 @@ export function everyPhaseDone(
 
 // -- a phase -----------------------------------------------------------------------------------
 
-export interface Progress {
-  /** `1/7`. */
-  count: string;
-  /** The track's accessible name and the sentence: `1 of 7 slices done, 1 in progress`. */
-  label: string;
-  /** One a slice: `is-done`, `is-now` (the slice being worked on) or `''`. */
-  segs: ("is-done" | "is-now" | "")[];
-}
-
-/** A phase's progress (F39): `live` while it is in progress with slices left. */
-export function progress(
-  phase: Pick<PhaseRow, "done" | "total" | "status">,
-): Progress {
-  const total = Math.max(0, Math.floor(phase.total));
-  const done = Math.min(total, Math.max(0, Math.floor(phase.done)));
-  const live = phase.status === "in_progress" && done < total;
-  return {
-    count: `${done}/${total}`,
-    label: `${done} of ${plural(total, "slice")} done${live ? ", 1 in progress" : ""}`,
-    segs: Array.from({ length: total }, (_, i) =>
-      i < done ? "is-done" : live && i === done ? "is-now" : "",
-    ),
-  };
-}
-
 /** The longest total in a list of phases: the list's `--steps-n`, so segments share a width. */
 export function longestTotal(
   phases: readonly Pick<PhaseRow, "total">[],
 ): number {
   return phases.reduce((n, p) => Math.max(n, p.total), 0);
-}
-
-// -- deferred jobs -----------------------------------------------------------------------------
-
-const FILTER_STATUSES: Record<JobFilter, readonly string[]> = {
-  open: ["deferred", "ready"],
-  promoted: ["promoted"],
-  dropped: ["dropped"],
-  done: ["done"],
-};
-
-/** Whether a job is in a status filter's set (Open is deferred or ready). */
-export function inFilter(
-  job: Pick<JobRow, "status">,
-  filter: JobFilter,
-): boolean {
-  return FILTER_STATUSES[filter].includes(job.status ?? "");
-}
-
-/** Each status filter's count. */
-export function jobCounts(
-  jobs: readonly Pick<JobRow, "status">[],
-): Record<JobFilter, number> {
-  const out: Record<JobFilter, number> = {
-    open: 0,
-    promoted: 0,
-    dropped: 0,
-    done: 0,
-  };
-  for (const job of jobs) {
-    for (const filter of Object.keys(FILTER_STATUSES) as JobFilter[]) {
-      if (inFilter(job, filter)) out[filter] += 1;
-    }
-  }
-  return out;
-}
-
-/** The open deferred jobs (deferred or ready): `12 open`, project home's `12 deferred`. */
-export function openJobs(jobs: readonly Pick<JobRow, "status">[]): number {
-  return jobCounts(jobs).open;
 }
 
 // -- docs --------------------------------------------------------------------------------------

@@ -49,7 +49,7 @@ export function pagerWays(
 export type PagerQuery = Record<string, string | null | undefined>;
 
 /**
- * The query key that holds a list's page: the Library's lists and the Deferred jobs list use `page`; the
+ * The query key that holds a list's page: the Library's lists use `page`; the
  * backlog's Archived phases `archived` and the Agenda's Deferred part `deferred` (job 02 frame.md F300), so a
  * page that holds a second list keeps both lists' pages in its address.
  */

@@ -15,6 +15,7 @@ import {
 import { useRouter } from "next/navigation";
 
 import { AGENDA, type AgendaAct } from "@/content/workspace/agenda";
+import { PROPOSED } from "@/content/workspace/agenda-thread";
 import { Dialog, DialogActions } from "@/sikstack/frame/dialog";
 import { Pager } from "@/sikstack/library/pager";
 import { pagerRange } from "@/sikstack/library/pager-model";
@@ -28,6 +29,7 @@ import {
 } from "@/sikstack/workspace/frame";
 import { WS_CHANGE } from "@/content/workspace/frame";
 import {
+  acceptAgendaItems,
   addAgendaItem,
   discardChange,
   moveAgendaItem,
@@ -170,6 +172,11 @@ interface Grab {
  * and Reopen act at once; Drop and Delete ask. Every write is one inbox entry through the agenda's actions; the page
  * keeps what it wrote (`Overlay`) over each read until a read shows it applied or refused, and reads again after a
  * write (`router.refresh()`).
+ *
+ * **Proposed** (P61-e9, when any) comes first, before the open work: the items an agent opened, in the read's
+ * order, no grip and no box (their columns stay, so every part keeps its edges), each row's end cell who proposed it
+ * and the day, and **Accept** in Delete's place (disabled and busy while it is sent). Accept writes one `accept`;
+ * the item becomes Open, first in the open order, Waiting for sync.
  */
 export function AgendaList({
   project,
@@ -181,6 +188,7 @@ export function AgendaList({
   const router = useRouter();
   const uid = useId();
   const ids = {
+    proposed: `${uid}-proposed`,
     open: `${uid}-open`,
     deferred: `${uid}-deferred`,
     ended: `${uid}-ended`,
@@ -211,6 +219,9 @@ export function AgendaList({
     part: AgendaPartKey;
     message: string;
   }>(null);
+  /** The Proposed row whose Accept is on its way, and an Accept that was not taken (P61-e9). */
+  const [accepting, setAccepting] = useState<string | null>(null);
+  const [acceptFailed, setAcceptFailed] = useState<string | null>(null);
 
   const addRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -302,7 +313,9 @@ export function AgendaList({
   const open = parts.open;
   const openIds = open.map((r) => r.id);
   const titles = new Map(
-    [...parts.open, ...parts.deferred, ...parts.ended].map((r) => [r.id, r]),
+    [...parts.proposed, ...parts.open, ...parts.deferred, ...parts.ended].map(
+      (r) => [r.id, r],
+    ),
   );
   const titleOf = (id: string) => titles.get(id)?.title ?? id;
   const liveLift = lift !== null && openIds.includes(lift.id) ? lift : null;
@@ -339,6 +352,32 @@ export function AgendaList({
     setOverlay((o) => settle(o, key, answer));
     if (answer.ok) router.refresh();
     return answer;
+  };
+
+  // -- Accept (P61-e9) ------------------------------------------------------------------------
+
+  /**
+   * Accept a Proposed item: it becomes Open, first in the open order, and waits for the sync; the open part's box
+   * (or Add item) takes the focus, the row it was on having left. After a reload the read says so itself
+   * (`accepting`), so no second Accept is offered.
+   */
+  const accept = async (row: AgendaRowModel) => {
+    if (accepting !== null) return;
+    setAccepting(row.id);
+    setAcceptFailed(null);
+    const answer = await acceptAgendaItems(project, [row.id]);
+    setAccepting(null);
+    if (answer.ok) {
+      // shown at once: the row leaves Proposed, Open and first in the open order, Waiting for sync
+      setOverlay((o) => written(o, answer.entry, timeZone));
+      setSaid(PROPOSED.said(row.title));
+      focusPart.current = "open";
+      router.refresh();
+      return;
+    }
+    const result = writeShown(answer, PROPOSED.failed);
+    if (result.kind === "signed-out") router.refresh();
+    else if (result.kind !== "ok") setAcceptFailed(result.message);
   };
 
   // -- the add form --------------------------------------------------------------------------
@@ -719,6 +758,44 @@ export function AgendaList({
 
   return (
     <div className={cx("stack gap-5", drag !== null && "agenda-dragging")}>
+      {parts.proposed.length > 0 ? (
+        <section className="panel agenda-part" aria-labelledby={ids.proposed}>
+          <PartHead
+            headId={ids.proposed}
+            head={PROPOSED.head}
+            count={AGENDA.count(parts.proposed.length)}
+          />
+          {acceptFailed ? (
+            <div className="panel-body has-rule">
+              <p className="notice notice-danger" role="alert">
+                {acceptFailed}
+              </p>
+            </div>
+          ) : null}
+          <WsList>
+            {parts.proposed.map((row) => (
+              <AgendaRow
+                key={row.id}
+                row={row}
+                href={hrefOf(row)}
+                action={
+                  // Delete's quiet button, so every part keeps its columns; while it is sent it is disabled and busy
+                  <button
+                    type="button"
+                    className="agenda-del"
+                    aria-label={PROPOSED.acceptLabel(row.title)}
+                    disabled={accepting !== null}
+                    aria-busy={accepting === row.id ? true : undefined}
+                    onClick={() => void accept(row)}
+                  >
+                    {PROPOSED.accept[0]}
+                  </button>
+                }
+              />
+            ))}
+          </WsList>
+        </section>
+      ) : null}
       <section className="panel agenda-part" aria-labelledby={ids.open}>
         <PartHead
           headId={ids.open}

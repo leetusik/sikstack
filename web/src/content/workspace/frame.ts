@@ -7,14 +7,14 @@ import { plural } from "@/lib/format";
 
 /** The kinds of thing a status word belongs to (F37, F301, F306). */
 export type WsStatusKind =
-  "phase" | "slice" | "job" | "verdict" | "item" | "pr" | "gate" | "doc";
+  "phase" | "slice" | "verdict" | "item" | "pr" | "gate" | "doc";
 
 /**
  * F37's table: every stored value of each kind to its word and its status class, by meaning: `status-idle`
  * not started, `status-ready` approved, `status-live` running, the bare `status` handed on, `status-pending`
  * waiting on the operator, `status-blocked` cannot go on, `status-changes` sent back, `status-done` finished,
  * `status-revoked` ended without doing. A verdict's `pending` is **Not reviewed** (a phase's and a slice's
- * `pending` is **Waiting on operator**); a deferred agenda item reads as a deferred job does (F301); a ready
+ * `pending` is **Waiting on operator**); a deferred agenda item reads **Deferred** (F301); a ready
  * pull request reads **Open** (F306).
  */
 export const WS_STATUS: Record<
@@ -38,13 +38,6 @@ export const WS_STATUS: Record<
     pending: ["Waiting on operator", "status status-pending"],
     blocked: ["Blocked", "status status-blocked"],
     done: ["Done", "status status-done"],
-  },
-  job: {
-    deferred: ["Deferred", "status status-idle"],
-    ready: ["Ready", "status status-ready"],
-    promoted: ["Promoted", "status"],
-    done: ["Done", "status status-done"],
-    dropped: ["Dropped", "status status-revoked"],
   },
   verdict: {
     pending: ["Not reviewed", "status status-idle"],
@@ -108,19 +101,18 @@ export const WS_RISK: Record<string, string> = {
   high: "High",
 };
 
-/** The four places, as the row of links reads them (F36, F41). */
-export type WsPlace = "agenda" | "backlog" | "deferred" | "docs";
+/** The three places, as the row of links reads them (F36, F41). */
+export type WsPlace = "agenda" | "backlog" | "docs";
 
 export const WS_PLACES: Record<WsPlace, string> = {
   agenda: "Agenda",
   backlog: "Backlog",
-  deferred: "Deferred",
   docs: "Docs",
 };
 
 /** The Workspace head (`WsNav.dc.html`, F40, F41) and the sync line (`WsSync.dc.html`, F40). */
 export const WS_HEAD = {
-  /** The `h1` and the page title of each of the four places (F36). */
+  /** The `h1` and the page title of each of the three places (F36). */
   title: "Workspace",
   /** The row of places' name. */
   nav: "Workspace",
@@ -186,12 +178,11 @@ export const WS_ACTIONS = {
 } as const;
 
 /** The kinds of item a Workspace page shows on its own (F49): its not-found title and sentence. */
-export type WsItemKind = "phase" | "slice" | "job" | "doc" | "item";
+export type WsItemKind = "phase" | "slice" | "doc" | "item";
 
 const ITEM_NAMES: Record<WsItemKind, [title: string, thing: string]> = {
   phase: ["Phase", "phase"],
   slice: ["Slice", "slice"],
-  job: ["Deferred job", "deferred job"],
   doc: ["Doc", "doc"],
   item: ["Agenda item", "agenda item"],
 };
@@ -209,19 +200,15 @@ export const WS_STATES = {
   partFailed: {
     agenda: "The agenda did not load.",
     backlog: "The backlog did not load.",
-    deferred: "Deferred jobs did not load.",
     docs: "Docs did not load.",
   },
   retry: "Try again",
-  /** A search that finds nothing (the Shell's pattern). */
-  noMatch: (q: string) => `No deferred job contains “${q}”.`,
 } as const;
 
-/** The pager's names on the three Workspace lists, and their rows a page (F300, F82, F304). */
+/** The pager's names on the two Workspace lists, and their rows a page (F300, F304). */
 export const WS_PAGER = {
   deferredItems: { label: "Deferred items, pages", per: 10, key: "deferred" },
   archived: { label: "Archived phases, pages", per: 10, key: "archived" },
-  deferredJobs: { label: "Deferred jobs, pages", per: 50, key: "page" },
 } as const;
 
 /** F39: a phase's progress, `1/7`, and its sentence `1 of 7 slices done, 1 in progress`. */
@@ -239,7 +226,6 @@ export const WS_GLOSSARY = {
   heads: {
     phases: "Phases",
     slices: "Slices",
-    deferredJobs: "Deferred jobs",
     plan: "Plan",
     result: "Result",
     intent: "Intent",
@@ -253,8 +239,6 @@ export const WS_GLOSSARY = {
     review: "Review",
     gate: "Acceptance gate",
     explainedIn: "Explained in",
-    brief: "Brief",
-    promotedTo: "Promoted to",
     text: "Text",
     retired: "Retired",
     earlierVersions: "Earlier versions",
@@ -268,7 +252,6 @@ export const WS_GLOSSARY = {
       next: "Next",
       waiting: "Waiting on operator",
       none: "None",
-      deferredJobs: "Deferred jobs",
     },
     backlogColumns: ["Phase", "Status", "Review", "Slices"],
     item: {
@@ -295,13 +278,6 @@ export const WS_GLOSSARY = {
       completed: "Completed",
       stop: "Stop",
       since: "Since",
-    },
-    job: {
-      source: "Source",
-      trigger: "Trigger",
-      created: "Created",
-      deferredBecause: "Deferred because",
-      droppedBecause: "Dropped because",
     },
     doc: { version: "Version", versioned: "Versioned", from: "From" },
     verdict: {

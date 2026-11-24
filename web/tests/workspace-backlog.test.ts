@@ -3,7 +3,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
   Gate,
-  JobRow,
   PhaseRow,
   SliceName,
   Waiting,
@@ -135,20 +134,6 @@ const ARCHIVED: PhaseRow[] = ARCHIVE_NAMES.map((name, i) =>
 // the longest archived phase: longer than any phase in play
 ARCHIVED[4] = { ...ARCHIVED[4], done: 24, total: 24 };
 
-const JOBS: JobRow[] = Array.from({ length: 15 }, (_, i) => ({
-  id: `D${300 - i}-k${i % 10}`,
-  title: `Rate-limit sign-in attempts per address ${i}`,
-  lang: "en",
-  status: i < 9 ? "deferred" : i < 12 ? "ready" : "done",
-  source: null,
-  trigger: null,
-  created: "2026-11-10",
-  reason: null,
-  promotedTo: null,
-  dropped: null,
-  agenda: null,
-}));
-
 const WAITING: Waiting[] = [
   {
     type: "stop",
@@ -198,7 +183,6 @@ function workspace(over: Partial<Workspace> = {}): Workspace {
       waiting: WAITING,
     },
     phases: [...LIVE, ...ARCHIVED],
-    deferred: JOBS,
     docs: [],
     retired: [],
     agenda: [],
@@ -345,8 +329,11 @@ describe("Now", () => {
     expect(now.blocks[0].cells[0].status?.word).toBe("In progress");
     expect(now.streams).toBeNull();
     expect(now.none).toBe(false);
-    expect(now.deferred).toEqual({ text: "12 open", href: `${BASE}/deferred` });
     const html = renderToStaticMarkup(BacklogNow({ now }));
+    // the deferred jobs are retired (P61-e9): Now names none, and with something waiting it draws no facts row
+    expect(html).not.toContain("Deferred jobs");
+    expect(html).not.toContain("/workspace/deferred");
+    expect(html).not.toContain("backlog-facts");
     expect(html).toContain('class="steps is-compact"');
     expect(html).toContain("--steps-n:18");
     expect(html).not.toContain(">None<");

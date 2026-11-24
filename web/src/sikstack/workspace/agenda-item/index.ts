@@ -6,6 +6,8 @@
 // - `AgendaItemPage` (client): the page, its writes and the state they leave (`state.ts`).
 // - `AgendaItemLoading`: the page while it loads.
 // - `itemLines`, `itemView`, `headActions`: what the page draws from its read (`model.ts`).
+// - `Thread` (client, P61-e9): the item's thread and its note composer; `threadView`, `entrySource`, `noteBody`: what
+//   each entry shows and what the composer sends (`thread-model.ts`).
 export { AgendaItemPage, deletedState, type ItemPageRead } from "./item-page";
 export { AgendaItemLoading } from "./loading";
 export {
@@ -18,7 +20,6 @@ export {
   type HeadAction,
   type ItemRead,
   type ItemView,
-  type JobLine,
   type PhaseLine,
 } from "./model";
 export {
@@ -36,3 +37,12 @@ export {
   type PageEvent,
   type PageState,
 } from "./state";
+export { Thread } from "./thread";
+export {
+  entrySource,
+  NOTE_MAX,
+  noteBody,
+  threadView,
+  type EntrySource,
+  type EntryView,
+} from "./thread-model";

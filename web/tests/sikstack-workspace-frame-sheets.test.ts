@@ -170,7 +170,6 @@ const SHEETS = [
   "backlog.css",
   "phase.css",
   "slice.css",
-  "deferred.css",
   "docs.css",
 ];
 

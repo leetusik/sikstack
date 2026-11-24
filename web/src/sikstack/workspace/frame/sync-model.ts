@@ -16,6 +16,17 @@ export interface WsSyncLine {
 }
 
 /**
+ * The line a page draws when the read that carries the sync facts failed: the head stands and says nothing of a sync
+ * it could not read (no figure made up).
+ */
+export const NO_LINE: WsSyncLine = {
+  state: "fresh",
+  text: "",
+  cls: "",
+  version: "",
+};
+
+/**
  * The line for a workspace's `sync` and `version`. Fresh (under 24 h, the server's cut): a check,
  * `Synced 2m ago`, then the version. Behind: a ring, `Last synced 4d ago` (a date past a week, in the viewer's
  * zone through `options`). Never synced and not linked have no line: `WsNav` draws the page's one panel. No

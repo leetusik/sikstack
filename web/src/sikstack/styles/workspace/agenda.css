@@ -70,4 +70,6 @@
 /* the pager sizes itself by its own width: its host takes the foot's whole line */
 .agenda-foot > * { flex: 1 1 100%; min-width: 0; }
 
+/* a Proposed row's end cell: who proposed it, then the day */
+.agenda-by { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); min-width: 0; }
 }

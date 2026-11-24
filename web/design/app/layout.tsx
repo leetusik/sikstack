@@ -13,8 +13,6 @@ import {
 import "../../src/app/globals.css";
 import "@/sikstack/styles/index.css";
 import "@/sikstack/shell/shell.css";
-// P61-e9's sheet, after production's (the next versions' rules: `next/styles/agenda-thread.css`).
-import "../next/styles/agenda-thread.css";
 
 // The design build's root: production's root layout (`src/app/layout.tsx`) as it draws a signed-in page,
 // its sheets, faces and body classes, without the request-bound parts (Listen, the zone cookie).

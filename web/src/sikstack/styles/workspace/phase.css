@@ -37,11 +37,9 @@
 .phase-now ul { list-style: disc; }
 .phase-now ol { list-style: decimal; }
 .phase-now li::marker { color: var(--ink-2); }
-/* the workspace's lines are Markdown: a long path or address breaks rather than pushing the page sideways, and
-   code is the .md text's inline code (./md.css, frame.md F46) */
+/* the workspace's lines are Markdown: a long path or address breaks rather than pushing the page sideways; their
+   bold and code are the frame's stored prose (./frame.css, `.ws-prose`, frame.md F46) */
 .phase-md, .phase-gate-text { overflow-wrap: break-word; }
-.phase-md strong, .phase-gate-text strong { font-weight: 600; }
-.phase-md code, .phase-gate-text code { padding: 1px var(--code-pad) 1px 0; border-radius: var(--radius-xs); background: var(--bg); box-shadow: calc(-1 * var(--code-pad)) 0 0 var(--bg); font-family: var(--font-mono); font-size: var(--fs-meta); }
 .phase-notes, .phase-plain { display: flex; flex-direction: column; gap: var(--space-2); }
 /* the list is as wide as the Slices list above it, so it turns at the same widths */
 .phase-notes { container-type: inline-size; }

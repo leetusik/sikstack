@@ -4,6 +4,7 @@ import { getJson, getRaw } from "@/lib/knowledge/client";
 
 import { feedbackQueryString } from "./query";
 import type {
+  FeedbackAgenda,
   FeedbackDetail,
   FeedbackNumberedPage,
   FeedbackQuery,
@@ -91,4 +92,25 @@ export async function getFeedbackAttachment(
     `/app/feedback/${encodeURIComponent(feedbackId)}/attachments/${encodeURIComponent(attachmentId)}`,
     { token },
   );
+}
+
+/**
+ * `GET /app/feedback/{id}/agenda` → `{project, linked, items}` (P61-e9): the agenda items the
+ * record is on, which the server derives from the entries whose source is `feedback:<id>`, and
+ * whether its project's workspace is linked. Errors are thrown as `ApiError`.
+ */
+export async function getFeedbackAgenda(
+  token: string,
+  feedbackId: string,
+  signal?: AbortSignal,
+): Promise<FeedbackAgenda> {
+  const read = await getJson<FeedbackAgenda>(
+    `/app/feedback/${encodeURIComponent(feedbackId)}/agenda`,
+    { token, signal },
+  );
+  return {
+    project: read.project ?? null,
+    linked: read.linked === true,
+    items: Array.isArray(read.items) ? read.items : [],
+  };
 }

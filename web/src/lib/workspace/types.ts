@@ -209,40 +209,15 @@ export interface Slice extends Omit<SliceRow, "stop"> {
   stop: Stop | null;
 }
 
-// -- deferred jobs -------------------------------------------------------------------------------
-
-/** `folded`: the engine carried the job onto the agenda (`agenda-fold`); `agenda` names the item. */
-export type JobStatus =
-  "deferred" | "ready" | "promoted" | "done" | "dropped" | "folded";
-
-export interface JobRow {
-  id: string;
-  title: string | null;
-  lang: "en" | "ko";
-  status: JobStatus | string | null;
-  source: string | null;
-  trigger: string | null;
-  created: string | null;
-  reason: string | null;
-  promotedTo: string | null;
-  dropped: string | null;
-  agenda: string | null;
-}
+// -- an old deferred job's address --------------------------------------------------------------
 
 /**
- * One deferred job, with its brief (`GET …/workspace/deferred/{job}`): a stored one, or one the
- * fold removed, read from the entry that carries it. Its `agenda` is the item a fold entry
- * carrying it landed on, else its own link. A job no store or entry names is a 404 whose body
- * still reads `{detail, agenda: null}` (`FoldedJobLookup`).
+ * The folded-job lookup (`GET …/workspace/deferred/{job}`): the agenda item whose fold entry carries
+ * the job. A job no entry names is a 404 whose body reads `{detail, agenda: null}`. The deferred
+ * jobs pages are retired; their old addresses redirect through this.
  */
-export interface Job extends JobRow {
-  brief: string | null;
-}
-
-/** The folded-job lookup's answer on a 404: no store or entry names the job. */
-export interface FoldedJobLookup {
-  detail: string;
-  agenda: null;
+export interface FoldedJob {
+  agenda: string;
 }
 
 // -- docs ----------------------------------------------------------------------------------------
@@ -338,11 +313,15 @@ export interface AgendaItem {
   created: string | null;
   changed: string | null;
   phases: string[];
-  deferred: string[];
   outcome: string;
   reason: string;
   /** While the item reads Proposed: who opened it and when; else null (absent from an older read). */
   proposed?: Proposed | null;
+  /**
+   * A web Accept waits for the next sync: the item still reads Proposed, and no second Accept is
+   * offered (absent from an older read).
+   */
+  accepting?: boolean;
   /** How many entries its thread holds (absent from an older read). */
   entryCount?: number;
   /** Its latest activity: the day of its newest entry or last change (absent from an older read). */
@@ -357,20 +336,26 @@ export interface AgendaItem {
   deleting?: boolean;
 }
 
-/** The kinds of change the web's agenda pages write, each one engine agenda command. */
-export type ChangeKind =
-  "add" | "edit" | "move" | "defer" | "solve" | "drop" | "reopen" | "delete";
-
 /**
- * Every kind an inbox entry carries (the server's `INBOX_KINDS`): the pages' changes, plus `entry`
- * (one entry on an item's thread, `{kind, body}`; its author and source are the server's, never the
- * client's) and `accept` (Proposed items made Open). Feedback filed on the agenda writes `entry`
- * (and `add`) already, so a refusal's `kind`, an inbox entry's and an unplaced change's may read
- * either at run time; `ItemSync`, `InboxEntry` and `Unplaced` still type `ChangeKind` (Try again's
- * label falls back to Saving… for a kind it does not know) until the pages that write these two
- * widen it.
+ * The kinds of change the web's agenda pages write, each one engine agenda command, and every kind
+ * an inbox entry carries (the server's `INBOX_KINDS`): `entry` is one entry on an item's thread
+ * (`{kind, body}`; its author and source are the server's, never the client's), `accept` makes
+ * Proposed items Open. Feedback filed on the agenda writes `add` and `entry` too.
  */
-export type InboxKind = ChangeKind | "entry" | "accept";
+export type ChangeKind =
+  | "add"
+  | "edit"
+  | "move"
+  | "defer"
+  | "solve"
+  | "drop"
+  | "reopen"
+  | "delete"
+  | "entry"
+  | "accept";
+
+/** Every kind an inbox entry carries: the same set as `ChangeKind`. */
+export type InboxKind = ChangeKind;
 
 /** The kinds of an item's thread entry (the engine's `ENTRY_KINDS`); the web writes `note`. */
 export type EntryKind = "note" | "issue" | "feedback" | "question" | "decision";
@@ -444,7 +429,6 @@ export interface Workspace extends WorkspaceBase {
   streams: Stream[];
   pointer: Pointer;
   phases: PhaseRow[];
-  deferred: JobRow[];
   docs: DocRow[];
   retired: DocRow[];
   /** In the engine's listing order (the operator's), with this request's marks. */

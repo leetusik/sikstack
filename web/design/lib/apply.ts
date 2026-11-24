@@ -88,7 +88,6 @@ export function applyChange(
       created: ctx.day,
       changed: ctx.day,
       phases: [],
-      deferred: [],
       outcome: "",
       reason: "",
       sync: change.fields.waiting === true ? "waiting" : null,

@@ -22,9 +22,10 @@ import type { InboxEntry, WriteAnswer } from "./types";
  *
  * - add: `POST /app/projects/{id}/workspace/agenda {title, note?}` → `{entry, item}`, the id the
  *   route minted;
- * - edit, move (before or after another item), defer, solve, drop, reopen, delete:
- *   `POST …/workspace/agenda/changes {kind, items, fields}` → `{entry}`, one entry for all the
- *   items (the engine's commands are all or none);
+ * - edit, move (before or after another item), defer, solve, drop, reopen, delete, accept (a
+ *   Proposed item made Open) and entry (a note on an item's thread, `{kind: "note", body}`; the
+ *   server adds its author and source): `POST …/workspace/agenda/changes {kind, items, fields}` →
+ *   `{entry}`, one entry for all the items (the engine's commands are all or none);
  * - discard: `POST …/workspace/inbox/{entry}/discard` → `{entry}` (a waiting or a refused change);
  * - retry (Try again): `POST …/workspace/inbox/{entry}/retry` → `{entry, item?}`, the same change
  *   as a new entry, the refused one closed with it.
@@ -181,6 +182,27 @@ export async function deleteAgendaItems(
   items: string[],
 ): Promise<WriteAnswer> {
   return change(project, { kind: "delete", items, fields: {} });
+}
+
+/** Accept Proposed items (P61-e9): each becomes Open, first in the open order, at the next sync. */
+export async function acceptAgendaItems(
+  project: string,
+  items: string[],
+): Promise<WriteAnswer> {
+  return change(project, { kind: "accept", items, fields: {} });
+}
+
+/** Write a note on an item's thread (P61-e9): one `entry`, by the signed-in account, from the web. */
+export async function noteAgendaItem(
+  project: string,
+  item: string,
+  body: string,
+): Promise<WriteAnswer> {
+  return change(project, {
+    kind: "entry",
+    items: [item],
+    fields: { kind: "note", body },
+  });
 }
 
 /** Discard a change that waits or was refused. */

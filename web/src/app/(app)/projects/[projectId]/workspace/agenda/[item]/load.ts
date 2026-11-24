@@ -16,10 +16,11 @@ import { itemLines, type ItemRead } from "@/sikstack/workspace/agenda-item/model
  *
  * - **the item's own route** (`GET …/workspace/agenda/{item}`), which carries the Workspace's sync facts for the
  *   back row's line;
- * - **plus `GET …/workspace`** only when the item holds a phase or a deferred job, for those rows (their names,
- *   statuses and progress); an item that holds neither is one read.
+ * - **plus `GET …/workspace`** only when the item holds a phase, for those rows (their names, statuses and
+ *   progress); an item that holds none is one read.
  *
- * An item the route does not hold (a 404: no such item, a delete that waits, no linked workspace) is Not found,
+ * An item the route does not hold (a 404: no such item, no linked workspace) is Not found (a delete that waits is
+ * answered as the item, marked `deleting`: the page draws Item deleted),
  * which says the project's name and keeps the sync line under the back row: it reads the project and the
  * Workspace, together. A project the org does not hold is the project's own Not found (`missing`). A failed
  * read is `error`: the route's boundary draws it. A 401 is the session's and is thrown.
@@ -77,12 +78,13 @@ export async function loadAgendaItem(
     };
   }
   const { workspace: head, ...item } = read.value;
-  if (item.phases.length === 0 && item.deferred.length === 0)
-    return { state: "ready", head, item, phases: [], jobs: [] };
+  const synced = head.sync?.at ?? null;
+  if (item.phases.length === 0)
+    return { state: "ready", head, item, phases: [], synced };
   const ws = await readWorkspace(token, project);
   if (ws.state === "error") return { state: "error" };
   const lines = itemLines(item, ws.state === "ready" ? ws.value : null);
-  return { state: "ready", head, item, ...lines };
+  return { state: "ready", head, item, ...lines, synced };
 }
 
 /** The request's clock, read once, and the viewer's zone, for every date and the sync line on the page. */

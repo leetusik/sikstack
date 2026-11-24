@@ -5,7 +5,10 @@ import { WS_GLOSSARY } from "@/content/workspace/frame";
 import { Fact } from "@/sikstack/workspace/frame/facts";
 import type { WsBack } from "@/sikstack/workspace/frame/states-model";
 import { WsRetrySync, WsSync } from "@/sikstack/workspace/frame/sync";
-import type { WsSyncLine } from "@/sikstack/workspace/frame/sync-model";
+import {
+  NO_LINE,
+  type WsSyncLine,
+} from "@/sikstack/workspace/frame/sync-model";
 
 // A doc's first row and its loading form: no Markdown here, so a loading boundary (a client component) can draw
 // them without the renderer.
@@ -41,8 +44,6 @@ export function DocBackRow({
     </div>
   );
 }
-
-const NO_LINE: WsSyncLine = { state: "fresh", text: "", cls: "", version: "" };
 
 const TEXT_BARS = ["9em", "34em", "30em", "12em", "32em", "22em"];
 

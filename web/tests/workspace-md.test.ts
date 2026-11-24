@@ -6,7 +6,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { Md, type MdProps, mdSections } from "@/sikstack/workspace/md";
+import {
+  Md,
+  mdImageSrc,
+  type MdProps,
+  mdSections,
+} from "@/sikstack/workspace/md";
 
 // The Workspace's Markdown body (design job 02, frame.md F46): a real renderer whose output carries the `.md`
 // classes: three heading steps counted from `level`, a code block and a table in their own focusable scroll
@@ -181,6 +186,42 @@ describe("Md's links", () => {
     expect(out).toContain('<a href="https://example.com/record">the signed record</a>');
     expect(out).toContain('<a href="http://example.com/old">the old page</a>');
     expect(out).toContain('<a href="https://github.com/o/r/pull/9">the PR</a>');
+  });
+});
+
+describe("Md's images (D310)", () => {
+  it("draws an image from another host as its alt text, so opening the page fetches nothing from it", () => {
+    const html = render({
+      source: [
+        "![a tracking pixel](https://evil.example/p.png)",
+        "",
+        "![protocol-relative](//evil.example/q.png)",
+        "",
+        "![backslashes](/\\evil.example/r.png)",
+        "",
+        "![inline data](data:image/png;base64,AAAA)",
+        "",
+        "![on this site](/docs/diagram.png)",
+      ].join("\n"),
+    });
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("data:image");
+    expect(html).toContain("a tracking pixel");
+    expect(html).toContain("protocol-relative");
+    expect(html).toContain('<img src="/docs/diagram.png" alt="on this site"/>');
+    expect(html.match(/<img/g)).toHaveLength(1);
+  });
+
+  it("says which addresses stay on this site", () => {
+    expect(mdImageSrc("https://evil.example/p.png")).toBeNull();
+    expect(mdImageSrc("HTTP://evil.example/p.png")).toBeNull();
+    expect(mdImageSrc("//evil.example/p.png")).toBeNull();
+    expect(mdImageSrc("/\\evil.example/p.png")).toBeNull();
+    expect(mdImageSrc("/%5Cevil.example/p.png")).toBeNull();
+    expect(mdImageSrc(" javascript:alert(1)")).toBeNull();
+    expect(mdImageSrc("/docs/a.png")).toBe("/docs/a.png");
+    expect(mdImageSrc("topics/a.png")).toBe("topics/a.png");
+    expect(mdImageSrc(undefined)).toBeNull();
   });
 });
 

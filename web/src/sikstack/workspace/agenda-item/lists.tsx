@@ -1,7 +1,7 @@
 import { AGENDA_ITEM } from "@/content/workspace/agenda-item";
 import { WS_GLOSSARY } from "@/content/workspace/frame";
 import { Copy } from "@/sikstack/frame";
-import { jobHref, phaseHref } from "@/lib/workspace/address";
+import { phaseHref } from "@/lib/workspace/address";
 
 import { Steps, stepsN, WsList, WsRow, wsStatus } from "../frame";
 
@@ -66,43 +66,6 @@ export function PhasesPanel({
           </div>
         </div>
       )}
-    </section>
-  );
-}
-
-/**
- * The item's Deferred jobs panel, only when it holds one (`AgendaItem.dc.html`; F43): its count, then one row a job:
- * id, the title as the row's link, the status, the day it was created in `--ink-2`.
- */
-export function JobsPanel({
-  project,
-  view,
-  date,
-}: {
-  project: string;
-  view: ItemView;
-  date: (value: string | null) => string;
-}) {
-  if (view.jobs.length === 0) return null;
-  return (
-    <section className="panel" aria-labelledby="agendaitem-jobs">
-      <div className="panel-head">
-        <h2 id="agendaitem-jobs">{WS_GLOSSARY.heads.deferredJobs}</h2>
-        <p className="meta">{AGENDA_ITEM.jobCount(view.jobs.length)}</p>
-      </div>
-      <WsList>
-        {view.jobs.map((j) => (
-          <WsRow
-            key={j.id}
-            id={j.id}
-            name={j.title}
-            lang={j.lang === "ko" ? "ko" : null}
-            href={jobHref(project, j.id)}
-            status={wsStatus("job", j.status)}
-            end={<span className="dim ws-end">{date(j.created)}</span>}
-          />
-        ))}
-      </WsList>
     </section>
   );
 }

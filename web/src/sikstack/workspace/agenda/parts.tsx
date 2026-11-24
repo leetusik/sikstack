@@ -2,7 +2,7 @@ import type { CSSProperties, MouseEventHandler, ReactNode, Ref } from "react";
 import Link from "next/link";
 
 import { AGENDA } from "@/content/workspace/agenda";
-import { RefusedBadge, WaitingBadge } from "@/sikstack/workspace/frame";
+import { Author, RefusedBadge, WaitingBadge } from "@/sikstack/workspace/frame";
 import { cx } from "@/lib/cx";
 
 import type { AgendaRowModel } from "./model";
@@ -55,6 +55,9 @@ export function PartHead({
  * (a size container, so F43's four layouts follow the body's width), then **Delete**. `lead` is the open part's grip;
  * without it the grip's column is the empty `span.agenda-nogrip`, so the three parts share their edges. `check` is
  * the row's box; `className` carries `is-selected` (a picked row) and `is-lifted`.
+ *
+ * `action` takes Delete's place (P61-e9: a Proposed row's **Accept**); a Proposed row's end cell is who proposed it
+ * (an agent marked `Agent`) and the day.
  */
 export function AgendaRow({
   row,
@@ -66,6 +69,7 @@ export function AgendaRow({
   linkRef,
   deleteRef,
   onDelete,
+  action,
 }: {
   row: AgendaRowModel;
   href: string;
@@ -77,6 +81,8 @@ export function AgendaRow({
   linkRef?: Ref<HTMLAnchorElement>;
   deleteRef?: Ref<HTMLButtonElement>;
   onDelete?: MouseEventHandler<HTMLButtonElement>;
+  /** What stands in Delete's place, when the row's part acts otherwise. */
+  action?: ReactNode;
 }) {
   return (
     <li
@@ -107,18 +113,27 @@ export function AgendaRow({
           <span className={cx(row.status.cls, "ws-state")}>
             {row.status.word}
           </span>
-          {row.end ? <span className="dim ws-end">{row.end}</span> : null}
+          {row.proposed ? (
+            <span className="ws-end agenda-by">
+              {row.proposed.by ? <Author author={row.proposed.by} /> : null}
+              <span className="dim">{row.proposed.day}</span>
+            </span>
+          ) : row.end ? (
+            <span className="dim ws-end">{row.end}</span>
+          ) : null}
         </div>
       </div>
-      <button
-        type="button"
-        className="agenda-del"
-        aria-label={AGENDA.row.deleteLabel(row.title)}
-        ref={deleteRef}
-        onClick={onDelete}
-      >
-        {AGENDA.row.delete}
-      </button>
+      {action ?? (
+        <button
+          type="button"
+          className="agenda-del"
+          aria-label={AGENDA.row.deleteLabel(row.title)}
+          ref={deleteRef}
+          onClick={onDelete}
+        >
+          {AGENDA.row.delete}
+        </button>
+      )}
     </li>
   );
 }

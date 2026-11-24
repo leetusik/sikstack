@@ -5,7 +5,7 @@ import { useEffect, useSyncExternalStore, useTransition } from "react";
 import { WS_SYNC } from "@/content/workspace/frame";
 import { cx } from "@/lib/cx";
 
-import type { WsSyncLine } from "./sync-model";
+import { NO_LINE, type WsSyncLine } from "./sync-model";
 
 // -- Try again: the page reads again ------------------------------------------------------------
 
@@ -96,8 +96,6 @@ export function WsSync({
     </p>
   );
 }
-
-const NO_LINE: WsSyncLine = { state: "fresh", text: "", cls: "", version: "" };
 
 /**
  * Where a failed state draws no sync line (the read that carries it failed too): nothing, but the bar while a

@@ -358,19 +358,9 @@ export function Shell({
   );
 }
 
-/** A rail item: a link, or (Workspace, operator D1) an inert item marked `Coming`, never a link. */
+/** A rail item: a link, the current one `aria-current="page"`. */
 function RailEntry({ item }: { item: RailItem }) {
   const label = SHELL.rail[item.key];
-  if (item.href === null) {
-    return (
-      <span className="nav-item" aria-disabled="true">
-        <span className="nav-pill">
-          {label}
-          <span className="badge">{SHELL.coming}</span>
-        </span>
-      </span>
-    );
-  }
   return (
     <Link
       className="nav-item"

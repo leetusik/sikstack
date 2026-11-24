@@ -43,9 +43,8 @@ export const AGENDA_ITEM = {
     text: (title: string) =>
       `“${title}” leaves the workspace at the next sync.`,
   },
-  /** The Phases panel's count and the Deferred jobs panel's (FG5): `4 phases`, `3 jobs`. */
+  /** The Phases panel's count (FG5): `4 phases`. */
   phaseCount: (n: number) => plural(n, "phase"),
-  jobCount: (n: number) => plural(n, "job"),
   /** The command that plans a phase for an item, in the Copy field (F45). */
   command: (item: string) => `/create-phase ${item}`,
   copyCommand: "Copy the command",

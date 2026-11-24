@@ -128,5 +128,4 @@ export const SHELL = {
   },
   card: "card",
   reviewDueLabel: (cards: string) => `Review, ${cards} due`,
-  coming: "Coming",
 } as const;

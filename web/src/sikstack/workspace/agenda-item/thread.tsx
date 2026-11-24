@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useId, useRef, useState, type ReactNode } from "react";
 
+import { THREAD } from "@/content/workspace/agenda-thread";
 import { Swap } from "@/sikstack/ui";
-import { RefusedBadge, WaitingBadge, WsText } from "@/sikstack/workspace/frame";
 import { langOf } from "@/lib/workspace/model";
 import type { WriteAnswer } from "@/lib/workspace/types";
 
-import { THREAD } from "../../content/agenda-thread";
-import { Author } from "../frame/author";
+import { Author, RefusedBadge, WaitingBadge, WsText } from "../frame";
+
 import { noteBody, type EntryView } from "./thread-model";
 
 /**
@@ -18,8 +18,8 @@ import { noteBody, type EntryView } from "./thread-model";
  * the time at the row's end, the body under it at the measure (its Markdown as the server drew it, `prose`). A web
  * entry the workspace has not taken reads `Waiting for sync`; one it refused, `Change refused` and its line. The
  * panel ends with the note composer: **Note** and **Add note** (`Adding…` while it is sent); the note shows in the
- * thread at once, under its author, waiting for the sync. New in this design: applying it adds this file to
- * `src/sikstack/workspace/agenda-item/`, its sheet to `src/sikstack/styles/workspace/agenda-item.css`.
+ * thread at once, under its author, waiting for the sync. Its rules are `workspace/agenda-item.css`'s. A waiting
+ * note is in the read's thread, so the server draws its Markdown (`itemProse`), as it draws a synced one (D305).
  */
 export function Thread({
   entries,
@@ -33,9 +33,15 @@ export function Thread({
   onAdd: (body: string) => Promise<WriteAnswer>;
 }) {
   const uid = useId();
-  const ids = { head: `${uid}-head`, note: `${uid}-note`, error: `${uid}-error` };
+  const ids = {
+    head: `${uid}-head`,
+    note: `${uid}-note`,
+    error: `${uid}-error`,
+  };
   const [draft, setDraft] = useState("");
-  const [phase, setPhase] = useState<"rest" | "sending" | "empty" | "failed">("rest");
+  const [phase, setPhase] = useState<"rest" | "sending" | "empty" | "failed">(
+    "rest",
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [said, setSaid] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
@@ -67,7 +73,9 @@ export function Thread({
   }
 
   const body = (text: string) =>
-    (prose && Object.hasOwn(prose, text) ? prose[text] : null) ?? <WsText text={text} />;
+    (prose && Object.hasOwn(prose, text) ? prose[text] : null) ?? (
+      <WsText text={text} />
+    );
 
   return (
     <section className="panel" aria-labelledby={ids.head}>
@@ -102,7 +110,10 @@ export function Thread({
                 {e.mark === "waiting" ? <WaitingBadge /> : null}
                 {e.mark === "refused" ? <RefusedBadge /> : null}
                 {e.when ? (
-                  <time className="meta thread-when" dateTime={e.iso ?? undefined}>
+                  <time
+                    className="meta thread-when"
+                    dateTime={e.iso ?? undefined}
+                  >
                     {e.when}
                   </time>
                 ) : null}
@@ -124,58 +135,58 @@ export function Thread({
         </div>
       )}
       <div className="panel-body has-rule">
-      <form
-        className="stack gap-3 thread-compose"
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        {phase === "failed" && notice ? (
-          <p className="notice notice-danger" role="alert">
-            {notice}
-          </p>
-        ) : null}
-        <div className="field">
-          <label className="label" htmlFor={ids.note}>
-            {THREAD.composer.label}
-          </label>
-          <textarea
-            ref={field}
-            className="input"
-            id={ids.note}
-            rows={3}
-            lang={langOf(draft)}
-            value={draft}
-            disabled={sending}
-            aria-invalid={phase === "empty" ? true : undefined}
-            aria-describedby={phase === "empty" ? ids.error : undefined}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              if (phase === "empty") setPhase("rest");
-            }}
-          />
-          {phase === "empty" ? (
-            <p className="field-error" id={ids.error}>
-              {THREAD.composer.empty}
+        <form
+          className="stack thread-compose gap-3"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          {phase === "failed" && notice ? (
+            <p className="notice notice-danger" role="alert">
+              {notice}
             </p>
           ) : null}
-        </div>
-        <div className="cluster to-end">
-          <button
-            type="submit"
-            className="btn"
-            data-busy={sending ? "true" : undefined}
-            aria-busy={sending ? true : undefined}
-          >
-            <Swap labels={[...THREAD.composer.add]} />
-          </button>
-        </div>
-        <p className="sr-only" role="status">
-          {said}
-        </p>
-      </form>
+          <div className="field">
+            <label className="label" htmlFor={ids.note}>
+              {THREAD.composer.label}
+            </label>
+            <textarea
+              ref={field}
+              className="input"
+              id={ids.note}
+              rows={3}
+              lang={langOf(draft)}
+              value={draft}
+              disabled={sending}
+              aria-invalid={phase === "empty" ? true : undefined}
+              aria-describedby={phase === "empty" ? ids.error : undefined}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (phase === "empty") setPhase("rest");
+              }}
+            />
+            {phase === "empty" ? (
+              <p className="field-error" id={ids.error}>
+                {THREAD.composer.empty}
+              </p>
+            ) : null}
+          </div>
+          <div className="cluster to-end">
+            <button
+              type="submit"
+              className="btn"
+              data-busy={sending ? "true" : undefined}
+              aria-busy={sending ? true : undefined}
+            >
+              <Swap labels={[...THREAD.composer.add]} />
+            </button>
+          </div>
+          <p className="sr-only" role="status">
+            {said}
+          </p>
+        </form>
       </div>
     </section>
   );

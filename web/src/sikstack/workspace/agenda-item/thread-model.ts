@@ -1,19 +1,18 @@
 /**
  * An agenda item's thread, as pure functions (P61-e9; the read's `entries`, `ThreadEntry`): what each entry shows
- * and what the note composer sends. No React and no I/O. New in this design: applying it adds this file to
- * `src/sikstack/workspace/agenda-item/`.
+ * and what the note composer sends. No React and no I/O.
  *
  * - `threadView(entries, at)`: each entry oldest first, as the read gives them (a waiting web entry last): its
  *   author (a person or an agent), its kind's word, its source (a piece of feedback is a link to it, on the kind's
- *   word, and the body's last line back to it is left out; the web says `Web`; a slice or a phase is its id), when (F2's `when`), its body, and its mark (Waiting for sync, or the
- *   workspace's refusal).
+ *   word, and the body's last line back to it is left out; the web says `Web`; a slice or a phase is its id), when
+ *   (F2's `when`), its body, and its mark (Waiting for sync, or the workspace's refusal).
  * - `noteBody(text)`: what the composer sends, or null for nothing written.
  */
+import { ENTRY_KIND, THREAD } from "@/content/workspace/agenda-thread";
 import { feedbackItemHref } from "@/lib/feedback/place";
 import type { ThreadEntry } from "@/lib/workspace/types";
 
-import { ENTRY_KIND, THREAD } from "../../content/agenda-thread";
-import { authorOf, type AuthorName } from "../frame/author";
+import { authorOf, type AuthorName } from "../frame/author-model";
 
 export interface EntrySource {
   text: string;
@@ -60,11 +59,15 @@ export function entrySource(
  * server writes it), which the entry's kind already links, so that last line is left out.
  */
 function shownBody(e: ThreadEntry): string {
-  const ref = e.source?.startsWith("feedback:") ? e.source.slice("feedback:".length) : null;
+  const ref = e.source?.startsWith("feedback:")
+    ? e.source.slice("feedback:".length)
+    : null;
   if (!ref) return e.body;
   const tail = `/feedback/${ref}`;
   const body = e.body.trimEnd();
-  return body.endsWith(tail) ? body.slice(0, -tail.length).trimEnd() || body : e.body;
+  return body.endsWith(tail)
+    ? body.slice(0, -tail.length).trimEnd() || body
+    : e.body;
 }
 
 export function threadView(
@@ -83,7 +86,8 @@ export function threadView(
       when: e.created ? at.when(e.created) : "",
       iso: e.created,
       body: shownBody(e),
-      mark: sync === "waiting" ? "waiting" : refused !== null ? "refused" : null,
+      mark:
+        sync === "waiting" ? "waiting" : refused !== null ? "refused" : null,
       refused,
     };
   });

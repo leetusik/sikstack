@@ -9,30 +9,22 @@ import {
   FeedbackItemNotFoundState,
 } from "@/sikstack/feedback/item/states";
 import {
-  AddedToAgenda as AddedToAgendaToday,
-  AgendaPart as AgendaPartToday,
-  agendaPageState as agendaPageStateToday,
-} from "@/sikstack/feedback/agenda";
-import { canAdd, itemTitle, notOfferedText, sent } from "@/lib/feedback/agenda";
-import { zoneLabel } from "@/lib/feedback/format";
-import { feedbackBackHref } from "@/lib/feedback/place";
-import { agendaItemHref } from "@/lib/workspace/address";
-
-// P61-e9: the next versions of Add to agenda and the Agenda part (`next/feedback/agenda/`).
-import {
+  AddedToAgenda,
   AgendaHeadEnd,
+  AgendaPart,
+  agendaPageState,
   AgendaScope,
   AgendaSlot,
-} from "../next/feedback/agenda/control";
-import {
-  agendaPageState,
   NEW_ITEM,
   pickable,
   type AddPhase,
   type AgendaPartItem,
   type AgendaPick,
-} from "../next/feedback/agenda/model";
-import { AddedToAgenda, AgendaPart } from "../next/feedback/agenda/part";
+} from "@/sikstack/feedback/agenda";
+import { canAdd, itemTitle, notOfferedText, sent } from "@/lib/feedback/agenda";
+import { zoneLabel } from "@/lib/feedback/format";
+import { feedbackBackHref } from "@/lib/feedback/place";
+import { agendaItemHref } from "@/lib/workspace/address";
 
 import { FEEDBACK, feedbackItemsIn } from "./answers";
 import { FEEDBACK_FILED_STATES, FEEDBACK_STATES } from "./page-states";
@@ -43,7 +35,7 @@ import { apply, current, dataOf, getSnapshot, load, reset } from "./store";
 
 /**
  * One piece of feedback (`/projects/<id>/feedback/<feedbackId>`), production's `FeedbackItem` on a recorded
- * record (`GET /app/feedback/{id}`), its Agenda part and Add to agenda in their next versions (P61-e9). The
+ * record (`GET /app/feedback/{id}`), with production's Agenda part and Add to agenda (P61-e9). The
  * items it is on are read from the store's workspace (`feedbackItemsIn`, the server's own rule), so an add made in
  * the browser shows here, on the Agenda and on the item's thread at once. Production's page body
  * (`src/sikstack/feedback/item/body.tsx`) is a server component: this screen fills the same two slots it fills.
@@ -136,16 +128,21 @@ export function FeedbackScreen({
           <FeedbackItemErrorState error={THROWN} reset={retry} />
         </Frame>
       );
-    case "today": {
-      // Production's page today (`body.tsx`:122-145), unchanged: the seam offers no add and finds nothing sent.
-      const today = agendaPageStateToday(canAdd(record, PROJECT_NAME), sent(record));
+    case "no-workspace": {
+      // Production's page (`body.tsx`) for a project with no workspace linked: the seam's read says `linked: false`
+      // and no item, so the add is not offered and the part says why.
+      const unlinked = { project: record.project_id ?? null, linked: false, items: [] };
+      const none = agendaPageState(
+        canAdd(record, PROJECT_NAME, unlinked),
+        sent(record, unlinked),
+      );
       return (
         <Frame>
           <FeedbackItem
             view={view}
             backHref={backHref}
-            headEnd={today.kind === "not-offered" || today.kind === "offered" ? null : <AddedToAgendaToday />}
-            agenda={today.kind === "offered" ? null : <AgendaPartToday state={today} />}
+            headEnd={none.kind === "not-offered" || none.kind === "offered" ? null : <AddedToAgenda />}
+            agenda={none.kind === "offered" ? null : <AgendaPart state={none} />}
           />
         </Frame>
       );

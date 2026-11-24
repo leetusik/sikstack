@@ -18,7 +18,6 @@ export function awayPaths(project: string): string[] {
   const orgRail = railFor("/dashboard");
   const hrefs = [
     ws.backlog,
-    ws.deferred,
     ws.docs,
     ...projectRail.items.map((i) => i.href),
     projectRail.review.href,

@@ -9,24 +9,18 @@ import { describe, expect, it } from "vitest";
 import { HeadFacts } from "@/sikstack/workspace/agenda-item/head";
 import { itemProse } from "@/sikstack/workspace/agenda-item/prose";
 import { BacklogWaiting } from "@/sikstack/workspace/backlog";
-import {
-  DeferredJob,
-  DeferredList,
-  readDeferredPlace,
-} from "@/sikstack/workspace/deferred";
-import { jobTriggers } from "@/sikstack/workspace/deferred/prose";
 import { DocVersions } from "@/sikstack/workspace/docs";
 import { wsSyncLine } from "@/sikstack/workspace/frame";
 import { WsProse } from "@/sikstack/workspace/frame/prose";
 import { PhaseSlices } from "@/sikstack/workspace/phase/parts";
 import { SliceHead } from "@/sikstack/workspace/slice";
 import type { ItemView } from "@/sikstack/workspace/agenda-item/model";
-import type { Job, JobRow, Slice, SliceRow } from "@/lib/workspace/types";
+import type { Slice, SliceRow } from "@/lib/workspace/types";
 
 // Stored prose drawn as its Markdown on every Workspace page (frame.md F46, F80): what the workspace and the
 // operator write carries the workspace's inline Markdown (bold, code, links to its own files), and every place
 // that draws such a text shows it as text, never its marks: the backlog's waiting list, a phase's slice rows, a
-// slice's sentence and a stop's words, a deferred job's facts, an agenda item's note, outcome and reason, a doc
+// slice's sentence and a stop's words, an agenda item's note, outcome and reason and its thread's entries, a doc
 // version's summary. Titles stay plain text.
 
 const html = (el: ReactElement) => renderToStaticMarkup(el);
@@ -136,73 +130,6 @@ describe("stored prose drawn as its Markdown", () => {
     );
     expectDrawn(out);
     expect(out).toContain("Say <code>accept</code>.");
-  });
-
-  it("in a deferred job's facts: trigger, source, reason and why it was dropped", () => {
-    const job: Job = {
-      id: "D141-4r",
-      title: "Cap the **attachments**",
-      lang: "en",
-      status: "dropped",
-      source: "Found by `/read-code` in the review",
-      trigger: "Before `KB_SMTP_HOST` is set on the box",
-      created: "2026-11-14",
-      reason: PROSE,
-      promotedTo: null,
-      dropped: "Done by **the merge**, see [the PR](topics/pr.md).",
-      agenda: null,
-      brief: null,
-    };
-    const out = html(
-      createElement(DeferredJob, {
-        project: "p",
-        job,
-        back: BACK,
-        line: LINE,
-        created: "Nov 14",
-        phase: null,
-        item: null,
-      }),
-    );
-    expectDrawn(out.replace("Cap the **attachments**", ""));
-    expect(out).toContain("Before <code>KB_SMTP_HOST</code> is set on the box");
-    expect(out).toContain("Found by <code>/read-code</code> in the review");
-    expect(out).toContain("Done by <strong>the merge</strong>, see the PR.");
-  });
-
-  it("in the Deferred jobs list: each row's trigger under its title", () => {
-    const row = (id: string, trigger: string | null): JobRow => ({
-      id,
-      title: "Cap the **attachments**",
-      lang: "en",
-      status: "deferred",
-      source: "P12-k3.S7",
-      trigger,
-      created: "2026-11-14",
-      reason: null,
-      promotedTo: null,
-      dropped: null,
-      agenda: null,
-    });
-    const jobs = [row("D141-4r", PROSE), row("D142-5s", null)];
-    const out = html(
-      createElement(DeferredList, {
-        project: "p",
-        jobs,
-        created: {},
-        triggers: jobTriggers(jobs),
-        place: readDeferredPlace({}),
-      }),
-    );
-    const sub =
-      /<span class="meta ws-sub"[^>]*>([\s\S]*?)<\/span><\/span>/.exec(
-        out,
-      )?.[0];
-    expect(sub).toBeDefined();
-    expectDrawn(sub!);
-    // a job with no trigger draws no line under its title; the title stays plain text
-    expect(out.split('class="meta ws-sub"').length - 1).toBe(1);
-    expect(out).toContain("Cap the **attachments**");
   });
 
   it("in an agenda item's facts: outcome and note, lines and lists as written", () => {

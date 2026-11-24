@@ -87,8 +87,8 @@ export type RailKey =
 
 export interface RailItem {
   key: RailKey;
-  /** The link, or `null` for an item that is not a link (none in the signed rails today). */
-  href: string | null;
+  /** The link. */
+  href: string;
   current: boolean;
 }
 
@@ -156,7 +156,7 @@ export function projectSwitchHref(pathname: string, projectId: string): string {
  * Review. The current item follows the path; an address the rail does not name has none (F25: `none`).
  *
  * The project form's Workspace is current on every page under `/projects/<id>/workspace` (the Agenda,
- * an item, the Backlog, a phase, a slice, Deferred, Docs), Overview then not.
+ * an item, the Backlog, a phase, a slice, Docs), Overview then not.
  * The project form's Library is the project's library (`/projects/<id>/library`, job 03 round 02,
  * F321), current there (Overview is then not); its Feedback is the project's Feedback,
  * `/projects/<id>/feedback` (`feedbackHref`, P65), current on that list and on an item opened from

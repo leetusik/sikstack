@@ -5,13 +5,12 @@ import {
   agendaItemHref,
   backlogHref,
   decodeWorkspaceFrom,
-  deferredHref,
   docHref,
   docsHref,
   FROM_PARAM,
-  jobHref,
   listHref,
   phaseHref,
+  retiredJobHref,
   sliceHref,
   wayBack,
   workspaceHref,
@@ -38,8 +37,6 @@ describe("the addresses", () => {
     );
     expect(phaseHref(PROJECT, "P8-q4")).toBe(`${ws}/phases/P8-q4`);
     expect(sliceHref(PROJECT, "P8-q4.S1")).toBe(`${ws}/slices/P8-q4.S1`);
-    expect(deferredHref(PROJECT)).toBe(`${ws}/deferred`);
-    expect(jobHref(PROJECT, "D141-4r")).toBe(`${ws}/deferred/D141-4r`);
     expect(docsHref(PROJECT)).toBe(`${ws}/docs`);
     expect(docHref(PROJECT, "architecture")).toBe(`${ws}/docs/architecture`);
     expect(docHref(PROJECT, "architecture", { version: "v2611171507" })).toBe(
@@ -47,22 +44,21 @@ describe("the addresses", () => {
     );
   });
 
-  it("writes page 1 and the Open filter as no key, and keeps a search", () => {
+  it("writes page 1 as no key", () => {
     expect(agendaHref(PROJECT, { deferred: 1 })).toBe(ws);
     expect(backlogHref(PROJECT, { archived: 1 })).toBe(`${ws}/backlog`);
-    expect(deferredHref(PROJECT, { status: "open", page: 1 })).toBe(
-      `${ws}/deferred`,
-    );
-    expect(
-      deferredHref(PROJECT, { q: "retry queue", status: "dropped", page: 4 }),
-    ).toBe(`${ws}/deferred?q=retry+queue&status=dropped&page=4`);
+  });
+
+  it("sends a retired deferred job's address to the item its fold entry names, else the Agenda (P61-e9)", () => {
+    expect(retiredJobHref(PROJECT, "A2-k5")).toBe(`${ws}/agenda/A2-k5`);
+    expect(retiredJobHref(PROJECT, null)).toBe(ws);
   });
 
   it("carries the list an item was opened from", () => {
-    const from: WorkspaceList = { list: "deferred", q: "업로드", page: 2 };
-    const href = jobHref(PROJECT, "D20-a3", from);
+    const from: WorkspaceList = { list: "agenda", deferred: 2 };
+    const href = agendaItemHref(PROJECT, "A20-a3", from);
     const url = new URL(href, "https://sikstack.test");
-    expect(url.pathname).toBe(`${ws}/deferred/D20-a3`);
+    expect(url.pathname).toBe(`${ws}/agenda/A20-a3`);
     expect(url.searchParams.get(FROM_PARAM)).toBe(listHref(PROJECT, from));
     expect(
       decodeWorkspaceFrom(url.searchParams.get(FROM_PARAM), PROJECT),
@@ -83,14 +79,6 @@ describe("the Workspace's from", () => {
       { list: "agenda", deferred: 3 },
       { list: "backlog" },
       { list: "backlog", archived: 6 },
-      { list: "deferred" },
-      {
-        list: "deferred",
-        q: "Retry failed uploads",
-        status: "promoted",
-        page: 2,
-      },
-      { list: "deferred", q: "검색이 느려요" },
       { list: "docs" },
     ];
     for (const list of lists) {
@@ -109,6 +97,9 @@ describe("the Workspace's from", () => {
       `/projects/${PROJECT}/workspace/agenda/A2-k5`,
       `/projects/${PROJECT}/workspace/phases`,
       `/projects/${PROJECT}/workspace/backlog/extra`,
+      // the retired Deferred jobs list is no list any more (P61-e9)
+      `/projects/${PROJECT}/workspace/deferred`,
+      `/projects/${PROJECT}/workspace/deferred?page=2`,
       "https://evil.example/projects/x/workspace",
       `//evil.example${ws}`,
       `${ws}/../../../library`,
@@ -134,15 +125,11 @@ describe("the Workspace's from", () => {
       `${ws}?page=2`,
       `${ws}/backlog?deferred=2`,
       `${ws}/docs?version=v0001`,
-      `${ws}/deferred?q=a&q=b`,
-      `${ws}/deferred?status=ready`,
-      `${ws}/deferred?page=0`,
-      `${ws}/deferred?page=02`,
+      `${ws}?deferred=0`,
+      `${ws}?deferred=02`,
+      `${ws}?deferred=2&deferred=3`,
       `${ws}/backlog?archived=-1`,
       `${ws}?deferred=two`,
-      `${ws}/deferred?q=`,
-      `${ws}/deferred?q=${"x".repeat(201)}`,
-      `${ws}/deferred?q=a%0Ab`,
       `${ws}/backlog#archived`,
     ]) {
       expect(decodeWorkspaceFrom(raw, PROJECT), raw).toBeNull();
@@ -178,13 +165,6 @@ describe("the way back", () => {
       wayBack(PROJECT, { kind: "phase" }, { list: "backlog", archived: 3 })
         .href,
     ).toBe(`${ws}/backlog?archived=3`);
-    expect(
-      wayBack(
-        PROJECT,
-        { kind: "job" },
-        { list: "deferred", status: "done", page: 2 },
-      ).href,
-    ).toBe(`${ws}/deferred?status=done&page=2`);
     expect(wayBack(PROJECT, { kind: "doc" }, { list: "docs" }).href).toBe(
       `${ws}/docs`,
     );
@@ -201,7 +181,6 @@ describe("the way back", () => {
     expect(
       wayBack(PROJECT, { kind: "agenda-item" }, { list: "backlog" }).to,
     ).toBe("agenda");
-    expect(wayBack(PROJECT, { kind: "job" }, null).href).toBe(`${ws}/deferred`);
   });
 
   it("takes a slice to its phase and an earlier version to its doc, carrying the list on", () => {

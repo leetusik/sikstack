@@ -26,6 +26,8 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 vi.mock("@/lib/feedback/app", () => ({
   getFeedbackDetail: (...args: unknown[]) => detail(...args),
+  // a project's workspace not linked: the Agenda part says so, no add (P61-e9's seam)
+  getFeedbackAgenda: async () => ({ project: null, linked: false, items: [] }),
 }));
 vi.mock("@/lib/knowledge/app", () => ({
   listProjects: (...args: unknown[]) => projects(...args),
