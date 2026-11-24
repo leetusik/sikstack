@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 import wf_store  # noqa: E402 -- the inbox applier sets its _CLOUD_UNDO (write_text's undo notes)
+import wf_cold  # noqa: E402 -- the cache: the eviction keeps an archived phase.json there; the hook's reads go lenient
 
 from wf_store import (  # noqa: E402
     _git, _git_available, _git_dir, _meter_ts, _one_line, _one_line_usage_errors, _worktree_entries, AGENDA,
@@ -859,7 +860,11 @@ def cloud_settle_pull(base: dict) -> None:
 
 
 class CloudSession:
-    """One command's boundary in a linked checkout: begin (pull, pre-command scan), then commit (its batches, in order)."""
+    """One command's boundary in a linked checkout: begin (pull, pre-command scan), then commit (its batches, in order).
+    The newest session is `active`: the cold reads (wf_cold) fetch through it, so a read inside a command uses the
+    session (and the lock) that command already holds."""
+
+    active = None
 
     def __init__(self, tokens: list, deadline=None) -> None:
         self.tokens = list(tokens)
@@ -875,6 +880,7 @@ class CloudSession:
         self.inbox_pending = None  # P1's count, read at the begin step; None: unknown, so the inbox is asked
         self.cloud_head = None  # the newest head sikstack named (P1, a manifest, a landed batch): eviction needs base = it
         self.evicted = 0  # files the last eviction took off the disk
+        CloudSession.active = self
 
     def _load(self, name: str):
         try:
@@ -1294,6 +1300,11 @@ class CloudSession:
                 continue
             if b.get("kind") != "file" or _sha(data) != b.get("sha256"):
                 continue
+            if re.fullmatch(r"works/phases/archived/[^/]+/phase\.json", rel):  # its reads (agenda links, the PR
+                try:  # stack, ids) then never cost a fetch on this machine; best effort, the bytes just checked
+                    wf_cold.keep(rel, data)
+                except OSError:
+                    pass
             _cloud_remove(rel)
             self.cache.pop(rel, None)
             self.evicted += 1
@@ -1454,7 +1465,11 @@ def cloud_fail_open(args: argparse.Namespace, line: str):
     """The hook's way past a cloud stop: the command runs on the disk as it is (its ids read from it), then the
     stop as a note."""
     normalize_id_args(args)
-    result = args.func(args)
+    wf_cold.LENIENT = True  # an evicted file with no valid cached copy reads as absent: no second wait on the network
+    try:
+        result = args.func(args)
+    finally:
+        wf_cold.LENIENT = False
     print(f"note: {line}")
     return result
 
@@ -1622,13 +1637,15 @@ def cloud_commit_hint() -> str:
 
 
 def cloud_exclude() -> None:
-    """Hide `.hi2vi/` in the workflow repo's common info/exclude (the installer does too; this covers an
-    install not yet updated). Never .gitignore, which is tracked."""
+    """Hide `.hi2vi/` and the cold reads' `cache/` in the workflow repo's common info/exclude (init does too; this
+    covers an install made before either). Never .gitignore, which is tracked."""
     exclude = _git_dir(common=True) / "info" / "exclude"
     existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    if {f"{CLOUD_DIR}/", f"/{CLOUD_DIR}/", CLOUD_DIR, f"/{CLOUD_DIR}"} & {l.strip() for l in existing.splitlines()}:
+    have = {l.strip() for l in existing.splitlines()}
+    add = [f"/{name}/" for name in (CLOUD_DIR, wf_cold.CACHE_DIR) if not {f"{name}/", f"/{name}/", name, f"/{name}"} & have]
+    if not add:
         return
-    write_text(exclude, existing + ("\n" if existing and not existing.endswith("\n") else "") + f"/{CLOUD_DIR}/\n")
+    write_text(exclude, existing + ("\n" if existing and not existing.endswith("\n") else "") + "".join(f"{l}\n" for l in add))
 
 
 def cloud_parse_address(address: str) -> tuple:

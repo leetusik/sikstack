@@ -28,10 +28,11 @@ ADAPTER = Path(__file__).resolve()
 sys.path.insert(0, str(ADAPTER.parents[2] / "scripts"))
 import workflow  # noqa: E402 -- the engine: it finds the workspace (or exits 2 with one line) and binds its seams
 from wf_store import (  # noqa: E402
-    _meter_ts, _one_line, ACTIVE, all_events, ARCHIVED,
+    _meter_ts, _one_line, ACTIVE, ARCHIVED,
     archived_phase_ids, cmd_next, HOST_ROOT, id_sort_key, PHASE_ID_PATTERN,
     PHASE_ID_RE, read_json, require_phase, require_slice, resume_card, ROOT, SLICE_SUFFIX_PATTERN,
 )
+import wf_cold  # noqa: E402 -- the meter's reads of a linked checkout's cold set (the event log, archived slices)
 # The retired canvas flow's record root (2.0.0 retired it): only the meter reads it, to attribute old design spans.
 OLD_DESIGN_ROOT_REL = "docs/reference/design"
 
@@ -451,10 +452,12 @@ _VERDICTS = ("done", "escalate", "needs_operator", "blocked")  # the verdict tab
 
 def _slice_verdicts(phase=None, slice_id=None) -> dict:
     """{slice id: (kind, verdict, source)} of every active and archived slice (one phase's, or one slice): the
-    verdict is the `status:` line of its result.md (the executor's verdict block), else its slice.json status."""
+    verdict is the `status:` line of its result.md (the executor's verdict block), else its slice.json status. A
+    linked checkout's evicted archived slices are read through the cache, their result.md beside them (wf_cold)."""
     out = {}
+    archived = sorted(wf_cold.archived_glob("*/slices/*/slice.json", siblings=("result.md",)), key=wf_cold.truth_rel)
     for root in (ACTIVE, ARCHIVED):
-        for sj in (sorted(root.glob("*/slices/*/slice.json")) if root.is_dir() else []):
+        for sj in ((sorted(root.glob("*/slices/*/slice.json")) if root.is_dir() else []) if root is ACTIVE else archived):
             try:
                 data = read_json(sj)
             except (OSError, ValueError):
@@ -730,12 +733,13 @@ def _meter_project_dirs(explicit) -> tuple:
 
 
 def _meter_known_slices(events: list) -> tuple:
-    """({slice id: kind or None}) from the phase folders (active and archived) and the events."""
+    """({slice id: kind or None}) from the phase folders (active and archived; a linked checkout's evicted ones
+    through the cache) and the events."""
     kinds: dict = {}
     for root in (ACTIVE, ARCHIVED):
-        if not root.is_dir():
+        if root is ACTIVE and not root.is_dir():
             continue
-        for sj in root.glob("*/slices/*/slice.json"):
+        for sj in (root.glob("*/slices/*/slice.json") if root is ACTIVE else wf_cold.archived_glob("*/slices/*/slice.json")):
             try:
                 kinds[sj.parent.name] = read_json(sj).get("kind")
             except (OSError, ValueError):
@@ -1195,7 +1199,7 @@ def cmd_meter(args: argparse.Namespace) -> None:
     """What a phase really cost: the main thread beside its subagent spans, metered from Claude Code's
     transcripts (deduplicated, attributed to slices, priced at list price), then each slice's verdict read
     from its result.md or slice.json. Read-only; no transcripts found is one line, never a failure."""
-    events = all_events()
+    events = wf_cold.all_events()  # linked: sikstack's whole log (through the cache) and the lines not yet sent
     if args.phase is not None and not ((ACTIVE / args.phase).is_dir() or args.phase in archived_phase_ids()):
         raise SystemExit(f"meter: no such phase: {args.phase}")
     if args.slice is not None and not (ACTIVE / args.slice.split(".", 1)[0] / "slices" / args.slice).is_dir() \
@@ -1274,10 +1278,11 @@ def cmd_meter(args: argparse.Namespace) -> None:
 
 def _phase_created_records() -> list:
     """`[{id, created_at}]` of every active and archived phase: what `id_sort_key` needs to order minted ids
-    (an archived phase is read from its `phase.json`); an unreadable file is skipped."""
+    (an archived phase is read from its `phase.json`, a linked checkout's evicted one through the cache); an
+    unreadable file is skipped."""
     out = []
     for root in (ACTIVE, ARCHIVED):
-        for pj in (root.glob("*/phase.json") if root.is_dir() else []):
+        for pj in ((root.glob("*/phase.json") if root.is_dir() else []) if root is ACTIVE else wf_cold.archived_glob("*/phase.json")):
             try:
                 data = read_json(pj)
             except (OSError, ValueError):

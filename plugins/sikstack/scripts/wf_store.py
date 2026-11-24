@@ -31,6 +31,9 @@ SEAMS = {
         'agenda_index', 'agenda_links', 'agenda_read_all', 'agenda_require_item', 'rebuild_agenda_dashboard',
         'validate_agenda',
     ),
+    "wf_cold": (
+        'archived_base_dirs',
+    ),
     "wf_cloud": (
         'cloud_commits_waiting_line', 'cloud_linked', 'cloud_store_line', 'COMMITTED_AT',
     ),
@@ -1038,8 +1041,13 @@ def phase_pinned(data) -> bool:
 def archived_phase_ids() -> set:
     """Every phase id archived/ holds, from each folder's `archive_manifest.json` `phase_id`, its
     `phase.json` `id` and the `_<id>_` in the folder name (`_archive_one` writes all three): an archived
-    id is spent. An unreadable entry gives what still reads, never an error."""
+    id is spent. An unreadable entry gives what still reads, never an error. A linked checkout adds the folder
+    names sikstack holds (`archived_base_dirs`: the base's paths, no request), so an evicted archive stays spent."""
     ids = set()
+    for name in archived_base_dirs():
+        match = ARCHIVE_FOLDER_ID_RE.search(name)
+        if match:
+            ids.add(match.group(1))
     for adir in (ARCHIVED.iterdir() if ARCHIVED.is_dir() else []):
         if not adir.is_dir():
             continue
@@ -4279,7 +4287,8 @@ def _archive_one(pdir: Path, forced: bool) -> Path:
     base_name = f"{timestamp()}_{phase_id}_{slugify(phase.get('name', phase_id))}"
     archive_name = base_name
     suffix = 1
-    while (ARCHIVED / archive_name).exists():
+    held = set(archived_base_dirs())  # a linked checkout's evicted archive folders: their names are taken too
+    while (ARCHIVED / archive_name).exists() or archive_name in held:
         suffix += 1
         archive_name = f"{base_name}_{suffix}"
     dest = ARCHIVED / archive_name

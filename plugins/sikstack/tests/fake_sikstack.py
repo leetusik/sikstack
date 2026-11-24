@@ -14,6 +14,12 @@ project is 404; X-Sikstack-Checkout and X-Sikstack-Engine are required):
   (the asked paths past the page's byte budget come back in `rest`, to be asked again)
 - GET inbox -> {entries: [{id, created_at, kind, items, fields, minted_id}]}: the web's pending agenda
   changes, oldest first
+- POST search {query, prefix?, limit?} -> {head, hits: [{path, line, snippet}], truncated}, as the server's: the
+  query matched after strip and casefold, one hit per line (split on \n, 1-based), by path then line, over the live
+  records under `prefix` (a plain startswith; one trailing / allowed, else path-checked: 400); the snippet is the
+  stripped line, or a 240-character window around the first match; binary records (a NUL in the first 8 KB, or not
+  UTF-8) skipped; limit default 50, over 200 cut to 200; a query of under 2 or over 200 characters, or a limit
+  that is not a positive int, is 422
 - P4 POST commit {batch_id, command, origin, ops, events, derived, inbox} -> 200 {head, revs} or
   409 {conflicts: [...]}; ops are put / delete / move / append, applied in order, all or nothing;
   an inbox result ({id, state: applied|refused, reason, exit}) for an entry that is not pending makes the
@@ -166,6 +172,56 @@ class Store:
             files.append({"path": path, "rev": rec["rev"], "sha256": rec["sha256"], "encoding": encoding, "content": content})
             used += len(rec["content"])
         return {"files": files, "rest": rest}
+
+    def search(self, body: dict) -> tuple:
+        """(status, answer) of the search route, the server's rules (server/workspace_api.py, service.py)."""
+        query = body.get("query")
+        if not isinstance(query, str) or not 2 <= len(query.strip()) <= 200:
+            return 422, {"detail": "query must be 2 to 200 characters"}
+        prefix = body.get("prefix")
+        if prefix is None or prefix == "":
+            prefix = ""
+        elif not isinstance(prefix, str):
+            return 400, {"detail": "prefix must be a relative path prefix"}
+        else:
+            bare = prefix[:-1] if prefix.endswith("/") else prefix
+            parts = bare.split("/")
+            if not bare or len(bare) > 1024 or bare.startswith("/") or "\\" in bare or "\x00" in bare \
+                    or any(part in ("", ".", "..") for part in parts):
+                return 400, {"detail": f"prefix is not a clean relative path: {bare!r}"}
+        limit = body.get("limit")
+        if limit is None:
+            limit = 50
+        elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            return 422, {"detail": "limit must be a positive number"}
+        limit = min(limit, 200)
+        needle, hits, truncated = query.strip().casefold(), [], False
+        for path in sorted(p for p in self.records if p.startswith(prefix)):
+            rec = self.live(path)
+            if rec is None or b"\x00" in rec["content"][:8192]:
+                continue
+            try:
+                text = rec["content"].decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if needle not in text.casefold():
+                continue
+            for number, line in enumerate(text.split("\n"), start=1):
+                if needle not in line.casefold():
+                    continue
+                snippet = line.strip()
+                if len(snippet) > 240:
+                    at = max(snippet.casefold().find(needle), 0)
+                    start = max(0, min(at - (240 - len(needle)) // 2, len(snippet) - 240))
+                    snippet = snippet[start:start + 240]
+                hits.append({"path": path, "line": number, "snippet": snippet})
+                if len(hits) > limit:
+                    break
+            if len(hits) > limit:
+                truncated = True
+                del hits[limit:]
+                break
+        return 200, {"head": self.head, "hits": hits, "truncated": truncated}
 
     def commit(self, batch: dict, who: str):
         """(status, answer): all or nothing, idempotent by batch_id."""
@@ -642,6 +698,12 @@ def make_handler(store: Store, key: str, log_path: str):
                     if (self.broken or {}).get("how") == "badbase64":
                         for item in payload["files"]:
                             item.update(encoding="base64", content="not*base64")
+                elif route == "search" and method == "POST":
+                    body = self._body()
+                    entry["search"] = {k: body.get(k) for k in ("query", "prefix", "limit") if k in body}
+                    status, payload = store.search(body)
+                    if status == 200:
+                        entry["hits"] = len(payload["hits"])
                 elif route == "commit" and method == "POST":
                     entry["bytes"] = int(self.headers.get("Content-Length") or 0)
                     batch = self._body()

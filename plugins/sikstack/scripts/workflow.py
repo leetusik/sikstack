@@ -5,6 +5,7 @@ and the dispatch. `init` runs first, before the state is looked for (wf_init.py,
 The engine is flat modules beside this file, each importing only the ones listed above it:
 - wf_store.py: where the state is (the finder), paths, ids, events, phases, slices, the notebook, next, review,
   the acceptance gate, check and archive;
+- wf_cold.py: the reads of what a linked checkout keeps only in sikstack (through .sikstack/cache/), and `cold`;
 - wf_git.py: pull requests, the parallel worktrees, the repo registry and phase scope;
 - wf_design.py (design-sign), wf_agenda.py (the agenda, its threads and agenda-fold), wf_cloud.py: the named parts,
   each its own file.
@@ -107,6 +108,7 @@ if __name__ == "__main__" and sys.argv[1:2] == ["migrate"]:  # reads an old work
     raise SystemExit(with_offer(lambda: wf_migrate.migrate_main(sys.argv[2:]), sys.argv[1:]))
 
 import wf_store  # noqa: E402 -- first: it finds the workspace, or exits 2 with one line
+import wf_cold  # noqa: E402
 import wf_git  # noqa: E402
 import wf_design  # noqa: E402
 import wf_agenda  # noqa: E402
@@ -125,6 +127,9 @@ from wf_git import (  # noqa: E402
 )
 from wf_agenda import (  # noqa: E402
     add_agenda_parsers, AGENDA_ID_HELP,
+)
+from wf_cold import (  # noqa: E402
+    add_cold_parsers,
 )
 from wf_design import (  # noqa: E402
     DESIGN_API_COMMANDS, add_design_parsers,
@@ -405,6 +410,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_agenda_parsers(sub)  # agenda, agenda-*
 
     add_cloud_parsers(sub)  # link, sign-in, unlink, sync
+
+    add_cold_parsers(sub)  # cold fetch | search | status | clear
     return parser
 
 
@@ -447,7 +454,7 @@ def run(args: argparse.Namespace, tokens: list) -> int:
 
 # The seams: each module's SEAMS names what it calls in a module above it; bound here, once every module and the
 # parser exist, before any command runs.
-for _module in (wf_store, wf_git, wf_design, wf_agenda, wf_cloud):
+for _module in (wf_store, wf_cold, wf_git, wf_design, wf_agenda, wf_cloud):
     for _owner, _names in getattr(_module, "SEAMS", {}).items():
         for _name in _names:
             setattr(_module, _name, globals()[_name] if _owner == "workflow" else getattr(sys.modules[_owner], _name))

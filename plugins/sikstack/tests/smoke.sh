@@ -16,7 +16,7 @@
 #   tests/static_pins.py, less the installer's own; Test 29 is new (the finder, init, the hooks, the shipped text), and
 #   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
-#   Test 34 (the cold set in cloud mode, run after Test 23).
+#   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -524,7 +524,7 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the three named parts' own commands, 40 in all, and no
+# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 41 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
@@ -534,10 +534,10 @@ design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 
 agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-entry", "agenda-show", "agenda-merge", "agenda-fold", "agenda-edit",
           "agenda-move", "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link",
           "agenda-unlink"}  # 0.3.0: the four deferred-job verbs retired
-cloud = {"link", "sign-in", "unlink", "sync", "mark-committed"}
+cloud = {"link", "sign-in", "unlink", "sync", "mark-committed", "cold"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 40 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 40 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda and cloud parts' own, no adapter command" \
+assert len(names) == 41 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 41 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -3823,9 +3823,13 @@ elif check == "once":  # extra: a file of lines that must be in sikstack's log e
     for line in Path(extra[0]).read_text().splitlines():
         need(log_lines.count(line) == 1, f"a line is in sikstack {log_lines.count(line)} time(s): {line[:80]}")
     thin()
-elif check == "joined":  # a fresh join: the working set only, no cold path fetched or written
+elif check == "joined":  # a fresh join: the working set only on disk; its one cold read is the archived phase.json files
+    # the agenda's link holders need (the rebuild after the pull), and those land in .sikstack/cache/, never on disk
+    import re
     fetched = [p for r in R if r["path"].endswith("/fetch") for p in r.get("paths") or []]
-    need(fetched and not [p for p in fetched if cold(p)], f"the join fetched a cold path: {[p for p in fetched if cold(p)][:3]}")
+    stray = [p for p in fetched if cold(p) and not re.fullmatch(r"works/phases/archived/[^/]+/phase\.json", p)]
+    need(fetched and not stray, f"the join fetched a cold path beyond the link holders: {stray[:3]}")
+    need(all((root / "cache" / p).is_file() for p in fetched if cold(p)), "a link holder's read did not land in .sikstack/cache/")
     on_disk = [str(p.relative_to(root)) for top in ("works", "docs") for p in (root / top).rglob("*") if p.is_file()]
     need(not [p for p in on_disk if cold(p) and p != EV], f"a cold path is on the joined disk: {[p for p in on_disk if cold(p)][:3]}")
     need(not C, "the join sent a batch")
@@ -3922,7 +3926,7 @@ co_m=$(co_mark); printf '%s\n' "$COK" | co "$COB" link "$COU" > "$COW/f.txt"; co
 co "$COB" sync > "$COW/f2.txt"; co_rc2=$?; co "$COB" sync --status > "$COW/f3.txt"
 [ "$co_rc" = 0 ] && [ "$co_r" = ok ] && grep -q "^linked: joined sikstack's workspace" "$COW/f.txt" && [ -f "$COB/.sikstack/docs/current/product.md" ] \
   && [ "$co_rc2" = 0 ] && grep -qE ' here=0 differ=0 ' "$COW/f3.txt" \
-  && ok "a fresh join fetches and writes no cold path (the working set only), and sync and sync --status there list nothing" \
+  && ok "a fresh join writes no cold path to disk (the working set only; the archived phase.json files the agenda's links need are read into .sikstack/cache/), and sync and sync --status there list nothing" \
   || bad "the fresh join pulled the cold set -- rc=$co_rc/$co_rc2 $co_r / $(tail -2 "$COW/f.txt") / $(cat "$COW/f3.txt")"
 # (g) unlink restores every cold file byte-equal to sikstack's (C6); unlink --from-disk, offline, names what it cannot.
 co "$COA" unlink > "$COW/g.txt"; co_rc=$?; co_r=$(co_check "$COA/.sikstack" 0 restored)
@@ -3945,6 +3949,189 @@ PY
 if grep -rqF "$COK" "$COA" "$COB" "$CO_OUT" "$COW/fake" 2>/dev/null; then bad "the workspace key leaked into a tree, the output or the request log"; fi
 kill "$CO_PID" 2>/dev/null; wait "$CO_PID" 2>/dev/null
 echo "cold test runtime: $(( $(date +%s) - co_t0 ))s"
+
+# ---------------------------------------------------------------------------
+echo "== Test 35: the cold reads in cloud mode, against the local fake sikstack -- with every archived phase, doc version and the event log evicted, agenda and agenda-show still count an archived phase's link; section and phase scope of an evicted phase print what they did on disk; the next phase number is never an evicted one's; agenda-delete rewrites an evicted phase.json in sikstack and leaves it off the disk; meter reads the whole log; cold fetch / status / clear / search work, a tampered cached copy is fetched again, and cold search finds the same line in local mode =="
+cr_t0=$(date +%s)
+newtmp CRW; CRX="$CRW/xdg"; CRH="$CRW/h"; CR_OUT="$CRW/out.txt"; : > "$CR_OUT"; CRS_=""
+cr() { ( cd "$CRH" && XDG_CONFIG_HOME="$CRX" python3 "$(wf_entry "$1")" "$@" ) 2>&1 | tee -a "$CR_OUT"; return "${PIPESTATUS[0]}"; }
+CRA="$CRH/.sikstack"
+# Local mode: A1 linked by P1 and A2 by P2, both archived (P2, the highest number, with a slice, its result.md, a
+# topic and the meter's events); two versions of a doc, docs/index.json, a docs/reference file and a .gitignore * cache.
+{ mkhost "$CRH" && git -C "$CRA" config user.email smoke@example.invalid && git -C "$CRA" config user.name smoke \
+  && cr agenda-add --id A1-aa --title "kept item" --author person:smoke && cr agenda-add --id A2-bb --title "item to delete" --author person:smoke \
+  && cr phase new --phase P1 --name "Phase one" --objective first --agenda A1-aa && cr phase archive P1 --force \
+  && cr phase new --phase P2 --name "Phase two" --objective second --agenda A2-bb \
+  && cr slice new --phase P2 --slice P2.S1 --name probe --kind implementation --risk low \
+  && mkdir -p "$CRA/works/phases/active/P2/topics" "$CRA/docs/versions/product" "$CRA/docs/reference/cache" \
+  && printf '# P2.S1\n\n- status: done\n- summary: probe\n\nThe quick COLD fox jumped over the archived dog.\n' > "$CRA/works/phases/active/P2/slices/P2.S1/result.md" \
+  && printf '# a topic\n\n## One\n\nan agent wrote this\n' > "$CRA/works/phases/active/P2/topics/note.md" \
+  && python3 - "$CRA" "$CRW/projects/-fixture" <<'PY'
+import json, os, sys
+root, proj = sys.argv[1], sys.argv[2]
+with open(os.path.join(root, "works", "events.jsonl"), "a") as f:
+    for ts, old, new in (("2026-01-01T10:00:00+00:00", "todo", "in_progress"), ("2026-01-01T11:00:00+00:00", "in_progress", "done")):
+        f.write(json.dumps({"ts": ts, "type": "slice_status_changed", "slice": "P2.S1", "old_status": old, "new_status": new}) + "\n")
+os.makedirs(proj)
+rows = [{"type": "user", "timestamp": "2026-01-01T10:29:00.000Z", "message": {"role": "user", "content": "go"}},
+        {"type": "assistant", "timestamp": "2026-01-01T10:30:00.000Z", "message": {"id": "m1", "model": "claude-opus-5-5", "content": [],
+         "stop_reason": "end_turn", "usage": {"input_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 50}}}]
+open(os.path.join(proj, "sess1.jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+  } > "$CRW/setup.txt" 2>&1 && cr phase archive P2 --force > "$CRW/setup2.txt" 2>&1 \
+  && { printf '# product v0001\n' > "$CRA/docs/versions/product/v0001_first.md"; printf '# product v0002 cold\n' > "$CRA/docs/versions/product/v0002_cold.md"
+       printf '{"docs": {"product": {"latest": "v0002_cold", "current_path": "docs/current/product.md", "versions": [{"id": "v0001_first", "path": "docs/versions/product/v0001_first.md"}, {"id": "v0002_cold", "path": "docs/versions/product/v0002_cold.md"}]}}}\n' > "$CRA/docs/index.json"
+       printf 'reference one\n' > "$CRA/docs/reference/one.md"; printf '*\n' > "$CRA/docs/reference/cache/.gitignore"; printf 'a local cache\n' > "$CRA/docs/reference/cache/blob.txt"; } \
+  || bad "cold reads probe: the setup failed -- $(tail -3 "$CRW/setup.txt") $(cat "$CRW/setup2.txt" 2>/dev/null)"
+# cr_reads <tag>: the reads C1 and C2 compare, each command's output and exit in <tag>.<n>.txt.
+cr_reads() { local i=0 c; for c in "agenda" "agenda-show A1" "agenda-show A2" "section P2" "section P2 Objective" "section P2 --topic note" "section P1 Now" "phase scope P2" "check --no-rebuild"; do
+  i=$((i + 1)); # shellcheck disable=SC2086
+  cr $c > "$CRW/$1.$i.txt"; echo "exit=$?" >> "$CRW/$1.$i.txt"; done; }
+cr_same() { local i bad=""; for i in 1 2 3 4 5 6 7 8 9; do cmp -s "$CRW/$1.$i.txt" "$CRW/$2.$i.txt" || bad="$bad [$i: $(diff "$CRW/$1.$i.txt" "$CRW/$2.$i.txt" | head -4 | tr '\n' ' ')]"; done; printf '%s' "$bad"; }
+cr_reads local
+cr meter --phase P2 --json --transcripts "$CRW/projects/-fixture" > "$CRW/meter.local.json"; cr_mrc=$?
+cr cold search "quick cold fox" > "$CRW/search.local.txt"; cr_src=$?
+git -C "$CRA" add -A >/dev/null 2>&1; git -C "$CRA" commit -qm setup >/dev/null 2>&1
+[ "$(grep -c '(1 of 1 phase done)' "$CRW/local.1.txt")" = 2 ] || bad "cold reads probe: the local agenda does not count both archived links -- $(head -5 "$CRW/local.1.txt")"
+[ "$cr_mrc" = 0 ] && [ "$cr_src" = 0 ] && grep -q 'result.md:6: \[P2\] The quick COLD fox' "$CRW/search.local.txt" \
+  && ok "cold search in local mode scans the disk by sikstack's rules: an archived result.md's line, its path, line and phase ($(head -1 "$CRW/search.local.txt" | cut -c1-60)...)" \
+  || bad "cold search in local mode wrong -- rc=$cr_mrc/$cr_src $(cat "$CRW/search.local.txt")"
+# The link: everything goes up, then the cold set leaves the disk.
+CRK="cold-reads-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$CRK" > "$CRW/key"; chmod 600 "$CRW/key"
+python3 "$REPO_ROOT/tests/fake_sikstack.py" --dir "$CRW/fake" --port-file "$CRW/port" --key-file "$CRW/key" \
+  --project proj-1 --org org-1 --lifetime 900 > "$CRW/fake.txt" 2>&1 &
+CR_PID=$!
+for _ in $(seq 1 100); do [ -s "$CRW/port" ] && break; sleep 0.1; done
+CRS_="http://127.0.0.1:$(cat "$CRW/port" 2>/dev/null)"
+cr_mark() { if [ -f "$CRW/fake/requests.jsonl" ]; then grep -c '' "$CRW/fake/requests.jsonl"; else echo 0; fi; }
+# cr_py <check> [args]: one named assertion over the fake (its records and the requests since a mark) and the checkout.
+cr_py() { python3 - "$CRW/fake/requests.jsonl" "$CRS_" "$CRA" "$@" <<'PY'
+import base64, hashlib, http.client, json, os, stat, sys
+from pathlib import Path
+from urllib.parse import urlparse, quote
+log, server, root, check, extra = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4], sys.argv[5:]
+u = urlparse(server)
+def get(path):
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    conn.request("GET", path)
+    return json.loads(conn.getresponse().read())
+S = get("/_fake/state")
+live = {p: f for p, f in S["files"].items() if not f["deleted"]}
+def cloud(p):
+    return base64.b64decode(get("/_fake/file?path=" + quote(p))["content"])
+def need(cond, why):
+    if not cond:
+        print(why)
+        sys.exit(1)
+def since(mark):
+    lines = Path(log).read_text().splitlines() if Path(log).exists() else []
+    return [json.loads(l) for l in lines[int(mark):]]
+arch = lambda pid: sorted(p for p in live if p.startswith("works/phases/archived/") and f"_{pid}_" in p)
+if check == "thin":  # every archived file, doc version, docs/index.json and docs/reference file is off the disk
+    cold = [p for p in live if p.startswith(("works/phases/archived/", "docs/versions/", "docs/reference/")) or p == "docs/index.json"]
+    need(len(cold) >= 12, f"too few cold records in sikstack: {len(cold)}")
+    need(not [p for p in cold if (root / p).exists()], f"cold files left on disk: {[p for p in cold if (root / p).exists()][:3]}")
+    need((root / "docs/reference/cache/blob.txt").is_file(), "the .gitignore * cache left the disk")
+    need((root / "works/events.jsonl").read_bytes() == b"", "the event log on disk is not thin")
+    print(f"ok {len(cold)}")
+    sys.exit(0)
+elif check == "rev":  # extra: phase id; the rev of its archived phase.json
+    print(live[[p for p in arch(extra[0]) if p.endswith("/phase.json")][0]]["rev"])
+    sys.exit(0)
+elif check == "folder":  # extra: printed folder, phase id: the cache copy is sikstack's folder, byte for byte, read-only
+    folder, pid = Path(extra[0]), extra[1]
+    files = arch(pid)
+    prefix = files[0].split("/")[3]
+    need(str(folder).endswith("/.sikstack/cache/works/phases/archived/" + prefix), f"not the cache folder: {folder}")
+    got = sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file())
+    want = sorted(p.split("/", 4)[4] for p in files)
+    need(got == want, f"the cache folder holds {got}, sikstack {want}")
+    for p in files:
+        here = folder / p.split("/", 4)[4]
+        need(here.read_bytes() == cloud(p), f"{p}: the cache copy differs from sikstack's")
+        need(not (here.stat().st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)), f"{p}: the cache copy is writable")
+    print(f"ok {len(files)}")
+    sys.exit(0)
+elif check == "file":  # extra: printed path, record path: the cache copy equals sikstack's record
+    need(extra[0].endswith("/.sikstack/cache/" + extra[1]) and Path(extra[0]).read_bytes() == cloud(extra[1]),
+         f"{extra[0]} is not sikstack's {extra[1]}")
+elif check == "refetched":  # extra: mark, cache path, record path: fetched again since mark, now sikstack's bytes
+    asked = [p for r in since(extra[0]) if r["path"].endswith("/fetch") for p in r.get("paths") or []]
+    need(extra[2] in asked, f"{extra[2]} was not fetched again: {asked[:4]}")
+    need(Path(extra[1]).read_bytes() == cloud(extra[2]), "the cache copy is not sikstack's bytes")
+elif check == "deleted":  # extra: the rev before: P2's phase.json lost its link in sikstack, at a new rev, off the disk
+    p = [x for x in arch("P2") if x.endswith("/phase.json")][0]
+    data = json.loads(cloud(p))
+    need("agenda" not in data and data.get("id") == "P2", f"sikstack's P2 phase.json still links: {data.get('agenda')}")
+    need(live[p]["rev"] > int(extra[0]), f"P2's phase.json rev did not move: {live[p]['rev']}")
+    need(not (root / p).exists() and not list((root / "works/phases").glob("archived/*_P2_*")), "P2's archived folder is on disk after the command")
+    base = json.loads((root / ".hi2vi/base.json").read_text())
+    need(base["files"][p]["sha256"] == live[p]["sha256"] and not (root / ".hi2vi/journal.json").exists(), "the base does not hold the new P2 phase.json")
+    puts = [op for r in since(extra[1]) if r["path"].endswith("/commit") for op in r["batch"]["ops"] if op.get("path") == p]
+    need(puts and puts[0]["op"] == "put" and puts[0]["base_rev"] == int(extra[0]), f"not a put on the base's rev: {puts}")
+print("ok")
+PY
+}
+cr_m=$(cr_mark); printf '%s\n' "$CRK" | cr link "$CRS_/projects/proj-1" > "$CRW/link.txt"; cr_rc=$?; cr_r=$(cr_py thin)
+[ "$cr_rc" = 0 ] && [ "${cr_r%% *}" = ok ] || bad "cold reads probe: the link did not thin the disk -- rc=$cr_rc $cr_r / $(tail -3 "$CRW/link.txt")"
+# C8: meter reads sikstack's log and the evicted slice through the cache, and prints what local mode printed.
+cr meter --phase P2 --json --transcripts "$CRW/projects/-fixture" > "$CRW/meter.cloud.json"; cr_rc=$?
+[ "$cr_rc" = 0 ] && cmp -s "$CRW/meter.local.json" "$CRW/meter.cloud.json" && grep -q '"P2.S1"' "$CRW/meter.cloud.json" \
+  && ok "meter --phase in cloud mode, with the event log and the archived phase off the disk, prints exactly what local mode printed (the same slice rows, its main thread attributed by the log's window)" \
+  || bad "meter in cloud mode differs from local mode -- rc=$cr_rc $(diff "$CRW/meter.local.json" "$CRW/meter.cloud.json" | head -6 | tr '\n' ' ')"
+# C1, C2: the reads print what they printed on disk.
+cr_reads cloud; cr_d=$(cr_same local cloud)
+[ -z "$cr_d" ] \
+  && ok "with every archived phase evicted: agenda still counts each item's archived link ($(grep -c '(1 of 1 phase done)' "$CRW/cloud.1.txt") items at 1 of 1 phase done), agenda-show lists them, section (index, a section, a topic) and phase scope of an evicted phase and check print exactly what they printed on disk" \
+  || bad "a read of an evicted phase differs from the disk's --$cr_d"
+# C6: a tampered cached copy is never read: it is fetched again (a link holder and a section's folder).
+cr_p1=$(ls "$CRA"/cache/works/phases/archived/*_P1_*/phase.json 2>/dev/null | head -1); cr_p2=$(ls "$CRA"/cache/works/phases/archived/*_P2_*/phase.md 2>/dev/null | head -1)
+chmod u+w "$cr_p1" "$cr_p2" 2>/dev/null; printf '{"id": "P1", "agenda": "A9-zz"}\n' > "$cr_p1"; printf '## Objective\n\ntampered\n' > "$cr_p2"
+cr_m=$(cr_mark); cr agenda > "$CRW/t1.txt"; echo "exit=$?" >> "$CRW/t1.txt"; cr section P2 Objective > "$CRW/t2.txt"; echo "exit=$?" >> "$CRW/t2.txt"
+cr_r1=$(cr_py refetched "$cr_m" "$cr_p1" "${cr_p1#"$CRA"/cache/}"); cr_r2=$(cr_py refetched "$cr_m" "$cr_p2" "${cr_p2#"$CRA"/cache/}")
+[ -n "$cr_p1" ] && [ -n "$cr_p2" ] && cmp -s "$CRW/local.1.txt" "$CRW/t1.txt" && cmp -s "$CRW/local.5.txt" "$CRW/t2.txt" && [ "$cr_r1" = ok ] && [ "$cr_r2" = ok ] \
+  && ok "a tampered cached copy (a link holder's phase.json, an evicted phase.md) is never read: the layer fetches it again, checks it against the base, and agenda and section print what the disk printed" \
+  || bad "a tampered cache copy was read -- $cr_r1 / $cr_r2 / $(diff "$CRW/local.1.txt" "$CRW/t1.txt" | head -3 | tr '\n' ' ') / $(diff "$CRW/local.5.txt" "$CRW/t2.txt" | head -3 | tr '\n' ' ')"
+# C7: cold search finds the same line through sikstack's search route.
+cr_m=$(cr_mark); cr cold search "quick cold fox" > "$CRW/search.cloud.txt"; cr_rc=$?
+cr_searched=$(tail -n +"$((cr_m + 1))" "$CRW/fake/requests.jsonl" | grep -c '"/api/workspace/proj-1/search"')
+[ "$cr_rc" = 0 ] && cmp -s "$CRW/search.local.txt" "$CRW/search.cloud.txt" && [ "$cr_searched" = 1 ] \
+  && ok "cold search in cloud mode asks sikstack's search route once and prints the evicted result.md's line exactly as local mode found it on disk (path, line, [P2], snippet)" \
+  || bad "cold search in cloud mode wrong -- rc=$cr_rc searched=$cr_searched $(cat "$CRW/search.cloud.txt")"
+cr cold search "a" > "$CRW/s2.txt" 2>&1; cr_rc=$?; cr cold search "phase" --limit 1 > "$CRW/s3.txt"; cr_rc2=$?
+[ "$cr_rc" = 1 ] && grep -q '2 to 200 characters' "$CRW/s2.txt" && [ "$cr_rc2" = 0 ] && [ "$(grep -c '' "$CRW/s3.txt")" = 2 ] && grep -q '^truncated: the first 1 hit' "$CRW/s3.txt" \
+  && ok "cold search refuses a one-character text in one line, and a cut answer ends with its truncated line" \
+  || bad "cold search's refusal or truncated line wrong -- rc=$cr_rc/$cr_rc2 $(cat "$CRW/s2.txt" "$CRW/s3.txt")"
+# C5: cold fetch, status and clear.
+cr cold clear > /dev/null; cr cold fetch 2 > "$CRW/f1.txt"; cr_rc=$?; cr_r=$(cr_py folder "$(head -1 "$CRW/f1.txt")" P2)
+cr cold fetch product@v0001 > "$CRW/f2.txt"; cr_rc2=$?; cr_r2=$(cr_py file "$(head -1 "$CRW/f2.txt")" docs/versions/product/v0001_first.md)
+cr cold fetch product > "$CRW/f3.txt"; cr_rc3=$?; cr_r3=$(cr_py file "$(head -1 "$CRW/f3.txt")" docs/versions/product/v0002_cold.md)
+[ "$cr_rc" = 0 ] && [ "${cr_r%% *}" = ok ] && grep -q '^cold fetch: [0-9]* file(s) under .sikstack/cache/, read-only' "$CRW/f1.txt" && [ "$cr_rc2" = 0 ] && [ "$cr_r2" = ok ] \
+  && [ "$cr_rc3" = 0 ] && [ "$cr_r3" = ok ] && [ -z "$(git -C "$CRA" status --porcelain | grep 'cache')" ] \
+  && ok "cold fetch 2 brings P2's whole archived folder into .sikstack/cache/ byte-equal to sikstack's and read-only (${cr_r#ok } files); product@v0001 brings that version and product the latest (through docs/index.json); git never sees the cache" \
+  || bad "cold fetch wrong -- rc=$cr_rc/$cr_rc2/$cr_rc3 $cr_r / $cr_r2 / $cr_r3 / $(cat "$CRW/f1.txt" "$CRW/f2.txt" "$CRW/f3.txt" | tr '\n' ' ')"
+printf 'new here\n' > "$CRA/docs/reference/new.md"
+cr cold status > "$CRW/st.txt"; cr_rc=$?; cr cold clear > "$CRW/cl.txt"; cr_rc2=$?
+[ "$cr_rc" = 0 ] && grep -qE '^works/phases/archived/ [0-9]+ in sikstack: [0-9]+ evicted, 0 on disk' "$CRW/st.txt" \
+  && grep -qF '  docs/reference/cache/ 2 file(s), 16 B (.gitignore *: never synced)' "$CRW/st.txt" \
+  && grep -qF '  docs/reference/new.md 1 file(s), 9 B (not in sikstack)' "$CRW/st.txt" && grep -qE '^cache: [1-9][0-9]* file' "$CRW/st.txt" \
+  && [ "$cr_rc2" = 0 ] && grep -q '^cold clear: removed [1-9]' "$CRW/cl.txt" && [ -z "$(find "$CRA/cache" -type f 2>/dev/null)" ] \
+  && ok "cold status lists the cold paths by prefix (evicted, on disk), the cache, a .gitignore * cache and a file sikstack lacks under docs/reference/; cold clear empties the cache" \
+  || bad "cold status or clear wrong -- rc=$cr_rc/$cr_rc2 $(cat "$CRW/st.txt" "$CRW/cl.txt" | tr '\n' '|')"
+# C3: the highest number was P2's, archived and evicted: the next phase is P3.
+cr phase new --name Three --objective third > "$CRW/n.txt"; cr_rc=$?
+[ "$cr_rc" = 0 ] && grep -qE 'P3-[0-9a-z]{2}' "$CRW/n.txt" \
+  && ok "with P2 (the highest number) archived and evicted, phase new mints P3, never an evicted phase's number ($(grep -oE 'P[0-9]+-[0-9a-z]{2}' "$CRW/n.txt" | head -1))" \
+  || bad "phase new reused an evicted number -- rc=$cr_rc $(cat "$CRW/n.txt")"
+# C4: agenda-delete of an item an evicted phase links: that phase.json is rewritten in sikstack, then off the disk.
+cr_rev=$(cr_py rev P2); cr_m=$(cr_mark); cr agenda-delete A2 > "$CRW/del.txt"; cr_rc=$?; cr_r=$(cr_py deleted "$cr_rev" "$cr_m")
+[ "$cr_rc" = 0 ] && grep -q '^deleted A2-bb: 1 link cleared' "$CRW/del.txt" && [ "$cr_r" = ok ] \
+  && ok "agenda-delete of an item an evicted phase links rewrites that phase.json in sikstack (a put on the base's rev r$cr_rev, the agenda key gone) and the file is off the disk again after the command" \
+  || bad "agenda-delete did not reach the evicted phase.json -- rc=$cr_rc $cr_r / $(cat "$CRW/del.txt")"
+if grep -rqF "$CRK" "$CRH" "$CR_OUT" "$CRW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
+kill "$CR_PID" 2>/dev/null; wait "$CR_PID" 2>/dev/null
+echo "cold reads test runtime: $(( $(date +%s) - cr_t0 ))s"
 
 # ---------------------------------------------------------------------------
 echo "== Test 24: the web's agenda inbox, applied by a linked engine against the local fake sikstack -- at next and sync, entries oldest first, each run in-process as its agenda command: exit 0 applied, each in a batch of its own with exactly the files its command wrote; a refusal's one line sent verbatim with exit 1, a usage error's with exit 2; a brief id refused unrun with nothing written; an entry another checkout applied first is a 409, its change dropped here and sikstack's copy pulled, never applied twice; a crash inside a command leaves the entry pending and the tree as it was; a delete clears its links in the same batch; the applier never deadlocks on .hi2vi/lock =="
