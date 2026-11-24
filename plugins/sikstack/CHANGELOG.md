@@ -23,9 +23,15 @@ integer version per release, `## v<N>` below; that history continues here.
 - **`agenda-merge <into> <from…>`** moves every entry and phase link onto the first item and drops each other one
   as `merged into <into>`; all or none.
 - **`agenda-fold`** carries an install's deferred jobs onto the agenda once: each open job becomes a Proposed item
-  (or an entry on the item it was linked to) whose first entry carries its id, title, source, reason, trigger,
-  created date and its brief when edited; every job leaves one `deferred_folded` event; `works/deferred/` and
-  `works/deferred.md` go. A second run has nothing to fold. While open jobs remain, `check` fails naming it.
+  whose first entry carries its id, title, source, reason, trigger, created date and its brief when edited. A job
+  linked to an Open, In progress, Proposed or Deferred item is an entry on that item instead (a Deferred item stays
+  Deferred and `agenda` lists it); one linked to a Solved or Dropped item, or to no item, becomes its own Proposed
+  item whose entry says `was linked to <item> (Solved)`, so no open job ends on a closed item. Every job leaves one
+  `deferred_folded` event; `works/deferred/` and `works/deferred.md` go. A second run has nothing to fold. The fold
+  runs only on the default checkout: on another branch, a parallel stream's branch or a linked worktree it refuses in
+  one line naming the default checkout and writes nothing, since a second fold would mint a second set of ids for
+  the same jobs. While open jobs remain, `check` fails naming it on the default checkout, and warns elsewhere where
+  to run it.
 - **Removed:** `defer-job`, `deferred`, `promote-deferred` and `drop-deferred` (each now refuses in one line pointing
   at the agenda), their skills, the deferred dashboard and counts, and `agenda-link/unlink --deferred`.
   `works/agenda.md`, `index.json` and `backlog.md` show Proposed apart and each item's entry count and latest entry
@@ -36,9 +42,12 @@ integer version per release, `## v<N>` below; that history continues here.
   and the phase template.
 - The web inbox maps `entry` and `accept` (dormant until the server sends them); its `add` passes the web's writer
   (`person:web`), so a web add stays Open at once.
-- **Migration notes:** install 3.0.0, run `sikstack agenda-fold` once in each workspace (until then `check` fails
-  while open deferred jobs remain), then triage the Proposed items: `agenda-accept`, `agenda-merge` or `agenda-drop
-  --reason`. Scripts calling `agenda-add` add `--author`.
+- **Migration notes:** install 3.0.0, run `sikstack agenda-fold` in each workspace once, on the default checkout (on
+  the default branch, not in a phase's worktree or on its branch; until then `check` fails there while open
+  deferred jobs remain; a phase branch drops `works/deferred/` when it merges the default branch), then triage the
+  Proposed items: `agenda-accept`, `agenda-merge` or `agenda-drop --reason`. A job that was linked to a Deferred
+  item is an entry on it and stays Deferred: reopen the item to take it up. Scripts calling `agenda-add` add
+  `--author`.
 
 ## 2.1.0 — 2026-11-23
 

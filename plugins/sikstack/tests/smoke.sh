@@ -1238,6 +1238,98 @@ PY
   && [ "$(fd agenda 2>&1 | grep -c ' Proposed ')" = 2 ] \
   && ok "before the fold check fails naming agenda-fold (3 open jobs); agenda-fold makes one Proposed item per open job (the linked one an entry on its item), each first entry carrying the job's id, title, reason, trigger, source, created date and its brief when edited; 5 deferred_folded events; works/deferred/ and deferred.md gone; a second run folds nothing" \
   || bad "agenda-fold wrong -- rc=$fc_rc/$ff_rc/$ff2_rc/$fc2_rc $fr / $(printf '%s\n' "$fc" | grep -i defer) / $(printf '%s\n' "$ff" | head -1) / $ff2"
+# (f2) every open job lands in an active view: a job linked to a Solved or Dropped item (or to no item) becomes a
+# Proposed item whose first entry names the old link; one linked to an Open or a Deferred item is an entry on it,
+# and the Deferred item stays listed by `agenda`; the closed items take no entry.
+newtmp FSW; FS="$FSW/ws"; mkws FS >/dev/null 2>&1 || bad "fold-status probe: fresh install failed"
+fs() { ( cd "$FS" && python3 "$ENG" "$@" ); }
+fs_add() { fs agenda-add --title "$1" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p'; }
+fso=$(fs_add "open item"); fss=$(fs_add "solved item"); fsd=$(fs_add "dropped item"); fsf=$(fs_add "deferred item")
+{ fs agenda-solve "$fss" && fs agenda-drop "$fsd" --reason stale && fs agenda-defer "$fsf"; } >/dev/null 2>&1 || bad "fold-status probe: could not close the items"
+python3 - "$FS/works" "$fso" "$fss" "$fsd" "$fsf" <<'PY'
+import json, os, sys
+works, links = sys.argv[1], dict(zip(("open", "solved", "dropped", "deferred", "gone"), sys.argv[2:] + ["A9-zz"]))
+for word, aid in links.items():
+    d = os.path.join(works, "deferred", "open", f"D-{word}"); os.makedirs(d)
+    json.dump({"id": f"D-{word}", "title": f"job on {word}", "status": "deferred", "source": "P4", "reason": "why",
+               "trigger": "when", "created_at": "2026-10-01T09:00:00+09:00", "promoted_to": None, "dropped_reason": None,
+               "agenda": aid}, open(os.path.join(d, "deferred.json"), "w"), indent=2)
+PY
+fsf_out=$(fs agenda-fold 2>&1); fsf_rc=$?; fsc=$(fs check 2>&1); fsc_rc=$?; fsl=$(fs agenda 2>&1)
+fsr=$(python3 - "$FS/works" "$fso" "$fss" "$fsd" "$fsf" <<'PY'
+import json, os, sys, glob
+works, (o, s, d, f) = sys.argv[1], sys.argv[2:]
+entries = {}
+for p in glob.glob(os.path.join(works, "agenda", "*", "entries", "*.json")):
+    e = json.load(open(p)); entries[e["job"]["id"]] = (os.path.basename(os.path.dirname(os.path.dirname(p))), e)
+item = lambda aid: json.load(open(os.path.join(works, "agenda", aid, "agenda.json")))
+page = open(os.path.join(works, "agenda.md")).read()
+bad = []
+if sorted(entries) != ["D-deferred", "D-dropped", "D-gone", "D-open", "D-solved"]: bad.append(f"jobs {sorted(entries)}")
+for did, want in (("D-open", o), ("D-deferred", f)):
+    if entries.get(did, (None,))[0] != want: bad.append(f"{did} not an entry on {want}")
+for did, old, word in (("D-solved", s, "Solved"), ("D-dropped", d, "Dropped"), ("D-gone", "A9-zz", "no such item")):
+    aid, e = entries.get(did, (None, {}))
+    if aid in (o, s, d, f) or aid is None or (item(aid).get("proposed") or {}).get("by") != "agent:fold":
+        bad.append(f"{did} landed on {aid}, not a new Proposed item")
+    elif f"was linked to {old} ({word})" not in e["body"] or e["job"].get("agenda") != old or f"job on {did[2:]}" not in page:
+        bad.append(f"{did} does not name its old link {old} ({word}) or is not on agenda.md")
+for closed in (s, d):
+    if os.path.isdir(os.path.join(works, "agenda", closed, "entries")): bad.append(f"{closed} took an entry")
+print("; ".join(bad) or "ok")
+PY
+)
+[ "$fsf_rc" -eq 0 ] && printf '%s\n' "$fsf_out" | head -1 | grep -qx 'folded 5 open jobs into the agenda (3 new Proposed items, 2 entries on linked items); 0 closed jobs left with a deferred_folded event; works/deferred/ removed' \
+  && printf '%s\n' "$fsf_out" | grep -qE "^D-solved -> A[^ ]+ \(Proposed; was linked to $fss \(Solved\)\)$" \
+  && printf '%s\n' "$fsf_out" | grep -qE "^D-dropped -> A[^ ]+ \(Proposed; was linked to $fsd \(Dropped\)\)$" \
+  && printf '%s\n' "$fsf_out" | grep -qx "D-deferred -> $fsf (its linked item, Deferred)" \
+  && printf '%s\n' "$fsf_out" | grep -qx "D-open -> $fso (its linked item, Open)" \
+  && [ "$fsr" = ok ] && [ "$fsc_rc" -eq 0 ] && printf '%s\n' "$fsl" | grep -qE "^$fsf +Deferred +deferred item +\(1 entry\)$" \
+  && [ "$(printf '%s\n' "$fsl" | grep -c ' Proposed ')" = 3 ] \
+  && ok "agenda-fold lands every open job in an active view: linked to Solved, Dropped or no item it is a new Proposed item naming the old link; linked to Open or Deferred it is an entry there, and agenda lists the Deferred item" \
+  || bad "agenda-fold left a job outside the active views -- rc=$fsf_rc/$fsc_rc $fsr / $(printf '%s\n' "$fsf_out" | tr '\n' '|') / $(printf '%s\n' "$fsl" | tr '\n' '|')"
+# (f3) the fold runs once, on the default checkout: on another branch, on a parallel stream's branch and in a linked
+# worktree it refuses in one line naming the default checkout and writes nothing, and check there says where to run
+# it; on the default checkout it folds, once.
+newtmp FWW; FWH="$FWW/host"; FW="$FWH"; mkws FW >/dev/null 2>&1 || bad "fold-stream probe: fresh install failed"
+fw() { ( cd "$FW" && python3 "$ENG" "$@" ); }
+fw_tree() { ( cd "$1" && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
+python3 - "$FW/works" <<'PY'
+import json, os, sys
+d = os.path.join(sys.argv[1], "deferred", "open", "D1-ab"); os.makedirs(d)
+json.dump({"id": "D1-ab", "title": "one job", "status": "deferred", "source": "P4", "reason": "why", "trigger": "when",
+           "created_at": "2026-10-01T09:00:00+09:00"}, open(os.path.join(d, "deferred.json"), "w"), indent=2)
+PY
+( fw phase new --phase P1 --name Side --objective toy && cd "$FW" && git add -A && git commit -qm jobs ) >/dev/null 2>&1 || bad "fold-stream probe: could not commit the job"
+fw_refused() {  # <label> <dir to run in> <expected reason, a grep -E pattern>
+  local _t1 _t2 _out _rc _chk
+  _t1=$(fw_tree "$2"); _out=$( cd "$2" && python3 "$ENG" agenda-fold 2>&1 ); _rc=$?; _t2=$(fw_tree "$2")
+  _chk=$( cd "$2" && python3 "$ENG" check 2>&1 ); ( cd "$2" && git reset -q --hard && git clean -qfd ) >/dev/null 2>&1  # each case starts clean
+  [ "$_rc" -eq 1 ] && [ "$(printf '%s\n' "$_out" | grep -c '')" = 1 ] && [ "$_t1" = "$_t2" ] \
+    && printf '%s\n' "$_out" | grep -qE "^agenda-fold refused, nothing was written: $3; the fold runs once, on the default checkout \(.*branch main\)" \
+    && printf '%s\n' "$_chk" | grep -qE 'run sikstack agenda-fold once, on the default checkout \(.*branch main\), never here' \
+    && ok "agenda-fold on $1 refuses in one line naming the default checkout and writes nothing; check there says where to run it" \
+    || bad "agenda-fold on $1 did not refuse cleanly -- rc=$_rc $_out / $(printf '%s\n' "$_chk" | grep agenda-fold) / $(diff <(echo "$_t1") <(echo "$_t2") | head -3)"
+}
+git -C "$FW" checkout -q -b side
+fw_refused "a branch other than the default" "$FW" "this checkout is on branch side, not the default branch main"
+git -C "$FW" checkout -q main
+python3 - "$FW/works/phases/active/P1/phase.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["execution"] = {"mode": "parallel", "branch": "phase/P1-side", "worktree": None}
+open(sys.argv[1], "w").write(json.dumps(d, indent=2) + "\n")
+PY
+( cd "$FW" && git add -A && git commit -qm stamp && git checkout -q -b phase/P1-side ) >/dev/null 2>&1 || bad "fold-stream probe: could not stamp the stream"
+fw_refused "a parallel stream's branch" "$FW" "this checkout is the parallel stream phase/P1-side"
+git -C "$FW" checkout -q main
+git -C "$FWH" worktree add -q --detach "$FWW/hwt" >/dev/null 2>&1 && git -C "$FW" worktree add -q --detach "$FWW/hwt/.sikstack" >/dev/null 2>&1 \
+  || bad "fold-stream probe: could not add the linked worktrees"
+fw_refused "a linked worktree" "$FWW/hwt/.sikstack" "this checkout is a linked worktree, not the default checkout"
+fwf=$(fw agenda-fold 2>&1); fwf_rc=$?; fwf2=$(fw agenda-fold 2>&1)
+[ "$fwf_rc" -eq 0 ] && printf '%s\n' "$fwf" | head -1 | grep -q '^folded 1 open job into the agenda (1 new Proposed item, ' \
+  && [ "$fwf2" = "nothing to fold: works/deferred/ is gone" ] \
+  && ok "on the default checkout agenda-fold folds the job once; a second run has nothing to fold" \
+  || bad "agenda-fold on the default checkout wrong -- rc=$fwf_rc $fwf / $fwf2"
 # (g) two clones each add an entry to one item: no truth file conflicts (each entry is its own new file), the
 # generated files are regenerated by check, and both entries are on the merged item.
 newtmp TGW; TG="$TGW/ws"; mkws TG >/dev/null 2>&1 || bad "two-clone probe: fresh install failed"

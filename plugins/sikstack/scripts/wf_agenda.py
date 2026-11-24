@@ -16,7 +16,7 @@ from wf_store import (  # noqa: E402
     _default_checkout_root, _git, _git_available, _ls_tree, _one_line_usage_errors, _phase_json_at_ref, _repo_prefix,
     _rev_parse, ACTIVE, AGENDA, agenda_folder_ids, AGENDA_ID_RE, AGENDA_KEYS, AGENDA_SHOWN, AGENDA_STATUSES,
     AGENDA_TITLE_MAX, AGENDA_TITLE_REFUSAL, all_active_phases, append_event, ARCHIVE_FOLDER_ID_RE, ARCHIVED,
-    archived_phase_ids, clean_cell, current_stream, HOST_ROOT, id_sort_key, ID_TOKEN_ALPHABET, ID_TOKEN_PATTERN,
+    archived_phase_ids, clean_cell, current_stream, git_current_branch, HOST_ROOT, id_sort_key, ID_TOKEN_ALPHABET, ID_TOKEN_PATTERN,
     MAIN_HOST, mint_id, NESTED, now_iso, PHASE_ARG_HELP, PHASE_ID_RE, phase_dirs, phase_execution, phase_in_flight,
     read_json, rebuild_index_and_state, ROOT, shown, SLICE_ID_RE, WORKFLOW_CMD, WORKS, write_json, write_text,
 )
@@ -1009,11 +1009,15 @@ def agenda_merge(args: argparse.Namespace) -> None:
 
 
 # The fold (P72): 3.0.0 retired deferred jobs, so an older install's works/deferred/ is carried onto the agenda once,
-# by agenda-fold, for any install. Each open job becomes its own Proposed item (or, linked to an item that exists,
-# an entry on that item), whose first entry (kind issue, author agent:fold) carries the job: its id, title, source,
-# reason, trigger and created date in `job` and in the body, and its brief when it differs from the brief the
-# old engine wrote. Each job, open or closed, leaves one `deferred_folded` event naming its end; then
-# works/deferred/ and works/deferred.md are removed. All or none: every job is read before the first write.
+# by agenda-fold, for any install. Each open job lands where the operator triages it, exactly once: linked to an
+# item still in an active view (Open, In progress, Proposed, or Deferred, which `agenda` lists and which the operator
+# chose to defer) it is an entry on that item; otherwise (no link, or a link to a Solved, Dropped or missing item) it
+# becomes its own Proposed item, its entry naming the old link. The first entry (kind issue, author agent:fold)
+# carries the job: its id, title, source, reason, trigger, created date (and old link) in `job` and in the body, and
+# its brief when it differs from the brief the old engine wrote. Each job, open or closed, leaves one
+# `deferred_folded` event naming its end; then works/deferred/ and works/deferred.md are removed. All or none: every
+# job is read before the first write. The fold runs only on the default checkout (`_fold_elsewhere`): a fold on
+# another branch or worktree would mint a second set of ids for the same jobs, so each would show twice after a merge.
 DEFERRED = WORKS / "deferred"
 DEFERRED_PLACES = ("open", "promoted", "dropped")
 DEFERRED_BRIEF = "# Deferred: __DEFERRED_ID__ __TITLE__\n\n## Context\n\n## Why Deferred\n\n## Trigger to Promote\n\n## Notes\n\n"
@@ -1063,14 +1067,18 @@ def _fold_brief(job: dict):
     return brief.rstrip()
 
 
-def _fold_entry(job: dict) -> tuple:
-    """`(source, body, job)`: the fold's first entry for an open job."""
+def _fold_entry(job: dict, was=None) -> tuple:
+    """`(source, body, job)`: the fold's first entry for an open job; `was` is `(link, word)` when the job was linked
+    to an item it does not land on (Solved, Dropped, or no such item), named in the body and kept in `job.agenda`."""
     data, did = job["data"], job["id"]
     raw = _fold_text(data.get("source"))
     source = (f"slice:{raw}" if SLICE_ID_RE.fullmatch(raw) else f"phase:{raw}" if PHASE_ID_RE.fullmatch(raw)
               else f"deferred:{did}")
     carried = {key: data.get(key) for key in ("title", "source", "reason", "trigger", "created_at")}
-    lines = [f"Folded from deferred job {did}, created {_fold_text(data.get('created_at')) or 'at an unrecorded time'}.",
+    if was is not None:
+        carried["agenda"] = was[0]
+    linked = f"; it was linked to {_agenda_link_shown(was[0])} ({was[1]})" if was is not None else ""
+    lines = [f"Folded from deferred job {did}, created {_fold_text(data.get('created_at')) or 'at an unrecorded time'}{linked}.",
              f"Title: {_fold_text(data.get('title'))}", f"Source: {raw}", f"Reason: {_fold_text(data.get('reason'))}",
              f"Trigger: {_fold_text(data.get('trigger'))}"]
     brief = _fold_brief(job)
@@ -1086,20 +1094,61 @@ def _fold_title(job: dict) -> str:
     return title if len(title) <= AGENDA_TITLE_MAX else title[:AGENDA_TITLE_MAX - 1] + "…"
 
 
+def _fold_default_branch():
+    """The default branch's name for the fold: origin/HEAD's target, else a local main, else a local master, else
+    None (no git, or neither resolves: the branch rule is then not applied)."""
+    proc = _git(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], check=False)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip().split("/", 1)[-1]
+    for name in ("main", "master"):
+        if _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], check=False).returncode == 0:
+            return name
+    return None
+
+
+def _fold_elsewhere():
+    """`(why, place)` when this checkout is not the default one, else None. The fold runs once, on the default
+    checkout: on a parallel stream's branch (`current_stream`, which holds in a clone too), in a linked worktree (a
+    nested install's worktree set, or a worktree of the workflow repo) or on any branch other than the default one, a
+    fold would mint its own ids for jobs the default checkout folds too. No git: one checkout, so None."""
+    if not _git_available():
+        return None
+    default = _fold_default_branch()
+    place = _agenda_default_place(default)
+    stream = current_stream(all_active_phases())
+    if stream:
+        return f"this checkout is the parallel stream {stream}", place
+    in_set = HOST_ROOT is not None and MAIN_HOST is not None and os.path.realpath(str(HOST_ROOT)) != os.path.realpath(str(MAIN_HOST))
+    if in_set or _default_checkout_root() is not None:
+        return "this checkout is a linked worktree, not the default checkout", place
+    branch = git_current_branch()
+    if branch and default and branch != default:
+        return f"this checkout is on branch {branch}, not the default branch {default}", place
+    return None
+
+
 def _validate_unfolded(errors: list, warnings: list) -> None:
     """An install from before 3.0.0 holding works/deferred/: an ERROR while it holds an open job (3.0.0 reads none,
     so the work would be lost from every view until the fold), a WARNING when only closed jobs or the old
-    works/deferred.md are left. Both name the fold."""
+    works/deferred.md are left. Both name the fold. Off the default checkout (`_fold_elsewhere`) it is one WARNING
+    naming where the fold runs: the default checkout holds the same jobs and fails there, and this checkout drops
+    works/deferred/ when it merges the default branch, so nothing here is lost and nothing here should fold."""
     if not DEFERRED.exists() and not (WORKS / "deferred.md").exists():
         return
     base = DEFERRED / "open"
     count = sum(1 for d in base.iterdir() if d.is_dir()) if base.is_dir() else 0
-    if count:
+    elsewhere = _fold_elsewhere()
+    if elsewhere is not None:
+        warnings.append(f"works/deferred/ is left from deferred jobs ({_plural(count, 'open job')}): run {WORKFLOW_CMD} "
+                        f"{ENTRY_UNFOLDED} once, on {elsewhere[1]}, never here ({elsewhere[0]}); this checkout drops "
+                        f"works/deferred/ when it merges the default branch")
+    elif count:
         errors.append(f"works/deferred/ holds {count} open deferred job{'s' if count != 1 else ''}, which 3.0.0 no longer "
-                      f"reads: run {WORKFLOW_CMD} {ENTRY_UNFOLDED} (each becomes a Proposed agenda item whose first entry carries it)")
+                      f"reads: run {WORKFLOW_CMD} {ENTRY_UNFOLDED} once, on this default checkout (each becomes a Proposed "
+                      f"agenda item, or an entry on the open or deferred item it was linked to, whose first entry carries it)")
     else:
         warnings.append(f"works/deferred/ or works/deferred.md is left from deferred jobs, with no open job: run "
-                        f"{WORKFLOW_CMD} {ENTRY_UNFOLDED} to record the closed jobs as events and remove it")
+                        f"{WORKFLOW_CMD} {ENTRY_UNFOLDED} on this default checkout to record the closed jobs as events and remove it")
 
 
 def agenda_fold(args: argparse.Namespace) -> None:
@@ -1107,29 +1156,40 @@ def agenda_fold(args: argparse.Namespace) -> None:
     if not DEFERRED.exists() and not left_page.exists():
         print("nothing to fold: works/deferred/ is gone")
         return
+    elsewhere = _fold_elsewhere()
+    if elsewhere is not None:
+        raise SystemExit(f"agenda-fold refused, nothing was written: {elsewhere[0]}; the fold runs once, on "
+                         f"{elsewhere[1]}, and this checkout drops works/deferred/ when it merges the default branch")
     jobs, problems = _deferred_left()
     if problems:
         path, why = problems[0]
         raise SystemExit(f"agenda-fold refused, nothing was written: {shown(path)} {why}: fix it by hand, or remove its "
                          f"folder, then fold again")
     every = agenda_items()  # strict: an unreadable agenda.json refuses here, before any write
+    by_id, links = {item["id"]: item for item in every}, agenda_links()
     stamp, order = now_iso(), _agenda_parked_order(every)
     folded = []
     for job in (job for job in jobs if job["place"] == "open"):
-        linked = _agenda_link_value(job["data"])
-        if linked is not None and agenda_item_exists(linked):
-            aid, new = linked, False
+        linked, was = _agenda_link_value(job["data"]), None
+        target = by_id.get(linked) if linked is not None else None
+        if target is not None and _agenda_status(target) in ("open", "deferred"):  # an active view: Open/In progress/Proposed, Deferred
+            aid, new, word = linked, False, agenda_shown_status(target, links)
         else:
+            if linked is not None:  # Solved, Dropped, an unusable status, or no such item: lands as Proposed, naming it
+                was = (linked, agenda_shown_status(target, links) if _agenda_status(target or {}) else
+                       f"status {_agenda_value_text(target.get('status'))}" if target is not None else "no such item")
+            word = None
             aid, new = mint_id("A"), True
             write_json(AGENDA / aid / "agenda.json", _agenda_record(
                 {"id": aid, "title": _fold_title(job), "note": None, "status": "open", "order": order,
                  "created_at": stamp, "changed_at": stamp, "outcome": None, "reason": None,
                  "proposed": {"by": FOLD_AUTHOR, "at": stamp}}))
             order += 1.0
-        source, body, carried = _fold_entry(job)
+        source, body, carried = _fold_entry(job, was)
         name = _entry_write(aid, "issue", FOLD_AUTHOR, source, body, stamp, {"job": carried})
-        append_event("deferred_folded", deferred=job["id"], end="agenda", agenda=aid, entry=name)
-        folded.append((job["id"], aid, new))
+        append_event("deferred_folded", deferred=job["id"], end="agenda", agenda=aid, entry=name,
+                     **({"was_linked": was[0]} if was is not None else {}))
+        folded.append((job["id"], aid, new, word, was))
     for job in (job for job in jobs if job["place"] != "open"):
         data = job["data"]
         end = ({"promoted_to": data.get("promoted_to")} if job["place"] == "promoted"
@@ -1145,8 +1205,9 @@ def agenda_fold(args: argparse.Namespace) -> None:
     print(f"folded {_plural(len(folded), 'open job')} into the agenda ({made} new Proposed item{'s' if made != 1 else ''}, "
           f"{onto} entr{'y' if onto == 1 else 'ies'} on linked items); {_plural(closed, 'closed job')} left with a "
           f"deferred_folded event; works/deferred/ removed")
-    for did, aid, new in folded:
-        print(f"{did} -> {aid}" + (" (Proposed)" if new else " (its linked item)"))
+    for did, aid, new, word, was in folded:
+        print(f"{did} -> {aid} " + (f"(its linked item, {word})" if not new else
+                                     f"(Proposed; was linked to {_agenda_link_shown(was[0])} ({was[1]}))" if was else "(Proposed)"))
 
 
 def _agenda_set_link(holder: dict, aid) -> None:
@@ -1611,7 +1672,7 @@ def add_agenda_parsers(sub) -> None:
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_merge)
 
-    p = sub.add_parser("agenda-fold", help="Carry an older install's deferred jobs onto the agenda, once: each open job becomes a Proposed item (or an entry on the item it was linked to) whose first entry carries the job, each job leaves a deferred_folded event, then works/deferred/ and works/deferred.md are removed; all or none; a second run has nothing to fold")
+    p = sub.add_parser("agenda-fold", help="Carry an older install's deferred jobs onto the agenda, once: each open job becomes a Proposed item (or an entry on the Open or Deferred item it was linked to; a job linked to a Solved or Dropped item is its own Proposed item naming that link) whose first entry carries the job, each job leaves a deferred_folded event, then works/deferred/ and works/deferred.md are removed; all or none; a second run has nothing to fold; runs only on the default checkout")
     _one_line_usage_errors(p)
     p.set_defaults(func=agenda_fold)
 
