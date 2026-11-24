@@ -502,6 +502,55 @@ def _doc_target(text: str):
     raise SystemExit(f"cold fetch: {doc} has no version {version} (its versions: {', '.join(i for i, _ in found)})")
 
 
+def _inside(path: Path) -> bool:
+    """True when `path`, with every symlink in it followed, is the workspace's works/ or docs/ or under them."""
+    try:
+        real = Path(os.path.realpath(path))
+        root = Path(os.path.realpath(ROOT))
+    except (OSError, ValueError):
+        return False
+    return any(real == top or top in real.parents for top in (root / "works", root / "docs"))
+
+
+def _named(rel: str, under=("works/", "docs/")) -> bool:
+    """The path form's rule, as text: under one of `under`, no absolute path, no backslash, no empty, `.` or `..` part."""
+    return (isinstance(rel, str) and "\\" not in rel and rel.startswith(under)
+            and not any(p in ("", ".", "..") for p in rel.split("/")))
+
+
+def _contained(rel: str, under=("works/", "docs/")) -> bool:
+    """cold fetch's one path check, for every target form: True when `rel` is a ROOT-relative POSIX path under one
+    of `under` (the path form's rule: no absolute path, no backslash, no empty, `.` or `..` part) and, on this disk,
+    it leads nowhere out of works/ or docs/: neither it, a folder above it, nor (a folder) a symlink in it resolves
+    outside them. Every path cold fetch prints, and every record it caches, is `rel` under ROOT or the cache."""
+    if not _named(rel, under):
+        return False
+    path = ROOT / rel
+    if not _inside(path):
+        return False
+    if path.is_dir():
+        for dirpath, dirnames, filenames in os.walk(str(path)):  # never follows a symlinked folder; checks it
+            for name in dirnames + filenames:
+                here = Path(dirpath) / name
+                if here.is_symlink() and not _inside(here):
+                    return False
+    return True
+
+
+def _hold(rel: str, text: str, doc: bool = False) -> str:
+    """`rel` when `_contained` holds it (a doc version: under docs/versions/), else the command's one-line refusal."""
+    if _contained(rel, ("docs/versions/",) if doc else ("works/", "docs/")):
+        return rel
+    if doc and not _contained(rel):
+        raise SystemExit(f"cold fetch: {text} resolves to a path that leaves the workspace's docs/versions/ (an "
+                         "absolute or `..` path in docs/index.json, or a symlink out): refused, nothing was read")
+    if doc:
+        raise SystemExit(f"cold fetch: docs/index.json gives {text} a path that is no doc version (not under "
+                         "docs/versions/; fetch that path itself if it is the file you want): refused, nothing was read")
+    raise SystemExit(f"cold fetch: {text} leads out of the workspace's works/ and docs/ through a symlink: refused, "
+                     "nothing was read")
+
+
 def _fetch_rel(rel: str) -> tuple:
     """(path to print, line) for a truth path or folder: on disk when nothing of it is evicted, else the cache."""
     if not linked():
@@ -534,13 +583,13 @@ def cmd_cold_fetch(args: argparse.Namespace) -> None:
         phase = _phase_target(text)
         if phase is not None:
             if (ACTIVE / phase).is_dir():
-                print(ACTIVE / phase)
+                print(ROOT / _hold(f"works/phases/active/{phase}", text))
                 print("cold fetch: on disk (an active phase; nothing was copied)")
                 return
             rel = archived_phase_dir(phase)
             held = [n for n in held_folders() if (ARCHIVE_FOLDER_ID_RE.search(n) or [None, None])[1] == phase]
             if rel is None and held:
-                print(ARCHIVED / held[-1])
+                print(ROOT / _hold(f"{ARCHIVED_REL}{held[-1]}", text))
                 print(f"cold fetch: on disk with only {HELD_MARKER}: unlink --from-disk left the files it names in "
                       "sikstack only (local mode reads only this disk; nothing was asked)")
                 return
@@ -550,11 +599,13 @@ def cmd_cold_fetch(args: argparse.Namespace) -> None:
         rel = _doc_target(text)
         if rel is None and "@" in text:
             raise SystemExit(f"cold fetch: {text.partition('@')[0]} is no doc with versions (docs/index.json, docs/versions/)")
+        if rel is not None:
+            rel = _hold(rel, text, doc=True)
     if rel is None:
         rel = _target_rel(text)
-        if not rel.startswith(("works/", "docs/")) or any(p in ("", ".", "..") for p in rel.split("/")):
+        if not _named(rel):
             raise SystemExit(f"cold fetch: {text!r} names no phase, doc or path under works/ or docs/")
-    path, line = _fetch_rel(rel)
+    path, line = _fetch_rel(_hold(rel, text))
     print(path)
     print(line)
 

@@ -28,7 +28,9 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   lines (sikstack's new search route while linked, the disk by the same rules in local mode); `cold status` names what
   is cold, cached and left on disk; `cold clear` empties the cache. The explain skill (0.19.4), the explain route,
   and the Explore agent say where history went: a record not on disk is read through `cold fetch` and
-  found with `cold search`.
+  found with `cold search`. Every path `cold fetch` prints stays under the workspace's `works/` or `docs/`: a
+  `docs/index.json` version path that is absolute, holds `..` or is not under `docs/versions/`, and a path that is
+  or holds a symlink leading out, are refused in one line, exit 1.
 - **Unlink restores everything** sikstack holds before its one commit; `unlink --from-disk` names what it cannot
   restore.
 - **`unlink --from-disk` (offline) keeps local mode working.** It writes every cold file this checkout's cache holds

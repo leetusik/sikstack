@@ -4215,6 +4215,45 @@ cr cold fetch product > "$CRW/f3.txt"; cr_rc3=$?; cr_r3=$(cr_py file "$(head -1 
   && [ "$cr_rc3" = 0 ] && [ "$cr_r3" = ok ] && [ -z "$(git -C "$CRA" status --porcelain | grep 'cache')" ] \
   && ok "cold fetch 2 brings P2's whole archived folder into .sikstack/cache/ byte-equal to sikstack's and read-only (${cr_r#ok } files); product@v0001 brings that version and product the latest (through docs/index.json); git never sees the cache" \
   || bad "cold fetch wrong -- rc=$cr_rc/$cr_rc2/$cr_rc3 $cr_r / $cr_r2 / $cr_r3 / $(cat "$CRW/f1.txt" "$CRW/f2.txt" "$CRW/f3.txt" | tr '\n' ' ')"
+# C9: every path cold fetch prints stays in the workspace. Another checkout writes docs/index.json in sikstack with
+# version paths that leave docs/ (a relative escape, an absolute path): cold fetch of either doc, bare and @version,
+# refuses in one line, exit 1, printing no path and caching nothing of it. With the good index back, product@v0001
+# still fetches sikstack's bytes.
+printf 'outside the workspace\n' > "$CRW/outside.txt"
+cr_put() { python3 - "$CRS_" "$1" "$2" <<'PY'
+import http.client, json, sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request("POST", "/_fake/write", json.dumps({"path": sys.argv[2], "content": open(sys.argv[3]).read()}), {"Content-Type": "application/json"})
+assert conn.getresponse().status == 200
+PY
+}
+python3 - "$CRS_" "$CRW" <<'PY'
+import base64, http.client, json, os, sys
+from urllib.parse import urlparse
+u, w = urlparse(sys.argv[1]), sys.argv[2]
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request("GET", "/_fake/file?path=docs/index.json")
+good = base64.b64decode(json.loads(conn.getresponse().read())["content"])
+open(os.path.join(w, "index.good.json"), "wb").write(good)
+evil = json.loads(good)
+evil["docs"]["evil"] = {"latest": "v1", "versions": [{"id": "v1", "path": "../../outside.txt"}]}
+evil["docs"]["abs"] = {"latest": "v1", "versions": [{"id": "v1", "path": os.path.join(w, "outside.txt")}]}
+open(os.path.join(w, "index.evil.json"), "w").write(json.dumps(evil) + "\n")
+PY
+cr cold clear > /dev/null; cr_put docs/index.json "$CRW/index.evil.json"; cr_d=""; cr_i=0
+for t in evil evil@v1 abs abs@v1; do
+  cr_i=$((cr_i + 1)); cr cold fetch "$t" > "$CRW/esc.$cr_i.txt" 2>&1; cr_rc=$?
+  { [ "$cr_rc" = 1 ] && [ "$(grep -c '' "$CRW/esc.$cr_i.txt")" = 1 ] && grep -q 'refused, nothing was read' "$CRW/esc.$cr_i.txt" \
+    && ! grep -q 'outside' "$CRW/esc.$cr_i.txt"; } || cr_d="$cr_d [$t: rc=$cr_rc $(tr '\n' '|' < "$CRW/esc.$cr_i.txt")]"
+done
+cr_left=$(find "$CRA/cache" -type f ! -path "$CRA/cache/docs/index.json" 2>/dev/null | head -3)
+cr_put docs/index.json "$CRW/index.good.json"; cr cold fetch product@v0001 > "$CRW/f4.txt"; cr_rc=$?
+cr_r=$(cr_py file "$(head -1 "$CRW/f4.txt")" docs/versions/product/v0001_first.md)
+[ -z "$cr_d" ] && [ -z "$cr_left" ] && [ "$cr_rc" = 0 ] && [ "$cr_r" = ok ] \
+  && ok "with docs/index.json in sikstack naming a version path that leaves the workspace (../../outside.txt, an absolute path), cold fetch of that doc, bare or @version, refuses in one line, exit 1, prints no path and caches nothing of it; with the good index back, product@v0001 fetches sikstack's bytes" \
+  || bad "cold fetch followed an index path out of the workspace --$cr_d left=[$cr_left] good: rc=$cr_rc $cr_r $(tr '\n' '|' < "$CRW/f4.txt")"
 printf 'new here\n' > "$CRA/docs/reference/new.md"
 cr cold status > "$CRW/st.txt"; cr_rc=$?; cr cold clear > "$CRW/cl.txt"; cr_rc2=$?
 [ "$cr_rc" = 0 ] && grep -qE '^works/phases/archived/ [0-9]+ in sikstack: [0-9]+ evicted, 0 on disk' "$CRW/st.txt" \
@@ -4260,6 +4299,45 @@ done
   || bad "unlink --from-disk lost an archived agenda link -- rc=$cr_rc/$cr_rc2$cr_d / $(tr '\n' '|' < "$CRW/u.disk.txt")"
 if grep -rqF "$CRK" "$CRH" "$CRW/twin" "$CR_OUT" "$CRW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
 kill "$CR_PID" 2>/dev/null; wait "$CR_PID" 2>/dev/null
+# C10: local mode, the same rule on the disk. docs/index.json names version paths that leave docs/ (../../, a
+# docs/versions/../../../../ walk, an absolute path) or name a file outside docs/versions/ (docs/current/x.md: a
+# doc version is a docs/versions/ file); a version file, a doc folder and a docs/reference folder are symlinks out
+# of the workspace, and docs/reference/ holds one. Every such cold fetch refuses in one line, exit 1, printing no
+# path and writing nothing. A good version, a symlink that stays inside docs/ and the path form of docs/current/x.md
+# still print their disk path.
+CLH="$CRW/l"; CLA="$CLH/.sikstack"
+cl() { ( cd "$CLH" && XDG_CONFIG_HOME="$CRX" python3 "$ENG" "$@" ) 2>&1; }
+mkdir -p "$CRW/outdir"; printf 'outside dir\n' > "$CRW/outdir/v0001_far.md"
+{ mkhost "$CLH" && mkdir -p "$CLA/docs/versions/product" "$CLA/docs/versions/link" "$CLA/docs/reference" \
+  && printf '# product v0001\n' > "$CLA/docs/versions/product/v0001_one.md" && ln -s v0001_one.md "$CLA/docs/versions/product/v0002_alias.md" \
+  && printf 'current x\n' > "$CLA/docs/current/x.md" && ln -s "$CRW/outside.txt" "$CLA/docs/versions/link/v0001_out.md" \
+  && ln -s "$CRW/outdir" "$CLA/docs/versions/far" && ln -s "$CRW/outdir" "$CLA/docs/reference/out" \
+  && python3 - "$CLA/docs/index.json" "$CRW/outside.txt" <<'PY'
+import json, sys
+v = lambda p: {"latest": "v1", "versions": [{"id": "v1", "path": p}]}
+docs = {"product": {"latest": "v0001_one", "versions": [{"id": "v0001_one", "path": "docs/versions/product/v0001_one.md"},
+                                                        {"id": "v0002_alias", "path": "docs/versions/product/v0002_alias.md"}]},
+        "evil": v("../../outside.txt"), "walk": v("docs/versions/../../../../outside.txt"), "abs": v(sys.argv[2]),
+        "cur": v("docs/current/x.md"), "lnk": v("docs/versions/link/v0001_out.md")}
+open(sys.argv[1], "w").write(json.dumps({"docs": docs}) + "\n")
+PY
+  git -C "$CLA" add -A && git -C "$CLA" commit -qm setup; } > "$CRW/l.setup.txt" 2>&1 || bad "cold fetch containment probe: the setup failed -- $(tail -3 "$CRW/l.setup.txt")"
+cl_d=""; cl_i=0
+for t in evil evil@v1 walk abs abs@v1 cur cur@v1 lnk link far docs/versions/link/v0001_out.md docs/reference/out docs/reference docs/versions/far/v0001_far.md; do
+  cl_i=$((cl_i + 1)); cl cold fetch "$t" > "$CRW/lesc.$cl_i.txt"; cl_rc=$?
+  { [ "$cl_rc" = 1 ] && [ "$(grep -c '' "$CRW/lesc.$cl_i.txt")" = 1 ] && grep -q 'refused, nothing was read' "$CRW/lesc.$cl_i.txt" \
+    && ! grep -q 'outside\|outdir' "$CRW/lesc.$cl_i.txt"; } || cl_d="$cl_d [$t: rc=$cl_rc $(tr '\n' '|' < "$CRW/lesc.$cl_i.txt")]"
+done
+cl_ok=""
+for t in "product@v0001:docs/versions/product/v0001_one.md" "product:docs/versions/product/v0001_one.md" \
+         "product@v0002:docs/versions/product/v0001_one.md" "docs/current/x.md:docs/current/x.md" "docs/versions/product:"; do
+  cl cold fetch "${t%%:*}" > "$CRW/lok.txt"; cl_rc=$?; cl_p=$(head -1 "$CRW/lok.txt"); cl_want="${t#*:}"
+  { [ "$cl_rc" = 0 ] && grep -q '^cold fetch: on disk' "$CRW/lok.txt" && case "$cl_p" in "$(cd "$CLA" && pwd -P)"/docs/*) true ;; *) false ;; esac \
+    && { [ -z "$cl_want" ] || cmp -s "$cl_p" "$CLA/$cl_want"; }; } || cl_ok="$cl_ok [${t%%:*}: rc=$cl_rc $(tr '\n' '|' < "$CRW/lok.txt")]"
+done
+[ -z "$cl_d" ] && [ -z "$cl_ok" ] && [ ! -e "$CLA/cache" ] && [ -z "$(git -C "$CLA" status --porcelain)" ] \
+  && ok "local mode: cold fetch refuses, in one line with exit 1 and no path, every docs/index.json version path that leaves the workspace (../../, a docs/versions/../ walk, an absolute path) or docs/versions/ (docs/current/x.md), and every version file, doc folder or docs/ folder that is or holds a symlink out of the workspace; a good version, a symlink inside docs/ and docs/current/x.md by path still print their disk path, byte-equal; nothing was written" \
+  || bad "cold fetch in local mode led out of the workspace --$cl_d$cl_ok cache=$([ -e "$CLA/cache" ] && echo yes) $(git -C "$CLA" status --porcelain | head -3 | tr '\n' ' ')"
 echo "cold reads test runtime: $(( $(date +%s) - cr_t0 ))s"
 
 # ---------------------------------------------------------------------------
