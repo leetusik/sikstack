@@ -1199,7 +1199,7 @@ def cmd_meter(args: argparse.Namespace) -> None:
     """What a phase really cost: the main thread beside its subagent spans, metered from Claude Code's
     transcripts (deduplicated, attributed to slices, priced at list price), then each slice's verdict read
     from its result.md or slice.json. Read-only; no transcripts found is one line, never a failure."""
-    events = wf_cold.all_events()  # linked: sikstack's whole log (through the cache) and the lines not yet sent
+    events = wf_cold.logged_events()  # linked: sikstack's whole log (through the cache) and the lines not yet sent
     if args.phase is not None and not ((ACTIVE / args.phase).is_dir() or args.phase in archived_phase_ids()):
         raise SystemExit(f"meter: no such phase: {args.phase}")
     if args.slice is not None and not (ACTIVE / args.slice.split(".", 1)[0] / "slices" / args.slice).is_dir() \

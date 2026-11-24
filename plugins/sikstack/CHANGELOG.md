@@ -10,6 +10,31 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.4.0 — 2026-11-24
+
+- **The cold set lives only in sikstack while linked.** In cloud mode, archived phases (`works/phases/archived/**`),
+  doc versions (`docs/versions/**`), `docs/reference/**`, `docs/index.json` and the event log's sent lines
+  (`works/events.jsonl`) stay in sikstack and leave the disk. A file leaves only once sikstack holds its exact bytes:
+  at the end of a command's commit, with no journal and the base at sikstack's newest head, each file's sha256 is
+  checked against the base, and a file sikstack lacks or holds at other bytes stays. A fresh join pulls the working
+  set only. An evicted path is never sent as a delete or a move; `works/events.jsonl` keeps only its unsent lines.
+- **The cache.** Reads of an evicted record go through `.sikstack/cache/<its path>`: a read-only copy, valid only
+  while its sha256 equals the base's, refetched otherwise. `/cache/` is in the workflow repo's exclude, so git never
+  sees it. The eviction caches each archived `phase.json` it takes off the disk, and a join reads every archived
+  `phase.json` into the cache, so agenda links, archived ids and the meter still read them. A rare write to an
+  archived record (an agenda link, `repo map-anchors`) fetches and checks it first.
+- **`sikstack cold fetch|search|status|clear`**, in both modes. `cold fetch <P|doc[@version]|path>` prints the path
+  to read, then one summary line; `cold search "<text>" [--prefix] [--limit]` prints `path:line: [P<n>] snippet`
+  lines (sikstack's new search route while linked, the disk by the same rules in local mode); `cold status` names what
+  is cold, cached and left on disk; `cold clear` empties the cache. The explain skill (0.19.4), the explain route,
+  and the Explore agent say where history went: a record not on disk is read through `cold fetch` and
+  found with `cold search`.
+- **Unlink restores everything** sikstack holds before its one commit; `unlink --from-disk` names what it cannot
+  restore.
+- **The workflow repo while linked:** its `git status` shows the evicted paths (at least ` M works/events.jsonl`).
+  The repo is inert in cloud mode; `unlink` brings them back.
+- **Migration notes:** none for local mode. A linked checkout thins at its first command on 0.4.0.
+
 ## 0.3.0 — 2026-11-24
 
 - **The agenda is the one home for work not being done now; deferred jobs are retired.** An item is a thread of

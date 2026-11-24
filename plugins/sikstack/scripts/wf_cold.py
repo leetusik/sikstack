@@ -55,13 +55,13 @@ def linked() -> bool:
     return cloud_linked()
 
 
-def _sha(data: bytes) -> str:
+def _bytes_sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _file_sha(path: Path):
+def _path_sha(path: Path):
     try:
-        return _sha(path.read_bytes())
+        return _bytes_sha(path.read_bytes())
     except OSError:
         return None
 
@@ -159,7 +159,7 @@ def _ensure(rels: list, files=None) -> tuple:
         entry = _held(rel, files)
         if entry is None:
             continue
-        if _file_sha(CACHE / rel) == entry["sha256"]:
+        if _path_sha(CACHE / rel) == entry["sha256"]:
             out[rel] = CACHE / rel
         else:
             need.append(rel)
@@ -171,7 +171,7 @@ def _ensure(rels: list, files=None) -> tuple:
                 continue
             raise SystemExit(f"{rel} is held only in sikstack ({CLOUD_DIR}/base.json names it), and sikstack has no live "
                              "record of it: run sync to see this checkout against sikstack")
-        if _sha(data) != files[rel]["sha256"]:
+        if _bytes_sha(data) != files[rel]["sha256"]:
             if LENIENT:
                 continue
             raise SystemExit(f"{rel} changed in sikstack after this command's pull (its sha256 is not the one "
@@ -212,7 +212,7 @@ def hydrate(path: Path) -> bool:
     if rel not in got:
         return False
     data = got[rel].read_bytes()
-    if _sha(data) != files[rel]["sha256"]:  # the copy changed under us: never write unchecked bytes
+    if _bytes_sha(data) != files[rel]["sha256"]:  # the copy changed under us: never write unchecked bytes
         raise SystemExit(f"{rel}: its cached copy changed while it was read: run the command again")
     target = ROOT / rel
     wf_store._cloud_undo_note(target)  # the inbox applier's undo: an entry that crashes removes it again
@@ -253,7 +253,7 @@ def _materialize(rels: list, files: dict, prune=None) -> tuple:
     fetch, cached = [], 0
     for rel in rels:
         sha = files[rel]["sha256"]
-        if _file_sha(CACHE / rel) == sha:
+        if _path_sha(CACHE / rel) == sha:
             cached += 1
             continue
         disk = ROOT / rel
@@ -261,7 +261,7 @@ def _materialize(rels: list, files: dict, prune=None) -> tuple:
             data = disk.read_bytes() if disk.is_file() else None
         except OSError:
             data = None
-        if data is not None and _sha(data) == sha:
+        if data is not None and _bytes_sha(data) == sha:
             keep(rel, data)
         else:
             fetch.append(rel)
@@ -360,12 +360,12 @@ def event_log() -> bytes:
     else:
         keep(EVENTS_REL, cloud)
     offset = entry.get("offset") if isinstance(entry, dict) else None
-    if not (isinstance(offset, int) and 0 <= offset <= len(local) and _sha(local[:offset]) == entry.get("sha256")):
+    if not (isinstance(offset, int) and 0 <= offset <= len(local) and _bytes_sha(local[:offset]) == entry.get("sha256")):
         offset = len(local) if not isinstance(entry, dict) else 0
     return cloud + local[offset:]
 
 
-def all_events(counts=None) -> list:
+def logged_events(counts=None) -> list:
     """`wf_store.all_events` through the layer: the whole log in file order (sikstack's first, in a linked
     checkout). `counts["skipped"]` gets the number of unreadable lines."""
     if not linked():
@@ -642,7 +642,7 @@ def cmd_cold_status(args: argparse.Namespace) -> None:
         data = b""
     entry = files.get(EVENTS_REL) if isinstance(files.get(EVENTS_REL), dict) else {}
     offset = entry.get("offset")
-    if not (isinstance(offset, int) and 0 <= offset <= len(data) and _sha(data[:offset]) == entry.get("sha256")):
+    if not (isinstance(offset, int) and 0 <= offset <= len(data) and _bytes_sha(data[:offset]) == entry.get("sha256")):
         offset = 0
     unsent = data[offset:].count(b"\n")
     print(f"{EVENTS_REL}: {unsent} unsent line(s) on disk; the rest is in sikstack")
@@ -684,7 +684,7 @@ def _left_why(rel: str, path: Path, files: dict):
     entry = _held(rel, files)
     if entry is None:
         return "not in sikstack"
-    if _file_sha(path) != entry["sha256"]:
+    if _path_sha(path) != entry["sha256"]:
         return "differs from sikstack"
     return None
 
