@@ -284,17 +284,15 @@ All three read the same five names from the box's `.env` (through the api's `env
   (its DKIM `TXT resend._domainkey` and the `MX` + SPF `TXT` on its `send` subdomain, DNS
   only, grey cloud). Mail *to* `info@sikstack.com` arrives through Cloudflare Email
   Routing (its MX and SPF on the apex, a custom address forwarding to the operator's
-  inbox); those records do not clash with Resend's. (Resend's host, port and user are as
-  the breakdown recorded them; check them against Resend's SMTP page when setting up.)
-- **Fallback:** until Resend verifies the domain, the box keeps the old sender, the
-  **hi@hi2vi.com** mailbox (`KB_SMTP_FROM=hi@hi2vi.com`, its login the same mailbox,
-  since that provider refuses a sender that does not match the login). Because the three
-  mails share the sender, the switch moves all three at once.
+  inbox); those records do not clash with Resend's. Resend's SMTP page gives that host,
+  port and user, with the API key as the password. This is the only production sender:
+  until Resend verifies the domain, no mail goes out (leave `KB_SMTP_HOST` unset).
 - Placement: the five lines go into `/opt/knowledge/.env` on the box, the password never
   shown on a screen, pasted into a chat or committed. Set them over ssh from the
   operator's machine with a script that reads each value by name from the operator's
-  local git-ignored `.env` and writes it into the box's file without printing it, or with
-  an editor on the box (`sudo vi`). Verify by name only
+  local git-ignored `.env` and writes it into the box's file without printing it (ending
+  the file in a newline first, as §4f's command does), or with an editor on the box
+  (`sudo vi`). Verify by name only
   (`grep -c '^KB_SMTP_PASSWORD=' /opt/knowledge/.env` prints `1`, never the value). Then
   recreate the api (`docker compose -f compose.prod.yml up -d --force-recreate --no-deps
   api`, or the next Production Deploy, which force-recreates it).
@@ -389,10 +387,15 @@ window, default 5; `0` or less turns the per-install limit off). Then recreate t
   ```bash
   ssh oracle-cloud 'set -e; cd /opt/knowledge; umask 077
     cp -p .env "$HOME/knowledge.env.bak.$(date +%Y%m%d%H%M%S)"
-    grep -q "^KB_DESIGN_SECRET=" .env || printf "KB_DESIGN_SECRET=%s\n" "$(openssl rand -hex 32)" >> .env
+    grep -q "^KB_DESIGN_SECRET=" .env || { [ -z "$(tail -c 1 .env)" ] || echo >> .env
+      printf "KB_DESIGN_SECRET=%s\n" "$(openssl rand -hex 32)" >> .env; }
     grep -c "^KB_DESIGN_SECRET=" .env'
   # expect: 1 (the count only, never the value)
   ```
+
+  The `tail -c 1` test ends the file in a newline before the append, so a `.env` whose
+  last line has none keeps that line whole instead of gaining the new name on its end.
+  Any other line appended to `.env` goes the same way.
 
   Rotating it signs every open design tab out of its build (they reopen from the
   viewer). Then recreate the api and `knowledge-design` (the next Production Deploy
@@ -420,8 +423,7 @@ window, default 5; `0` or less turns the per-install limit off). Then recreate t
       `/home/opc/sikstack_tls/`, staged by the edge repo as `certs/sikstack.{crt,key}`.
 - [ ] **`GOOGLE_API_KEY`** obtained (recommended) — or a deliberate BM25-only launch.
 - [ ] **`KB_SMTP_*`** (§4b, optional) set in `/opt/knowledge/.env` for
-      `info@sikstack.com` over Resend (or, until Resend verifies the domain, the
-      hi@hi2vi.com fallback), values never printed — or a deliberate launch with no
+      `info@sikstack.com` over Resend, values never printed — or a deliberate launch with no
       outgoing mail (no Feedback alert, no waitlist mails).
 - [ ] **`KB_SIGNUP_WAITLIST=on`** (§4c) in `/opt/knowledge/.env` — or a deliberate open
       sign-up.

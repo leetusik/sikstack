@@ -101,7 +101,7 @@ print(f"statements={len(ast.parse(src).body)} failed={fails}")
 sys.exit(1 if fails else 0)
 PY
 ); t0_rc=$?
-if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 20 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
+if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 16 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
 else printf '%s\n' "$t0_out"; bad "a shipped text pin failed (lines above)"; fi
 
 # ---------------------------------------------------------------------------

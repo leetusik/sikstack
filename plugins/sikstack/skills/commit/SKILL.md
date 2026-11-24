@@ -3,7 +3,6 @@ name: commit
 description: Group pending changes by topic into focused conventional commits.
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git reset:*), Bash(git commit:*), Bash(git -C .sikstack status:*), Bash(git -C .sikstack diff:*), Bash(git -C .sikstack log:*), Bash(git -C .sikstack add:*), Bash(git -C .sikstack reset:*), Bash(git -C .sikstack commit:*)
 user-invocable: false
-disable-model-invocation: true
 ---
 
 # commit

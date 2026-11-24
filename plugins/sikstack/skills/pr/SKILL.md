@@ -3,7 +3,6 @@ name: pr
 description: "Write, check, open and close a phase's pull requests under PR rule v1: one body per recorded branch, measured by pr check, opened as drafts when the review passes, closed on the operator's accept."
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch --show-current), Bash(git branch --list:*), Bash(git rev-parse:*), Bash(git check-attr:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh api repos/*/community/profile), Bash(sikstack next), Bash(sikstack pr check:*), Bash(sikstack pr rules), Bash(sikstack pr team), Read, Write, Edit, Glob, Grep
 user-invocable: false
-disable-model-invocation: true
 ---
 
 # pr

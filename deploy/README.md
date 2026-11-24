@@ -327,7 +327,7 @@ first: its `validate.sh` gains `sikstack` in `CERT_NAMES`, and its `stage.sh` st
 in its count and its pair-match loop), as it did for `jujutower`.
 
 ```bash
-# in the edge repo, on a clean tree — loop 1, the two sikstack vhosts:
+# in the edge repo, on a clean tree — loop 1, the two sikstack vhosts, BEFORE the deploy (§3c):
 cp <platform>/deploy/sikstack.conf <platform>/deploy/sikstack-design.conf edge/conf.d/
 cd edge
 ./validate.sh            # local gate: dummy certs + compose config + nginx -t over the WHOLE tree
@@ -335,7 +335,7 @@ bash stage.sh            # rsync the tree to /home/opc/edge (no --delete), stage
 ssh oracle-cloud 'cd /home/opc/edge && ./deploy.sh'
 # expect: "config OK — issuing graceful reload" -> "reload complete. New config is live."
 
-# loop 2, once sikstack.com serves (§3c): the three redirect hosts.
+# loop 2, AFTER the deploy (§3c): the three redirect hosts.
 cp <platform>/deploy/hi2vi.conf <platform>/deploy/knowledge.conf <platform>/deploy/vocky.conf edge/conf.d/
 # ... then the same ./validate.sh -> bash stage.sh -> ./deploy.sh
 ```
@@ -371,19 +371,30 @@ diff <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /tmp/live-hi2vi.conf) \
 
 ### 3c. Order
 
-1. **The app first.** The platform is deployed with its sikstack.com configuration, and
-   `knowledge-api`, `knowledge-web`, `knowledge-mcp` and `knowledge-design` are healthy
-   on `changple_shared_network`. This one Production Deploy runs before the sikstack.com
-   vhost exists, so dispatch it with `smoke_host=hi2vi.com` (§6): the old apex vhost
-   still proxies that host to the same containers, and the MCP server still accepts it
-   (`MCP_ALLOWED_HOSTS` keeps it until the redirect is live). `NEXT_PUBLIC_APP_URL` is
-   baked in at this build, so from here hi2vi.com serves pages whose canonical links
-   say sikstack.com: land step 2 right after.
-2. **Then `sikstack.conf` and `sikstack-design.conf`** (loop 1). Check the apex (§5) and
-   one design host before going on.
-3. **Then `hi2vi.conf`, `knowledge.conf` and `vocky.conf`** (loop 2). The redirect hosts
-   go live **only once sikstack.com serves**: before that they would send every user
-   to a host that answers nothing.
+**Loop 1, then the Production Deploy, then loop 2.** The deploy is the moment the app's
+links, mails and clients start sending people and keys to sikstack.com, so sikstack.com
+must already answer by then, and hi2vi.com keeps serving until it redirects.
+
+1. **Loop 1: `sikstack.conf` and `sikstack-design.conf`** (§3a), before the deploy. Every
+   upstream in them is a variable resolved at request time, so the edge loads them while
+   the app still runs the old build: the apex serves that build at once (its pages still
+   link to hi2vi.com, and its MCP server answers `421` on sikstack.com until the deploy
+   adds the host), and a design host answers `502` (or an older `knowledge-design`'s own
+   refusal) until the deploy has it up with the sikstack.com origin. Check `https://sikstack.com/healthz` (§5).
+   *Back out:* revert the loop-1 commit in the edge repo (the two files leave `conf.d/`)
+   and run the same loop; nothing else has changed yet.
+2. **The Production Deploy, with `smoke_host=sikstack.com`** (the default, §6). It ships
+   the sikstack.com configuration and brings `knowledge-api`, `knowledge-web`,
+   `knowledge-mcp` and `knowledge-design` up healthy; its smoke runs on the apex loop 1
+   made serve. Check the apex and one design host (§5).
+   *Back out:* none, the app is fix-forward (§6): fix on `main` and re-dispatch. The old
+   apex vhost still serves the same containers on hi2vi.com. If loop 1 has to come out
+   after this step, re-dispatch with `smoke_host=hi2vi.com`, and put loop 1 back soon:
+   the app's links now say sikstack.com.
+3. **Loop 2: `hi2vi.conf`, `knowledge.conf` and `vocky.conf`**, once the apex and a
+   design host answer. Check the redirects (§5).
+   *Back out:* revert the loop-2 commit and run the same loop; the old apex vhost serves
+   the platform on hi2vi.com again, beside sikstack.com.
 4. Afterwards, in a later change: drop `hi2vi.com` from `MCP_ALLOWED_HOSTS` and
    `MCP_ALLOWED_ORIGINS` and from `smoke_host`'s choices (the old host no longer reaches
    the containers).
@@ -396,11 +407,9 @@ diff <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /tmp/live-hi2vi.conf) \
 
 ### 3d. Rollback
 
-Loop 2 first: restore the three previous redirect-host files in the edge repo (revert
-the loop-2 commit), then the same loop (`./validate.sh` → `bash stage.sh` →
-`./deploy.sh`); the old apex vhost serves the platform again on hi2vi.com. Loop 1 can
-stay (sikstack.com keeps serving beside it) or be reverted the same way. The app needs
-no rollback for either: the containers serve both hosts.
+Each step's *back out* is above; undo them in reverse order (loop 2, then loop 1), each
+through the edge repo's loop (`./validate.sh` → `bash stage.sh` → `./deploy.sh`). The app
+needs no rollback for either loop: until loop 2 lands, the containers serve both hosts.
 
 > **Re-check the certs any time:**
 > `ssh oracle-cloud "openssl x509 -in /home/opc/edge/certs/sikstack.crt -noout -text | grep -A1 'Subject Alternative Name'"`
@@ -507,8 +516,9 @@ either: it goes live fresh-on-write the instant the api writes it.)
   workflow** (on `main`). Or: `gh workflow run deploy-production.yml --ref main`.
 - **Input `smoke_host`** — the host the external smoke runs against: `sikstack.com`
   (the default) or `hi2vi.com`, nothing else (the preflight and the smoke step both
-  refuse any other value). Leave it at the default, except for the domain move's first
-  deploy (§3c step 1), which runs before the sikstack.com vhost lands:
+  refuse any other value). Leave it at the default; the domain move's deploy too runs
+  after loop 1, so sikstack.com serves (§3c step 2). `hi2vi.com` is the fallback while
+  loop 2 is pending, or if loop 1 has to come out after the deploy:
   `gh workflow run deploy-production.yml --ref main -f smoke_host=hi2vi.com`. Once the
   hi2vi.com redirect is live, a smoke there fails (it answers 308).
 - It is **`workflow_dispatch`-only** and **main-guarded** — the agent's constant

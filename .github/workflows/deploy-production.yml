@@ -17,9 +17,9 @@ on:
     inputs:
       smoke_host:
         description: >-
-          Host the external smoke runs against. sikstack.com, except the domain move's first
-          deploy, which runs before the sikstack.com vhost lands and smokes the old apex while
-          it still serves (deploy/README.md §3c, §6). Once hi2vi.com only redirects, its smoke fails.
+          Host the external smoke runs against. sikstack.com; hi2vi.com is the fallback while its
+          redirect is pending or if the sikstack.com vhost has to come out (deploy/README.md §3c, §6).
+          Once hi2vi.com only redirects, its smoke fails.
         type: choice
         options:
           - sikstack.com

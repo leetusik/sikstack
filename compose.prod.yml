@@ -304,11 +304,12 @@ services:
       # host-with-port needs a `base:*` wildcard — so `sikstack.com` (edge) is exact,
       # `knowledge-mcp` + `knowledge-mcp:*` cover the internal path; localhost
       # stays a built-in config.py default (image healthcheck + smoke).
-      # CUTOVER (P70): `hi2vi.com` stays in both lists for the deploy that ships this
-      # file. It runs before the edge serves sikstack.com, so its external smoke runs on
-      # hi2vi.com, whose vhost still proxies to this container until the redirect lands
-      # (deploy/README.md §3c). Once deploy/hi2vi.conf (redirect-only) is live, the old
-      # host never reaches this container and both `hi2vi.com` entries can go.
+      # CUTOVER: the edge serves sikstack.com before the deploy that ships this file
+      # (deploy/README.md §3c), so its smoke runs there. `hi2vi.com` stays in both lists
+      # as the fallback smoke and MCP host: its vhost still proxies to this container
+      # while the redirect (loop 2) is pending, and serves alone again if loop 1 must be
+      # backed out after the deploy. Once deploy/hi2vi.conf (redirect-only) is live, the
+      # old host never reaches this container and both `hi2vi.com` entries can go.
       MCP_ALLOWED_HOSTS: "sikstack.com,hi2vi.com,knowledge-mcp,knowledge-mcp:*"
       MCP_ALLOWED_ORIGINS: "https://sikstack.com,https://hi2vi.com"
     # Documentary only (no publish) — the edge + co-tenant agents reach it over the

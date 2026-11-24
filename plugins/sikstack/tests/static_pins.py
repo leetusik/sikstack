@@ -27,7 +27,7 @@ def _pay(rel):  # an old payload/ path, mapped into the plugin
     return root / rel
 root = Path(sys.argv[1])
 skills = {p.parent.name for p in (root / "skills").glob("*/SKILL.md")}
-assert len(skills) == 17, len(skills)  # 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
+assert len(skills) == 16, len(skills)  # 0.5.0: archive-phase retired (rotate-backlog and `phase archive <P>` archive); 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
 assert not skills & {"defer-job", "deferred", "promote-deferred"}, skills
 def engine_src():  # the engine's source: every module, payload/scripts/*.py (the shell's engine_src)
     return "".join(f.read_text(encoding="utf-8") for f in sorted((root / "scripts").glob("*.py")))
@@ -46,11 +46,11 @@ for name in ("design-cowork", "do-whole-phase"):
     assert named and named == shipped, (name, sorted(named ^ shipped))
 for gone in ("AGENTS.md", ".agents", ".codex"):
     assert not (root / gone).exists(), gone
-# 0.5.0: archive-phase, commit, pr and review-phase carry both markers (path-only: callers read them by path).
-model_invocable = {"create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route"}
-# 0.5.0: the `/` menu holds the 9 skills a person types; these 8 are the agents' and carry `user-invocable: false`.
-agent_only = {"archive-phase", "commit", "pr", "review-phase", "parallel-phase", "read-code", "executor-route", "design-cowork"}
-assert len(skills) == 17 and agent_only <= set(skills), sorted(skills)
+# 0.5.0: review-phase alone carries both markers (path-only: its executor reads it by path); commit and pr stay model-invocable for the spoken ask.
+model_invocable = {"create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route", "commit", "pr"}
+# 0.5.0: the `/` menu holds the 9 skills a person types; these 7 are the agents' and carry `user-invocable: false`.
+agent_only = {"commit", "pr", "review-phase", "parallel-phase", "read-code", "executor-route", "design-cowork"}
+assert len(skills) == 16 and len(agent_only) == 7 and agent_only <= set(skills), sorted(skills)
 for name in sorted(skills):
     body = (root / "skills" / name / "SKILL.md").read_text()
     front = body.split("\n---\n", 1)[0]
@@ -58,6 +58,27 @@ for name in sorted(skills):
     assert (marker in front) == (name not in model_invocable), name
     assert ("\nuser-invocable: false\n" in front + "\n") == (name in agent_only), name
     assert front.count("user-invocable") == (name in agent_only), name
+# Every shipped skill has a way in. One with both markers is path-only: neither `/` nor the Skill tool reaches it, and
+# `${CLAUDE_PLUGIN_ROOT}` resolves only inside a loaded skill or agent. So another skill or agent must name its
+# `${CLAUDE_PLUGIN_ROOT}/skills/<name>/SKILL.md`; the contract (the session card, read where no plugin root resolves)
+# must not send anyone to it by name; and its own text must not offer the operator's words as a way in (a spoken ask
+# reaches only a model-invocable skill).
+_contract = (root / "contract.md").read_text(encoding="utf-8")
+_unreached = []
+for name in sorted(skills):
+    body = (root / "skills" / name / "SKILL.md").read_text()
+    front = body.split("\n---\n", 1)[0] + "\n"
+    if "\ndisable-model-invocation: true\n" not in front or "\nuser-invocable: false\n" not in front:
+        continue
+    _path = f"${CLAUDE_PLUGIN_ROOT}/skills/{name}/SKILL.md"
+    if not any(_path in v for k, v in LIVE.items() if k.startswith((f"{P}/skills/", f"{P}/agents/"))
+               and not k.startswith(f"{P}/skills/{name}/")):
+        _unreached.append((name, "no shipped skill or agent reads it by path"))
+    if f"`{name}`" in _contract:
+        _unreached.append((name, "the session card names it, with no path"))
+    if "in words" in body:
+        _unreached.append((name, "it offers the operator's words as a way in"))
+assert not _unreached, _unreached
 create_phase = (root / "skills/create-phase/SKILL.md").read_text()
 assert "the agent when instructed" in create_phase
 assert "Never on the agent's own initiative" in create_phase
@@ -442,7 +463,7 @@ for _n in _caps:
     _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/") and "/explain-" not in k)
     for _gone in ("docs phase", "docs-phase", "docs-debt", "doc_impact", "doc_versions", "Doc impact list"):
         assert _gone not in _txt, (_n, _gone)
-_s6 = ("parallel-phase", "pr", "update-workspace", "rotate-backlog", "archive-phase", "retrofit", "agenda")
+_s6 = ("parallel-phase", "pr", "update-workspace", "rotate-backlog", "retrofit", "agenda")
 assert sum(_size(_n) for _n in _s6) <= 70000, sum(_size(_n) for _n in _s6)
 for _n in _s6:
     _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/"))
@@ -631,7 +652,6 @@ checks = [
      ["(its review note reads `team-reported: …`): the team's review comments"]),
     ([sk("pr")], ["**Changes after the phase is done**: `reference/reopen.md`"], ["**Team changes after the phase is done**"]),
     (both("review.md"), [], ["or a team's review after a reopen)"]),
-    ([sk("archive-phase")], ["**A phase with an open PR:** `phase rotate` leaves it active"], ["is held too"]),
     ([sk("create-phase")], ["**One question rides on that confirmation, never a stop of its own:**"], []),
     ([flat(sk("parallel-phase"))], ["### A reopened phase — a change request on its open PR", "`--note \"operator-reported: <what>\"`", "Then `pr sync <P>` there (the default branch's record is stale)"], ["### A reopened phase — a team's changes on its open PR"]),
     (both("decomposition.md"), ["--base <that branch>"], []),
