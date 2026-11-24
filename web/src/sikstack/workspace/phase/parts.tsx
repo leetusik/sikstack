@@ -30,6 +30,7 @@ import { NotebookDecisions } from "./decisions";
 import { WsProse } from "@/sikstack/workspace/frame/prose";
 import {
   askedDates,
+  explainedDocuments,
   gatePlace,
   isCurrentSlice,
   notebookQuestions,
@@ -37,6 +38,7 @@ import {
   originalParagraphs,
   pullRequestView,
   sliceSub,
+  type ExplainedRow,
   type PhaseItemView,
 } from "./model";
 
@@ -400,28 +402,37 @@ export function PhaseReview({ review }: { review: Phase["review"] }) {
   );
 }
 
-/** Explained in: the document's title as a link to the project's library, `Library` under it. */
+/**
+ * Explained in (`Phase.dc.html`): one row a document the phase is explained in (`explainedDocuments`), its
+ * title as a link to the document in the Library's reader, `Library` under it. No rows, no panel.
+ */
 export function PhaseExplained({
-  title,
-  href,
+  documents,
 }: {
-  title: string;
-  href: string;
+  documents: readonly ExplainedRow[];
 }) {
+  if (documents.length === 0) return null;
   return (
     <section className="panel" aria-labelledby="phase-doc-head">
       <div className="panel-head">
         <h2 id="phase-doc-head">{G.heads.explainedIn}</h2>
       </div>
       <ul className="ws-list">
-        <li className="row phase-link-row">
-          <Link className="link-strong ws-open" href={href}>
-            <span className="row-stack">
-              <span className="ws-name-text">{title}</span>
-              <span className="meta ws-sub">{PHASE_PAGE.library}</span>
-            </span>
-          </Link>
-        </li>
+        {documents.map((d) => (
+          <li key={d.key} className="row phase-link-row">
+            <Link className="link-strong ws-open" href={d.href}>
+              <span className="row-stack">
+                <span
+                  className="ws-name-text"
+                  lang={HANGUL.test(d.title) ? "ko" : undefined}
+                >
+                  {d.title}
+                </span>
+                <span className="meta ws-sub">{PHASE_PAGE.library}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -432,7 +443,6 @@ export function PhaseExplained({
 export interface PhaseLinks {
   slice: (full: string) => string;
   item: (id: string) => string;
-  library: string;
 }
 
 /** A phase (`Phase.dc.html`): the head, then the main column and the side column. */
@@ -511,9 +521,7 @@ export function PhaseView({
           {place === "side" ? (
             <PhaseGate gate={phase.gate} date={dates.date} />
           ) : null}
-          {phase.explain ? (
-            <PhaseExplained title={phase.explain.title} href={links.library} />
-          ) : null}
+          <PhaseExplained documents={explainedDocuments(phase)} />
         </div>
       </div>
     </div>

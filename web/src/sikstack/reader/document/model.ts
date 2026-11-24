@@ -1,7 +1,9 @@
 import { READER_DOCUMENT } from "@/content/reader-document";
 import type { Mark } from "@/sikstack/library/mark-row-model";
 import { decodeFrom, itemWayBack, type ListOrigin } from "@/lib/library/from";
+import type { KbExplainedPhase } from "@/lib/knowledge/types";
 import { positionNear } from "@/lib/reader/note-list";
+import { phaseHref } from "@/lib/workspace/address";
 import type { ReaderBookmark, ReaderNotes } from "@/lib/reader/types";
 
 /**
@@ -159,4 +161,53 @@ export function hereAction(here: Here): string {
   return here.kind === "bookmark"
     ? READER_DOCUMENT.notes.section
     : READER_DOCUMENT.notes.position;
+}
+
+// ---- the way back to the phases (P61-e9: mirrors the phase page's Explained in) ---------------------------
+
+/** One phase the document was explained from, as `DocumentPhases` draws it. */
+export interface DocPhaseRow {
+  /** The phase's full id, the row's key. */
+  key: string;
+  /** The name, or the full id when the phase has none. */
+  name: string;
+  lang: "ko" | undefined;
+  /** `P48-q4 · Explain phase`. */
+  sub: string;
+  /** The phase's page in the project's Workspace. */
+  href: string;
+}
+
+const HANGUL = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/;
+
+/**
+ * The document read's `phases` (a member's only) as rows: the explain phase first, then the source phases in
+ * the read's order, each once, linking to its phase page in the project (`projectId`, the control-plane id the
+ * Workspace's addresses take). No project id, or no phases, gives none: the reader then shows nothing.
+ */
+export function phaseRows(
+  phases: readonly KbExplainedPhase[] | null | undefined,
+  projectId: string | null,
+): DocPhaseRow[] {
+  if (!projectId || !phases?.length) return [];
+  const t = READER_DOCUMENT.phases;
+  const ordered = [
+    ...phases.filter((p) => p.role === "explain"),
+    ...phases.filter((p) => p.role !== "explain"),
+  ];
+  const seen = new Set<string>();
+  const rows: DocPhaseRow[] = [];
+  for (const p of ordered) {
+    if (!p.id || seen.has(p.id)) continue;
+    seen.add(p.id);
+    const name = p.name?.trim() || p.id;
+    rows.push({
+      key: p.id,
+      name,
+      lang: HANGUL.test(name) ? "ko" : undefined,
+      sub: t.sub(p.id, p.role === "explain" ? t.role.explain : t.role.source),
+      href: phaseHref(projectId, p.id),
+    });
+  }
+  return rows;
 }

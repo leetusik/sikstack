@@ -203,7 +203,7 @@ export type ProjectCopy = typeof PROJECT;
  * Imported by path (`@/content/project`), never through the barrel. The older `PROJECT` above stays
  * for its other readers; nothing here renames or removes one of its keys.
  *
- * The Workspace panel, once the project's workspace has synced: `Workspace`, the open jobs' count, the
+ * The Workspace panel, once the project's workspace has synced: `Workspace`, the agenda's count, the
  * phases and `See all in Workspace`. Not linked (or never synced), its signed two sentences: `empty`,
  * then `run.before`, the link command (`run.command`, read as code) and `run.after`. The command is
  * the operator's signed words, filled with the page's origin and the project's id.
@@ -226,8 +226,12 @@ export const PROJECT_HOME = {
   },
   workspace: {
     heading: "Workspace",
-    /** The head's count: the open deferred jobs (`12 deferred`). */
-    deferred: (n: string): string => `${n} deferred`,
+    /**
+     * The head's count, a link to the Agenda: the Open and In progress items, then the Proposed ones
+     * apart (`4 open · 1 proposed`), in the signed panel's place for its count.
+     */
+    agenda: (open: string, proposed: string): string =>
+      `${open} open · ${proposed} proposed`,
     all: "See all in Workspace",
     empty: "No workspace linked yet.",
     run: {

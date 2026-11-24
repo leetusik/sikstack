@@ -11,6 +11,10 @@ import {
 } from "@/components/reader/document-page";
 import { READER_DOCUMENT } from "@/content/reader-document";
 import { requestNonce } from "@/sikstack/shell/data";
+import {
+  documentPhaseRows,
+  withDocumentPhases,
+} from "@/sikstack/reader/document/with-phases";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { getDocument } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
@@ -152,20 +156,26 @@ async function render(
   loaded: ReaderLoad,
   query: Record<string, string | string[] | undefined>,
   token?: string,
+  doc?: KbDocument,
 ) {
-  const [nonce, jar, listen] = await Promise.all([
+  const [nonce, jar, listen, phases] = await Promise.all([
     requestNonce(),
     cookies(),
     documentListen(loaded, token),
+    doc ? documentPhaseRows(token, doc) : Promise.resolve([]),
   ]);
   const org = loaded.kind === "reader" ? orgOf(loaded.reader.view) : null;
-  return renderDocument(loaded, {
-    from: firstOf(query[FROM_PARAM]),
-    org,
-    nonce,
-    timeZone: viewerTimeZone(jar),
-    listen,
-  });
+  // P61-e9: a member's way back to the phases the document was explained from, under its end.
+  return withDocumentPhases(
+    renderDocument(loaded, {
+      from: firstOf(query[FROM_PARAM]),
+      org,
+      nonce,
+      timeZone: viewerTimeZone(jar),
+      listen,
+    }),
+    phases,
+  );
 }
 
 /** The org's slug a document's own address names (`/@{org}/…`), for a visitor's way back. */
@@ -201,7 +211,12 @@ export default async function DocumentPage({
     // Temporary (307), like the pretty-URL redirect below; the browser keeps `#section`.
     const chapter = chapterRedirectHref(doc, { v, lang: langOf(query.lang) });
     if (chapter) redirect(chapter);
-    return render(await loadOnce(ctx.token, id, v, cookie), query, ctx.token);
+    return render(
+      await loadOnce(ctx.token, id, v, cookie),
+      query,
+      ctx.token,
+      doc,
+    );
   }
 
   // ── Anonymous branch — public-only read, no token. A miss bounces to /login. ─

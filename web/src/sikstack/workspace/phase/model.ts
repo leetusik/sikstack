@@ -11,6 +11,7 @@
  * - `notebookQuestions`, `NOTEBOOK_DECISIONS_SHOWN`, `notebookShows`: the notebook's order and its groups.
  * - `originalParagraphs`: the operator's words, as written, never parsed as Markdown.
  * - `agendaItemOf`: the phase's agenda item as the Agenda holds it now, with its state and mark.
+ * - `explainedDocuments`: the documents **Explained in** lists, each a link to the Library's reader.
  *
  * Deliberately free of `server-only`: the page and its client islands share it.
  */
@@ -22,6 +23,7 @@ import { itemState, phaseLookup } from "@/lib/workspace/model";
 import type {
   AgendaItem,
   Branch,
+  ExplainDocument,
   Gate,
   Notebook,
   NotebookQuestion,
@@ -196,4 +198,40 @@ export function agendaItemOf(
     state: wsStatus("item", itemState(item, phaseLookup(phases))),
     mark: item.sync === "waiting" ? "waiting" : item.sync ? "refused" : null,
   };
+}
+
+// -- Explained in ----------------------------------------------------------------------------------
+
+/** One row of **Explained in**: the document's title, a link to it in the Library's reader. */
+export interface ExplainedRow {
+  /** The document's id, the row's key. */
+  key: number;
+  title: string;
+  /** The reader's address (`/documents/<id>`), never the project's library list. */
+  href: string;
+}
+
+/**
+ * The documents a phase is explained in: an explain phase's own (`explain.documents`, its newest REVIEW's
+ * `## Published`), then every document `explainedIn` names (the phase as a source, or as the explain phase),
+ * each once, by id, in that order. Empty when the read names none (an older read names neither list): the
+ * page then draws no panel.
+ */
+export function explainedDocuments(
+  phase: Pick<Phase, "explain" | "explainedIn">,
+): ExplainedRow[] {
+  const seen = new Set<number>();
+  const rows: ExplainedRow[] = [];
+  const add = (d: ExplainDocument) => {
+    if (seen.has(d.id) || !d.href) return;
+    seen.add(d.id);
+    rows.push({
+      key: d.id,
+      title: d.title?.trim() || d.rel_path,
+      href: d.href,
+    });
+  };
+  for (const d of phase.explain?.documents ?? []) add(d);
+  for (const d of phase.explainedIn ?? []) add(d);
+  return rows;
 }

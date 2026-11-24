@@ -68,10 +68,12 @@ import { ReaderFoot } from "../reader-foot";
 import { ReaderHead } from "../reader-head";
 import { slotOf, slotWants } from "../slot";
 import { DocumentBookmarks } from "./document-notes";
+import { DocumentPhases } from "./document-phases";
 import {
   documentBack,
   foldSections,
   type DocMark,
+  type DocPhaseRow,
   type DocumentMarks,
 } from "./model";
 
@@ -83,7 +85,8 @@ import {
  *     > Bar (the way back by `?from=`, the title and `Document in <project>` once the head has left the window,
  *       Older version, Notes and Display; never Ask, decision 3)
  *     + .reader-frame > main.reader-main > article.reader-col > ReaderHead (noun document, sections folded
- *       past six), .read-flow (the text), ReaderEnd kind="document"
+ *       past six), .read-flow (the text), ReaderEnd kind="document", then the way back to the phases the
+ *       document was explained from (`DocumentPhases`, a member's, when the read names any; P61-e9)
  *     + ReaderFoot bar={false} (the pill alone) + one sheet at a time (Notes, Version history, Display)
  *
  * Listen (P64-3y.S6; job 07 round 01, `## Build` › Listen, F206 to F211, listen:FG1, FG8): AudioHead in
@@ -119,6 +122,8 @@ export interface DocumentReaderProps {
   timeZone?: string;
   /** The document's Listen seed, read by the page (`documentListen`); null: no Listen here. */
   listen?: ListenSeed | null;
+  /** The phases the document was explained from (`phaseRows`, `withDocumentPhases`); none: nothing shows. */
+  phases?: readonly DocPhaseRow[];
   // The text (`ChapterBody`).
   children?: ReactNode;
 }
@@ -133,6 +138,7 @@ export function DocumentReader({
   nonce,
   timeZone,
   listen = null,
+  phases = [],
   children,
 }: DocumentReaderProps) {
   const router = useRouter();
@@ -495,6 +501,7 @@ export function DocumentReader({
                         onAsk={() => setAsking(true)}
                         onDismiss={() => setAsking(false)}
                       />
+                      <DocumentPhases rows={phases} />
                     </article>
                   </main>
                 </div>
