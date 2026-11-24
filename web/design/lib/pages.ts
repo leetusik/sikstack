@@ -8,7 +8,11 @@ import {
   DESIGN_LIST_STATES,
   FEEDBACK_FILED_STATES,
   FEEDBACK_STATES,
+  INVITE_STATES,
   ITEM_STATES,
+  MEMBERS_STATES,
+  NEW_ORG_STATES,
+  ORG_SWITCHER_STATES,
   type PageStates,
 } from "./page-states";
 import { PROJECT, RECORDING } from "./recording";
@@ -116,6 +120,39 @@ export const PAGES: readonly BuildPage[] = [
     recording: true,
     reads: ["design.details", "design.shareRefused", "design.gone"],
     states: DESIGN_BUILD_STATES,
+  },
+  // The org surfaces (P78-s2.S2's design): made data, no recording (`org-data.ts`).
+  {
+    name: "Org switcher",
+    route: "/dashboard (the top bar of every app page)",
+    production: "src/sikstack/shell/shell.tsx",
+    entry: "/dashboard/",
+    reads: ["next/shell/shell.tsx", "next/shell/model.ts", "lib/org-data.ts (made)"],
+    states: ORG_SWITCHER_STATES,
+  },
+  {
+    name: "New org",
+    route: "/orgs/new",
+    production: null,
+    entry: "/orgs/new/",
+    reads: ["next/org/new-org.tsx", "lib/org-data.ts (made)"],
+    states: NEW_ORG_STATES,
+  },
+  {
+    name: "Members",
+    route: "/members",
+    production: null,
+    entry: "/members/",
+    reads: ["next/org/members.tsx", "lib/org-data.ts (made)"],
+    states: MEMBERS_STATES,
+  },
+  {
+    name: "Invite",
+    route: "/invite?code=…",
+    production: null,
+    entry: "/invite/",
+    reads: ["next/org/invite.tsx", "lib/org-data.ts (made)"],
+    states: INVITE_STATES,
   },
   {
     name: "System",

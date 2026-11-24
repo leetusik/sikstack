@@ -1,0 +1,22 @@
+/*
+ * The org surfaces' classes (P78-s2.S2's design): the org menu's rule before New org, and New org's narrow
+ * form. Applied, this sheet is `src/sikstack/styles/org.css`, imported by `index.css` after the Design service's
+ * sheet. Scoped like the system's sheets (./README.md): one `@scope (.ui) to ([data-ui-legacy])` block. It
+ * declares no custom property; every length and colour is a token.
+ */
+@scope (.ui) to ([data-ui-legacy]) {
+  /* the org menu: the orgs end, an action follows (New org); the line spans the menu's inner width */
+  .menu-rule {
+    display: block;
+    flex: none;
+    height: 1px;
+    margin: var(--space-1) calc(-1 * var(--space-1));
+    background: var(--line);
+  }
+
+  /* New org: one field and its two buttons, kept to a form's width on the column's left edge */
+  .org-form {
+    width: 100%;
+    max-width: 32em;
+  }
+}

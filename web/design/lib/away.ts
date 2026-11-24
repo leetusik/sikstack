@@ -12,6 +12,10 @@ export function awayPaths(project: string): string[] {
   const inDesign = new Set([
     `/projects/${encodeURIComponent(project)}/workspace`,
     `/projects/${encodeURIComponent(project)}/design`,
+    // The org surfaces (P78-s2.S2's design) draw org home's address (the org switcher), Members and New org.
+    "/dashboard",
+    "/members",
+    "/orgs/new",
   ]);
   const ws = workspaceHrefs(project);
   const projectRail = railFor(`/projects/${encodeURIComponent(project)}/workspace`);
@@ -25,6 +29,9 @@ export function awayPaths(project: string): string[] {
     "/dashboard",
     // The Design viewer opens a build on its own host through this route (`src/sikstack/design/model.ts`).
     "/api/design/open",
+    // The invite link's sign-in pair (P78-s2.S2's design).
+    "/login",
+    "/signup",
   ];
   const paths = new Set<string>();
   for (const href of hrefs) {

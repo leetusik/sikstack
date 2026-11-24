@@ -48,6 +48,13 @@ const config: NextConfig = {
     // Relative targets resolve from this folder.
     resolveAlias: {
       "@/lib/workspace/actions": "./lib/actions.ts",
+      // P78-s2.S2's org surfaces: the Shell's next version (the org menu for every account with New org, the org
+      // rail's Members), drawn in place of production's wherever it is imported: by path, and as the shell
+      // index's "./shell" (the key catches every "./shell" import; production has only that one). Its rules come
+      // with it: "@/sikstack/shell/model" (the design's `away.ts` reads the rail from it).
+      "@/sikstack/shell/shell": "./next/shell/shell.tsx",
+      "./shell": "./next/shell/shell.tsx",
+      "@/sikstack/shell/model": "./next/shell/model.ts",
       "design-recording": `./${path.relative(here, recording).split(path.sep).join("/")}`,
     },
   },
