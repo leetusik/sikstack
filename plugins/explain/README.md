@@ -213,7 +213,10 @@ Release checklist — before pushing a release:
    orgs, member invites, password reset, owner-only org settings and the waitlist alert.
    0.19.8: an owner makes a member an owner, so an org can be handed over; an account
    whose last membership ends gets a fresh `default` org, as at sign-up; and the daily
-   new-org limit counts `tenants.made_by` (migration 0016), so a promotion never counts.)
+   new-org limit counts `tenants.made_by` (migration 0016), so a promotion never counts.
+   0.19.9: tenant #1 is pinned for the operator's account (migration 0017, from its
+   first membership), so handing that org over and leaving it moves neither the `docs/`
+   corpus nor the master bearer.)
 2. `python3 scripts/plugin_parity.py` — templates in parity with the repo.
 3. `claude plugin validate .`, `claude plugin validate ./plugins/explain` and
    `claude plugin validate ./plugins/sikstack` — all pass

@@ -8,7 +8,7 @@ three Feedback tables (events, comments, attachments; revision ``0009``), the
 eight workspace-store tables (revision ``0011``), the sikstack plugin's
 ``installs`` and ``install_sign_ins`` (revision ``0012``), ``design_builds``
 (revision ``0013``) and ``org_invites`` (revision ``0014``); ``tenants.made_by`` is
-revision ``0016``.
+revision ``0016``, and ``tenant_one_pins`` revision ``0017``.
 """
 
 from __future__ import annotations
@@ -1327,3 +1327,23 @@ class PasswordResetModel(Base):
     created_at: Mapped[datetime] = _ts()
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class TenantOnePinModel(Base):
+    """Tenant #1, pinned (revision ``0017``; ``server.api_auth.get_tenant_one_id``).
+
+    One row per operator account (``KB_OPERATOR_EMAIL``'s user): the org that holds the
+    ``docs/`` corpus, the master bearer and ``is_public``. It is written once, from that
+    account's first membership (by the migration, else at the API's first resolution),
+    and no membership change moves it: the operator can hand the org over and leave.
+    Keyed by the account, so a database whose operator email changes keeps each
+    account's pin. Both keys ``CASCADE``: a deleted account or org takes its pin along.
+    """
+
+    __tablename__ = "tenant_one_pins"
+
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    tenant_id: Mapped[UUID] = _uuid_fk("tenants.id")
+    created_at: Mapped[datetime] = _ts()
