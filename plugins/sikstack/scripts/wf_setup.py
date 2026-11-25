@@ -53,6 +53,53 @@ def plugin_version() -> str:
     return version if isinstance(version, str) and version.strip() else "unknown"
 
 
+def user_agent() -> str:
+    """The User-Agent of every request the engine makes: sikstack/<plugin version>. urllib's own (Python-urllib/<ver>)
+    is blocked by the network in front of sikstack (a text 403, `error code: 1010`)."""
+    return f"sikstack/{plugin_version()}"
+
+
+# The members of an RFC 9457 problem and Cloudflare's extensions to it: Cloudflare answers its 1xxx errors (a 1010
+# browser-signature block, a WAF 1020, ...) as such a problem to a request that accepts JSON, which every engine
+# request does (developers.cloudflare.com/fundamentals/reference/error-responses/). The API's own 403 holds none.
+EDGE_PROBLEM_MEMBERS = frozenset({
+    "type", "title", "status", "instance", "error_code", "error_name", "error_category", "ray_id", "timestamp", "zone",
+    "cloudflare_error", "retryable", "retry_after", "owner_action_required", "what_you_should_do", "footer"})
+
+
+def block_line(status, raw, content_type: str = "", key: str = "") -> "str | None":
+    """A 403 is sikstack's own only when it is the API's JSON: Content-Type application/json (never
+    application/problem+json) and a JSON object holding `detail` and none of EDGE_PROBLEM_MEMBERS. Any other 403
+    (Cloudflare's JSON problem, a text `error code: 1010`, an HTML page, an empty body) was blocked in front of it.
+    The block's words, with what the body says (its error code, its words or its first line, at most 80 characters;
+    the key is blanked out of the whole body first, so no cut can leave a piece of it), or None when the answer is
+    not a block."""
+    if status != 403:
+        return None
+    text = (raw or b"").decode("utf-8", "replace")
+    if key:
+        text = text.replace(key, "<key>")
+    try:
+        parsed = json.loads(text) if text.strip() else None
+    except ValueError:
+        parsed = None
+    media = (content_type or "").split(";")[0].strip().lower()
+    if media == "application/json" and isinstance(parsed, dict) and "detail" in parsed \
+            and not EDGE_PROBLEM_MEMBERS.intersection(parsed):
+        return None
+    said = ""
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("error_code"), (int, str)) and not isinstance(parsed.get("error_code"), bool):
+            said = f"error code: {parsed['error_code']}"
+        else:
+            said = next((parsed[k] for k in ("detail", "title", "message", "error") if isinstance(parsed.get(k), str)
+                         and parsed[k].strip()), "")
+    if not said:
+        said = next((line for line in text.splitlines() if line.strip()), "")
+    said = " ".join(str(said).split())[:80].strip()
+    return "blocked before it reached sikstack (HTTP 403" + (f": {said})" if said else ")")
+
+
 def _write_json(path: Path, data: dict, mode: int = 0o600) -> None:
     """Write whole or not at all: a temp file beside it, then a rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +160,7 @@ def register(server: str, install: str, email: str, version: str, timeout: float
     body = json.dumps({"install_id": install, "email": email, "plugin_version": version}).encode("utf-8")
     request = urllib.request.Request(f"{server}/api/installs", data=body, method="POST",
                                      headers={"Content-Type": "application/json", "Accept": "application/json",
-                                              "User-Agent": f"sikstack/{version}"})
+                                              "User-Agent": user_agent()})
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=timeout) as answer:
             status, raw = answer.status, answer.read(65536)
@@ -156,8 +203,9 @@ def retry_pending(data_dir, timeout: float = HOOK_TIMEOUT):
 
 
 def post_json(server: str, path: str, body: dict, timeout: float) -> tuple:
-    """(status, payload) of one POST to the server, or (None, why) when no answer came. Never follows a redirect;
-    an answer that is not JSON reads as {}."""
+    """(status, payload, blocked) of one POST to the server, or (None, why, None) when no answer came. Never follows
+    a redirect; an answer that is not JSON reads as {}; `blocked` is block_line's words for a 403 that is not the
+    API's own, else None."""
     import urllib.error
     import urllib.request
 
@@ -167,20 +215,20 @@ def post_json(server: str, path: str, body: dict, timeout: float) -> tuple:
 
     request = urllib.request.Request(f"{server}{path}", data=json.dumps(body).encode("utf-8"), method="POST",
                                      headers={"Content-Type": "application/json", "Accept": "application/json",
-                                              "User-Agent": f"sikstack/{plugin_version()}"})
+                                              "User-Agent": user_agent()})
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=timeout) as answer:
-            status, raw = answer.status, answer.read(1 << 20)
+            status, raw, kind = answer.status, answer.read(1 << 20), answer.headers.get("Content-Type")
     except urllib.error.HTTPError as exc:
-        status, raw = exc.code, exc.read(1 << 16)
+        status, raw, kind = exc.code, exc.read(1 << 16), exc.headers.get("Content-Type") if exc.headers else None
     except Exception as exc:  # noqa: BLE001 - unreachable, refused, timed out, a TLS error
         reason = getattr(exc, "reason", None) or exc
-        return None, f"{exc.__class__.__name__}: {reason}"[:200]
+        return None, f"{exc.__class__.__name__}: {reason}"[:200], None
     try:
         payload = json.loads(raw.decode("utf-8") or "{}")
     except (ValueError, UnicodeDecodeError):
         payload = {}
-    return status, payload if isinstance(payload, dict) else {}
+    return status, payload if isinstance(payload, dict) else {}, block_line(status, raw, kind or "")
 
 
 def machine_server(data_dir: Path) -> str:
@@ -282,8 +330,13 @@ def feedback_main(argv: list) -> int:
         print(f"{prog}: {exc} (nothing was sent)", file=sys.stderr)
         return 2
     install = registered_install(data_dir, prog)
-    status, payload = post_json(server, "/api/installs/feedback",
-                                {"install_id": install, "message": report, "plugin_version": plugin_version()}, SETUP_TIMEOUT)
+    status, payload, blocked = post_json(server, "/api/installs/feedback",
+                                         {"install_id": install, "message": report, "plugin_version": plugin_version()},
+                                         SETUP_TIMEOUT)
+    if blocked:
+        print(f"{prog}: the request to {server} was {blocked}, by something in front of it: nothing was sent",
+              file=sys.stderr)
+        return 1
     if status == 202:
         print(f"sent: the report reached {server} (receipt {payload.get('request_id', '?')}); thank you")
         return 0

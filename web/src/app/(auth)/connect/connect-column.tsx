@@ -32,8 +32,11 @@ import { useAuthEmail } from "../auth-email";
  *   applies only to the send that started it. Success is Connected; a failure keeps the screen
  *   with the notice, Connect keeping its name.
  * - *Outcomes* (waitlisted, connected, declined, already, other, expired): the title, focused on
- *   arrival, a panel with one sentence and at most one way on. Another account's Sign out signs
+ *   arrival, a panel with one sentence and at most one way on. Another account's sentence names
+ *   `/sikstack:sign-in release` (which frees the install for a new code), and its Sign out signs
  *   out and reloads this page (signed out, the same code).
+ * - Signed in, the account a Connect uses shows once, right under the action pair, with Use
+ *   another account: the same sign-out, back to this code signed out.
  * - Waitlisted comes from the `(auth)` layout's memory: a sign-up or sign-in sent from this
  *   page that answered "waitlisted" for this code (`useAuthEmail().waitlisted`).
  */
@@ -171,16 +174,6 @@ export function ConnectColumn({ initial }: { initial: ConnectView }) {
                   <span>{setup.domain}</span>
                 </dd>
               </div>
-              {signedIn && (
-                <div className="row">
-                  <dt>{CONNECT_COPY.facts.signedInAs}</dt>
-                  <dd>
-                    <span>{me.local}</span>
-                    <wbr />
-                    <span>{me.domain}</span>
-                  </dd>
-                </div>
-              )}
             </dl>
           </div>
           {signedIn && orgs.length > 1 && (
@@ -202,24 +195,37 @@ export function ConnectColumn({ initial }: { initial: ConnectView }) {
             </fieldset>
           )}
           {signedIn ? (
-            <div className="sk-actions">
-              <button
-                type="button"
-                className={buttonClass()}
-                disabled={busy}
-                onClick={decline}
-              >
-                {CONNECT_COPY.decline}
-              </button>
-              <button
-                type="button"
-                className={buttonClass("primary")}
-                data-busy={busy ? "true" : "false"}
-                disabled={busy}
-                onClick={connect}
-              >
-                <Swap labels={[CONNECT_COPY.connect, CONNECT_COPY.connecting]} />
-              </button>
+            <div className="stack gap-1">
+              <div className="sk-actions">
+                <button
+                  type="button"
+                  className={buttonClass()}
+                  disabled={busy}
+                  onClick={decline}
+                >
+                  {CONNECT_COPY.decline}
+                </button>
+                <button
+                  type="button"
+                  className={buttonClass("primary")}
+                  data-busy={busy ? "true" : "false"}
+                  disabled={busy}
+                  onClick={connect}
+                >
+                  <Swap labels={[CONNECT_COPY.connect, CONNECT_COPY.connecting]} />
+                </button>
+              </div>
+              <p className="signin-wait-text">
+                <span className="dim">{CONNECT_COPY.signedInAs}</span>{" "}
+                <span className="connect-addr strong">
+                  <span>{me.local}</span>
+                  <wbr />
+                  <span>{me.domain}</span>
+                </span>{" "}
+                <button type="button" className="link link-row" disabled={busy} onClick={signOut}>
+                  {CONNECT_COPY.useAnotherAccount}
+                </button>
+              </p>
             </div>
           ) : (
             <div className="sk-actions">
@@ -274,7 +280,13 @@ export function ConnectColumn({ initial }: { initial: ConnectView }) {
   } else if (shown === "declined") {
     sentence = <p className="block-text">{words.declined}</p>;
   } else if (shown === "other") {
-    sentence = <p className="block-text">{words.other}</p>;
+    sentence = (
+      <p className="block-text">
+        {words.other.before}
+        <span className="cmd-inline">{CONNECT_COPY.releaseCommand}</span>
+        {words.other.after}
+      </p>
+    );
     wayOn = (
       <p className="cluster gap-1">
         <button type="button" className="link link-row" onClick={signOut}>

@@ -15,9 +15,12 @@ It claims this machine's install for the account you confirm on the web, and lin
    sikstack sign-in --data-dir "${CLAUDE_PLUGIN_DATA}"
    ```
 
+   Add `--release` when the user's arguments hold the word `release`, when the user says this install belongs to the wrong account, or when the connect page said "Connected to another account": it first releases the install from the account that claimed it (one `released:` or `release:` line), then goes on with a new code. A server that cannot release says so in one line and nothing changes.
+
    It prints a short code and the connect page's address and opens the page in the browser. As soon as those two lines appear, tell the user: open the page (if it did not open), check it shows the same code, sign in or create an account there, and press **Connect**.
 2. **Wait for it.** It ends by itself once the page is answered:
    - `linked:` and `on the web:` lines: the install is connected; the repo's earlier work was uploaded. Relay the web address.
    - `still waiting` (exit 3): run the same command again; it keeps the same code while it lives.
    - a declined or expired code, or a refusal (an already linked checkout, uncommitted changes in `.sikstack/`): relay the one line it printed.
+   - a line saying the request was `blocked before it reached sikstack`: something in front of sikstack refused it, not the account or the key. Relay the line. When it says the code is kept, the same command resumes that code later.
 3. **Never print or ask for a key.** The key comes from the server once and goes straight into your user config; the command never shows it.
