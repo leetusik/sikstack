@@ -26,11 +26,16 @@ The shapes (the web's Workspace pages draw every field):
 - **Doc** ``{id, title, state, version, ordinal, versioned, from, stale, sections,
   versions}``: ``version`` is the stored id's leading token (``?version=`` takes it or
   the whole id), ``ordinal`` the version's place in the doc's history, 1 the oldest.
-- **Agenda item** ``{id, title, lang, note, state, created, changed, phases, outcome,
-  reason, proposed, entryCount, latest, sync, accepting}``; ``state`` may read
-  ``proposed`` (apart from Open and listed before it); ``accepting`` is true while a
-  pending web ``accept`` names the item (:meth:`WorkspaceReader._overlay`); the item
-  read adds its thread, ``entries``, and ``deleting`` (:meth:`WorkspaceReader.item`).
+- **Agenda** ``{id, title, lang, note, state, created, changed, phases, outcome,
+  reason, proposed, entryCount, itemsOpen, latest, sync, accepting}``; ``state`` is
+  ``proposed``, ``open``, ``in_progress``, ``solved`` or ``dropped``, never Deferred (an
+  older engine's stored ``deferred`` reads ``proposed``); ``proposed`` reads apart from
+  Open and is listed before it; ``accepting`` is true while a pending web ``accept``
+  names the agenda (:meth:`WorkspaceReader._overlay`); the agenda read adds its items,
+  ``entries``, and ``deleting`` (:meth:`WorkspaceReader.item`). An **item** is one file
+  under the agenda's ``entries/`` (:func:`_thread_entry`): its ``state`` (``open``,
+  ``done``, ``dismissed``; absent reads ``open``), ``stateBy``, ``stateAt``, its full
+  ``file`` name and its ``ref`` (``A7-m3/hnj0``).
 
 A phase's ``branches`` are ``{repo, branch, pr}``, ``pr`` ``{number, state, url}`` or
 ``None`` with no URL (:func:`pull_request`).
@@ -57,8 +62,11 @@ their sha256, so a new head re-reads only what changed. Nothing is persisted.
 **The web's changes.** An agenda change made on the web is an inbox entry until a
 linked engine applies or refuses it (``server/workspace_web_api.py``). The open entries
 are read on every request, outside the memo and its key, and laid over the agenda as
-each item's ``sync``: ``None``, ``'waiting'`` or ``{refused, entry, kind}``; a pending add is
-its own row and a pending delete hides its item (:meth:`WorkspaceReader._overlay`).
+each agenda's ``sync``: ``None``, ``'waiting'`` or ``{refused, entry, kind}``; a pending add
+(or split) is its own row and a pending delete hides its agenda
+(:meth:`WorkspaceReader._overlay`). The pending item changes, splits and proposes are
+applied the engine's way (:func:`predict`), auto-close included, so a page shows the state
+they will make while ``sync`` reads waiting.
 The Workspace's ``unplaced`` lists every open entry no row carries (its items gone or
 never there, or its refusal behind a newer entry on the same item), so a change that
 does not apply is never out of sight (:meth:`WorkspaceReader._unplaced`).
@@ -86,12 +94,23 @@ from server.persistence.engine import get_session_maker
 from server.workspace import WorkspaceReadError
 from server.workspace.repository import WorkspaceRepository
 from server.workspace.types import (
+    ENTRY_NAME_PATTERN,
+    ENTRY_STATES,
     INBOX_ACCEPT,
     INBOX_ADD,
     INBOX_DELETE,
     INBOX_ENTRY,
+    INBOX_ITEM_DELETE,
+    INBOX_ITEM_DISMISS,
+    INBOX_ITEM_DONE,
+    INBOX_ITEM_KINDS,
+    INBOX_ITEM_REOPEN,
     INBOX_OPEN_STATES,
     INBOX_PENDING,
+    INBOX_PROPOSE,
+    INBOX_SPLIT,
+    ITEM_DROPPED_REASON,
+    ITEM_SOLVED_OUTCOME,
     KIND_APPEND,
     InboxEntry,
     WorkingRecord,
@@ -122,13 +141,21 @@ RETIRED_DOCS = ("experience", "frontend", "backend", "data", "api", "security")
 _PR_STATES = {"draft": "draft", "ready": "open", "merged": "merged", "closed": "closed"}
 _PR_NUMBER = re.compile(r"/pull/([0-9]+)/?(?:[?#].*)?$")
 
-#: The derived agenda word back to its state key (the engine's ``AGENDA_SHOWN``, reversed).
+#: The derived agenda word back to its state key (the engine's ``AGENDA_SHOWN``, reversed;
+#: 0.6.0 retired Deferred).
 _AGENDA_SHOWN = {"Proposed": "proposed", "Open": "open", "In progress": "in_progress",
-                 "Deferred": "deferred", "Solved": "solved", "Dropped": "dropped"}
+                 "Solved": "solved", "Dropped": "dropped"}
+#: The words an ``index.json`` row may carry: an older engine's ``Deferred`` reads Proposed,
+#: as the engine reads a stored ``deferred`` (``_agenda_proposed``).
+_SHOWN_READ = {**_AGENDA_SHOWN, "Deferred": "proposed"}
 #: A state key to the engine's word for it (its refusal lines name the word).
 AGENDA_WORDS = {key: word for word, key in _AGENDA_SHOWN.items()}
-#: An item's thread: ``works/agenda/<AID>/entries/<name>.json``, name order time order.
+#: The states an agenda closes itself from when its last open item goes (the engine's
+#: ``_agenda_auto_close``: stored ``open``, so Open, Proposed and In progress).
+_CLOSABLE = ("open", "proposed", "in_progress")
+#: An agenda's items: ``works/agenda/<AID>/entries/<name>.json``, name order time order.
 _ENTRIES_DIR = "/entries/"
+_ENTRY_NAME = re.compile(ENTRY_NAME_PATTERN)
 #: A ``## Published`` table cell's document path: ``<project>/<file>.md`` (or ``.html``).
 _REL_PATH = re.compile(r"[^\s|`/]+(?:/[^\s|`/]+)+\.(?:md|html)")
 #: A slice in one of these is a phase's current slice when the pointer is elsewhere.
@@ -1017,18 +1044,32 @@ class WorkspaceReader:
     # -- agenda -----------------------------------------------------------------------
 
     async def agenda(self) -> list[dict[str, Any]]:
-        """Every agenda item, in the engine's listing order, with this request's sync marks."""
+        """Every agenda, in the engine's listing order, with this request's sync marks and
+        the open inbox's predictions."""
 
-        return self._overlay(await self._agenda_rows())
+        return self._overlay(await self._agenda_rows(), threads=await self._agenda_entries())
 
     async def held_ids(self) -> set[str]:
-        """The ids a web change may name: the stored items and every pending add's id."""
+        """The ids a web change may name: the stored agendas and every pending add's or
+        split's new id."""
 
         ids = {row["id"] for row in await self._agenda_rows()}
         ids.update(entry.minted_id for entry in self._inbox
-                   if entry.kind == INBOX_ADD and entry.state == INBOX_PENDING
+                   if entry.kind in (INBOX_ADD, INBOX_SPLIT) and entry.state == INBOX_PENDING
                    and entry.minted_id)
         return ids
+
+    async def item_files(self, aid: str) -> list[str]:
+        """The full file names of the items agenda ``aid`` holds as the overlay predicts
+        them (its stored items, less the ones a pending change deletes or splits off, plus
+        the ones a pending split moves onto it), in name order: what a web item change
+        or split may name."""
+
+        threads = await self._agenda_entries()
+        prediction = predict(await self._agenda_rows(), threads, self._inbox)
+        if aid in prediction.files:
+            return sorted(prediction.files[aid])
+        return [entry["file"] for entry in threads.get(aid, ()) if entry["file"]]
 
     async def agenda_ids(self) -> set[str]:
         """Every agenda id the web can see: the stored items and every open entry's ids."""
@@ -1072,13 +1113,11 @@ class WorkspaceReader:
         return await self._memoized(("agenda",), build)
 
     async def _agenda_entries(self) -> dict[str, list[dict[str, Any]]]:
-        """``{item: [entry]}``: every item's thread at the head, each in name (time) order.
+        """``{agenda: [item]}``: every agenda's items at the head, each in name (time) order.
 
-        An entry is ``{id, kind, author, by, name, source, created, body, job, sync}``:
-        ``id`` its file name without ``.json``, ``by`` ``person`` or ``agent`` and
-        ``name`` the rest of its author, ``created`` its ``created_at`` as stored, ``job``
-        the folded job's id it carries (``agenda-fold``), ``sync`` ``None``. A file that
-        is not a JSON object with a text ``body`` is skipped, never raised on.
+        An item is ``{id, file, ref, kind, author, by, name, source, created, body, job,
+        state, stateBy, stateAt, deleting, sync}`` (:func:`_thread_entry`). A file that is
+        not a JSON object with a text ``body`` is skipped, never raised on.
         """
 
         async def build():
@@ -1086,9 +1125,9 @@ class WorkspaceReader:
                      if _ENTRIES_DIR in p and not p.rsplit("/", 1)[1].startswith(".")]
             texts = await self.texts(paths)
             out: dict[str, list[dict[str, Any]]] = {}
-            for path in paths:  # sorted: name order within each item
+            for path in paths:  # sorted: name order within each agenda
                 aid = path[len(AGENDA):].split("/", 1)[0]
-                entry = _thread_entry(path.rsplit("/", 1)[1][: -len(".json")],
+                entry = _thread_entry(aid, path.rsplit("/", 1)[1][: -len(".json")],
                                       _json_object(texts.get(path)))
                 if entry is not None:
                     out.setdefault(aid, []).append(entry)
@@ -1112,28 +1151,32 @@ class WorkspaceReader:
     def _item(data: dict[str, Any], derived: dict[str, Any] | None,
               links: dict[str, list[str]],
               entries: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
-        """One stored item as a row.
+        """One stored agenda as a row.
 
-        ``state`` is the engine's derived word when ``index.json`` lists the item, else
-        the stored status, read ``proposed`` while it is ``open`` and carries a
-        ``proposed`` value (the engine's own rule). ``proposed`` is ``{by, at}`` (who
-        opened it and when, as stored) while the item reads Proposed, else ``None``.
-        ``entryCount`` counts its thread and ``latest`` is its latest activity: the day
-        of its newest entry or of its last change, whichever is later.
+        ``state`` is the engine's derived word when ``index.json`` lists the agenda (an
+        older engine's ``Deferred`` reads ``proposed``), else the stored status, read
+        ``proposed`` while it is ``open`` and carries a ``proposed`` value, or is an older
+        engine's ``deferred`` (the engine's own rule, ``_agenda_proposed``): no row ever
+        reads Deferred. ``proposed`` is ``{by, at}`` (who opened it and when, as stored;
+        both ``None`` for an older ``deferred``) while it reads Proposed, else ``None``.
+        ``entryCount`` counts its items and ``itemsOpen`` the open ones among them
+        (``state`` absent or ``open``); ``latest`` is its latest activity: the day of its
+        newest item or of its last change, whichever is later.
         """
 
         aid = data["id"]
         title = _str(data.get("title"))
         stored_proposed = data.get("proposed")
+        stored = _str(data.get("status"))
+        if stored == "deferred" or (stored == "open" and stored_proposed is not None):
+            stored = "proposed"
         if derived is not None:
-            state = _AGENDA_SHOWN.get(str(derived.get("shown_status")), _str(data.get("status")))
+            state = _SHOWN_READ.get(str(derived.get("shown_status")), stored)
             phases = [str(p) for p in derived.get("phases") or []]
             if isinstance(derived.get("proposed"), dict):
                 stored_proposed = derived["proposed"]
         else:
-            state = _str(data.get("status"))
-            if state == "open" and stored_proposed is not None:
-                state = "proposed"
+            state = stored
             phases = list(links.get(aid, ()))
         proposed = None
         if state == "proposed":
@@ -1155,26 +1198,41 @@ class WorkspaceReader:
             "reason": _str(data.get("reason")) or "",
             "proposed": proposed,
             "entryCount": len(thread),
+            "itemsOpen": sum(1 for e in thread if e["state"] == "open"),
             "latest": max(days) if days else None,
             "sync": None,
             "accepting": False,
         }
 
     async def item(self, aid: str) -> dict[str, Any] | None:
-        """One item with its thread, or ``None``.
+        """One agenda with its items, or ``None``.
 
-        ``entries`` are its stored entries in name (time) order, then every open inbox
-        entry on it (a web note or filed feedback the engine has not applied yet), each
-        marked by its ``sync``: ``'waiting'`` or ``{refused, entry, kind}``. An item a
-        pending delete hides from the list still reads, ``deleting`` true and marked
-        waiting, so its page can say so (A283-qb D309-zp).
+        ``entries`` are its items in name (time) order as the open inbox predicts them
+        (:func:`predict`: a pending item change's state, a pending delete's item kept and
+        marked ``deleting``, a pending split's items on the new agenda and gone from this
+        one), each marked by the newest open change naming it (``sync``: ``'waiting'`` or
+        ``{refused, entry, kind}``), then every open inbox ``entry`` on it (a web note or
+        filed feedback the engine has not applied yet), marked by its own ``sync``. An
+        agenda a pending delete hides from the list still reads, ``deleting`` true and
+        marked waiting, so its page can say so (A283-qb D309-zp); so does the new agenda
+        of a pending split.
         """
 
-        rows = self._overlay(await self._agenda_rows(), hide_deleting=False)
+        threads = await self._agenda_entries()
+        rows = self._overlay(await self._agenda_rows(), hide_deleting=False, threads=threads)
         row = next((it for it in rows if it["id"] == aid), None)
         if row is None:
             return None
-        thread = [dict(entry) for entry in (await self._agenda_entries()).get(aid, ())]
+        prediction = predict(await self._agenda_rows(), threads, self._inbox)
+        if aid in prediction.files:
+            files = [*prediction.files[aid].values(), *prediction.deleted.get(aid, {}).values()]
+            thread = [dict(e) for e in sorted(files, key=lambda e: e["file"])]
+        else:
+            thread = [dict(entry) for entry in threads.get(aid, ())]
+        for entry in thread:
+            mark = prediction.marks.get(entry["file"])
+            if mark is not None:
+                entry["sync"] = _sync_mark(mark)
         thread += [_pending_entry(entry) for entry in self._inbox
                    if entry.kind == INBOX_ENTRY and entry.items[:1] == (aid,)]
         deleting = any(entry.kind == INBOX_DELETE and entry.state == INBOX_PENDING
@@ -1196,17 +1254,24 @@ class WorkspaceReader:
         return [{key: row[key] for key in ("id", "title", "lang", "state", "sync")}
                 for row in await self.agenda() if row["id"] in held]
 
-    def _overlay(self, rows: list[dict[str, Any]],
-                 hide_deleting: bool = True) -> list[dict[str, Any]]:
-        """``rows`` with each item's ``sync`` from the open inbox entries naming it.
+    def _overlay(self, rows: list[dict[str, Any]], hide_deleting: bool = True,
+                 threads: dict[str, list[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
+        """``rows`` with each agenda's ``sync`` from the open inbox entries naming it, and
+        the state and counts the pending ones predict.
 
-        ``'waiting'`` while the newest open entry naming the item is pending, ``{refused,
+        ``'waiting'`` while the newest open entry naming the agenda is pending, ``{refused,
         entry, kind}`` while it is refused (the engine's line, verbatim, the entry Discard
-        and Try again name, and the change's kind, for Try again's label). A pending add
-        is its own row, first in the open part (after the Proposed items, which stand
-        apart); a pending delete hides its item unless ``hide_deleting`` is false (the
-        item read); a pending ``accept`` marks its item ``accepting`` (so a reload stops
-        offering Accept). A marked row is a copy: the memoized rows are never changed.
+        and Try again name, and the change's kind, for Try again's label). A pending add,
+        and a pending split the engine would apply (:func:`predict`), is its own row, first
+        in the open part (after the Proposed agendas, which stand apart); a pending delete
+        hides its agenda unless ``hide_deleting`` is false (the item read); a pending
+        ``accept`` marks its agenda ``accepting`` (so a reload stops offering Accept). With
+        ``threads`` (the stored items, :meth:`_agenda_entries`), each agenda a pending item
+        change or split touches reads its predicted ``entryCount`` and ``itemsOpen``, and
+        one a pending ``propose`` or an auto-close moves reads its predicted ``state``,
+        ``outcome``, ``reason`` and ``proposed``, placed where the engine lists it: last in
+        the Proposed part, or first among the Solved and Dropped. A marked row is a copy:
+        the memoized rows are never changed.
         """
 
         if not self._inbox:
@@ -1215,51 +1280,79 @@ class WorkspaceReader:
         deleting: set[str] = set()
         accepting: set[str] = set()
         for entry in self._inbox:
-            for aid in entry.items:
+            named = [*entry.items]
+            if entry.kind == INBOX_SPLIT and entry.minted_id:
+                named.append(entry.minted_id)
+            for aid in named:
                 latest[aid] = entry
                 if hide_deleting and entry.kind == INBOX_DELETE and entry.state == INBOX_PENDING:
                     deleting.add(aid)
                 if entry.kind == INBOX_ACCEPT and entry.state == INBOX_PENDING:
                     accepting.add(aid)
+        prediction = predict(rows, threads or {}, self._inbox)
+
+        def predicted(row: dict[str, Any]) -> dict[str, Any]:
+            aid = row["id"]
+            changes: dict[str, Any] = dict(prediction.states.get(aid, {}))
+            files = prediction.files.get(aid)
+            if files is not None:
+                changes["entryCount"] = len(files)
+                changes["itemsOpen"] = sum(1 for f in files.values() if f["state"] == "open")
+            entry = latest.get(aid)
+            if entry is not None:
+                changes["sync"] = _sync_mark(entry)
+                changes["accepting"] = aid in accepting
+            return {**row, **changes} if changes else row
+
         stored = {row["id"] for row in rows}
         added: list[dict[str, Any]] = []
         for entry in reversed(self._inbox):  # newest first: each add goes first
             aid = entry.minted_id
-            if entry.kind != INBOX_ADD or not aid or aid in stored or aid in deleting:
+            if not aid or aid in stored or aid in deleting:
+                continue
+            if entry.kind != INBOX_ADD and not (entry.kind == INBOX_SPLIT
+                                                and prediction.splits.get(aid) is entry):
                 continue
             stored.add(aid)
-            added.append(_added_item(entry, _sync_mark(latest.get(aid, entry))))
+            added.append(predicted(_added_item(entry, _sync_mark(latest.get(aid, entry)))))
         out: list[dict[str, Any]] = []
         for row in rows:
-            aid = row["id"]
             if added and row.get("state") != "proposed":
                 out += added
                 added = []
-            if aid in deleting:
+            if row["id"] in deleting:
                 continue
-            entry = latest.get(aid)
-            if entry is None:
-                out.append(row)
-                continue
-            out.append({**row, "sync": _sync_mark(entry), "accepting": aid in accepting})
-        return out + added
+            out.append(predicted(row))
+        out += added
+        moved = {aid for aid, change in prediction.states.items()
+                 if change.get("state") in ("proposed", "solved", "dropped")}
+        if not moved:
+            return out
+        rest = [row for row in out if row["id"] not in moved]
+        lead = next((i for i, r in enumerate(rest) if r.get("state") != "proposed"), len(rest))
+        rest[lead:lead] = [r for r in out if r["id"] in moved and r["state"] == "proposed"]
+        end = next((i for i, r in enumerate(rest) if r.get("state") in ("solved", "dropped")),
+                   len(rest))
+        rest[end:end] = [r for r in out if r["id"] in moved and r["state"] != "proposed"]
+        return rest
 
     def _unplaced(self, rows: list[dict[str, Any]],
                   shown: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Every open entry no shown row carries, oldest first, so none closes unseen.
 
-        ``rows`` are the stored items and ``shown`` the overlaid agenda. A pending entry
-        is listed when none of its items is a stored item or an open add's id (one that
-        is matched waits on its row, or is a delete hiding it); a refused entry when no
-        shown row's ``sync`` names it: its items are gone or never existed, or a newer
-        entry on the same item took the row's mark. Built per request, never memoized.
+        ``rows`` are the stored agendas and ``shown`` the overlaid agenda. A pending entry
+        is listed when none of its agendas is a stored agenda or an open add's or split's
+        new id (one that is matched waits on its row, or is a delete hiding it); a refused
+        entry when no shown row's ``sync`` names it: its agendas are gone or never existed,
+        or a newer entry on the same agenda took the row's mark. Built per request, never
+        memoized.
         """
 
         if not self._inbox:
             return []
         held = {row["id"] for row in rows}
         held.update(entry.minted_id for entry in self._inbox
-                    if entry.kind == INBOX_ADD and entry.minted_id)
+                    if entry.kind in (INBOX_ADD, INBOX_SPLIT) and entry.minted_id)
         carried = {row["sync"]["entry"] for row in shown if isinstance(row.get("sync"), dict)}
         out: list[dict[str, Any]] = []
         for entry in self._inbox:
@@ -1329,7 +1422,7 @@ class WorkspaceReader:
             }
 
         lists = await self._memoized(("workspace",), build)
-        shown = self._overlay(lists["agenda"])
+        shown = self._overlay(lists["agenda"], threads=await self._agenda_entries())
         return {**base, **lists, "agenda": shown,
                 "unplaced": self._unplaced(lists["agenda"], shown)}
 
@@ -1616,22 +1709,52 @@ def _added_item(entry: InboxEntry, sync: str | dict[str, Any]) -> dict[str, Any]
         "reason": "",
         "proposed": None,
         "entryCount": 0,
+        "itemsOpen": 0,
         "latest": day,
         "sync": sync,
         "accepting": False,
     }
 
 
-def _thread_entry(name: str, data: dict[str, Any] | None) -> dict[str, Any] | None:
-    """One stored entry file as the item read gives it, or ``None`` when it is malformed
-    (not a JSON object with a text ``body``)."""
+def entry_state(data: dict[str, Any] | None) -> str:
+    """An item's state by the engine's rule (``entry_state``): its stored ``state`` when
+    it is one of ``ENTRY_STATES``, else ``open`` (absent, or a value the engine does not
+    read): an item is closed only by a state the engine reads."""
+
+    value = data.get("state") if isinstance(data, dict) else None
+    return value if isinstance(value, str) and value in ENTRY_STATES else "open"
+
+
+def entry_ref(aid: str, file: str) -> str:
+    """The reference an item is typed by (the engine's ``entry_ref``): ``<agenda>/<tail>``,
+    the 4 symbols that end its file name, or ``<agenda>/<file>`` for a name off the form."""
+
+    return f"{aid}/{file[-9:-5]}" if _ENTRY_NAME.fullmatch(file) else f"{aid}/{file}"
+
+
+def _thread_entry(aid: str, name: str, data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """One stored item file as the agenda read gives it, or ``None`` when it is malformed
+    (not a JSON object with a text ``body``).
+
+    ``{id, file, ref, kind, author, by, name, source, created, body, job, state, stateBy,
+    stateAt, deleting, sync}``: ``id`` its file name without ``.json``, ``file`` the full
+    name (what a web item change names), ``ref`` what the engine's commands take
+    (:func:`entry_ref`), ``by`` ``person`` or ``agent`` and ``name`` the rest of its
+    author, ``created`` its ``created_at`` as stored, ``job`` the folded job's id it
+    carries (``agenda-fold``), ``state`` :func:`entry_state` and ``stateBy`` /
+    ``stateAt`` who set it and when, as stored (``None`` while it was never set);
+    ``deleting`` and ``sync`` are the overlay's (``False``, ``None`` here).
+    """
 
     if data is None or not isinstance(data.get("body"), str):
         return None
     author = _str(data.get("author"))
     job = data.get("job") if isinstance(data.get("job"), dict) else None
+    file = f"{name}.json"
     return {
         "id": name,
+        "file": file,
+        "ref": entry_ref(aid, file),
         "kind": _str(data.get("kind")),
         "author": author,
         **_author_parts(author),
@@ -1639,16 +1762,23 @@ def _thread_entry(name: str, data: dict[str, Any] | None) -> dict[str, Any] | No
         "created": _str(data.get("created_at")),
         "body": data["body"],
         "job": _str(job.get("id")) if job else None,
+        "state": entry_state(data),
+        "stateBy": _str(data.get("state_by")),
+        "stateAt": _str(data.get("state_at")),
+        "deleting": False,
         "sync": None,
     }
 
 
 def _pending_entry(entry: InboxEntry) -> dict[str, Any]:
-    """A web entry the engine has not applied, as a thread entry marked by its sync."""
+    """A web entry the engine has not applied, as an open item marked by its sync: it has
+    no file (and so no ``ref``) until the engine writes it."""
 
     author = _str(entry.fields.get("author"))
     return {
         "id": str(entry.id),
+        "file": None,
+        "ref": None,
         "kind": _str(entry.fields.get("kind")),
         "author": author,
         **_author_parts(author),
@@ -1656,8 +1786,151 @@ def _pending_entry(entry: InboxEntry) -> dict[str, Any]:
         "created": _iso_z(entry.created_at),
         "body": _str(entry.fields.get("body")) or "",
         "job": None,
+        "state": "open",
+        "stateBy": None,
+        "stateAt": None,
+        "deleting": False,
         "sync": _sync_mark(entry),
     }
+
+
+#: An item kind's verb: the state it sets (``None``: the file goes) (``ITEM_VERBS``).
+_ITEM_TO = {INBOX_ITEM_DONE: "done", INBOX_ITEM_DISMISS: "dismissed",
+            INBOX_ITEM_REOPEN: "open", INBOX_ITEM_DELETE: None}
+
+
+@dataclass(slots=True)
+class Prediction:
+    """What the pending inbox entries will make of the agenda, by the engine's rules.
+
+    ``states``: ``{agenda: {state, outcome, reason, proposed}}`` for each agenda a
+    ``propose`` or an auto-close moves. ``files``: ``{agenda: {file: item}}``, the items
+    of each agenda an item change or a split touches, each a copy with its predicted
+    ``state``, ``stateBy`` and ``stateAt`` (a split's moved items keep theirs, with the
+    new agenda's ``ref``); ``deleted``: the items a pending ``item-delete`` takes, each
+    marked ``deleting``. ``splits``: ``{new agenda: entry}`` for each split the engine
+    would apply. ``marks``: ``{file: entry}``, the newest open item change or split naming
+    each item (pending or refused).
+    """
+
+    states: dict[str, dict[str, Any]] = field(default_factory=dict)
+    files: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    deleted: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    splits: dict[str, InboxEntry] = field(default_factory=dict)
+    marks: dict[str, InboxEntry] = field(default_factory=dict)
+
+
+def predict(rows: Iterable[dict[str, Any]], threads: dict[str, list[dict[str, Any]]],
+            inbox: Iterable[InboxEntry]) -> Prediction:
+    """The pending entries applied in order, oldest first, the way a linked engine applies
+    them at its next sync (``wf_cloud.py`` ``cloud_inbox_step``), each all or none as its
+    command is (``wf_agenda.py``):
+
+    - ``item-done`` / ``item-dismiss`` take open items, ``item-reopen`` closed ones,
+      ``item-delete`` any (``agenda_item_change``); an entry naming an item its agenda does
+      not hold, or one in the wrong state, is the engine's refusal and predicts nothing.
+    - **Auto-close** (``_agenda_auto_close``): after any of them but ``item-reopen``, an
+      agenda that held items before it, reads Open, Proposed or In progress and holds no
+      open item reads Solved (``ITEM_SOLVED_OUTCOME``) when any of its remaining items is
+      done, else Dropped (``ITEM_DROPPED_REASON``). One with no items never closes; a
+      reopened item never reopens its agenda.
+    - ``split`` (``agenda_split``): the named items move, state and all, to the new agenda
+      (Open: the web's author is a person), refused when it would take none or every item;
+      then the source may close itself the same way.
+    - ``propose`` (``agenda_propose``): an Open or In progress agenda reads Proposed.
+    - an ``add`` makes its agenda (Open, no items) and an ``entry`` adds one open item, so
+      a later change counts them as the engine will.
+
+    The other kinds (edit, move, solve, drop, reopen, delete, accept) change no predicted
+    state here: their marks are the overlay's. A refused entry predicts nothing.
+    """
+
+    base = {row["id"]: row.get("state") for row in rows}
+    out = Prediction()
+    notes: dict[str, int] = {}
+
+    def state_of(aid: str) -> str | None:
+        return out.states.get(aid, {}).get("state", base.get(aid))
+
+    def items_of(aid: str) -> dict[str, dict[str, Any]]:
+        if aid not in out.files:
+            out.files[aid] = {e["file"]: dict(e) for e in threads.get(aid, ()) if e.get("file")}
+        return out.files[aid]
+
+    def auto_close(aid: str) -> None:
+        if state_of(aid) not in _CLOSABLE:
+            return
+        held = items_of(aid)
+        if notes.get(aid) or any(item["state"] == "open" for item in held.values()):
+            return
+        done = sum(1 for item in held.values() if item["state"] == "done")
+        dismissed = sum(1 for item in held.values() if item["state"] == "dismissed")
+        if done:
+            out.states[aid] = {"state": "solved", "outcome": ITEM_SOLVED_OUTCOME.format(
+                done=done, dismissed=dismissed), "reason": "", "proposed": None}
+        else:
+            out.states[aid] = {"state": "dropped", "outcome": "",
+                               "reason": ITEM_DROPPED_REASON, "proposed": None}
+
+    for entry in inbox:
+        fields = entry.fields if isinstance(entry.fields, dict) else {}
+        names = fields.get("entries") if isinstance(fields.get("entries"), list) else []
+        names = list(dict.fromkeys(n for n in names if isinstance(n, str)))
+        if entry.kind in (*INBOX_ITEM_KINDS, INBOX_SPLIT):
+            for name in names:
+                out.marks[name] = entry
+        if entry.state != INBOX_PENDING:
+            continue
+        author = _str(fields.get("author"))
+        at = _iso_z(entry.created_at)
+        if entry.kind == INBOX_ADD:
+            if entry.minted_id and entry.minted_id not in base:
+                base[entry.minted_id] = "open"
+            continue
+        if entry.kind == INBOX_ENTRY:
+            if entry.items:
+                notes[entry.items[0]] = notes.get(entry.items[0], 0) + 1
+            continue
+        if entry.kind == INBOX_PROPOSE:
+            if entry.items and all(state_of(aid) in ("open", "in_progress") for aid in entry.items):
+                for aid in entry.items:
+                    out.states[aid] = {**out.states.get(aid, {}), "state": "proposed",
+                                       "proposed": {"by": author, "at": at}}
+            continue
+        if len(entry.items) != 1 or entry.items[0] not in base or not names:
+            continue
+        aid = entry.items[0]
+        held = items_of(aid)
+        if any(name not in held for name in names):
+            continue
+        if entry.kind in INBOX_ITEM_KINDS:
+            to = _ITEM_TO[entry.kind]
+            now = [held[name]["state"] for name in names]
+            if entry.kind == INBOX_ITEM_REOPEN and "open" in now:
+                continue
+            if entry.kind in (INBOX_ITEM_DONE, INBOX_ITEM_DISMISS) and any(s != "open" for s in now):
+                continue
+            had = len(held) + notes.get(aid, 0)
+            for name in names:
+                if to is None:
+                    out.deleted.setdefault(aid, {})[name] = {**held.pop(name), "deleting": True}
+                else:
+                    held[name] = {**held[name], "state": to, "stateBy": author, "stateAt": at}
+            if entry.kind != INBOX_ITEM_REOPEN and had:
+                auto_close(aid)
+            continue
+        # a split
+        new = entry.minted_id
+        title = fields.get("title")
+        if (not new or new in base or not isinstance(title, str) or not title.strip()
+                or len(names) >= len(held) + notes.get(aid, 0)):
+            continue
+        moved = {name: {**held.pop(name), "ref": entry_ref(new, name)} for name in sorted(names)}
+        out.files[new] = moved
+        base[new] = "open"
+        out.splits[new] = entry
+        auto_close(aid)
+    return out
 
 
 def _author_parts(author: str | None) -> dict[str, str | None]:

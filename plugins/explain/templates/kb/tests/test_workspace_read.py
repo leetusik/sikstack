@@ -209,6 +209,8 @@ def test_shapes_come_back_field_for_field(store):
     assert record(f"{base}/docs/product?version=v2611020550_the_retry_queue") == expected["doc"]
     item = record(f"{base}/agenda/A2-k5")
     assert item == expected["item"] and "deferred" not in item
+    # an agenda's items: a stored state read with who set it and when, an absent one open
+    assert record(f"{base}/agenda/A1-h7") == expected["item_with_items"]
 
     planned = _get(client, owner, f"{base}/phases/P9-r5")
     assert planned["explain"] == {"title": "How export works", "documents": []}
@@ -485,6 +487,148 @@ def test_a_refused_change_names_its_kind_on_the_row_and_unplaced():
     assert reader._overlay([{"id": "A2-k5", "sync": None}])[0]["sync"] == "waiting"
 
 
+# -- the overlay's predictions: the engine's item rules (no database) -------------------
+#
+# Each case is the engine's own rule, ``plugins/sikstack/scripts/wf_agenda.py`` at this
+# branch: ``agenda_item_change`` (lines 1185-1246: done and dismiss take open items, reopen
+# closed ones, delete any, all or none; no auto-close after a reopen), ``_agenda_auto_close``
+# (lines 1159-1178: an agenda stored ``open``, so Open, Proposed or In progress, that held
+# items and holds none open is Solved when any is done, outcome ``ITEM_SOLVED_OUTCOME``,
+# else Dropped, reason ``ITEM_DROPPED_REASON``, lines 324-325), ``agenda_split`` (lines
+# 1249-1297: the named items move whole, never none or every one, then the source may
+# close) and ``agenda_propose`` (lines 976-999: Open or In progress only).
+
+_AT = datetime(2026, 11, 25, 1, 0, tzinfo=UTC)
+_X = "20261120T000000.000001Z-xa01.json"
+_Y = "20261121T000000.000001Z-yb02.json"
+_Z = "20261122T000000.000001Z-zc03.json"
+
+
+def _items_of(aid: str, **states: str) -> list[dict]:
+    """Thread entries of ``aid`` as the reader builds them, one per name in ``states``."""
+
+    from server.workspace_read import _thread_entry
+
+    names = {"X": _X, "Y": _Y, "Z": _Z}
+    out = []
+    for key, state in states.items():
+        data = {"kind": "note", "author": "person:june", "source": "web:agenda",
+                "created_at": "2026-11-20T09:00:00+09:00", "body": key}
+        if state != "absent":
+            data.update(state=state, state_by="agent:x", state_at="2026-11-21T09:00:00+09:00")
+        out.append(_thread_entry(aid, names[key][:-5], data))
+    return out
+
+
+def _pending(kind: str, items: tuple, fields: dict | None = None, minted: str | None = None,
+             state: str = "pending"):
+    from server.workspace.types import InboxEntry
+
+    return InboxEntry(id=uuid4(), kind=kind, items=items,
+                      fields={"author": "person:june", **(fields or {})}, minted_id=minted,
+                      state=state, created_at=_AT, reason=None if state == "pending" else "no")
+
+
+def _rows(*pairs: tuple[str, str]) -> list[dict]:
+    return [{"id": aid, "state": state, "outcome": "", "reason": "", "proposed": None,
+             "entryCount": 0, "itemsOpen": 0, "sync": None, "accepting": False}
+            for aid, state in pairs]
+
+
+def test_the_overlay_predicts_the_last_open_items_auto_close_as_the_engine_does():
+    from server.workspace_read import predict
+
+    rows = _rows(("A2-k5", "in_progress"), ("A1-h7", "solved"))
+    threads = {"A2-k5": _items_of("A2-k5", X="absent", Y="dismissed")}
+
+    # done on the last open item: Solved, the outcome naming the done and dismissed ones
+    done = _pending("item-done", ("A2-k5",), {"entries": [_X]})
+    p = predict(rows, threads, [done])
+    assert p.states["A2-k5"] == {"state": "solved", "proposed": None, "reason": "",
+                                 "outcome": "all items dealt with: 1 done, 1 dismissed"}
+    assert p.files["A2-k5"][_X]["state"] == "done"
+    assert p.files["A2-k5"][_X]["stateBy"] == "person:june"
+    assert p.files["A2-k5"][_X]["stateAt"] == "2026-11-25T01:00:00Z"
+
+    # dismissing it instead, none done: Dropped
+    dismiss = _pending("item-dismiss", ("A2-k5",), {"entries": [_X]})
+    assert predict(rows, threads, [dismiss]).states["A2-k5"] == {
+        "state": "dropped", "outcome": "", "reason": "every item dismissed or deleted",
+        "proposed": None}
+    # deleting every item, none done: Dropped, the items marked deleting
+    delete = _pending("item-delete", ("A2-k5",), {"entries": [_X, _Y]})
+    p = predict(rows, threads, [delete])
+    assert p.states["A2-k5"]["state"] == "dropped" and p.files["A2-k5"] == {}
+    assert set(p.deleted["A2-k5"]) == {_X, _Y} and p.deleted["A2-k5"][_X]["deleting"] is True
+
+    # an item still open, a pending note (an open item to come) or a Solved agenda: no close
+    two = {"A2-k5": _items_of("A2-k5", X="absent", Y="absent")}
+    assert predict(rows, two, [done]).states == {}
+    note = _pending("entry", ("A2-k5",), {"kind": "note", "body": "more"})
+    assert predict(rows, threads, [note, done]).states == {}
+    assert predict(rows, threads, [done, note]).states["A2-k5"]["state"] == "solved"
+    solved = {"A1-h7": _items_of("A1-h7", X="absent")}
+    assert predict(rows, solved, [_pending("item-done", ("A1-h7",),
+                                           {"entries": [_X]})]).states == {}
+
+    # a reopen never reopens or closes its agenda; done on a closed item is the engine's
+    # refusal, and a refused entry predicts nothing
+    reopen = _pending("item-reopen", ("A2-k5",), {"entries": [_Y]})
+    p = predict(rows, threads, [reopen])
+    assert p.states == {} and p.files["A2-k5"][_Y]["state"] == "open"
+    assert predict(rows, threads, [_pending("item-done", ("A2-k5",),
+                                            {"entries": [_X, _Y]})]).states == {}
+    assert predict(rows, threads, [_pending("item-done", ("A2-k5",), {"entries": [_X]},
+                                            state="refused")]).states == {}
+    assert predict(rows, threads, [_pending("item-done", ("A2-k5",),
+                                            {"entries": [_Z]})]).states == {}
+
+
+def test_the_overlay_predicts_a_split_and_a_propose_as_the_engine_does():
+    from server.workspace_read import WorkspaceReader, predict
+
+    rows = _rows(("A2-k5", "open"), ("A1-h7", "solved"))
+    threads = {"A2-k5": _items_of("A2-k5", X="absent", Y="done", Z="absent")}
+
+    split = _pending("split", ("A2-k5",), {"entries": [_Z, _X], "title": "Retry storms"},
+                     minted="A3-p7")
+    p = predict(rows, threads, [split])
+    assert list(p.files["A3-p7"]) == [_X, _Z]  # moved whole, in name order
+    assert p.files["A3-p7"][_X]["ref"] == "A3-p7/xa01"
+    assert list(p.files["A2-k5"]) == [_Y]
+    # the source keeps only a done item: it closes itself, Solved
+    assert p.states["A2-k5"]["state"] == "solved"
+    assert p.states["A2-k5"]["outcome"] == "all items dealt with: 1 done, 0 dismissed"
+    assert "A3-p7" not in p.states and p.splits == {"A3-p7": split}
+
+    # none or every item: the engine refuses it, nothing predicted
+    every = _pending("split", ("A2-k5",), {"entries": [_X, _Y, _Z], "title": "All"},
+                     minted="A4-q8")
+    assert predict(rows, threads, [every]).splits == {}
+
+    # the overlay: the new agenda its own row, first in the open part, waiting, its counts
+    # the items it takes; the source's counts what is left, its predicted close last
+    reader = WorkspaceReader(None, uuid4(), None, None, inbox=[split])
+    shown = reader._overlay(rows, threads=threads)
+    assert [(r["id"], r["state"]) for r in shown] == [
+        ("A3-p7", "open"), ("A2-k5", "solved"), ("A1-h7", "solved")]
+    new, source = shown[0], shown[1]
+    assert new["title"] == "Retry storms" and new["sync"] == "waiting"
+    assert (new["entryCount"], new["itemsOpen"]) == (2, 2)
+    assert (source["entryCount"], source["itemsOpen"]) == (1, 0)
+    assert source["sync"] == "waiting"
+
+    # propose: Open or In progress reads Proposed, first; a Solved one is refused
+    propose = _pending("propose", ("A2-k5",))
+    reader = WorkspaceReader(None, uuid4(), None, None, inbox=[propose])
+    shown = reader._overlay(_rows(("A9-zz", "proposed"), ("A1-h7", "solved"),
+                                  ("A2-k5", "in_progress")), threads={})
+    assert [(r["id"], r["state"]) for r in shown] == [
+        ("A9-zz", "proposed"), ("A2-k5", "proposed"), ("A1-h7", "solved")]
+    assert shown[1]["proposed"] == {"by": "person:june", "at": "2026-11-25T01:00:00Z"}
+    assert predict(rows, {}, [_pending("propose", ("A1-h7",))]).states == {}
+
+
 def test_a_doc_version_reads_its_place_in_the_stored_history():
     from server.workspace_read import version_ordinals
 
@@ -555,6 +699,38 @@ def test_a_proposed_item_reads_proposed_apart_and_first(store):
     assert [r["state"] for r in rows[1:]] == ["open", "in_progress", "solved"]
 
 
+def test_an_older_deferred_agenda_reads_proposed_and_nothing_reads_deferred(store):
+    """0.6.0 retired Deferred: a stored ``deferred`` (an older engine's, or another
+    checkout still on 0.5.x) reads Proposed, as the engine reads it (``wf_agenda.py``
+    ``_agenda_proposed``), whether ``index.json`` lists it or not, and an older
+    ``index.json`` row's ``Deferred`` word reads Proposed too."""
+
+    client, _url, _engine = store
+    owner, project_id, key = _owner_with_key(client)
+    _store_tree(client, project_id, key)
+    base = f"/app/projects/{project_id}/workspace"
+    _commit(client, project_id, key, [
+        _put("works/agenda/A3-p7/agenda.json", _agenda_json("A3-p7", "Retry storms",
+                                                           status="deferred", order=None)),
+    ])
+
+    rows = _get(client, owner, base)["agenda"]
+    assert [(r["id"], r["state"]) for r in rows] == [
+        ("A3-p7", "proposed"), ("A2-k5", "in_progress"), ("A1-h7", "solved")]
+    assert rows[0]["proposed"] == {"by": None, "at": None}
+    item = _get(client, owner, f"{base}/agenda/A3-p7")
+    assert item["state"] == "proposed"
+
+    # an older engine's index row says Deferred: it reads Proposed
+    old = {"id": "A3-p7", "title": "Retry storms", "status": "deferred",
+           "shown_status": "Deferred", "order": None, "phases": [], "phases_done": 0}
+    _commit(client, project_id, key, [], derived=[_index_with(old), _state_record()])
+    ws = _get(client, owner, base)
+    assert [(r["id"], r["state"]) for r in ws["agenda"]][0] == ("A3-p7", "proposed")
+    assert all(r["state"] != "deferred" for r in ws["agenda"])
+    assert _get(client, owner, f"{base}/agenda/A3-p7")["state"] == "proposed"
+
+
 def _entry_file(aid: str, name: str, body: str, *, created: str, kind: str = "note",
                 author: str = "person:june", source: str = "web:agenda", **extra) -> dict:
     data = {"kind": kind, "author": author, "source": source, "created_at": created,
@@ -579,17 +755,20 @@ def test_an_item_reads_its_thread_in_name_order_skipping_malformed_files(store):
     ])
 
     item = _get(client, owner, f"{base}/agenda/A2-k5")
+    unset = {"state": "open", "stateBy": None, "stateAt": None, "deleting": False}
     assert item["entries"] == [
-        {"id": older, "kind": "note", "author": "person:june", "by": "person", "name": "june",
+        {"id": older, "file": f"{older}.json", "ref": "A2-k5/a1b2", "kind": "note",
+         "author": "person:june", "by": "person", "name": "june",
          "source": "web:agenda", "created": "2026-11-23T09:15:00+09:00", "body": "Seen twice.",
-         "job": None, "sync": None},
-        {"id": newer, "kind": "issue", "author": "agent:claude-opus-5-5", "by": "agent",
+         "job": None, **unset, "sync": None},
+        {"id": newer, "file": f"{newer}.json", "ref": "A2-k5/b2c3", "kind": "issue",
+         "author": "agent:claude-opus-5-5", "by": "agent",
          "name": "claude-opus-5-5", "source": "slice:P8-q4.S1",
          "created": "2026-11-24T10:15:00+09:00", "body": "Still failing on 3G.", "job": None,
-         "sync": None},
+         **unset, "sync": None},
     ]
     row = next(r for r in _get(client, owner, base)["agenda"] if r["id"] == "A2-k5")
-    assert row["entryCount"] == 2 and row["latest"] == "2026-11-24"
+    assert row["entryCount"] == 2 and row["itemsOpen"] == 2 and row["latest"] == "2026-11-24"
     assert "entries" not in row  # the list carries counts, never the thread
     assert item["entryCount"] == 2 and item["deleting"] is False
 
