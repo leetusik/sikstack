@@ -209,7 +209,8 @@ Release checklist — before pushing a release:
    default), as Feedback is. 0.19.5: the hosted address is sikstack.com in setup and in the
    explain resolver, and a saved address on the old domain's hosts resolves to it.
    0.19.6: the scaffold's sign-in start takes `release`, which frees an install claimed
-   by another account and ends its older codes.)
+   by another account and ends its older codes. 0.19.7: the scaffold's server carries
+   orgs, member invites, password reset, owner-only org settings and the waitlist alert.)
 2. `python3 scripts/plugin_parity.py` — templates in parity with the repo.
 3. `claude plugin validate .`, `claude plugin validate ./plugins/explain` and
    `claude plugin validate ./plugins/sikstack` — all pass
