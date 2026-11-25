@@ -2,14 +2,18 @@
 
 Every route but the invite's read needs a session (``require_user``) and acts in the
 session's active org (``X-Sikstack-Org``, else the first). An org's ``owner`` (who
-made it) renames it, invites, revokes and removes members; a ``member`` (who joined
-by an invite) reads its members and may leave. Routes:
+made it, or was made one) renames it, invites, revokes, removes members and makes a
+member an owner; a ``member`` (who joined by an invite) reads its members and may
+leave. Every account keeps at least one org: when a leave or a removal ends the
+account's last membership, the same transaction gives it a fresh org, as sign-up does
+(``default``, the account its owner, one project ``default``). Routes:
 
 - ``POST /app/orgs {name}``: a new org named ``name`` (1 to ``ORG_NAME_MAX``
   characters once trimmed, no control character; else 422), the caller its owner,
   with one project ``default``, as at sign-up. A name one of the caller's orgs has
   already (any case) is a 409 ``{"reason": "taken"}``; an account that made
-  ``ORGS_PER_DAY`` orgs in the last day (its sign-up org aside) gets a 429
+  ``ORGS_PER_DAY`` orgs with this route in the last day (``tenants.made_by``: an org it
+  was made owner of, its sign-up org and a fresh org never count) gets a 429
   ``{"reason": "limit"}``. ``201 {"tenant", "project"}``.
 - ``PATCH /app/tenant/name {name}``: rename the active org (owner only, else 403;
   the same name rule). The slug (Public URL) stays ``PATCH /app/tenant``.
@@ -29,13 +33,18 @@ by an invite) reads its members and may leave. Routes:
   carries no code.
 - ``DELETE /app/invites/{id}`` (owner only): revoke, no confirm. 404 for an id that
   is not this org's, 409 for one already used; revoking twice is a 204 again.
+- ``POST /app/members/{id}/owner`` (owner only; ``id`` is a member row's, as
+  listed): the row's role becomes ``owner`` (its ``joined_at`` stays), so an owner can
+  hand the org over and then leave. 204; 404 for an id that is not this org's; a row
+  that is an owner already is a 204 that changes nothing. No route makes an owner a
+  member again.
 - ``DELETE /app/members/{id}`` (owner only; ``id`` is a member row's, as listed):
   the member is out of the org at once (its next request naming the org is the
-  ``X-Sikstack-Org`` 403). 204; 404 for an id that is not this org's; 409
-  ``{"reason": "last_owner"}`` for the org's last owner.
-- ``POST /app/tenant/leave``: the caller leaves the active org. 204; 409
-  ``{"reason": "last_owner"}`` for its last owner (so every account keeps the org it
-  signed up with, and always has one).
+  ``X-Sikstack-Org`` 403), and gets a fresh org when this was its only one. 204; 404
+  for an id that is not this org's; 409 ``{"reason": "last_owner"}`` for the org's
+  last owner.
+- ``POST /app/tenant/leave``: the caller leaves the active org, and gets a fresh org
+  when this was its only one. 204; 409 ``{"reason": "last_owner"}`` for its last owner.
 - ``GET /app/invite/{code}`` (a session or none): the org's name and the invite's
   state (``valid``, ``expired``, ``revoked``, ``used``); on a valid invite also the
   invited address and the inviter's, which the invite page draws. Signed in, it adds
@@ -45,6 +54,11 @@ by an invite) reads its members and may leave. Routes:
   ``{"state": "joined" | "member", "tenant"}``; 403 ``{"reason": "other"}`` for an
   account whose email is not the invited one; 410 ``{"state"}`` for an invite that
   no longer works; 404 for an unknown code.
+
+Make owner and Remove check the caller's role twice: before (``require_owner``) and
+again among the rows they lock, so an owner removed while its act waits on the lock gets
+a 403 and nothing changes. Invite and revoke check it once: a late invite from a removed
+owner stays revocable by any owner left.
 
 Every route answers 404 without ``DATABASE_URL``, as the install routes do.
 """
@@ -58,14 +72,19 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text, update
 
 from server import config, invites
 from server.accounts.auth import AuthContext, optional_user, require_owner, require_user
 from server.accounts.repository import AccountsRepository
 from server.accounts.security import sha256_hex
-from server.accounts.service import OrgLimitError, get_accounts_service
-from server.accounts.types import ROLE_MEMBER, ROLE_OWNER
+from server.accounts.service import (
+    DEFAULT_ORG_NAME,
+    DEFAULT_PROJECT_NAME,
+    OrgLimitError,
+    get_accounts_service,
+)
+from server.accounts.types import ROLE_MEMBER, ROLE_OWNER, CreateProject
 from server.auth_api import serialize_project, serialize_tenant
 from server.email_address import is_plain_address
 from server.installs_api import _require_accounts_plane, _take, _take_address
@@ -83,7 +102,7 @@ INVITES_PER_HOUR = 10
 INVITES_PER_DAY = 30
 #: Invite mails one address may get a day, from every org together.
 INVITES_PER_ADDRESS_DAY = 3
-#: Orgs one account may make a day (its sign-up org aside).
+#: Orgs one account may make a day with ``POST /app/orgs`` (``tenants.made_by``).
 ORGS_PER_DAY = 10
 
 HOUR = timedelta(hours=1)
@@ -165,7 +184,10 @@ async def create_org(
         return _refused(409, "taken", "you already have an org with that name")
     try:
         tenant, _member, project = await get_accounts_service().create_org(
-            ctx.user.id, payload.name, limit=(ORGS_PER_DAY, utc_now() - DAY)
+            ctx.user.id,
+            payload.name,
+            made_by_user=True,
+            limit=(ORGS_PER_DAY, utc_now() - DAY),
         )
     except OrgLimitError:
         return _refused(429, "limit", "you made as many orgs as you may today; try tomorrow")
@@ -320,41 +342,119 @@ async def revoke_invite(invite_id: UUID, ctx: AuthContext = Depends(require_user
     return Response(status_code=204)
 
 
-async def _end_membership(
-    tenant_id: UUID, *, member_id: UUID | None = None, user_id: UUID | None = None
-) -> str:
-    """Delete one membership row of ``tenant_id``: ``ended``, ``unknown`` or ``last_owner``.
+def _locked_rows(tenant_id: UUID, user_id: UUID | None = None):
+    """The org's member rows, and ``user_id``'s own rows in every org, locked in id order.
 
-    Every member row of the org is locked first, so two owners leaving at once can never
-    leave the org with none.
+    One statement, ``ORDER BY id`` under ``FOR UPDATE``: Postgres sorts before it locks,
+    so every membership change takes the rows it shares with another in the same order
+    and two of them never deadlock; and two leaves of one account from two orgs at once
+    both lock the account's rows, so the later one counts them once the first commits.
+    """
+
+    where = TenantMemberModel.tenant_id == tenant_id
+    if user_id is not None:
+        where = or_(where, TenantMemberModel.user_id == user_id)
+    return select(TenantMemberModel).where(where).order_by(TenantMemberModel.id).with_for_update()
+
+
+async def _end_membership(
+    tenant_id: UUID,
+    *,
+    member_id: UUID | None = None,
+    user_id: UUID | None = None,
+    by: UUID | None = None,
+) -> str:
+    """Delete one membership row of ``tenant_id``: ``ended``, ``unknown``, ``forbidden``
+    or ``last_owner``.
+
+    The org's member rows and every membership of the row's account are locked first
+    (``_locked_rows``), so two owners leaving at once never leave the org with none, and
+    of two leaves of one account at once the later counts the account's rows after the
+    first commits. ``by`` (a removal's caller) must still be an owner among the locked
+    rows, else ``forbidden``. When the row is the account's last membership, the same
+    transaction gives the account a fresh org (``_fresh_org``).
     """
 
     async with get_session_maker()() as session, session.begin():
-        rows = (
-            await session.execute(
-                select(TenantMemberModel)
-                .where(TenantMemberModel.tenant_id == tenant_id)
-                .with_for_update()
-            )
-        ).scalars().all()
+        if user_id is None:
+            # The row's account, read unlocked: a row's account never changes, and the
+            # locked read below finds the row again or not at all.
+            user_id = (
+                await session.execute(
+                    select(TenantMemberModel.user_id).where(
+                        TenantMemberModel.id == member_id,
+                        TenantMemberModel.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if user_id is None:
+                return "unknown"
+        rows = (await session.execute(_locked_rows(tenant_id, user_id))).scalars().all()
+        in_org = [r for r in rows if r.tenant_id == tenant_id]
+        if by is not None and not _owns(in_org, by):
+            return "forbidden"
         target = next(
             (
                 r
-                for r in rows
-                if (member_id is not None and r.id == member_id)
-                or (user_id is not None and r.user_id == user_id)
+                for r in in_org
+                if r.user_id == user_id and (member_id is None or r.id == member_id)
             ),
             None,
         )
         if target is None:
             return "unknown"
-        if target.role == ROLE_OWNER and sum(r.role == ROLE_OWNER for r in rows) <= 1:
+        if target.role == ROLE_OWNER and sum(r.role == ROLE_OWNER for r in in_org) <= 1:
             return "last_owner"
+        last = sum(r.user_id == user_id for r in rows) <= 1
         await session.execute(delete(TenantMemberModel).where(TenantMemberModel.id == target.id))
+        if last:
+            await _fresh_org(session, user_id)
     return "ended"
 
 
-_LAST_OWNER = "an org keeps at least one owner"
+def _owns(rows, user_id: UUID) -> bool:
+    """Whether ``user_id`` holds an owner row among ``rows`` (an org's locked rows)."""
+
+    return any(r.user_id == user_id and r.role == ROLE_OWNER for r in rows)
+
+
+async def _fresh_org(session, user_id: UUID) -> None:
+    """A fresh org for an account whose last membership just ended, in the caller's
+    transaction, as at sign-up (``AccountsService.provision_signup``): the tenant
+    ``default`` with no maker (it never counts against the daily limit), the account its
+    owner, and one project ``default``."""
+
+    repository = AccountsRepository(session)
+    tenant = await repository.create_tenant(DEFAULT_ORG_NAME)
+    await repository.add_tenant_member(tenant_id=tenant.id, user_id=user_id, role=ROLE_OWNER)
+    await repository.create_project(CreateProject(tenant_id=tenant.id, name=DEFAULT_PROJECT_NAME))
+
+
+_REFUSALS = {"last_owner": "an org keeps at least one owner"}
+#: ``require_owner``'s 403 detail, for the same refusal found under the lock.
+_NOT_AN_OWNER = "only an owner of this org can do that"
+
+
+@router.post("/app/members/{member_id}/owner", status_code=204)
+async def make_owner(member_id: UUID, ctx: AuthContext = Depends(require_user)) -> Response:
+    """Make a member of the active org an owner (owner only; no confirm)."""
+
+    _require_accounts_plane()
+    await require_owner(ctx)
+    async with get_session_maker()() as session, session.begin():
+        rows = (await session.execute(_locked_rows(ctx.tenant.id))).scalars().all()
+        if not _owns(rows, ctx.user.id):  # removed while this waited on the lock
+            raise HTTPException(status_code=403, detail=_NOT_AN_OWNER)
+        target = next((r for r in rows if r.id == member_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="member not found")
+        if target.role != ROLE_OWNER:
+            await session.execute(
+                update(TenantMemberModel)
+                .where(TenantMemberModel.id == target.id)
+                .values(role=ROLE_OWNER)
+            )
+    return Response(status_code=204)
 
 
 @router.delete("/app/members/{member_id}", status_code=204, response_model=None)
@@ -365,22 +465,24 @@ async def remove_member(
 
     _require_accounts_plane()
     await require_owner(ctx)
-    ended = await _end_membership(ctx.tenant.id, member_id=member_id)
+    ended = await _end_membership(ctx.tenant.id, member_id=member_id, by=ctx.user.id)
     if ended == "unknown":
         raise HTTPException(status_code=404, detail="member not found")
-    if ended == "last_owner":
-        return _refused(409, "last_owner", _LAST_OWNER)
+    if ended == "forbidden":  # removed while this waited on the lock
+        raise HTTPException(status_code=403, detail=_NOT_AN_OWNER)
+    if ended in _REFUSALS:
+        return _refused(409, ended, _REFUSALS[ended])
     return Response(status_code=204)
 
 
 @router.post("/app/tenant/leave", status_code=204, response_model=None)
 async def leave_org(ctx: AuthContext = Depends(require_user)) -> Response | JSONResponse:
-    """Leave the active org (not its last owner)."""
+    """Leave the active org (not as its last owner; an only org leaves a fresh one)."""
 
     _require_accounts_plane()
     ended = await _end_membership(ctx.tenant.id, user_id=ctx.user.id)
-    if ended == "last_owner":
-        return _refused(409, "last_owner", _LAST_OWNER)
+    if ended in _REFUSALS:
+        return _refused(409, ended, _REFUSALS[ended])
     return Response(status_code=204)
 
 

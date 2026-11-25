@@ -210,7 +210,10 @@ Release checklist — before pushing a release:
    explain resolver, and a saved address on the old domain's hosts resolves to it.
    0.19.6: the scaffold's sign-in start takes `release`, which frees an install claimed
    by another account and ends its older codes. 0.19.7: the scaffold's server carries
-   orgs, member invites, password reset, owner-only org settings and the waitlist alert.)
+   orgs, member invites, password reset, owner-only org settings and the waitlist alert.
+   0.19.8: an owner makes a member an owner, so an org can be handed over; an account
+   whose last membership ends gets a fresh `default` org, as at sign-up; and the daily
+   new-org limit counts `tenants.made_by` (migration 0016), so a promotion never counts.)
 2. `python3 scripts/plugin_parity.py` — templates in parity with the repo.
 3. `claude plugin validate .`, `claude plugin validate ./plugins/explain` and
    `claude plugin validate ./plugins/sikstack` — all pass

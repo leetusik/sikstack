@@ -69,7 +69,11 @@ export function designInvite(members: readonly MemberRow[], invites: readonly In
 
 export const designRevoke = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
 
-/** The design's Remove: the row goes. Its Leave: refused (the design never leaves the page it draws). */
+/**
+ * The design's Make owner: the row reads Owner. Its Remove: the row goes. Its Leave: refused (the design never leaves
+ * the page it draws).
+ */
+export const designPromote = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
 export const designRemove = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
 export const designLeave = (): Promise<{ ok: boolean }> => wait(400, { ok: false });
 

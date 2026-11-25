@@ -55,12 +55,25 @@ export const MEMBERS = {
      * P78-s2.F1: membership ends in the invites' Revoke pattern (a quiet button at the row's end, no confirm, a
      * toast): an owner removes a member; a member leaves, from its own row, and lands on its next org's home.
      */
+    /** The controls column's head, for a screen reader only. */
+    actions: "Actions",
+    /**
+     * An owner makes a member an owner in the same pattern (no confirm; the row reads Owner and the toast says so),
+     * so an owner can hand the org over and then leave it from its own row.
+     */
+    makeOwner: "Make owner",
+    makeOwnerLabel: (email: string) => `Make ${email} an owner`,
+    madeOwner: (email: string) => `${email} is an owner now.`,
+    makeOwnerFailed: (email: string) => `Could not make ${email} an owner. Try again.`,
     remove: "Remove",
     removeLabel: (email: string) => `Remove ${email} from the org`,
     removed: (email: string) => `${email} removed.`,
+    removeFailed: (email: string) => `Could not remove ${email}. Try again.`,
     leave: "Leave",
     leaveLabel: (org: string) => `Leave ${org}`,
     leaveFailed: (org: string) => `Could not leave ${org}. Try again.`,
+    /** The API's 409 `last_owner`: an org keeps at least one owner. */
+    leaveLastOwner: (org: string) => `You can't leave ${org}: make another member an owner first.`,
   },
   roles: { owner: "Owner", member: "Member" },
   invites: {

@@ -14,7 +14,6 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.accounts.types import (
-    ROLE_OWNER,
     AuthTokenRecord,
     CreateAuthToken,
     CreateProject,
@@ -107,10 +106,14 @@ class AccountsRepository:
 
     # -- tenancy ----------------------------------------------------------
 
-    async def create_tenant(self, name: str) -> TenantRecord:
-        """Persist a tenant and return the stored record."""
+    async def create_tenant(self, name: str, *, made_by: UUID | None = None) -> TenantRecord:
+        """Persist a tenant and return the stored record.
 
-        model = TenantModel(name=name)
+        ``made_by``: the account that made it with ``POST /app/orgs`` (the one whose
+        daily new-org limit it counts against); None for an org made with an account.
+        """
+
+        model = TenantModel(name=name, made_by=made_by)
         self._session.add(model)
         await self._session.flush()
         await self._session.refresh(model)
@@ -184,24 +187,20 @@ class AccountsRepository:
         return (await self._session.execute(statement)).scalar_one_or_none()
 
     async def count_orgs_made_since(self, user_id: UUID, since: datetime) -> int:
-        """How many orgs the user made (owns) since ``since``, its first org aside.
+        """How many orgs the user made with ``POST /app/orgs`` since ``since``.
 
-        The first membership is the sign-up org, made with the account, never by
-        ``POST /app/orgs``.
+        An org the user made is one whose ``tenants.made_by`` is the user and whose
+        ``tenants.created_at`` is after ``since``. ``made_by`` is written once, when the
+        org is made (``create_tenant``), so the count never depends on which member rows
+        still exist: an org the user was made owner of never counts, and one it made
+        still counts after it leaves or hands it over. An org made with the account (the
+        sign-up org, and the fresh org a last membership's end gives) has no maker.
         """
 
-        first = (
-            select(TenantMemberModel.id)
-            .where(TenantMemberModel.user_id == user_id)
-            .order_by(TenantMemberModel.created_at, TenantMemberModel.id)
-            .limit(1)
-            .scalar_subquery()
-        )
-        statement = select(func.count()).where(
-            TenantMemberModel.user_id == user_id,
-            TenantMemberModel.role == ROLE_OWNER,
-            TenantMemberModel.created_at > since,
-            TenantMemberModel.id != first,
+        statement = (
+            select(func.count())
+            .select_from(TenantModel)
+            .where(TenantModel.made_by == user_id, TenantModel.created_at > since)
         )
         return int((await self._session.execute(statement)).scalar_one())
 

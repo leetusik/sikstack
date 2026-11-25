@@ -6,9 +6,23 @@ import { redirect } from "next/navigation";
 
 import { requireIdentity } from "@/lib/auth-guards";
 import { ApiError } from "@/lib/knowledge/client";
-import { createInvite, createOrg, leaveOrg, removeMember, renameOrg, revokeInvite } from "@/lib/knowledge/orgs";
+import {
+  createInvite,
+  createOrg,
+  leaveOrg,
+  makeOwner,
+  removeMember,
+  renameOrg,
+  revokeInvite,
+} from "@/lib/knowledge/orgs";
 import { asOrgId, clearedOrgCookieOptions, ORG_COOKIE, orgCookieOptions } from "@/lib/session";
-import { checkOrgName, looksLikeEmail, type CreateOrgResult, type InviteResult } from "@/sikstack/org/model";
+import {
+  checkOrgName,
+  looksLikeEmail,
+  type CreateOrgResult,
+  type InviteResult,
+  type MembershipRefusal,
+} from "@/sikstack/org/model";
 
 /**
  * The org pages' writes as SERVER ACTIONS (the app's rule for signed-in mutations, `dashboard/actions.ts`): behind
@@ -20,9 +34,12 @@ import { checkOrgName, looksLikeEmail, type CreateOrgResult, type InviteResult }
  *   cookie, `/api/auth/org`; the API just made the caller its owner), and the page lands on its home.
  * - `renameOrgAction`: the org home's Org name panel (owner only; the API refuses anyone else).
  * - `sendInviteAction`, `revokeInviteAction`: Members' Invites panel (owner only, the same).
- * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row. A
- *   left org is no longer the caller's, so Leave clears the org cookie (the session acts in its first org again) and
- *   lands on that org's home, as the switch does. Neither ever ends an org's last owner (the API's 409).
+ * - `makeOwnerAction`: Make owner on a member's row (owner only).
+ * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row, or on
+ *   an owner's when the org has another. A left org is no longer the caller's, so Leave clears the org cookie (the
+ *   session acts in its first org again, a fresh `default` one when the left org was its only one) and lands on that
+ *   org's home, as the switch does. Neither ever ends an org's last owner (the API's 409 `last_owner`, kept as the
+ *   `reason` the page words its toast by).
  */
 
 type RenameResult = { ok: true; name: string } | { ok: false; reason: "empty" | "taken" | "failed" };
@@ -102,11 +119,19 @@ export async function revokeInviteAction(id: string): Promise<{ ok: boolean }> {
   }
 }
 
-export async function removeMemberAction(id: string): Promise<{ ok: boolean }> {
+/** The API's 409 on a membership's end, by its `reason`; anything else is `failed`. */
+function refusal(error: unknown): MembershipRefusal {
+  if (error instanceof ApiError && error.status === 409) {
+    if (error.reason === "last_owner") return error.reason;
+  }
+  return "failed";
+}
+
+export async function makeOwnerAction(id: string): Promise<{ ok: boolean }> {
   if (typeof id !== "string" || !asOrgId(id)) return { ok: false };
   const { token } = await requireIdentity();
   try {
-    await removeMember(token, id);
+    await makeOwner(token, id);
     revalidatePath("/members");
     return { ok: true };
   } catch {
@@ -114,13 +139,27 @@ export async function removeMemberAction(id: string): Promise<{ ok: boolean }> {
   }
 }
 
+export async function removeMemberAction(
+  id: string,
+): Promise<{ ok: true } | { ok: false; reason: MembershipRefusal }> {
+  if (typeof id !== "string" || !asOrgId(id)) return { ok: false, reason: "failed" };
+  const { token } = await requireIdentity();
+  try {
+    await removeMember(token, id);
+    revalidatePath("/members");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: refusal(error) };
+  }
+}
+
 /** Leave the active org: on success the org cookie is cleared and the page lands on the next org's home. */
-export async function leaveOrgAction(): Promise<{ ok: false }> {
+export async function leaveOrgAction(): Promise<{ ok: false; reason: MembershipRefusal }> {
   const { token } = await requireIdentity();
   try {
     await leaveOrg(token);
-  } catch {
-    return { ok: false };
+  } catch (error) {
+    return { ok: false, reason: refusal(error) };
   }
   (await cookies()).set(ORG_COOKIE, "", clearedOrgCookieOptions());
   revalidatePath("/", "layout");
