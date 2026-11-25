@@ -10,6 +10,31 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.6.0 — 2026-11-25
+
+- **A local workspace publishes design builds: `sikstack design-link`.** `design-publish`, `design-builds` and
+  `design-delete` used to need a cloud-linked checkout, and a linked checkout runs no worktree phases. A design link
+  is enough now. It is the `[design]` table of `.sikstack/config.toml`, holding `server` and `project_id` and never
+  the key. It is not cloud mode: `next` prints no `store=cloud`, nothing syncs, and `worktree start` still runs.
+  - `sikstack design-link --data-dir "${CLAUDE_PLUGIN_DATA}"` runs the connect-page sign-in, the same flow
+    `sign-in` uses. On approval it keeps the new project's workspace key and writes `[design]`, never `[cloud]`. The
+    project is named after the main host checkout's folder, even when it runs in a phase's worktree.
+  - `sikstack design-link <server>/projects/<project-id>` links an existing project. It reads a pasted workspace key
+    at a prompt (one stdin line otherwise), as `link` does, never from the command line.
+  - Either way the key is probed against the design API before anything is written. Then it is kept in
+    `$XDG_CONFIG_HOME/sikstack/workspace-keys.json` (0600, never printed), and the table goes into the workflow
+    repo's main checkout's `config.toml`, uncommitted, with its path printed. The verbs read the table from there
+    first, else from the checkout's own, so a phase's worktree cut before the link publishes too.
+  - It refuses with one line and writes nothing in a cloud-linked checkout (that link already publishes), with a key
+    file or folder open to group or others, for a key the design API refuses, and over a `[design]` table naming
+    another link unless `--replace`.
+- **With no link at all, the three verbs name `design-link`** (and `/sikstack:sign-in` for cloud mode) in their one
+  line, before any request. A cloud-linked checkout publishes exactly as before.
+- **`design-cowork`'s publish step works in a local workspace.** It sets the design link with the operator when there
+  is none, publishes, and reports the build's viewer (`url=`). Sharing is turned on in that viewer by a member, and
+  the share link copied there is what a teammate with no account opens; the engine never turns sharing on.
+  `/sikstack:sign-in` points to `design-link` for design sharing without cloud mode.
+
 ## 0.5.1 — 2026-11-25
 
 - **Every request now names the plugin: `User-Agent: sikstack/<version>`.** The network in front of sikstack.com

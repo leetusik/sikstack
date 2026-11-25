@@ -17,8 +17,9 @@
 #   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
 #   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
-#   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release) and
-#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll).
+#   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release),
+#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll) and
+#   Test 38 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -526,20 +527,20 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 41 in all, and no
+# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 42 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
-design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
+design = {"design-sign", "design-publish", "design-builds", "design-delete", "design-link"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes; 0.6.0 design-link
 agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-entry", "agenda-show", "agenda-merge", "agenda-fold", "agenda-edit",
           "agenda-move", "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link",
           "agenda-unlink"}  # 0.3.0: the four deferred-job verbs retired
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed", "cold"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 41 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 41 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
+assert len(names) == 42 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 42 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs, design-link and the agenda, cloud and cold parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -5664,6 +5665,139 @@ if grep -rqF "$DPK" "$DPH" "$DPW"/*.txt "$DPW/fake" 2>/dev/null || printf '%s\n'
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$DP_PID" 2>/dev/null; wait "$DP_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 38: the design link in a local workspace, against the local fake sikstack -- with no [cloud] and no [design] table, design-publish, design-builds and design-delete each refuse in one line naming design-link, before any request; design-link refuses a cloud-linked checkout, a key folder open to others, a key the design API refuses (401, 403), and another project over a set link without --replace (and with it, a probe's 404), each with nothing written; from a phase's worktree it reads a pasted key (stdin, never argv), keeps it 0600 and writes [design] (server and project_id, no key) into the main checkout's config.toml, saying where; then the worktree cut before the link and the main checkout both publish and design-builds lists both, while next prints no store=cloud and worktree start still runs; the connect-page form run in a worktree names the new project after the main host folder and writes [design], never [cloud]; the key appears nowhere =="
+newtmp DLW; DLX="$DLW/xdg"; DLH="$DLW/dlhost"; DL2="$DLW/dlhost2"
+dl() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" "$@" ) 2>&1; }
+# dl_install <host>: a nested install with phase P1 in its own worktree pair, cut now (before any link); prints the host worktree.
+dl_install() {
+  mkhost "$1" >/dev/null && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m install >/dev/null \
+    && ( cd "$1" && python3 "$ENG" phase new --phase P1 --name "Probe" --objective "probe the design link" >/dev/null ) \
+    && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m p1 >/dev/null \
+    && ( cd "$1" && python3 "$ENG" worktree start P1 --host-branch feat/p1 ) | sed -n 's/^host_worktree=//p'
+}
+DLT=$(dl_install "$DLH" 2>"$DLW/install.txt"); DL2T=$(dl_install "$DL2" 2>>"$DLW/install.txt")
+{ [ -d "$DLT/.sikstack" ] && [ -d "$DL2T/.sikstack" ]; } || bad "design link probe: an install or its worktree failed -- $(tail -3 "$DLW/install.txt")"
+DLK="design-link-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$DLK" > "$DLW/key"; chmod 600 "$DLW/key"
+python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$DLW/fake" --port-file "$DLW/port" --key-file "$DLW/key" \
+  --project proj-d --org org-d --lifetime 900 > "$DLW/fake.txt" 2>&1 &
+DL_PID=$!
+for _ in $(seq 1 100); do [ -s "$DLW/port" ] && break; sleep 0.1; done
+DLS="http://127.0.0.1:$(cat "$DLW/port" 2>/dev/null)"
+DLL="$DLW/fake/requests.jsonl"
+dl_n() { cat "$DLL" 2>/dev/null | grep -c '' | tr -d ' '; }  # every request the fake received
+dl_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$DLS/_fake/control" >/dev/null; }
+dl_cfg() { cat "$1/.sikstack/config.toml"; }
+dp_build "$DLH/web/design" design/data/sample/recording.json
+# (a) no [cloud], no [design]: each verb refuses in one line naming design-link, and the fake receives nothing.
+dl_a1=$(dl "$DLH" design-publish --folder "$DLH/web/design"; echo "rc=$?")
+dl_a2=$(dl "$DLT" design-builds; echo "rc=$?")
+dl_a3=$(dl "$DLT" design-delete bnotabuildbutwellformed; echo "rc=$?")
+dl_a_ok=1
+for dl_pair in "design-publish|nothing was published|$dl_a1" "design-builds|nothing was read|$dl_a2" "design-delete|nothing was deleted|$dl_a3"; do
+  dl_v=${dl_pair%%|*}; dl_rest=${dl_pair#*|}; dl_nw=${dl_rest%%|*}; dl_o=${dl_rest#*|}
+  { [ "$(printf '%s\n' "$dl_o" | grep -c '')" = 2 ] && [ "$(printf '%s\n' "$dl_o" | tail -1)" = rc=1 ] \
+    && printf '%s\n' "$dl_o" | head -1 | grep -q "^$dl_v: this checkout is not linked to sikstack .*run sikstack design-link .*/sikstack:sign-in .*($dl_nw)\$"; } || dl_a_ok=0
+done
+[ "$dl_a_ok" = 1 ] && [ "$(dl_n)" = 0 ] \
+  && ok "with no [cloud] and no [design] table, design-publish, design-builds and design-delete (main checkout and a phase's worktree) each refuse in one line naming design-link (and /sikstack:sign-in for cloud mode); the fake receives no request" \
+  || bad "the unlinked refusal naming design-link is wrong -- sent=$(dl_n) [$dl_a1] [$dl_a2] [$dl_a3]"
+# (b) design-link's refusals, each with nothing written: a cloud-linked checkout, a key folder open to others, a key the
+# design API refuses (401, 403).
+mkhost "$DLW/linked" >/dev/null 2>&1 && set_link "$DLW/linked/.sikstack" "$DLS"
+dl_c0=$(dl_cfg "$DLW/linked"); dl_n0=$(dl_n)
+dl_b1=$(printf '%s\n' "$DLK" | dl "$DLW/linked" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+dl_cfg0=$(dl_cfg "$DLH")
+mkdir -p "$DLX/sikstack" && chmod 755 "$DLX/sikstack"
+dl_b2=$(printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+chmod 700 "$DLX/sikstack"
+dl_n2=$(dl_n)
+dl_b3=$(printf 'wrong-key\n' | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+dl_ctl '{"design_answer": {"status": 403, "detail": "this key cannot reach a workspace"}}'
+dl_b4=$(printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+[ "$(printf '%s\n' "$dl_b1" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b1" | head -1 | grep -q '^design-link: this checkout is linked to sikstack (cloud mode: the \[cloud\] table in .*), and that link already publishes design builds (nothing was written)$' \
+  && [ "$dl_n2" = "$dl_n0" ] && [ "$(dl_cfg "$DLW/linked")" = "$dl_c0" ] \
+  && [ "$(printf '%s\n' "$dl_b2" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b2" | grep -q '^design-link: .*can be read by group or others (mode 0755)' \
+  && [ "$(printf '%s\n' "$dl_b3" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b3" | grep -q '^design-link: sikstack refused (HTTP 401): .*(nothing was written)$' \
+  && [ "$(printf '%s\n' "$dl_b4" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b4" | grep -q '^design-link: sikstack refused (HTTP 403): this key cannot reach a workspace.*(nothing was written)$' \
+  && [ "$(dl_cfg "$DLH")" = "$dl_cfg0" ] && ! grep -q '^\[design\]' "$DLT/.sikstack/config.toml" && [ ! -e "$DLX/sikstack/workspace-keys.json" ] \
+  && ok "design-link refuses a cloud-linked checkout (its link already publishes; no request), a key folder open to others, and a key the design API answers 401 or 403, each in one line with nothing written: no [design] table, no key file" \
+  || bad "a design-link refusal is wrong -- [$dl_b1] [$dl_b2] [$dl_b3] [$dl_b4] sent=$dl_n0/$dl_n2 keys=$(ls "$DLX/sikstack" 2>&1)"
+# (c) from the phase's worktree: the pasted key (stdin) is probed, kept 0600, and [design] lands in the main checkout's
+# config.toml, never the worktree's, and never [cloud].
+printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d" > "$DLW/c.txt"; dl_rc=$?
+dl_mode=$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$DLX/sikstack/workspace-keys.json" 2>/dev/null)
+dl_saved=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["proj-d"]["key"])' "$DLX/sikstack/workspace-keys.json" "$DLS" 2>/dev/null)
+dl_tbl=$(python3 - "$DLH/.sikstack/config.toml" <<'PY2'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r"^\[design\]\n((?:[^\[\n][^\n]*\n|\n)*)", text, re.M)
+print(" ".join(l.split(" = ")[0] for l in (m.group(1).splitlines() if m else []) if l.strip() and not l.startswith("#")))
+PY2
+)
+[ "$dl_rc" = 0 ] && grep -q "^design_link=written server=$DLS project=proj-d config=/.*/dlhost/\.sikstack/config\.toml\$" "$DLW/c.txt" \
+  && [ "$dl_mode" = 0o600 ] && [ "$dl_saved" = "$DLK" ] && [ "$dl_tbl" = "schema server project_id linked_at" ] \
+  && grep -qx "server = \"$DLS\"" "$DLH/.sikstack/config.toml" && grep -qx 'project_id = "proj-d"' "$DLH/.sikstack/config.toml" \
+  && ! grep -q '^\[cloud\]' "$DLH/.sikstack/config.toml" && ! grep -q '^\[design\]' "$DLT/.sikstack/config.toml" \
+  && ! grep -qF "$DLK" "$DLW/c.txt" "$DLH/.sikstack/config.toml" \
+  && ok "design-link from a phase's worktree reads the pasted key from stdin, keeps it in the key file (0600, never printed) and writes [design] (schema, server, project_id, linked_at; no key) into the main checkout's config.toml, naming that file; the worktree's own config.toml and [cloud] stay untouched" \
+  || bad "design-link (pasted key, from a worktree) is wrong -- rc=$dl_rc mode=$dl_mode table=[$dl_tbl] $(cat "$DLW/c.txt")"
+# (d) the worktree (cut before the link) and the main checkout both publish; design-builds lists both, newest first;
+# no workspace request, no cloud mode.
+dl_p1=$(dl "$DLT" design-publish --folder "$DLH/web/design"); dl_prc1=$?
+dl_p2=$(dl "$DLH" design-publish --folder "$DLH/web/design"); dl_prc2=$?
+dl_id1=$(printf '%s\n' "$dl_p1" | sed -n 's/^published=\([^ ]*\) .*/\1/p'); dl_id2=$(printf '%s\n' "$dl_p2" | sed -n 's/^published=\([^ ]*\) .*/\1/p')
+dl_ls=$(dl "$DLT" design-builds); dl_lrc=$?
+dl_nx1=$(dl "$DLH" next); dl_nx2=$(dl "$DLT" next)
+[ "$dl_prc1" = 0 ] && [ "$dl_prc2" = 0 ] && [ -n "$dl_id1" ] && [ -n "$dl_id2" ] && [ "$dl_id1" != "$dl_id2" ] \
+  && printf '%s\n' "$dl_p1" | grep -q "^published=$dl_id1 url=$DLS/projects/proj-d/design/$dl_id1 private=no .* host=http://$dl_id1.design.fake.localhost/\$" \
+  && [ "$dl_lrc" = 0 ] && [ "$(printf '%s\n' "$dl_ls" | sed -n 1p)" = "builds=2 project=proj-d" ] \
+  && printf '%s\n' "$dl_ls" | sed -n 2p | grep -q "^$dl_id2 url=" && printf '%s\n' "$dl_ls" | sed -n 3p | grep -q "^$dl_id1 url=" \
+  && [ "$(grep '"route": "design"' "$DLL" | grep '"method": "POST"' | grep -c '"auth": "ok"')" = 2 ] && ! grep -q '"/api/workspace/' "$DLL" \
+  && ! printf '%s\n' "$dl_nx1$dl_nx2" | grep -q 'store=cloud' && printf '%s\n' "$dl_nx2" | grep -q '^stream=phase/P1-' \
+  && ok "with [design] set, the worktree cut before the link and the main checkout each print published= (the viewer url=, the build's host=), and design-builds lists both, newest first; no workspace request; next prints no store=cloud in either checkout" \
+  || bad "publishing with the design link is wrong -- rc=$dl_prc1/$dl_prc2/$dl_lrc [$dl_p1] [$dl_p2] [$dl_ls] next=[$dl_nx2]"
+# (e) worktree start still runs; another project over the set link is refused unless --replace, and --replace probes
+# before writing (the fake has no proj-x: its 404), so the link stays.
+( cd "$DLH" && python3 "$ENG" phase new --phase P2 --name "Second" --objective "cut after the link" >/dev/null 2>&1 )
+dl_w2=$( cd "$DLH" && python3 "$ENG" worktree start P2 --host-branch feat/p2 2>&1 ); dl_wrc=$?
+dl_n3=$(dl_n)
+dl_r1=$(printf '%s\n' "$DLK" | dl "$DLH" design-link "$DLS/projects/proj-x"; echo "rc=$?")
+dl_n4=$(dl_n)
+dl_r2=$(printf '%s\n' "$DLK" | dl "$DLH" design-link --replace "$DLS/projects/proj-x"; echo "rc=$?")
+dl_r3=$(dl "$DLH" design-link --data-dir "$DLW/data" --no-browser --wait 1; echo "rc=$?")
+[ "$dl_wrc" = 0 ] && printf '%s\n' "$dl_w2" | grep -q '^branch=phase/P2-' \
+  && [ "$(printf '%s\n' "$dl_r1" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r1" | head -1 | grep -q '^design-link: this workspace already has a design link (server=.* project=proj-d).*--replace.*(nothing was written)$' \
+  && [ "$dl_n4" = "$dl_n3" ] \
+  && [ "$(printf '%s\n' "$dl_r2" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r2" | grep -q '^design-link: sikstack refused (HTTP 404): .*(nothing was written)$' \
+  && [ "$(printf '%s\n' "$dl_r3" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r3" | head -1 | grep -q '^design-link: this workspace already has a design link .*--replace' \
+  && grep -qx 'project_id = "proj-d"' "$DLH/.sikstack/config.toml" && [ "$(grep -c '^\[design\]' "$DLH/.sikstack/config.toml")" = 1 ] \
+  && ! grep -q '"route": "sign-in"' "$DLL" \
+  && ok "worktree start still runs after the link; another project over the set link is refused unless --replace (no request), --replace probes first (a 404 writes nothing), and the connect-page form refuses over a set link before any sign-in" \
+  || bad "worktree start or a replace refusal is wrong -- rc=$dl_wrc [$dl_r1] [$dl_r2] [$dl_r3] sent=$dl_n3/$dl_n4"
+# (f) the connect-page form, run in a phase's worktree of a second install: the new project is named after the main host
+# folder (never the worktree's), the key is kept, [design] lands in the main checkout's config.toml, never [cloud].
+( cd "$DL2" && CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
+( cd "$DL2T" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" design-link --data-dir "$DLW/data" --no-browser --wait 30 > "$DLW/f.txt" 2>&1; echo "rc=$?" >> "$DLW/f.txt" ) &
+dl_bg=$!
+for _ in $(seq 1 100); do grep -q '^code: ' "$DLW/f.txt" 2>/dev/null && break; sleep 0.1; done
+dl_code=$(sed -n 's/^code: \([A-Z0-9-]*\) .*/\1/p' "$DLW/f.txt" | head -1)
+curl -s -X POST "$DLS/_fake/sign-in" -d "{\"code\":\"$dl_code\",\"state\":\"approved\"}" >/dev/null; wait "$dl_bg"
+dl_nx3=$(dl "$DL2T" next)
+grep -q '^rc=0' "$DLW/f.txt" && [ -n "$dl_code" ] && grep -q "^connect page: $DLS/connect?code=$dl_code" "$DLW/f.txt" \
+  && grep '"route": "sign-in"' "$DLL" | grep -q '"repo": "dlhost2"' && ! grep '"route": "sign-in"' "$DLL" | grep -q '"repo": "P1-' \
+  && grep -q "^design_link=written server=$DLS project=proj-d config=/.*/dlhost2/\.sikstack/config\.toml\$" "$DLW/f.txt" \
+  && grep -qx 'project_id = "proj-d"' "$DL2/.sikstack/config.toml" && ! grep -q '^\[cloud\]' "$DL2/.sikstack/config.toml" \
+  && ! grep -q '^\[design\]' "$DL2T/.sikstack/config.toml" && ! grep -qF "$DLK" "$DLW/f.txt" "$DL2/.sikstack/config.toml" \
+  && ! printf '%s\n' "$dl_nx3" | grep -q 'store=cloud' && [ -z "$(ls "$DLW/data/sign-in" 2>/dev/null)" ] \
+  && ok "the connect-page form of design-link, run in a phase's worktree, names the new project after the main host folder, keeps the key unprinted and writes [design] (never [cloud]) into the main checkout's config.toml; next stays local" \
+  || bad "design-link's connect-page form is wrong -- code=$dl_code $(cat "$DLW/f.txt") sign-ins=$(grep '"route": "sign-in"' "$DLL")"
+if grep -rqF "$DLK" "$DLH" "$DL2" "$DLW"/*.txt "$DLW/fake" 2>/dev/null; then
+  bad "the workspace key leaked into a tree, the output or the request log"
+fi
+kill "$DL_PID" 2>/dev/null; wait "$DL_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo "== Test 36: the engine's agent, the block reading and sign-in --release, against the local fake sikstack behind its Cloudflare gate -- a request without a sikstack/ agent is the gate's text 403 (the gate is not vacuous) and the engine's are let through; a non-JSON 403 reads as a block (never as not a workspace key) at link, the cloud session's stop line, a commit and design-builds, and a JSON 403 reads as before; sign-in without --release sends exactly its three fields; --release sends release: true, drops the pending code for a new one, prints the released or the not-connected line, and a server that answers no released is refused with nothing kept; a release that is not a boolean is the fake's 400 =="

@@ -284,8 +284,13 @@ for required in (
     # 2.1.0: publishing runs only on the operator's words and is never a sign-off; the critic judges from --shots tiles.
     "`sikstack design-publish --folder <folder> [--repo <name>]`", "Never publish unasked, and a publish is never a sign-off.",
     "`--shots <slice folder>/shots`", "[--shots <dir>]",
+    # 0.6.0: a local workspace publishes with a design link set with the operator; sharing stays a member's act on
+    # the viewer (the engine never turns it on), and the key is never asked for.
+    "`sikstack design-link --data-dir \"${CLAUDE_PLUGIN_DATA}\"`", "never ask for a key", "The workspace stays local.",
+    "sharing is turned on in that viewer, by a member, and the share link copied there is what a teammate with no account opens",
 ):
     assert required in design, required
+assert "linked checkouts only" not in design  # 0.6.0: a local workspace publishes too
 for gone in ("Artifact", "Design canvas", "Design System Artifact", "DesignSync", "claude-design", "design-open",
              "design-publish-plan", "design-readback", "design-canvas", "design-close", "design-check", "design-preview", "design-init", "design-system",
              "design-migrate", "critic+judge", "the judge", "PENDING #", "Mockup: requested", "canvas.json", "handoff.md", "frame pass",

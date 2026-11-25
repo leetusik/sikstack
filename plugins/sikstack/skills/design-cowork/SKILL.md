@@ -54,8 +54,15 @@ apply   a separate slice moves the signed files into production
   failures yourself. Commit the design folder, then stop `pending --stop-kind wave` and report the URL, the pages and states to open, the screenshots, what the drafter
   left open. Leave the server running for the operator; stop it when their words come back. Publish only when
   their words ask to: `sikstack design-publish --folder <folder> [--repo <name>]` uploads the build to the
-  project's Design service (linked checkouts only) and prints its URL, `private=yes` for a real project's recording;
-  report the URL. Never publish unasked, and a publish is never a sign-off.
+  project's Design service, from the main checkout or a phase's worktree, and prints `url=` (the build's viewer),
+  `private=yes` for a real project's recording. When it refuses naming `design-link` (a local workspace with no
+  design link yet), set one with the operator first: `sikstack design-link --data-dir "${CLAUDE_PLUGIN_DATA}"`
+  (Bash timeout 600000 ms) prints a code and the connect page; they confirm it there, which makes a project named
+  after the repo (exit 3: run it again to keep waiting). For an existing project the operator runs
+  `sikstack design-link <server>/projects/<id>` in their own terminal and pastes a workspace key; never ask for a
+  key. The workspace stays local. Then publish, and report the `url=`: sharing is turned on in that viewer, by a
+  member, and the share link copied there is what a teammate with no account opens. Never publish unasked, and a
+  publish is never a sign-off.
 - **Words.** Literal approval ("approved", "ship it", words to that effect) signs:
   `sikstack design-sign --slice <S> --words "<their exact words>" --folder <folder> [--repo <name>]` records the
   words with the product repo's commit. Anything else is feedback: append it verbatim to the slice's `feedback.md`,

@@ -432,8 +432,8 @@ def cloud_config_file() -> Path:
     return ROOT / "config.toml"
 
 
-def _toml_scalar(raw: str):
-    """A [cloud] value: a basic double-quoted string (with \\, \\" escapes), an integer or a boolean."""
+def _toml_scalar(raw: str, table: str = CLOUD_TABLE):
+    """A [cloud] (or [design]) value: a basic double-quoted string (with \\, \\" escapes), an integer or a boolean."""
     raw = raw.strip()
     m = re.fullmatch(r'"((?:[^"\\]|\\.)*)"\s*(?:#.*)?', raw)
     if m:
@@ -441,11 +441,12 @@ def _toml_scalar(raw: str):
     m = re.fullmatch(r"(-?[0-9]+|true|false)\s*(?:#.*)?", raw)
     if m:
         return json.loads(m.group(1))
-    raise ValueError(f"cannot read {raw!r} (a [cloud] value is a double-quoted string, an integer or true/false)")
+    raise ValueError(f"cannot read {raw!r} (a [{table}] value is a double-quoted string, an integer or true/false)")
 
 
-def _cloud_table_span(lines: list):
-    """(start, end) line indexes of config.toml's [cloud] table (its header to the next table header), or None."""
+def _cloud_table_span(lines: list, table: str = CLOUD_TABLE):
+    """(start, end) line indexes of config.toml's [cloud] table, or of the named one ([design]: wf_design), from its
+    header to the next table header, or None."""
     start = None
     for i, line in enumerate(lines):
         bare = line.strip()
@@ -453,7 +454,7 @@ def _cloud_table_span(lines: list):
             continue
         if start is not None:
             return start, i
-        if re.fullmatch(r"\[\s*" + CLOUD_TABLE + r"\s*\]\s*(?:#.*)?", bare):
+        if re.fullmatch(r"\[\s*" + re.escape(table) + r"\s*\]\s*(?:#.*)?", bare):
             start = i
     return (start, len(lines)) if start is not None else None
 
@@ -461,12 +462,19 @@ def _cloud_table_span(lines: list):
 def cloud_read_link():
     """The link, config.toml's [cloud] table as a dict, or None when there is none. A table that cannot be read raises
     ValueError (the link is broken: still linked, and CloudLink says so)."""
+    return config_read_table(cloud_config_file(), CLOUD_TABLE)
+
+
+def config_read_table(path: Path, table: str):
+    """A config.toml's [<table>] as a dict, or None when the file or the table is absent: the [cloud] link's grammar
+    (key = value lines, comments and blank lines skipped), read by table name; wf_design reads [design] with it. A
+    table that cannot be read raises ValueError."""
     try:
-        text = cloud_config_file().read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
     lines = text.splitlines()
-    span = _cloud_table_span(lines)
+    span = _cloud_table_span(lines, table)
     if span is None:
         return None
     link = {}
@@ -476,8 +484,8 @@ def cloud_read_link():
             continue
         m = re.fullmatch(r"([A-Za-z0-9_-]+)\s*=\s*(.+)", line)
         if not m:
-            raise ValueError(f"config.toml line {n + 1}: cannot read {line!r} in [{CLOUD_TABLE}]")
-        link[m.group(1)] = _toml_scalar(m.group(2))
+            raise ValueError(f"config.toml line {n + 1}: cannot read {line!r} in [{table}]")
+        link[m.group(1)] = _toml_scalar(m.group(2), table)
     return link
 
 
@@ -504,20 +512,25 @@ def _cloud_link_lines(link: dict) -> list:
 
 def cloud_write_link(link: dict) -> None:
     """Write the link as config.toml's [cloud] table, replacing one that is there; every other line stays."""
-    path = cloud_config_file()
+    config_write_table(cloud_config_file(), CLOUD_TABLE, CLOUD_TABLE_NOTE, link)
+
+
+def config_write_table(path: Path, table: str, note: str, link: dict) -> None:
+    """Write `link` as the config.toml at `path`'s [<table>] table, last, replacing one that is there; every other
+    line stays."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         text = ""
-    lines = cloud_drop_link_lines(text.splitlines())
+    lines = cloud_drop_link_lines(text.splitlines(), table)
     while lines and not lines[-1].strip():
         lines.pop()
-    block = ([""] if lines else []) + [f"[{CLOUD_TABLE}]", CLOUD_TABLE_NOTE] + _cloud_link_lines(link)
+    block = ([""] if lines else []) + [f"[{table}]", note] + _cloud_link_lines(link)
     write_text(path, "\n".join(lines + block) + "\n")
 
 
-def cloud_drop_link_lines(lines: list) -> list:
-    span = _cloud_table_span(lines)
+def cloud_drop_link_lines(lines: list, table: str = CLOUD_TABLE) -> list:
+    span = _cloud_table_span(lines, table)
     if span is None:
         return list(lines)
     start = span[0]
@@ -716,9 +729,11 @@ def cloud_server_check(server: str) -> str:
 
 class CloudLink:
     """The link (server, project) and the client. The key lives only in this object's request headers.
-    `link` and `key` are given only by the link command, before the checkout's link file exists."""
+    `link` and `key` are given only by the link command, before the checkout's link file exists; wf_design builds one
+    from the [design] table (`link`, no key: read from the same key file) with `again` naming design-link."""
 
-    def __init__(self, link=None, key=None) -> None:
+    def __init__(self, link=None, key=None, again: str = "link") -> None:
+        self.again = again  # the command a missing or bad key's line says to run again
         if link is None:
             path = cloud_config_file()
             try:
@@ -754,7 +769,7 @@ class CloudLink:
             try:
                 data = read_json(candidate)
             except (OSError, ValueError):
-                raise CloudError(f"no workspace key for this checkout: {candidate} is unreadable (run link again)")
+                raise CloudError(f"no workspace key for this checkout: {candidate} is unreadable (run {self.again} again)")
             servers = data if isinstance(data, dict) else {}
             projects = servers.get(raw_server) or servers.get(self.server)
             entry = projects.get(self.project) if isinstance(projects, dict) else None
@@ -763,10 +778,10 @@ class CloudLink:
                 break
         if not isinstance(key, str) or not key.strip():
             raise CloudError(f"no workspace key for {self.server} project {self.project} in {cloud_key_file()} "
-                             f"(or the older {cloud_old_key_file()}) (run link again)")
+                             f"(or the older {cloud_old_key_file()}) (run {self.again} again)")
         if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in key.strip()):
             raise CloudError(f"the workspace key for {self.server} project {self.project} in {path} holds spaces or "
-                             "control characters, so it is not a key (run link again): nothing was changed")
+                             f"control characters, so it is not a key (run {self.again} again): nothing was changed")
         return key.strip()
 
     blocked = None  # the last call's block line (a 403 that is not the API's own JSON: wf_setup.block_line), else None
@@ -1663,15 +1678,15 @@ def cloud_exclude() -> None:
     write_text(exclude, existing + ("\n" if existing and not existing.endswith("\n") else "") + "".join(f"{l}\n" for l in add))
 
 
-def cloud_parse_address(address: str) -> tuple:
-    """(server, project id) from the project's page address, `<server>/projects/<project-id>`."""
+def cloud_parse_address(address: str, command: str = "link") -> tuple:
+    """(server, project id) from the project's page address, `<server>/projects/<project-id>` (design-link too)."""
     from urllib.parse import unquote
     parsed = urlparse(address.strip())
     found = re.fullmatch(r"(.*?)/projects/([^/]+)/?", parsed.path or "")
     if parsed.username is not None or parsed.password is not None:
-        raise CloudError("link takes the project's page address with no credentials in it: nothing was written")
+        raise CloudError(f"{command} takes the project's page address with no credentials in it: nothing was written")
     if not parsed.scheme or not parsed.netloc or not found or parsed.query or parsed.fragment:
-        raise CloudError(f"link takes the project's page address, <server>/projects/<project-id> (not {address}): "
+        raise CloudError(f"{command} takes the project's page address, <server>/projects/<project-id> (not {address}): "
                          "nothing was written")
     return cloud_server_check(f"{parsed.scheme}://{parsed.netloc}{found.group(1)}"), unquote(found.group(2))
 
@@ -1895,8 +1910,11 @@ SIGNIN_WAIT = 540  # seconds one run waits for the connect page (under the Bash 
 SIGNIN_DIR = "sign-in"  # <data dir>/sign-in/<this checkout's hash>.json: a started sign-in (code, url, poll token), 0600
 
 
-def _signin_file(data_dir: Path) -> Path:
-    return data_dir / SIGNIN_DIR / (hashlib.sha256(str(ROOT.resolve()).encode("utf-8")).hexdigest()[:16] + ".json")
+def _signin_file(data_dir: Path, root=None, kind: str = "") -> Path:
+    """A started sign-in's file: per checkout (`root`, ROOT by default), and per `kind` (design-link's is "design", so
+    a code started for one command is never resumed by the other)."""
+    digest = hashlib.sha256(str((root or ROOT).resolve()).encode("utf-8")).hexdigest()[:16]
+    return data_dir / SIGNIN_DIR / (digest + (f"-{kind}" if kind else "") + ".json")
 
 
 def _signin_open(url: str) -> str:
@@ -1924,9 +1942,31 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
         server = cloud_server_check(wf_setup.machine_server(data_dir))
     except (CloudError, ValueError) as exc:
         raise SystemExit(f"{prog}: {exc}")
-    pending = _signin_file(data_dir)
+
+    def approved(answer: dict, project: str, key: str) -> int:
+        print(f"connected: the install now belongs to your account; linking this checkout to "
+              f"{answer.get('project_name') or project}")
+        sys.stdout.flush()
+        code = cloud_link_with(server, project, key, command="sign-in")
+        if answer.get("web_url"):
+            print(f"on the web: {answer['web_url']}")
+        return code
+
+    return cloud_device_sign_in(args, prog, server, data_dir, _signin_file(data_dir), (HOST_ROOT or ROOT.parent).name,
+                                "`sikstack sign-in`", "/sikstack:sign-in", "link this checkout", approved)
+
+
+def cloud_device_sign_in(args: argparse.Namespace, prog: str, server: str, data_dir: Path, pending: Path, repo: str,
+                         rerun: str, restart: str, purpose: str, approved) -> int:
+    """The connect-page sign-in, past its command's own refusals: start a code (or resume the one kept in `pending`),
+    print the code and the connect page, poll until the page is answered, then hand the one-time key to
+    `approved(answer, project, key)` and return what it returns. `sign-in` links this checkout with it; design-link
+    (wf_design) keeps it for design builds only. `repo` names the new project; `rerun` is the command that keeps
+    waiting, `restart` the one that starts over, `purpose` what the key is for. Exit 3: still waiting."""
+    import wf_setup
+    release = bool(getattr(args, "release", False))
     started = None
-    if args.release:  # a release always starts a new code: a pending one could still claim for the old account
+    if release:  # a release always starts a new code: a pending one could still claim for the old account
         pending.unlink(missing_ok=True)
     try:
         started = read_json(pending)
@@ -1938,9 +1978,8 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
         print(f"waiting for the connect page again (code {started['code']})")
     else:
         install = wf_setup.registered_install(data_dir, prog)
-        repo = (HOST_ROOT or ROOT.parent).name
         body = {"install_id": install, "repo": repo, "plugin_version": wf_setup.plugin_version()}
-        if args.release:
+        if release:
             body["release"] = True
         status, answer, blocked = wf_setup.post_json(server, "/api/installs/sign-in", body, wf_setup.SETUP_TIMEOUT)
         if blocked:
@@ -1949,7 +1988,7 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
         if status != 200 or not isinstance(answer.get("code"), str) or not isinstance(answer.get("poll_token"), str):
             why = answer if status is None else (answer.get("detail") or f"HTTP {status}")
             raise SystemExit(f"{prog}: {server} did not start a sign-in ({why}): nothing was written")
-        if args.release:
+        if release:
             released = answer.get("released")
             if not isinstance(released, bool):
                 raise SystemExit(f"{prog}: {server} does not support --release yet: nothing was released")
@@ -1969,7 +2008,7 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
                                                      {"poll_token": started["poll_token"]}, wf_setup.SETUP_TIMEOUT)
         if blocked:  # the pending code stays: the next run resumes it once the way through is open again
             raise SystemExit(f"{prog}: the request to {server} was {blocked}, by something in front of it: the code "
-                             f"{started['code']} is kept; run `sikstack sign-in` again to keep waiting")
+                             f"{started['code']} is kept; run {rerun} again to keep waiting")
         state = answer.get("status") if isinstance(answer, dict) else None
         if status == 429 or state == "slow_down":
             interval += 5
@@ -1979,27 +2018,21 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
             pending.unlink(missing_ok=True)
             if state == "denied":
                 raise SystemExit(f"{prog}: the sign-in was declined on the connect page: nothing was written")
-            raise SystemExit(f"{prog}: the code {started['code']} no longer works: run /sikstack:sign-in again "
+            raise SystemExit(f"{prog}: the code {started['code']} no longer works: run {restart} again "
                              "(nothing was written)")
         elif state == "approved":
             pending.unlink(missing_ok=True)
             key, project = answer.get("key"), answer.get("project_id")
             if not isinstance(key, str) or not key.strip() or not isinstance(project, str):
                 raise SystemExit(f"{prog}: the install is connected, but this run did not get its key (another run "
-                                 "collected it): run /sikstack:sign-in again to link this checkout")
-            print(f"connected: the install now belongs to your account; linking this checkout to "
-                  f"{answer.get('project_name') or project}")
-            sys.stdout.flush()
-            code = cloud_link_with(server, project, key.strip(), command="sign-in")
-            if answer.get("web_url"):
-                print(f"on the web: {answer['web_url']}")
-            return code
+                                 f"collected it): run {restart} again to {purpose}")
+            return approved(answer, project, key.strip())
         if float(started["until"]) <= time.time():
             pending.unlink(missing_ok=True)
-            raise SystemExit(f"{prog}: the code {started['code']} expired: run /sikstack:sign-in again "
+            raise SystemExit(f"{prog}: the code {started['code']} expired: run {restart} again "
                              "(nothing was written)")
         if time.monotonic() + interval > stop:
-            print(f"still waiting for the connect page (code {started['code']}): run `sikstack sign-in` again to keep "
+            print(f"still waiting for the connect page (code {started['code']}): run {rerun} again to keep "
                   "waiting")
             return 3
         time.sleep(interval)
