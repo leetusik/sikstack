@@ -9,8 +9,11 @@
 // Shoot (needs playwright-cli and the build served):
 //   every page of --manifest (or the --pages named), every state, every width, each in a fresh browser context;
 //   the page must show the state its run names (as the layout check confirms it), else that run FAILs (exit 1)
-//   and no plan is written; the design-only state widget ([data-design-states]) is hidden; a full-page
-//   screenshot goes to <out>/shots/, cut at 8000 px (the canvas's frame limit) and counted.
+//   and no plan is written; the design-only state widget ([data-design-states]) is hidden; every lazy image and
+//   iframe is loaded and every image decoded, as a teammate scrolling the page would see them; when the page holds
+//   a fixed element (a modal's backdrop), the window takes the page's height so the element spans the shot (a page
+//   that grows with the window is shot at its first measure); a full-page screenshot goes to <out>/shots/, cut at
+//   7968 px (the canvas's 8000 px frame limit less the artboard's 32 px caption) and counted.
 // --plan-only <shots dir> shoots nothing: it reads the PNG sizes of shots already taken (named as the shoot names
 // them) and pairs them with the manifest's pages and states (a page the manifest lists no states for has only its
 // default run).
@@ -43,6 +46,7 @@ exit 2: a usage error, a shot missing for --plan-only, or a driver error ("drive
 export const MAX_H = 8000; // the canvas's frame limit
 export const ENTRY = "Main.dc.html"; // the canvas's entry: its first artboard
 const GAP_X = 80, GAP_Y = 120, CAPTION = 32; // between shots in an artboard; between artboards; a shot's caption
+export const SHOT_MAX = MAX_H - CAPTION; // a shot is cut here, so its artboard (caption and shot) holds it whole
 const PAGES_MAX = 40; // a canvas holds at most 40 pages
 const BATCH_FILES = 25, BATCH_BYTES = 15 << 20;
 
@@ -159,7 +163,7 @@ const RUN = String.raw`async sessionPage => {
   __READ_STATE__
   const browser = sessionPage.context().browser();
   if (!browser) throw new Error("the session's browser cannot open a fresh context (a persistent profile?)");
-  const ctx = await browser.newContext({ viewport: { width: C.width, height: C.width < 600 ? 844 : 900 } });
+  const ctx = await browser.newContext({ viewport: { width: C.width, height: C.vh } });
   const page = await ctx.newPage();
   try {
     const resp = await page.goto(C.url, { waitUntil: "networkidle", timeout: 30000 });
@@ -170,11 +174,39 @@ const RUN = String.raw`async sessionPage => {
     if (C.discover) return JSON.stringify({ states, shows, widget });
     if (C.expect !== null && shows !== C.expect) return JSON.stringify({ mismatch: true, shows, widget });
     await page.addStyleTag({ content: "[data-design-states]{display:none !important}" });
+    // Load what a teammate scrolling the page would load: every lazy image and iframe now, each image decoded, and
+    // the network quiet again (at most 15 s).
+    const inflight = new Set();
+    let last = Date.now();
+    page.on("request", (r) => { inflight.add(r); last = Date.now(); });
+    const done = (r) => { inflight.delete(r); last = Date.now(); };
+    page.on("requestfinished", done); page.on("requestfailed", done);
+    const settle = async () => { const t0 = Date.now(); while (Date.now() - t0 < 15000 && (inflight.size || Date.now() - last < 300)) await page.waitForTimeout(50); };
+    await page.evaluate(() => { for (const el of document.querySelectorAll("img[loading=lazy], iframe[loading=lazy]")) el.loading = "eager"; });
+    await settle();
+    await page.evaluate(() => Promise.race([Promise.all([...document.images].map((i) => i.decode().catch(() => null))), new Promise((r) => setTimeout(r, 10000))]));
     await page.waitForTimeout(150);
-    const full = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, innerHeight));
+    const measure = () => page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, innerHeight));
+    const full = await measure();
     const h = Math.max(40, Math.min(full, C.maxH));
+    // A fixed element (a modal's backdrop, a bottom bar) is drawn over the window only, so the window takes the
+    // shot's height when the page holds one. A page whose height tracks the window (100vh under a header) grows
+    // with it; it is still shot at its first measure, which is what it held before the window grew.
+    const fixed = await page.evaluate(() => [...document.querySelectorAll("body *")].some((el) => {
+      if (getComputedStyle(el).position !== "fixed") return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }));
+    let grown = null;
+    if (fixed && h > C.vh) {
+      await page.setViewportSize({ width: C.width, height: h });
+      await settle();
+      await page.waitForTimeout(150);
+      const again = await measure();
+      if (again > full) grown = again;
+    }
     await page.screenshot({ path: C.file, fullPage: true, clip: { x: 0, y: 0, width: C.width, height: h }, type: C.type, ...(C.type === "jpeg" ? { quality: 85 } : {}) });
-    return JSON.stringify({ shows, widget, w: C.width, h, full, cut: full > C.maxH });
+    return JSON.stringify({ shows, widget, w: C.width, h, full, cut: full > C.maxH, fixed, grown });
   } finally {
     await ctx.close();
   }
@@ -225,7 +257,7 @@ function main(argv) {
       const size = pngSize(buf);
       if (!size) return usage(`not a PNG: ${f}`);
       delete s.step;
-      shots.push({ ...s, file: path.relative(out, f).split(path.sep).join("/"), w: size.w, h: size.h, cut: size.h >= MAX_H, bytes: buf.length });
+      shots.push({ ...s, file: path.relative(out, f).split(path.sep).join("/"), w: size.w, h: size.h, cut: size.h >= SHOT_MAX, bytes: buf.length });
     }
   } else {
     const session = `design-canvas-${process.pid}`;
@@ -235,7 +267,7 @@ function main(argv) {
     mkdirSync(path.join(out, "shots"), { recursive: true });
     rmSync(path.join(out, "plan.json"), { force: true });
     const run = (step, file) => runCode(RUN.replace("__CFG__", JSON.stringify({ url: step.url, width: step.width, expect: step.expect,
-      discover: !!step.discover, file, type: format, maxH: MAX_H })), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
+      discover: !!step.discover, file, type: format, maxH: SHOT_MAX, vh: step.width < 600 ? 844 : 900 })), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
     let driverErr = null;
     const fails = [];
     try {

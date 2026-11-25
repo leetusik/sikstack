@@ -358,8 +358,11 @@ for required in ("console", "request", "overflow", "clipped", "overlap", "target
 _cv = (root / "templates/design/canvas.mjs").read_text(encoding="utf-8")
 for required in ('from "./check.mjs"', "pagesFromManifest", "plan(", "READ_STATE", "makeDriver", '<script src="./support.js"></script>',
                  "data-dc-script", "$preview", "[data-design-states]{display:none", "MAX_H = 8000", 'ENTRY = "Main.dc.html"',
-                 "plan.json", "--plan-only", "@@shot:", "never writes the canvas's files"):
+                 "plan.json", "--plan-only", "@@shot:", "never writes the canvas's files",
+                 # 0.7.0: a shot loads every lazy image and iframe, spans fixed elements, and fits its artboard whole
+                 'el.loading = "eager"', "i.decode()", "page.setViewportSize", "SHOT_MAX = MAX_H - CAPTION", "maxH: SHOT_MAX"):
     assert required in _cv, ("canvas.mjs", required)
+assert (root / "tests/canvas_shoot.mjs").is_file(), "tests/canvas_shoot.mjs"
 for required in ("export function pagesFromManifest", "export function plan", "export const READ_STATE", "export function makeDriver"):
     assert required in _ck, ("check.mjs", required)
 _cc_check = (root / "tests/canvas_check.mjs").read_text(encoding="utf-8")

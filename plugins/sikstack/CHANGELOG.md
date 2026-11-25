@@ -39,12 +39,16 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   build stays the sikstack web share link.
   - `templates/design/canvas.mjs`, beside the layout check, imports that check's walk. It shoots every page, state
     and width (1440, 390) of a served build in a fresh context. It confirms each run's state, hides the state widget,
-    and cuts a shot at 8000 px. Then it writes `plan.json`, never the canvas's files:
+    and cuts a shot to fit an 8000 px artboard. Then it writes `plan.json`, never the canvas's files:
     - the index;
     - one artboard per page and state, its widths side by side under captions, with `Main.dc.html` first;
     - the upload batches.
 
     `--plan-only <shots dir>` plans again from shots already taken.
+  - Each shot is the page as a teammate scrolling it sees it: lazy images and iframes are loaded and decoded first,
+    and a page holding a fixed element (a modal's backdrop) is shot in a window as tall as the page, so the element
+    spans the shot; a page that grows with the window keeps its first height. Shots are cut at 7968 px, so the
+    32 px caption and the shot fit the 8000 px artboard whole. `tests/canvas_shoot.mjs` proves both in a browser.
   - design-cowork's `reference/claude-canvas.md` gives a session with the Artifact tool its steps, in the tool's
     order: open the shots, create the canvas, upload, write `canvas.json` and `Main.dc.html` with its own file tool
     and publish them together, then write and publish the other artboards. Nothing a script wrote is published.

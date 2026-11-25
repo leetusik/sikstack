@@ -5049,6 +5049,7 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
       import { mkdirSync, writeFileSync } from "node:fs";
       const cv = await import(pathToFileURL(process.env.CV_FILE).href), ck = await import(pathToFileURL(process.env.CK_FILE).href);
       const assert = (c, msg) => { if (!c) { console.log("canvas: " + msg); process.exit(1); } };
+      assert(cv.SHOT_MAX === 7968 && cv.MAX_H === 8000, "a shot is cut at 8000 less its 32 px caption");
       const D = process.env.CV_DIR, manifest = { pages: [
         { name: "Workspace · Agenda", entry: "/ws/", states: ["recorded", "behind", "loading"] },
         { name: "All pages", entry: "/" },
@@ -5060,7 +5061,7 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
       mkdirSync(D + "/shots", { recursive: true });
       shots.forEach((s, i) => {
         const b = Buffer.alloc(24); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
-        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([900, 8000, 2400, 844][i % 4], 20);
+        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([900, cv.SHOT_MAX, 2400, 844][i % 4], 20);
         writeFileSync(D + "/" + s.file, b);
       });
       // over 40 pages: no canvas pages; the first artboard is still Main.dc.html
@@ -5116,6 +5117,15 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
     [ "$cv_ok_rc" = 0 ] && [ "$cv_ok" = "canvas ok 6" ] && [ -z "$cv_bad" ] \
       && ok "canvas_check passes a folder written from the plan with /_blob/ urls, and fails a placeholder left, a src not /_blob/, a missing file and an overlap" \
       || bad "canvas_check -- ok: rc=$cv_ok_rc $cv_ok / broken:$cv_bad"
+    # 0.7.0: the shoot in a real browser, over a fixture build tests/canvas_shoot.mjs serves itself: a lazy image and
+    # iframe 6000 px down are drawn, a fixed tint covers a tall page's shot to its bottom row, a page that grows with
+    # the window keeps its first measured height, a 100vh page keeps its own, and a cut shot fits its artboard whole.
+    if command -v playwright-cli >/dev/null 2>&1; then
+      cv_shoot=$(node "$PLUGIN/tests/canvas_shoot.mjs" 2>&1); cv_shoot_rc=$?
+      [ "$cv_shoot_rc" = 0 ] && [ "$cv_shoot" = "shoot ok" ] \
+        && ok "canvas.mjs's shots (a browser over a fixture): lazy images and iframes drawn, a fixed overlay over the whole shot, a page that tracks the window not grown, a cut shot whole in its artboard" \
+        || bad "canvas.mjs's shots (rc=$cv_shoot_rc) -- $(printf '%s' "$cv_shoot" | head -4 | tr '\n' '|')"
+    else ok "canvas.mjs's shots in a browser (playwright-cli absent: skipped)"; fi
   else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
 else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 
