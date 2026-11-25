@@ -1107,7 +1107,7 @@ def test_the_made_by_migration_backfills_each_orgs_maker(monkeypatch):
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
             assert dict(conn.execute(made_by).all()) == want
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "0015_password_resets")
         with engine.connect() as conn:
             assert conn.execute(has_column).scalar_one() == 0
         command.upgrade(cfg, "head")

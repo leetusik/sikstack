@@ -585,6 +585,16 @@ for rel, n in (("commit/SKILL.md", 1), ("rotate-backlog/SKILL.md", 1),
     assert (root / "skills" / rel).read_text().count(cloud_waits) == n, f"{rel}: the linked waiting-commit sentence x{n}"
 assert "A linked checkout (`next` prints `store=cloud`) refuses `worktree start`" in (root / "skills/parallel-phase/SKILL.md").read_text()
 assert "In a linked checkout, changes made on the web arrive as inbox entries" in (root / "skills/agenda/SKILL.md").read_text()
+# 0.6.0: /agenda's feedback part lists the untriaged feedback, suggests file on / propose new / dismiss / leave with a
+# reason each, and runs only the operator's words (the skill only suggests).
+_fb = (root / "skills/agenda/SKILL.md").read_text(encoding="utf-8").split("\n## Feedback\n", 1)[1].split("\n## ", 1)[0]
+for _r in ("`sikstack agenda-feedback list`", "**file on `<A>`**", "`agenda-feedback file <id> --agenda <A> --author",
+           "**propose a new agenda** only when none is", "`agenda-feedback file <id> --new --title", "**dismiss** it",
+           "`agenda-feedback dismiss <id> [--reason", "**leave it** for later", "a one-line reason",
+           "run only the lines the operator says yes to", "never file or dismiss a piece on your own reading",
+           "`/sikstack:sign-in`"):
+    assert _r in _fb, _r
+assert "Reserved" not in _fb, "the reserved line is still under ## Feedback"
 # 0.3.0: deferred jobs are retired, so nothing is filed: every loose end is fixed now, dropped with a reason, or
 # (the exception) an agenda entry that says what would make it actionable. The line, word for word, in each place
 # that routes one; no shipped text but the CHANGELOG and the old installer's manifest names defer-job.
@@ -699,5 +709,5 @@ for _f in sorted((root / "scripts").glob("*.py")):
         _body = _ast.get_source_segment(_src, _fn) if _fn is not None else ""
         assert '"User-Agent": ' in _body and ("user_agent()" in _body), f"{_f.name}:{_line} sends no sikstack User-Agent"
         _ua_sites.append(f"{_f.name}:{_fn.name}")
-assert sorted(_ua_sites) == ["wf_cloud.py:call", "wf_design.py:_design_call", "wf_setup.py:post_json", "wf_setup.py:register"], _ua_sites
+assert sorted(_ua_sites) == ["wf_cloud.py:api_call", "wf_cloud.py:call", "wf_setup.py:post_json", "wf_setup.py:register"], _ua_sites
 assert 'return f"sikstack/{plugin_version()}"' in (root / "scripts/wf_setup.py").read_text(encoding="utf-8")

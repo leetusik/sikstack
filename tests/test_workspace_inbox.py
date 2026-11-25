@@ -1291,7 +1291,8 @@ def test_every_new_kind_is_an_entry_the_engine_turns_into_its_command(store, tmp
     code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import wf_cloud; "
             "print(json.dumps([wf_cloud.cloud_inbox_tokens(e, 'sikstack') "
             "for e in json.load(sys.stdin)]))")
-    run = subprocess.run([sys.executable, "-c", code, str(scripts)], input=json.dumps(entries),
+    # -B: no __pycache__ beside the engine's source (the plugin ships none; smoke checks it)
+    run = subprocess.run([sys.executable, "-B", "-c", code, str(scripts)], input=json.dumps(entries),
                          capture_output=True, text=True, check=True,
                          env={**os.environ, "SIKSTACK_ROOT": str(tmp_path / "ws")})
     tokens = json.loads(run.stdout)

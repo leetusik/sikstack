@@ -53,6 +53,18 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   phase, proposes one phase per agenda (two together only with a stated reason), each objective drawn from its open
   items and each made by `phase new --agenda <A>` after the operator confirms its name and objective; Proposed
   agendas are skipped until accepted.
+- **`/agenda` triages the product's users' feedback.** In a linked checkout, `sikstack agenda-feedback list` prints
+  the project's feedback that is neither filed nor dismissed, newest first, one line each led by its id;
+  `agenda-feedback file <id> --agenda <A>` adds it as a `feedback` item (source `feedback:<id>`, its message and its
+  page on sikstack), `--new --title "…"` instead opens a new agenda holding it (Open for a person, Proposed for an
+  agent), and `agenda-feedback dismiss <id> [--reason "…"]` dismisses it. sikstack keeps the mark, so a triaged piece
+  never lists again on any checkout; a piece an agenda item names, the web's "file on the agenda" included, counts as
+  filed. `file` records the mark after it writes the item: a failed record leaves the item and one line saying to run
+  it again, which then only records. `/agenda` reads the list and suggests, per piece, an agenda to file it on, a new
+  agenda or a dismissal, each with a reason, and runs only what the operator says. An unlinked checkout is told how
+  to link in one line.
+- **One link for the API verbs.** The design verbs and `agenda-feedback` share `wf_cloud.api_link` and `api_call`
+  (the link, the key and the one-line refusals); the design verbs send and print what they did before.
 - **Migration notes.** None by hand: the first rebuild writes `.sikstack/agenda.md` and removes `works/agenda.md`;
   commit both. A checkout still on 0.5.x reads a `state` key it does not know as nothing and keeps it.
 

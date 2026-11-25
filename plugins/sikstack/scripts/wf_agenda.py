@@ -849,6 +849,13 @@ def agenda_add(args: argparse.Namespace) -> None:
     agenda-accept or agenda-drop. `--author` is required, so no agenda is anonymous."""
     title = agenda_title(args.title)
     author = _entry_value(args.author, ENTRY_AUTHOR_RE, ENTRY_AUTHOR_FORM, "--author")
+    agenda_create(args, title, author)
+
+
+def agenda_create(args: argparse.Namespace, title: str, author: str) -> str:
+    """agenda-add's write, for it and any later engine caller (agenda-feedback file --new): the new agenda by
+    `_agenda_new`'s rule, its event, a rebuild and its one line (two when the open part was renumbered); returns its
+    id. `title` and `author` are checked already; `args` carries `id` and `note` (either may be None)."""
     item, writes, renumbered, proposed = _agenda_new(args, title, author, agenda_items())
     aid, stamp = item["id"], item["created_at"]
     for each in writes:
@@ -859,6 +866,7 @@ def agenda_add(args: argparse.Namespace) -> None:
     print(f"added {aid}: {title}" + (" (Proposed: agenda-accept or agenda-drop it)" if proposed else ""))
     if renumbered:
         print(_agenda_renumbered_line(len(writes)))
+    return aid
 
 
 def agenda_edit(args: argparse.Namespace) -> None:

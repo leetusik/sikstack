@@ -1,6 +1,6 @@
 ---
 name: agenda
-description: Handle the agendas with the operator. Show them, propose a triage per agenda and per item with a reason each, and run only what the operator says.
+description: Handle the agendas and the product's users' feedback with the operator. Show them, propose a triage per agenda, per item and per piece of feedback with a reason each, and run only what the operator says.
 allowed-tools: Bash(sikstack:*)
 disable-model-invocation: true
 ---
@@ -32,7 +32,15 @@ An agenda closes itself when its last open item goes: Solved when any of its ite
 
 ## Feedback
 
-_Reserved: the triage of the product's users' feedback onto agendas lands here._
+`/agenda feedback`, or after the agendas in a bare `/agenda`: the product's users' feedback, brought onto the agendas. It needs a linked checkout; when `agenda-feedback list` answers that this one is not linked, say so, say that `/sikstack:sign-in` (or `sikstack link <server>/projects/<project-id>`) links it, and stop.
+
+1. `sikstack agenda-feedback list` (`--json` for each piece's whole message, comment and target): every piece neither filed nor dismissed, newest first, its id leading its line.
+2. Read each piece against the agendas (`agenda`, and `agenda-show <A>` for a likely home) and suggest one line per piece, each with a one-line reason:
+   - **file on `<A>`**, the agenda it is closely related to (items first): `agenda-feedback file <id> --agenda <A> --author person:<the operator>`
+   - **propose a new agenda** only when none is: `agenda-feedback file <id> --new --title "…" --author person:<the operator>`
+   - **dismiss** it (noise, a duplicate, already fixed): `agenda-feedback dismiss <id> [--reason "…"] --author person:<the operator>`
+   - or **leave it** for later: nothing runs, and it lists again next time.
+3. Wait. These are suggestions: run only the lines the operator says yes to, as they amend them, and never file or dismiss a piece on your own reading. `file` writes the item, then sikstack records the piece filed; if it ends with the line saying to run it again, run that line as printed (it only records). A filed or dismissed piece never lists again, on any checkout.
 
 ## The other commands
 

@@ -216,7 +216,10 @@ Release checklist — before pushing a release:
    new-org limit counts `tenants.made_by` (migration 0016), so a promotion never counts.
    0.19.9: the scaffold's workspace read and agenda inbox speak an agenda's items: no
    Deferred (an older stored `deferred` reads Proposed), each item's state, `propose` in
-   `defer`'s place, the item kinds and `split`, and the overlay's prediction of them.)
+   `defer`'s place, the item kinds and `split`, and the overlay's prediction of them;
+   and Feedback's triage under the workspace key (`/api/feedback/<project>/triage`):
+   the untriaged feedback, a piece marked filed or dismissed in `feedback_triage`
+   (migration 0017), a piece an agenda item names counting as filed.)
 2. `python3 scripts/plugin_parity.py` — templates in parity with the repo.
 3. `claude plugin validate .`, `claude plugin validate ./plugins/explain` and
    `claude plugin validate ./plugins/sikstack` — all pass

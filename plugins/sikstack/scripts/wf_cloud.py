@@ -850,6 +850,69 @@ class CloudLink:
         return text[:200] or name
 
 
+# The link the engine's other API verbs share (the design verbs, agenda-feedback): this checkout's [cloud] link and its
+# workspace key, over this module's transport, with one line for every way a request can fail. They touch no workspace
+# truth by themselves, so they never cross the cloud boundary on their own account.
+API_SIGNIN_LINE = ("this checkout is not linked to sikstack (no [cloud] table in config.toml): run /sikstack:sign-in "
+                   "(or sikstack link <server>/projects/<project-id>) first")
+
+
+def api_link(prog: str, nothing: str) -> CloudLink:
+    """The linked checkout's CloudLink (server, project, key), or one line: the sign-in line when unlinked."""
+    if not cloud_linked():
+        raise SystemExit(f"{prog}: {API_SIGNIN_LINE} ({nothing})")
+    try:
+        return CloudLink()
+    except CloudError as exc:
+        raise SystemExit(f"{prog}: {exc}")
+
+
+def api_call(link: CloudLink, prog: str, nothing: str, method: str, path: str, body=None,
+             content_type: str = "application/json") -> dict:
+    """One request to `<server><path>` with the workspace key as the Bearer; the 2xx answer's JSON, else one line
+    (the server's own words with their status, a block in front of it, or sikstack unreachable), the key never in it.
+    A dict or list `body` is sent as JSON; bytes as they are, under `content_type`."""
+    import urllib.request
+    import wf_setup
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    headers = {"Authorization": "Bearer " + link._key, "Accept": "application/json",
+               "X-Sikstack-Checkout": link.checkout, "X-Sikstack-Engine": link.engine,
+               "User-Agent": wf_setup.user_agent()}
+    if isinstance(body, (dict, list)):
+        body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    if body is not None:
+        headers["Content-Type"] = content_type
+    wire = _CloudWire()
+    handlers = [NoRedirect()] + _cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if link.local else [])
+    request = urllib.request.Request(f"{link.server}{path}", data=body, method=method, headers=headers)
+    try:
+        status, raw, kind = link._exchange(urllib.request.build_opener(*handlers), request, wire)
+    except CloudUnreachable as exc:
+        raise SystemExit(f"{prog}: sikstack is not reachable at {link.server} ({exc}): {nothing}")
+    blocked = wf_setup.block_line(status, raw, kind, link._key)
+    if blocked:
+        raise SystemExit(f"{prog}: the request to {link.server} was {blocked}, by something in front of it ({nothing})")
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, ValueError):
+        payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    if 200 <= status < 300:
+        return payload
+    detail = payload.get("detail") if payload.get("detail") is not None else payload.get("error")
+    if isinstance(detail, list) and detail and isinstance(detail[0], dict):
+        detail = detail[0].get("msg")
+    detail = " ".join(str(detail).split())[:300] if detail else f"HTTP {status}"
+    hint = {401: "; make a workspace key under Keys on the project's page and link again",
+            403: "; this is not a workspace key: make one under Keys on the project's page"}.get(status, "")
+    line = f"{prog}: sikstack refused (HTTP {status}): {detail}{hint} ({nothing})"
+    raise SystemExit(line.replace(link._key, "<key>") if link._key else line)
+
+
 def cloud_settle_pull(base: dict) -> None:
     """A pull's write-ahead record (`pulling` in base.json: each append file's merged size, sha256 and base entry,
     saved before its write), settled against the disk after a pull that stopped midway: a file whose first `size`

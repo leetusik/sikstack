@@ -29,6 +29,7 @@ from server.feedback.types import (
     FeedbackMetrics,
     FeedbackMetricsQuery,
     FeedbackSummary,
+    FeedbackTriageRecord,
     ListFeedbackQuery,
     SummarizeFeedbackQuery,
 )
@@ -255,6 +256,62 @@ class FeedbackService:
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback records") from exc
+
+    # -- triage ---------------------------------------------------------------
+
+    async def list_untriaged_feedback(
+        self,
+        project_id: UUID,
+        *,
+        exclude: Collection[UUID] = (),
+        limit: int,
+    ) -> tuple[tuple[FeedbackEventRecord, ...], bool]:
+        """The project's untriaged feedback, newest first, and whether more remain."""
+
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                return await repository.list_untriaged_feedback(
+                    project_id, exclude=exclude, limit=limit
+                )
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise FeedbackReadError("failed to read feedback records") from exc
+
+    async def get_feedback_triage(self, feedback_id: UUID) -> FeedbackTriageRecord | None:
+        """The latest mark of one piece of feedback (load the event scoped first)."""
+
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                return await repository.get_feedback_triage(feedback_id)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise FeedbackReadError("failed to read feedback records") from exc
+
+    async def set_feedback_triage(
+        self,
+        feedback_id: UUID,
+        *,
+        state: str,
+        agenda: str | None,
+        reason: str | None,
+        by: str,
+    ) -> FeedbackTriageRecord:
+        """Mark one piece of feedback filed or dismissed; the latest mark wins (load the
+        event scoped first)."""
+
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                record = await repository.set_feedback_triage(
+                    feedback_id, state=state, agenda=agenda, reason=reason, by=by
+                )
+                await session.commit()
+                return record
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise FeedbackPersistenceError("failed to persist feedback triage") from exc
 
     async def summarize_feedback(self, query: SummarizeFeedbackQuery) -> FeedbackSummary:
         """Return aggregate feedback counts over a requested window."""

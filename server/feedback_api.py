@@ -49,6 +49,7 @@ import binascii
 import contextlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -76,6 +77,7 @@ from server.api_auth import (
     ApiAuthContext,
     resolve_api_capture,
     resolve_api_read,
+    resolve_api_workspace,
     resolve_api_write,
 )
 from server.app_api import serialize_credential
@@ -105,9 +107,21 @@ from server.feedback.types import (
     FeedbackMetrics,
     FeedbackMetricsQuery,
     FeedbackQueryFilters,
+    FeedbackTriageRecord,
     ListFeedbackQuery,
+    TRIAGE_FILED,
+    TRIAGE_STATES,
 )
 from server.usage.metering import stamp_credential_used
+from server.workspace import WorkspaceReadError
+from server.workspace.types import (
+    AGENDA_ID_PATTERN,
+    ENTRY_AUTHOR_PATTERN,
+    ENTRY_ONE_LINE,
+    INBOX_ENTRY,
+    INBOX_PENDING,
+)
+from server.workspace_read import open_reader
 
 logger = logging.getLogger(__name__)
 
@@ -1557,3 +1571,230 @@ async def get_app_feedback(request: Request) -> Response:
         for attachment in attachments
     ]
     return JSONResponse({"record": payload})
+
+
+# --- triage: the engine's feedback on the agenda (0.6.0) ------------------------------
+#
+# Engine-facing, under the project's ``workspace`` key like ``/api/workspace`` and the
+# design routes (``resolve_api_workspace``: another project's key, or a malformed project
+# id, is a 404; any other caller a 403; no key or a revoked one a 401):
+#
+# - ``GET /api/feedback/{project}/triage[?limit=]`` -> ``{project, feedback, more}``: the
+#   project's untriaged feedback, newest first, at most ``limit`` (default 50, at most
+#   100), ``more`` when there is more. Untriaged means no mark here and no item of the
+#   project's workspace (stored, or in a pending inbox entry) naming it by its source,
+#   ``feedback:<id>``: the web's "file on the agenda" files it as well.
+# - ``GET /api/feedback/{project}/triage/{feedback}`` -> ``{feedback}``, the same shape with
+#   its ``triage`` (``{state, agenda, reason, by, at, agendas}``: ``untriaged``, ``filed``
+#   or ``dismissed``; ``agendas`` the agendas whose items name it).
+# - ``POST /api/feedback/{project}/triage/{feedback} {state, agenda?, reason?, by}`` ->
+#   ``{feedback, triage}``: ``filed`` with a full agenda id, or ``dismissed`` with an
+#   optional one-line reason; ``by`` an entry author (``person:``/``agent:``). A later
+#   mark replaces the earlier one. The agenda is not checked against the store: the
+#   engine records the mark after it wrote the item, before its batch lands.
+#
+# A feedback of another project, or none, is a 404 (``feedback not found``); a bad body
+# a 400 with one line. Each feedback reads ``{id, at, product, channel, value, message,
+# comment, target, url}``: ``target`` is ``{type, id, role, text}`` or null, ``url`` its
+# page on the web (``KB_PUBLIC_BASE_URL``).
+
+DEFAULT_TRIAGE_LIMIT = 50
+MAX_TRIAGE_LIMIT = 100
+MAX_TRIAGE_BODY_BYTES = 16_384
+MAX_TRIAGE_REASON = 500
+_TRIAGE_NO_PROJECT = UUID(int=0)
+_FEEDBACK_SOURCE = "feedback:"
+
+
+async def _triage_caller(
+    request: Request, project_id: str, background_tasks: BackgroundTasks
+) -> ApiAuthContext:
+    _require_accounts_plane()
+    try:
+        pid = UUID(project_id)
+    except ValueError:
+        pid = _TRIAGE_NO_PROJECT
+    ctx = await resolve_api_workspace(request, pid)
+    background_tasks.add_task(stamp_credential_used, ctx.credential_id)
+    return ctx
+
+
+async def _filed_by_items(project_id: UUID) -> dict[str, list[str]]:
+    """``{feedback id: [agenda]}``: every feedback an item of the project's workspace names
+    by its source, stored or in a pending inbox entry (the web's "file on the agenda",
+    as ``WorkspaceReader.feedback_items`` reads it). An unlinked project names none."""
+
+    reader = await open_reader(project_id)
+    if not reader.linked:
+        return {}
+    named: dict[str, list[str]] = {}
+
+    def note(source: Any, aid: str) -> None:
+        if isinstance(source, str) and source.startswith(_FEEDBACK_SOURCE):
+            held = named.setdefault(source[len(_FEEDBACK_SOURCE):].strip().lower(), [])
+            if aid not in held:
+                held.append(aid)
+
+    for aid, thread in (await reader._agenda_entries()).items():
+        for entry in thread:
+            note(entry.get("source"), aid)
+    for entry in reader._inbox:
+        if entry.kind == INBOX_ENTRY and entry.state == INBOX_PENDING and entry.items:
+            note(entry.fields.get("source"), entry.items[0])
+    return named
+
+
+def _triage_feedback(record: FeedbackEventRecord) -> dict[str, Any]:
+    target = None
+    if any((record.target_type, record.target_id, record.target_role, record.target_text)):
+        target = {"type": record.target_type, "id": record.target_id,
+                  "role": record.target_role, "text": record.target_text}
+    return {
+        "id": str(record.id),
+        "at": serialize_datetime(record.ingested_at),
+        "product": record.source_product,
+        "channel": record.channel,
+        "value": record.feedback_value,
+        "message": record.message,
+        "comment": record.comment,
+        "target": target,
+        "url": f"{config.public_base_url()}/feedback/{record.id}",
+    }
+
+
+def _triage_json(triage: FeedbackTriageRecord | None, agendas: list[str]) -> dict[str, Any]:
+    if triage is None:
+        return {"state": TRIAGE_FILED if agendas else "untriaged",
+                "agenda": agendas[0] if agendas else None,
+                "reason": None, "by": None, "at": None, "agendas": agendas}
+    return {"state": triage.state, "agenda": triage.agenda, "reason": triage.reason,
+            "by": triage.by, "at": serialize_datetime(triage.at), "agendas": agendas}
+
+
+async def _triage_event(ctx: ApiAuthContext, feedback_id: str) -> FeedbackEventRecord | None:
+    """The key's project's own piece of feedback, or None (missing, malformed or another's)."""
+
+    try:
+        fid = UUID(feedback_id)
+    except ValueError:
+        return None
+    assert ctx.project_id is not None
+    return await get_feedback_service().get_scoped_feedback_event(fid, (ctx.project_id,))
+
+
+@router.get("/api/feedback/{project_id}/triage")
+async def list_untriaged_feedback(
+    project_id: str, request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    ctx = await _triage_caller(request, project_id, background_tasks)
+    assert ctx.project_id is not None
+    try:
+        limit = _parse_int_param(request.query_params.get("limit"), field_name="limit")
+    except FeedbackValidationError as exc:
+        return _detail(str(exc), 400)
+    if limit is None:
+        limit = DEFAULT_TRIAGE_LIMIT
+    if not 1 <= limit <= MAX_TRIAGE_LIMIT:
+        return _detail(f"limit must be between 1 and {MAX_TRIAGE_LIMIT}", 400)
+    try:
+        named = await _filed_by_items(ctx.project_id)
+    except WorkspaceReadError:
+        return _read_failed()
+    skipped = []
+    for raw in named:
+        with contextlib.suppress(ValueError):
+            skipped.append(UUID(raw))
+    try:
+        records, more = await get_feedback_service().list_untriaged_feedback(
+            ctx.project_id, exclude=skipped, limit=limit
+        )
+    except FeedbackReadError:
+        return _read_failed()
+    return JSONResponse({"project": str(ctx.project_id),
+                         "feedback": [_triage_feedback(record) for record in records],
+                         "more": more})
+
+
+@router.get("/api/feedback/{project_id}/triage/{feedback_id}")
+async def get_feedback_triage(
+    project_id: str, feedback_id: str, request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    ctx = await _triage_caller(request, project_id, background_tasks)
+    try:
+        record = await _triage_event(ctx, feedback_id)
+        if record is None:
+            return _not_found()
+        triage = await get_feedback_service().get_feedback_triage(record.id)
+        named = await _filed_by_items(ctx.project_id)
+    except (FeedbackReadError, WorkspaceReadError):
+        return _read_failed()
+    body = _triage_feedback(record)
+    body["triage"] = _triage_json(triage, named.get(str(record.id), []))
+    return JSONResponse({"feedback": body})
+
+
+def _triage_input(raw: Any) -> tuple[str, str | None, str | None, str]:
+    """``(state, agenda, reason, by)`` from a mark's body, or a FeedbackValidationError
+    naming the one thing wrong."""
+
+    if not isinstance(raw, dict):
+        raise FeedbackValidationError("the body must be a JSON object")
+    unknown = sorted(set(raw) - {"state", "agenda", "reason", "by"})
+    if unknown:
+        raise FeedbackValidationError(f"a mark takes no {unknown[0]}")
+    state = raw.get("state")
+    if state not in TRIAGE_STATES:
+        raise FeedbackValidationError(f"state must be one of {', '.join(TRIAGE_STATES)}")
+    by = raw.get("by")
+    if not isinstance(by, str) or not re.fullmatch(ENTRY_AUTHOR_PATTERN, by, re.DOTALL):
+        raise FeedbackValidationError(
+            "by must be person:<name> or agent:<name>, one line of at most 120 characters")
+    agenda, reason = raw.get("agenda"), raw.get("reason")
+    if state == TRIAGE_FILED:
+        if reason is not None:
+            raise FeedbackValidationError("a filed mark takes no reason")
+        if not isinstance(agenda, str) or not re.fullmatch(AGENDA_ID_PATTERN, agenda):
+            raise FeedbackValidationError("agenda must be a full agenda id (A7-m3)")
+        return state, agenda, None, by
+    if agenda is not None:
+        raise FeedbackValidationError("a dismissed mark takes no agenda")
+    if reason is not None:
+        if not isinstance(reason, str):
+            raise FeedbackValidationError("reason must be text")
+        reason = reason.strip() or None
+        if reason is not None and (len(reason) > MAX_TRIAGE_REASON
+                                   or not re.fullmatch(f"{ENTRY_ONE_LINE}*", reason)):
+            raise FeedbackValidationError(
+                f"reason must be one line of at most {MAX_TRIAGE_REASON} characters")
+    return state, None, reason, by
+
+
+@router.post("/api/feedback/{project_id}/triage/{feedback_id}")
+async def mark_feedback_triage(
+    project_id: str, feedback_id: str, request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    ctx = await _triage_caller(request, project_id, background_tasks)
+    raw = await _read_capped_body(request, MAX_TRIAGE_BODY_BYTES)
+    if isinstance(raw, JSONResponse):
+        return raw
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        return _detail("the body must be a JSON object", 400)
+    try:
+        state, agenda, reason, by = _triage_input(body)
+    except FeedbackValidationError as exc:
+        return _detail(str(exc), 400)
+    try:
+        record = await _triage_event(ctx, feedback_id)
+    except FeedbackReadError:
+        return _read_failed()
+    if record is None:
+        return _not_found()
+    try:
+        triage = await get_feedback_service().set_feedback_triage(
+            record.id, state=state, agenda=agenda, reason=reason, by=by
+        )
+    except FeedbackPersistenceError:
+        return _write_failed()
+    return JSONResponse({"feedback": str(record.id), "triage": _triage_json(triage, [])})

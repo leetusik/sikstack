@@ -18,7 +18,8 @@
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
 #   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
 #   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release) and
-#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll).
+#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll) and
+#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -526,7 +527,7 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 43 in all, and no
+# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 44 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
@@ -535,11 +536,12 @@ verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "w
 design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
 agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-propose", "agenda-item", "agenda-entry", "agenda-show",
           "agenda-split", "agenda-merge", "agenda-fold", "agenda-edit", "agenda-move", "agenda-solve", "agenda-drop",
-          "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink"}  # 0.3.0: the four deferred-job verbs retired; 0.6.0: agenda-defer retired
+          "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink",
+          "agenda-feedback"}  # 0.3.0: the four deferred-job verbs retired; 0.6.0: agenda-defer retired, agenda-feedback added
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed", "cold"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 43 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 43 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
+assert len(names) == 44 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 44 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -6054,6 +6056,120 @@ if grep -rqF "$BKK" "$BKW"/*.txt "$BKW/fake" "$BKW/repo" "$BKW/si" 2>/dev/null |
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$BK_PID" 2>/dev/null; wait "$BK_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 38: agenda-feedback against the local fake sikstack -- an unlinked checkout is refused with the sign-in line and nothing is written; list prints the untriaged feedback newest first, one line each led by its id, outside the cloud boundary; file --agenda writes a feedback item (source feedback:<id>, the message and its URL) then records filed; file --new opens a new agenda by agenda-add's rule (an agent's is Proposed) holding it; a failed record leaves the item, lands it in sikstack and prints one line saying to run it again, and the rerun records without a second item; dismiss records with its reason and writes nothing here; a filed or dismissed piece never lists again, on this checkout or another; the key appears nowhere =="
+newtmp AFW; AFX="$AFW/xdg"; AFH="$AFW/prod"; AFU="$AFW/unlinked"; AFO="$AFW/other"
+af() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$AFX" python3 "$ENG" "$@" ) 2>&1; }
+{ mkhost "$AFH" && mkhost "$AFU" && mkhost "$AFO"; } > "$AFW/setup.txt" 2>&1 || bad "agenda-feedback probe: the installs failed -- $(tail -3 "$AFW/setup.txt")"
+AFK="feedback-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$AFK" > "$AFW/key"; chmod 600 "$AFW/key"
+python3 "$REPO_ROOT/tests/fake_sikstack.py" --dir "$AFW/fake" --port-file "$AFW/port" --key-file "$AFW/key" \
+  --project proj-1 --org org-1 --lifetime 900 > "$AFW/fake.txt" 2>&1 &
+AF_PID=$!
+for _ in $(seq 1 100); do [ -s "$AFW/port" ] && break; sleep 0.1; done
+AFS="http://127.0.0.1:$(cat "$AFW/port" 2>/dev/null)"
+for _h in "$AFH" "$AFO"; do
+  printf '%s\n' "$AFK" | ( cd "$_h" && XDG_CONFIG_HOME="$AFX" python3 "$ENG" link "$AFS/projects/proj-1" ) >> "$AFW/link.txt" 2>&1 \
+    || bad "agenda-feedback probe: the link failed -- $(tail -2 "$AFW/link.txt")"
+done
+AFL="$AFW/fake/requests.jsonl"
+af_add() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$AFS/_fake/feedback" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
+af_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$AFS/_fake/control" >/dev/null; }
+af_ws() { grep -c '"path": "/api/workspace/' "$AFL" 2>/dev/null || true; }
+af_items() { find "$1/.sikstack/works/agenda" -path '*/entries/*.json' 2>/dev/null | wc -l | tr -d ' '; }
+AF_A=$(af_add '{"message": "Export hangs at 99%\nOn a 2 GB file", "channel": "web", "value": 2, "comment": "every time"}')
+AF_B=$(af_add '{"message": "Search is slow"}')
+AF_C=$(af_add '{"message": "Love the pager"}')
+AF_D=$(af_add '{"message": "spam spam"}')
+af_aid=$(af "$AFH" agenda-add --title "Export" --author person:op | sed -n 's/^added \(A[0-9]*-[a-z0-9]*\): .*/\1/p')
+mkdir -p "$AFU/.sikstack/works/agenda" && cp -R "$AFH/.sikstack/works/agenda/$af_aid" "$AFU/.sikstack/works/agenda/"
+# (a) unlinked: the sign-in line, nothing written, nothing sent.
+af_u0=$(af_items "$AFU"); af_n0=$(grep -c '"route": "triage"' "$AFL" 2>/dev/null || true)
+af_o1=$(af "$AFU" agenda-feedback list); af_rc1=$?
+af_o2=$(af "$AFU" agenda-feedback file "$AF_A" --agenda "$af_aid" --author person:op); af_rc2=$?
+af_o3=$(af "$AFU" agenda-feedback dismiss "$AF_A" --author person:op); af_rc3=$?
+[ "$af_rc1$af_rc2$af_rc3" = 111 ] && [ -n "$af_aid" ] \
+  && printf '%s\n' "$af_o1" | grep -q '^agenda-feedback list: this checkout is not linked to sikstack .*run /sikstack:sign-in .*(nothing was read)$' \
+  && printf '%s\n' "$af_o2" | grep -q '^agenda-feedback file: this checkout is not linked to sikstack .*(nothing was filed)$' \
+  && printf '%s\n' "$af_o3" | grep -q '^agenda-feedback dismiss: this checkout is not linked to sikstack .*(nothing was dismissed)$' \
+  && [ "$(printf '%s\n' "$af_o2" | grep -c '^agenda-feedback')" = 1 ] && [ "$(af_items "$AFU")" = "$af_u0" ] \
+  && [ "$(grep -c '"route": "triage"' "$AFL" 2>/dev/null || true)" = "$af_n0" ] \
+  && ok "an unlinked checkout is refused with the one sign-in line by list, file and dismiss; nothing is written or sent" \
+  || bad "the unlinked refusal is wrong -- aid=$af_aid rc=$af_rc1$af_rc2$af_rc3 [$af_o1] [$af_o2] [$af_o3]"
+# (b) list: newest first, one line each led by its id; outside the cloud boundary.
+af_ws0=$(af_ws)
+af_o4=$(af "$AFH" agenda-feedback list); af_rc4=$?
+[ "$af_rc4" = 0 ] && [ "$(printf '%s\n' "$af_o4" | sed -n 1p)" = "untriaged=4 more=no project=proj-1" ] \
+  && printf '%s\n' "$af_o4" | sed -n 2p | grep -q "^$AF_D at=" && printf '%s\n' "$af_o4" | sed -n 4p | grep -q "^$AF_B at=" \
+  && printf '%s\n' "$af_o4" | sed -n 5p | grep -qxF "$AF_A at=2026-11-25T01:00:00Z channel=web value=2 url=http://fake.localhost/feedback/$AF_A -- Export hangs at 99% On a 2 GB file | comment: every time" \
+  && [ "$(af_ws)" = "$af_ws0" ] \
+  && ok "agenda-feedback list prints the untriaged feedback newest first, one line each led by its id (when, channel, value, url, the message and its comment), with no workspace request around it" \
+  || bad "the list is wrong -- rc=$af_rc4 ws=$af_ws0/$(af_ws) [$af_o4]"
+# (c) file --agenda: the item, then the mark; file --new: an agent's new agenda is Proposed, holding it.
+af_o5=$(af "$AFH" agenda-feedback file "$AF_A" --agenda "$af_aid" --author person:op); af_rc5=$?
+af_o6=$(af "$AFH" agenda-feedback file "$AF_B" --new --title "Search speed" --author agent:claude-opus-5-5); af_rc6=$?
+af_new=$(printf '%s\n' "$af_o6" | sed -n 's/^added \(A[0-9]*-[a-z0-9]*\): Search speed (Proposed: agenda-accept or agenda-drop it)$/\1/p')
+af_item=$(find "$AFH/.sikstack/works/agenda/$af_aid/entries" -name '*.json' | head -1)
+af_post=$(grep '"route": "triage"' "$AFL" | grep '"method": "POST"' | head -1)
+af_body=$(python3 - "$af_item" "$AF_A" <<'PY2' 2>&1
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["kind"] == "feedback" and d["source"] == "feedback:" + sys.argv[2] and d["author"] == "person:op", d
+assert d["body"] == "Export hangs at 99%\nOn a 2 GB file\n\nhttp://fake.localhost/feedback/" + sys.argv[2], d
+print("ok")
+PY2
+)
+af_shown=$(af "$AFH" agenda --json | python3 -c 'import json,sys; print([a["shown_status"] for a in json.load(sys.stdin) if a["id"] == sys.argv[1]][0])' "$af_new" 2>&1)
+[ "$af_rc5" = 0 ] && [ "$af_rc6" = 0 ] && [ -n "$af_new" ] && [ "$af_body" = ok ] && [ "$af_shown" = Proposed ] \
+  && printf '%s\n' "$af_o5" | sed -n 1p | grep -q "^added item $af_aid/[0-9a-z]\{4\} (.*): feedback by person:op (feedback:$AF_A)\$" \
+  && [ "$(printf '%s\n' "$af_o5" | sed -n 2p)" = "filed=$AF_A agenda=$af_aid" ] \
+  && [ "$(printf '%s\n' "$af_o6" | tail -1)" = "filed=$AF_B agenda=$af_new" ] \
+  && printf '%s\n' "$af_post" | grep -qF "\"body\": {\"state\": \"filed\", \"agenda\": \"$af_aid\", \"by\": \"person:op\"}" \
+  && ok "file --agenda writes a feedback item (source feedback:<id>, the message and its URL) then records filed on that agenda; file --new opens an agent's Proposed agenda holding it and records filed there" \
+  || bad "file is wrong -- rc=$af_rc5/$af_rc6 new=$af_new shown=$af_shown body=[$af_body] post=[$af_post] [$af_o5] [$af_o6]"
+# (d) a failed record: the item stays (and lands in sikstack), one line says to run it again; the rerun only records.
+af_ctl '{"triage_answer": {"status": 503, "detail": "the store is unavailable", "method": "POST"}}'
+af_i7=$(af_items "$AFH")
+af_o7=$(af "$AFH" agenda-feedback file "$AF_C" --agenda "$af_aid" --author person:op); af_rc7=$?
+af_i8=$(af_items "$AFH")
+af_o8=$(af "$AFH" agenda-feedback file "$AF_C" --agenda "$af_aid" --author person:op); af_rc8=$?
+af_landed=$(curl -s "$AFS/_fake/state" | python3 -c 'import json,sys; print(sum(1 for p, r in json.load(sys.stdin)["files"].items() if "/entries/" in p and not r["deleted"]))')
+[ "$af_rc7" = 1 ] && [ "$af_rc8" = 0 ] && [ "$af_i8" = "$((af_i7 + 1))" ] && [ "$(af_items "$AFH")" = "$af_i8" ] \
+  && printf '%s\n' "$af_o7" | grep -q "^added item $af_aid/" \
+  && printf '%s\n' "$af_o7" | grep -qxF "agenda-feedback file: sikstack refused (HTTP 503): the store is unavailable (not recorded); the item stays on $af_aid: run sikstack agenda-feedback file $AF_C --agenda $af_aid --author person:op again to record it" \
+  && [ "$af_landed" = 3 ] \
+  && [ "$af_o8" = "$(printf '%s\n%s' "already on $af_aid: an item there holds feedback:$AF_C, so only the mark is recorded" "filed=$AF_C agenda=$af_aid")" ] \
+  && ok "a failed record leaves the item (it still lands in sikstack) and one line saying to run file again; the rerun records the mark without a second item" \
+  || bad "the failed record is wrong -- rc=$af_rc7/$af_rc8 items=$af_i7/$af_i8/$(af_items "$AFH") landed=$af_landed [$af_o7] [$af_o8]"
+# (e) dismiss: the mark with its reason, nothing written here; then nothing lists, on this checkout or another.
+af_i9=$(af_items "$AFH"); af_ws9=$(af_ws)
+af_o9=$(af "$AFH" agenda-feedback dismiss "$AF_D" --reason "spam" --author person:op); af_rc9=$?
+af_o10=$(af "$AFO" agenda-feedback list); af_rc10=$?
+af_o11=$(af "$AFH" agenda-feedback list --json)
+[ "$af_rc9" = 0 ] && [ "$af_o9" = "dismissed=$AF_D reason=spam" ] && [ "$(af_items "$AFH")" = "$af_i9" ] && [ "$(af_ws)" = "$af_ws9" ] \
+  && grep '"route": "triage"' "$AFL" | grep -qF "\"body\": {\"state\": \"dismissed\", \"reason\": \"spam\", \"by\": \"person:op\"}" \
+  && [ "$af_rc10" = 0 ] && [ "$af_o10" = "untriaged=0 more=no project=proj-1" ] \
+  && printf '%s\n' "$af_o11" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d == {"project": "proj-1", "feedback": [], "more": False}, d' \
+  && ok "dismiss records the mark with its reason and writes nothing here; a filed or dismissed piece never lists again, on this checkout or another linked one (--json alike)" \
+  || bad "dismiss or the second list is wrong -- rc=$af_rc9/$af_rc10 [$af_o9] [$af_o10] [$af_o11]"
+# (f) refusals before any request: a bad id, an unknown agenda, --new without --title, --title without --new.
+af_n12=$(grep -c '"route": "triage"' "$AFL"); af_i12=$(af_items "$AFH")
+af_o12=$(af "$AFH" agenda-feedback file nope --agenda "$af_aid" --author person:op); af_rc12=$?
+af_o13=$(af "$AFH" agenda-feedback file "$AF_A" --agenda A99-zz --author person:op); af_rc13=$?
+af_o14=$(af "$AFH" agenda-feedback file "$AF_A" --new --author person:op); af_rc14=$?
+af_o15=$(af "$AFH" agenda-feedback file "$AF_A" --agenda "$af_aid" --title x --author person:op); af_rc15=$?
+[ "$af_rc12$af_rc13$af_rc14$af_rc15" = 1111 ] && [ "$(grep -c '"route": "triage"' "$AFL")" = "$af_n12" ] && [ "$(af_items "$AFH")" = "$af_i12" ] \
+  && printf '%s\n' "$af_o12" | grep -q "^agenda-feedback file: 'nope' is not a feedback id" \
+  && printf '%s\n' "$af_o13" | grep -qx 'A99-zz names no agenda' \
+  && printf '%s\n' "$af_o14" | grep -q '^agenda-feedback file: --new needs --title' \
+  && printf '%s\n' "$af_o15" | grep -q '^agenda-feedback file: --title goes with --new only' \
+  && ok "a bad feedback id, an unknown agenda, --new without --title and --title without --new are refused in one line before any request" \
+  || bad "a refusal is wrong -- rc=$af_rc12$af_rc13$af_rc14$af_rc15 [$af_o12] [$af_o13] [$af_o14] [$af_o15]"
+if grep -rqF "$AFK" "$AFH" "$AFO" "$AFW"/*.txt "$AFW/fake" 2>/dev/null || printf '%s\n' "$af_o4$af_o5$af_o7$af_o9" | grep -qF "$AFK"; then
+  bad "the workspace key leaked into the tree, the output or the request log"
+fi
+kill "$AF_PID" 2>/dev/null; wait "$AF_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo

@@ -7,8 +7,8 @@ The engine is flat modules beside this file, each importing only the ones listed
   the acceptance gate, check and archive;
 - wf_cold.py: the reads of what a linked checkout keeps only in sikstack (through .sikstack/cache/), and `cold`;
 - wf_git.py: pull requests, the parallel worktrees, the repo registry and phase scope;
-- wf_design.py (design-sign), wf_agenda.py (the agenda, its items and agenda-fold), wf_cloud.py: the named parts,
-  each its own file.
+- wf_design.py (design-sign), wf_agenda.py (the agenda, its items and agenda-fold), wf_feedback.py
+  (agenda-feedback: the linked project's feedback onto the agenda), wf_cloud.py: the named parts, each its own file.
 wf_store imports none of the others: it calls them through its SEAMS, bound at the end of this file. The Claude
 Code side (executor routes, the meter, the compaction hook) is not here: it is the adapter folder,
 adapters/claude_code/ (`sikstack-adapter`), which imports this file and calls run(); nothing here imports it."""
@@ -112,6 +112,7 @@ import wf_cold  # noqa: E402
 import wf_git  # noqa: E402
 import wf_design  # noqa: E402
 import wf_agenda  # noqa: E402
+import wf_feedback  # noqa: E402
 import wf_cloud  # noqa: E402
 from wf_store import (  # noqa: E402
     cmd_check, cmd_gate, cmd_next, cmd_parallel_plan, cmd_phase_archive, cmd_set_slice_status, DEPENDS_ON_HELP,
@@ -133,6 +134,9 @@ from wf_cold import (  # noqa: E402
 )
 from wf_design import (  # noqa: E402
     DESIGN_API_COMMANDS, add_design_parsers,
+)
+from wf_feedback import (  # noqa: E402
+    FEEDBACK_API_COMMANDS, add_feedback_parsers,
 )
 from wf_cloud import (  # noqa: E402
     add_cloud_parsers, cloud_linked, CLOUD_OWN, cloud_refusal, cloud_run, mark_committed,
@@ -409,6 +413,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_agenda_parsers(sub)  # agenda, agenda-*
 
+    add_feedback_parsers(sub)  # agenda-feedback list | file | dismiss
+
     add_cloud_parsers(sub)  # link, sign-in, unlink, sync
 
     add_cold_parsers(sub)  # cold fetch | search | status | clear
@@ -435,9 +441,10 @@ def run(args: argparse.Namespace, tokens: list) -> int:
         # Never fall back to at-root mode on a broken marker: refuse, and let check list it all.
         raise SystemExit(f"{shown(ROOT / NESTED_MARKER)} is malformed, so this nested install cannot run {args.cmd}: "
                          f"{'; '.join(NESTED_PROBLEMS)} -- fix the file (run: {WORKFLOW_CMD} check --no-rebuild)")
-    if not cloud_linked() or args.cmd in CLOUD_OWN or args.cmd in DESIGN_API_COMMANDS:
+    if not cloud_linked() or args.cmd in CLOUD_OWN or args.cmd in DESIGN_API_COMMANDS or args.cmd in FEEDBACK_API_COMMANDS:
         # local mode: no link, so the command runs exactly as before; link, unlink and sync each take the lock
-        # themselves and never run the begin step; the design API verbs touch no workspace truth, so they need neither. Every typed phase / agenda / slice argument becomes its
+        # themselves and never run the begin step; the design API verbs and agenda-feedback list and dismiss touch no
+        # workspace truth, so they need neither (agenda-feedback file writes an item: it crosses). Every typed phase / agenda / slice argument becomes its
         # stored id here, once.
         normalize_id_args(args)
         result = args.func(args)
@@ -454,7 +461,7 @@ def run(args: argparse.Namespace, tokens: list) -> int:
 
 # The seams: each module's SEAMS names what it calls in a module above it; bound here, once every module and the
 # parser exist, before any command runs.
-for _module in (wf_store, wf_cold, wf_git, wf_design, wf_agenda, wf_cloud):
+for _module in (wf_store, wf_cold, wf_git, wf_design, wf_agenda, wf_feedback, wf_cloud):
     for _owner, _names in getattr(_module, "SEAMS", {}).items():
         for _name in _names:
             setattr(_module, _name, globals()[_name] if _owner == "workflow" else getattr(sys.modules[_owner], _name))

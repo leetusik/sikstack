@@ -68,6 +68,14 @@ status; never the key). control design_answer: {status, detail, method?} answers
 method) with that one line (a 403, a 413, ...); one-shot. A refused key is answered before the body is read, and the
 connection closed, as the server does (a big upload then sees its pipe broken).
 
+The triage API (P82-1g.S5's, agenda-feedback): GET /api/feedback/<project>/triage[?limit=] -> {project, feedback, more}:
+the feedback with no mark and that no item among the live records names by its source (feedback:<id>), newest first;
+GET .../triage/<id> -> {feedback: {..., triage: {state, agenda, reason, by, at, agendas}}}; POST .../triage/<id> {state,
+agenda?, reason?, by} -> {feedback, triage}, the latest mark wins; an unknown id 404 (feedback not found), a wrong key
+401, another project 404. Each request is logged (route "triage": method, path, body, status; never the key). control
+triage_answer: {status, detail, method?} answers the next triage request (of that method) with that one line; one-shot.
+Test-only POST /_fake/feedback {message, channel?, value?, comment?} -> {id} adds one piece, newest first.
+
 Test-only routes (no key, 127.0.0.1 only): GET /_fake/state (the records, no content),
 POST /_fake/write {path, content, kind?, deleted?} or {path, lines} (a change made by another checkout: a revision,
 or its lines appended to an append-only record), GET /_fake/file?path=
@@ -138,9 +146,11 @@ class Store:
         self.reports = []   # POST /api/installs/feedback bodies that landed
         self.inbox = []     # the web's agenda changes: {id, created_at, kind, items, fields, minted_id, state, ...}
         self.builds = []    # the design API's builds, newest first: {id, url, commit, branch, private, size, files, ...}
+        self.feedback = []  # the project's feedback, newest first: {id, at, product, channel, value, message, ...}
+        self.triage = {}    # feedback id -> its latest mark {state, agenda, reason, by, at}
         self.control = {"offline": False, "commit": None, "race": None, "gate": None, "fetch_page": None,
                         "inbox_race": None, "break": None, "slow": 0, "drip": 0, "drip_route": None,
-                        "rate": 0, "feedback_limit": 2, "design_answer": None,
+                        "rate": 0, "feedback_limit": 2, "design_answer": None, "triage_answer": None,
                         "block": None, "block_form": "text", "workspace_answer": None, "no_release": False}
         self.gate = threading.Condition()
         self.gate_seen = 0
@@ -385,6 +395,34 @@ class Store:
                                "at": "now", "command": "fake-write", "origin": "command"})
         return {"head": self.head}
 
+    def feedback_add(self, body: dict) -> dict:
+        """Test-only: one piece of the project's feedback (newest first), as a user's capture would land."""
+        import uuid
+        fid = str(uuid.uuid4())
+        self.feedback.insert(0, {"id": fid, "at": f"2026-11-25T01:00:{len(self.feedback):02d}Z", "product": "app-x",
+                                 "channel": body.get("channel"), "value": body.get("value"),
+                                 "message": body.get("message") or "feedback", "comment": body.get("comment"),
+                                 "target": None, "url": f"http://fake.localhost/feedback/{fid}"})
+        return {"id": fid}
+
+    def feedback_named(self) -> dict:
+        """{feedback id: [agenda]}: the feedback an item among the live records names by its source, as the server
+        derives it."""
+        named = {}
+        for path, rec in self.records.items():
+            bits = path.split("/")
+            if rec["deleted"] or len(bits) != 5 or bits[:2] != ["works", "agenda"] or bits[3] != "entries":
+                continue
+            try:
+                source = json.loads(rec["content"].decode("utf-8")).get("source")
+            except (UnicodeDecodeError, ValueError, AttributeError):
+                continue
+            if isinstance(source, str) and source.startswith("feedback:"):
+                held = named.setdefault(source[len("feedback:"):], [])
+                if bits[2] not in held:
+                    held.append(bits[2])
+        return named
+
     def dump(self) -> dict:
         return {"head": self.head,
                 "files": {p: {"rev": r["rev"], "sha256": r["sha256"], "kind": r["kind"], "deleted": r["deleted"],
@@ -627,6 +665,57 @@ def make_handler(store: Store, key: str, log_path: str):
             self._log(entry)
             return status, payload
 
+        def _triage(self, method: str, parts: list, url) -> tuple:
+            """The triage API (P82-1g.S5's): GET /api/feedback/<project>/triage[?limit=], GET and POST .../triage/<id>."""
+            auth = self.headers.get("Authorization") or ""
+            bearer = auth[7:] if auth.startswith("Bearer ") else None
+            entry = {"method": method, "path": "/" + "/".join(parts), "route": "triage",
+                     "checkout": self.headers.get("X-Sikstack-Checkout"),
+                     "auth": "none" if bearer is None else ("ok" if hmac.compare_digest(bearer, key) else "bad")}
+            answer = store.control.get("triage_answer")
+            if isinstance(answer, dict) and answer.get("method") in (None, method):
+                store.control["triage_answer"] = None
+            else:
+                answer = None
+            try:
+                body = self._body() if method == "POST" else {}
+            except ValueError:
+                body = None
+            entry["body"] = body
+            found = next((f for f in store.feedback if len(parts) == 5 and f["id"] == parts[4]), None)
+            if isinstance(answer, dict):
+                status, payload = int(answer.get("status", 400)), {"detail": answer.get("detail")}
+            elif entry["auth"] != "ok":
+                status, payload = 401, {"detail": "a workspace key is required"}
+            elif parts[2] != store.project_id:
+                status, payload = 404, {"detail": "project not found"}
+            elif len(parts) == 4 and method == "GET":
+                limit = int((parse_qs(url.query).get("limit") or ["50"])[0])
+                named = store.feedback_named()
+                rows = [f for f in store.feedback if f["id"] not in store.triage and f["id"] not in named]
+                status, payload = 200, {"project": store.project_id, "feedback": rows[:limit], "more": len(rows) > limit}
+            elif len(parts) == 5 and found is None:
+                status, payload = 404, {"detail": "feedback not found"}
+            elif len(parts) == 5 and method == "GET":
+                agendas = store.feedback_named().get(found["id"], [])
+                mark = store.triage.get(found["id"]) or {"state": "filed" if agendas else "untriaged",
+                                                         "agenda": agendas[0] if agendas else None,
+                                                         "reason": None, "by": None, "at": None}
+                status, payload = 200, {"feedback": {**found, "triage": {**mark, "agendas": agendas}}}
+            elif len(parts) == 5 and method == "POST":
+                if not isinstance(body, dict) or body.get("state") not in ("filed", "dismissed") or not body.get("by"):
+                    status, payload = 400, {"detail": "state must be one of filed, dismissed"}
+                else:
+                    mark = {"state": body["state"], "agenda": body.get("agenda"), "reason": body.get("reason"),
+                            "by": body["by"], "at": f"2026-11-25T00:00:{len(store.triage):02d}Z"}
+                    store.triage[found["id"]] = mark
+                    status, payload = 200, {"feedback": found["id"], "triage": {**mark, "agendas": []}}
+            else:
+                status, payload = 405, {"detail": "Method Not Allowed"}
+            entry["status"] = status
+            self._log(entry)
+            return status, payload
+
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.raw if self.raw is not None else (self.rfile.read(length) if length else b"")
@@ -678,6 +767,10 @@ def make_handler(store: Store, key: str, log_path: str):
             if parts[:2] == ["api", "design"]:
                 with store.lock:
                     self.reply = self._design(method, parts)
+                return
+            if parts[:2] == ["api", "feedback"] and len(parts) in (4, 5) and parts[3] == "triage":
+                with store.lock:
+                    self.reply = self._triage(method, parts, url)
                 return
             if parts[:1] != ["_fake"]:
                 with store.lock:
@@ -739,6 +832,8 @@ def make_handler(store: Store, key: str, log_path: str):
                         if found["state"] == "approved":
                             store.claimed.add(found["install_id"])
                         return self._send(200, {"state": found["state"]})
+                    if parts[1:] == ["feedback"] and method == "POST":
+                        return self._send(200, store.feedback_add(self._body()))
                     if parts[1:] == ["reports"] and method == "GET":
                         return self._send(200, {"reports": store.reports})
                     if parts[1:] == ["control"] and method == "POST":
