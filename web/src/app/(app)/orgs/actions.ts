@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { requireIdentity } from "@/lib/auth-guards";
 import { ApiError } from "@/lib/knowledge/client";
-import { createInvite, createOrg, renameOrg, revokeInvite } from "@/lib/knowledge/orgs";
-import { asOrgId, ORG_COOKIE, orgCookieOptions } from "@/lib/session";
+import { createInvite, createOrg, leaveOrg, removeMember, renameOrg, revokeInvite } from "@/lib/knowledge/orgs";
+import { asOrgId, clearedOrgCookieOptions, ORG_COOKIE, orgCookieOptions } from "@/lib/session";
 import { checkOrgName, looksLikeEmail, type CreateOrgResult, type InviteResult } from "@/sikstack/org/model";
 
 /**
@@ -19,6 +20,9 @@ import { checkOrgName, looksLikeEmail, type CreateOrgResult, type InviteResult }
  *   cookie, `/api/auth/org`; the API just made the caller its owner), and the page lands on its home.
  * - `renameOrgAction`: the org home's Org name panel (owner only; the API refuses anyone else).
  * - `sendInviteAction`, `revokeInviteAction`: Members' Invites panel (owner only, the same).
+ * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row. A
+ *   left org is no longer the caller's, so Leave clears the org cookie (the session acts in its first org again) and
+ *   lands on that org's home, as the switch does. Neither ever ends an org's last owner (the API's 409).
  */
 
 type RenameResult = { ok: true; name: string } | { ok: false; reason: "empty" | "taken" | "failed" };
@@ -36,6 +40,7 @@ export async function createOrgAction(name: string): Promise<CreateOrgResult> {
     if (error instanceof ApiError && error.status === 409 && error.reason === "taken") {
       return { ok: false, reason: "taken" };
     }
+    if (error instanceof ApiError && error.status === 429) return { ok: false, reason: "limit" };
     if (error instanceof ApiError && error.status === 422) return { ok: false, reason: "empty" };
     return { ok: false, reason: "failed" };
   }
@@ -77,6 +82,9 @@ export async function sendInviteAction(email: string): Promise<InviteResult> {
       if (error.reason === "address" || error.reason === "member" || error.reason === "invited") {
         return { ok: false, reason: error.reason };
       }
+      if (error.status === 429) {
+        return { ok: false, reason: error.reason === "recipient" ? "recipient" : "limit" };
+      }
     }
     return { ok: false, reason: "failed" };
   }
@@ -92,4 +100,29 @@ export async function revokeInviteAction(id: string): Promise<{ ok: boolean }> {
   } catch {
     return { ok: false };
   }
+}
+
+export async function removeMemberAction(id: string): Promise<{ ok: boolean }> {
+  if (typeof id !== "string" || !asOrgId(id)) return { ok: false };
+  const { token } = await requireIdentity();
+  try {
+    await removeMember(token, id);
+    revalidatePath("/members");
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Leave the active org: on success the org cookie is cleared and the page lands on the next org's home. */
+export async function leaveOrgAction(): Promise<{ ok: false }> {
+  const { token } = await requireIdentity();
+  try {
+    await leaveOrg(token);
+  } catch {
+    return { ok: false };
+  }
+  (await cookies()).set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  revalidatePath("/", "layout");
+  redirect("/dashboard");
 }

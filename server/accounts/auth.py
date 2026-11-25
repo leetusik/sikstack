@@ -211,7 +211,8 @@ async def require_owner(ctx: AuthContext) -> None:
     """403 unless the caller is an ``owner`` of the request's active org.
 
     The guard of every org-level write: the org's name, its Public URL (slug), its
-    org API keys and its invites. A ``member`` keeps the project-level work.
+    org API keys, its invites and members, and a project's visibility (publishing).
+    A ``member`` keeps the rest of the project-level work.
     """
 
     role = await get_accounts_service().get_member_role(ctx.tenant.id, ctx.user.id)

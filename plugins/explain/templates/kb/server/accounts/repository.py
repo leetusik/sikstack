@@ -7,12 +7,14 @@ the transaction).
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.accounts.types import (
+    ROLE_OWNER,
     AuthTokenRecord,
     CreateAuthToken,
     CreateProject,
@@ -180,6 +182,28 @@ class AccountsRepository:
             TenantMemberModel.user_id == user_id,
         )
         return (await self._session.execute(statement)).scalar_one_or_none()
+
+    async def count_orgs_made_since(self, user_id: UUID, since: datetime) -> int:
+        """How many orgs the user made (owns) since ``since``, its first org aside.
+
+        The first membership is the sign-up org, made with the account, never by
+        ``POST /app/orgs``.
+        """
+
+        first = (
+            select(TenantMemberModel.id)
+            .where(TenantMemberModel.user_id == user_id)
+            .order_by(TenantMemberModel.created_at, TenantMemberModel.id)
+            .limit(1)
+            .scalar_subquery()
+        )
+        statement = select(func.count()).where(
+            TenantMemberModel.user_id == user_id,
+            TenantMemberModel.role == ROLE_OWNER,
+            TenantMemberModel.created_at > since,
+            TenantMemberModel.id != first,
+        )
+        return int((await self._session.execute(statement)).scalar_one())
 
     async def list_org_members(self, tenant_id: UUID) -> tuple[OrgMemberRecord, ...]:
         """A tenant's members with their addresses, in the order they joined."""

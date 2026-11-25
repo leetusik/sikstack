@@ -4,11 +4,12 @@ import { ApiError, getJson, getRaw, sendJson } from "./client";
 import type { KbProject, KbTenant } from "./types";
 
 // The org pages' calls to the API (`server/orgs_api.py`), server to server: New org, the org
-// home's rename, Members (the list, an invite, a revoke) and the invite link (its read and its
+// home's rename, Members (the list, an invite, a revoke, a removal, leaving) and the invite link (its read and its
 // accept). Each session call acts in the active org (`X-Sikstack-Org` from the org cookie, as
 // every call does), but the invite link's two: its read lists the invite's own org, and its accept
 // joins that org, so neither names one (`org: null`), as the connect page's calls do. The refusals
-// keep the API's `reason` on the `ApiError` (`taken`, `address`, `member`, `invited`, `other`).
+// keep the API's `reason` on the `ApiError` (`taken`, `address`, `member`, `invited`, `other`,
+// `limit`, `recipient`, `last_owner`).
 
 /** `POST /app/orgs`: a new org, the caller its owner, with one project `default`. */
 export async function createOrg(
@@ -58,6 +59,16 @@ export async function createInvite(token: string, email: string): Promise<{ invi
 /** `DELETE /app/invites/{id}`: revoke one of the active org's invites (owner only). */
 export async function revokeInvite(token: string, id: string): Promise<void> {
   await sendJson<void>(`/app/invites/${encodeURIComponent(id)}`, "DELETE", undefined, { token });
+}
+
+/** `DELETE /app/members/{id}`: remove a member from the active org (owner only; never its last owner). */
+export async function removeMember(token: string, id: string): Promise<void> {
+  await sendJson<void>(`/app/members/${encodeURIComponent(id)}`, "DELETE", undefined, { token });
+}
+
+/** `POST /app/tenant/leave`: leave the active org (never as its last owner). */
+export async function leaveOrg(token: string): Promise<void> {
+  await sendJson<void>("/app/tenant/leave", "POST", undefined, { token });
 }
 
 /**

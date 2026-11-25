@@ -58,7 +58,7 @@ def wl(tmp_path, monkeypatch):
     monkeypatch.setenv("KB_DB_PATH", str(tmp_path / "data" / "kb.sqlite3"))
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("KB_AUTH_RATE_LIMIT", "0")
-    for name in SMTP_ENV:
+    for name in SMTP_ENV + ("KB_WAITLIST_ALERT_TO",):
         monkeypatch.delenv(name, raising=False)
     # Configured, so every mail reaches the (faked) send.
     monkeypatch.setenv("KB_SMTP_HOST", "smtp.invalid")
@@ -141,7 +141,9 @@ def test_switch_on_signup_answers_waitlisted_and_mints_no_token(wl, monkeypatch)
     mail = wl.sent[0]
     assert mail["To"] == email.lower() and mail["From"] == "hi@example.com"
     assert "waitlist" in mail.get_content()
-    assert wl.sent[1]["To"] == "info@sikstack.com"
+    # The install's own sender is its operator's inbox when no alert address is set.
+    assert wl.sent[1]["To"] == "hi@example.com"
+    assert wl.sent[1]["Subject"].startswith("Waitlist sign-up:")
     # A taken email answers as today, waitlisted or not.
     again = wl.post("/auth/signup", json={"email": email, "password": PASSWORD})
     assert again.status_code == 409
@@ -280,17 +282,18 @@ def test_a_failed_approval_mail_keeps_the_approval(wl, monkeypatch, capsys):
 
 
 def test_a_waitlisted_signup_alerts_the_operator_once(wl, monkeypatch):
-    """One alert to info@sikstack.com naming the address and the approve command; the
-    account's own mail is unchanged; an approved sign-up sends no alert."""
+    """One alert to ``KB_WAITLIST_ALERT_TO`` naming the address and the approve command;
+    the account's own mail is unchanged; an approved sign-up sends no alert."""
 
     from server import waitlist
 
+    monkeypatch.setenv("KB_WAITLIST_ALERT_TO", "alerts@ops.example.org")
     monkeypatch.setenv("KB_SIGNUP_WAITLIST", "on")
     email = _email().lower()
     res = wl.post("/auth/signup", json={"email": email, "password": PASSWORD})
     assert res.status_code == 202, res.text
 
-    alerts = [m for m in wl.sent if m["To"] == "info@sikstack.com"]
+    alerts = [m for m in wl.sent if m["To"] == "alerts@ops.example.org"]
     own = [m for m in wl.sent if m["To"] == email]
     assert len(alerts) == 1 and len(own) == 1 and len(wl.sent) == 2
     alert = alerts[0]
@@ -310,11 +313,38 @@ def test_a_waitlisted_signup_alerts_the_operator_once(wl, monkeypatch):
     assert wl.sent == []
 
 
+def test_the_alert_goes_to_the_installs_own_sender_else_nowhere(wl, monkeypatch):
+    """Without ``KB_WAITLIST_ALERT_TO`` the alert goes to ``KB_SMTP_FROM``; with neither
+    set (SMTP sending as its login) there is no alert mail and one WARNING."""
+
+    from server import waitlist
+
+    monkeypatch.setenv("KB_SMTP_FROM", "ops@example.org")
+    monkeypatch.setenv("KB_SIGNUP_WAITLIST", "on")
+    email = _email().lower()
+    assert wl.post("/auth/signup", json={"email": email, "password": PASSWORD}).status_code == 202
+    assert sorted(m["To"] for m in wl.sent) == sorted([email, "ops@example.org"])
+
+    # Spied on directly: an earlier suite's logging config may have disabled the logger.
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        waitlist.logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+    wl.sent.clear()
+    monkeypatch.delenv("KB_SMTP_FROM")
+    monkeypatch.setenv("KB_SMTP_USER", "mailer")
+    other = _email().lower()
+    res = wl.post("/auth/signup", json={"email": other, "password": PASSWORD})
+    assert res.status_code == 202
+    assert [m["To"] for m in wl.sent] == [other]  # the account's own mail only
+    assert len(warnings) == 1 and "KB_WAITLIST_ALERT_TO" in warnings[0]
+
+
 def test_a_failed_alert_never_fails_the_signup(wl, monkeypatch):
     import server.feedback.notify as notify
 
     def boom(message):
-        if message["To"] == "info@sikstack.com":
+        if message["Subject"].startswith("Waitlist sign-up:"):
             raise OSError("smtp down")
 
     monkeypatch.setattr(notify, "send_message", boom)
@@ -473,7 +503,7 @@ def test_signup_accepts_one_plain_address_and_mails_only_it(
 
     assert res.status_code == (202 if switch else 201), res.text
     assert _user_count(wl, stored) == 1
-    assert rcpt == ([[stored], ["info@sikstack.com"]] if switch else [])
+    assert rcpt == ([[stored], ["hi@example.com"]] if switch else [])
 
 
 LEGACY_ROWS = [

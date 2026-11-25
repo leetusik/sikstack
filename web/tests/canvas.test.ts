@@ -83,4 +83,15 @@ describe("the canvas", () => {
     );
     expect(read("src/app/manifest.ts")).not.toMatch(/f6f2e8/i);
   });
+
+  it("an old page inside the Shell paints the system's light ground as its paper, never the old beige", () => {
+    const css = read("src/app/canvas.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const m =
+      /@media not \(prefers-color-scheme: dark\)\s*\{\s*\.kb-app\.kb-legacy-page\s*\{\s*--kb-paper:\s*(#[0-9a-f]{6});/.exec(
+        css,
+      );
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe(token(':scope, [data-theme="light"]', "--bg"));
+    expect(read("src/sikstack/shell/legacy-page.tsx")).toMatch(/className="kb-app kb-legacy-page"/);
+  });
 });

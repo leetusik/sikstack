@@ -7,13 +7,14 @@ import { getMembers } from "@/lib/knowledge/orgs";
 import { MembersView } from "@/sikstack/org/members";
 
 import { orgHomeFormat } from "../dashboard/org-home-model";
-import { revokeInviteAction, sendInviteAction } from "../orgs/actions";
+import { leaveOrgAction, removeMemberAction, revokeInviteAction, sendInviteAction } from "../orgs/actions";
 
 /**
  * Members (`/members`, P78-s2.S2's signed design): the org rail's section after Feedback. One read,
  * `GET /app/members` in the active org: its members, and for an owner its pending invites, whose panel holds the
- * invite form (`sendInviteAction`) and each row's Revoke (`revokeInviteAction`). A member's view has the members
- * only. Dates in the viewer's zone (`kb_tz`). A failed read is the route's error page.
+ * invite form (`sendInviteAction`) and each row's Revoke (`revokeInviteAction`), and each member row's Remove
+ * (`removeMemberAction`). A member's view has the members only, its own row with Leave (`leaveOrgAction`). Dates in
+ * the viewer's zone (`kb_tz`). A failed read is the route's error page.
  */
 export const metadata: Metadata = { title: MEMBERS.title };
 
@@ -39,6 +40,8 @@ export default async function MembersPage() {
       }))}
       invite={sendInviteAction}
       revoke={revokeInviteAction}
+      remove={removeMemberAction}
+      leave={leaveOrgAction}
       format={format}
     />
   );

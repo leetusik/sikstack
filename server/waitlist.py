@@ -28,9 +28,11 @@ plain text. The waitlist mail is sent by sign-up after its response, best-effort
 (:func:`notify_waitlisted` never raises). With SMTP unconfigured no mail is sent and
 everything else works.
 
-Each new waitlisted sign-up also sends the operator one alert (``ALERT_TO``,
-``info@sikstack.com``), naming the address and the ``approve`` command above, after
-the response and best-effort (:func:`alert_waitlist_signup` never raises).
+Each new waitlisted sign-up also sends this install's operator one alert, naming the
+address and the ``approve`` command above, after the response and best-effort
+(:func:`alert_waitlist_signup` never raises). It goes to ``KB_WAITLIST_ALERT_TO``,
+else to ``KB_SMTP_FROM`` (``config.waitlist_alert_to``); with neither there is no
+alert mail, only a WARNING line. No address is built in.
 """
 
 from __future__ import annotations
@@ -68,9 +70,6 @@ sikstack
 """
 
 
-#: Where each new waitlisted sign-up is announced to the operator. A code default, not
-#: a setting: the box needs no new name in its env.
-ALERT_TO = "info@sikstack.com"
 ALERT_SUBJECT = "Waitlist sign-up: {email}"
 ALERT_BODY = """\
 {email} signed up and is on the waitlist.
@@ -152,12 +151,12 @@ async def notify_waitlisted(email: str) -> None:
         logger.exception("Waitlist mail to %s failed; dropped", email)
 
 
-def render_waitlist_alert(email: str) -> EmailMessage:
+def render_waitlist_alert(email: str, to_email: str) -> EmailMessage:
     """The operator's alert for one waitlisted sign-up: the address and the approve command."""
 
     shown = _shown(email)
     return _message(
-        ALERT_SUBJECT.format(email=shown), ALERT_BODY.format(email=shown), ALERT_TO
+        ALERT_SUBJECT.format(email=shown), ALERT_BODY.format(email=shown), to_email
     )
 
 
@@ -168,14 +167,19 @@ async def alert_waitlist_signup(email: str) -> None:
     failure is logged and dropped, so it never fails or delays the sign-up.
     """
 
+    # Warnings: the operator hears of this sign-up from nowhere else.
     if not config.smtp_configured():
-        # A warning: the operator hears of this sign-up from nowhere else.
+        logger.warning("SMTP is not configured; no waitlist alert for %s", _shown(email))
+        return
+    to_email = config.waitlist_alert_to()
+    if not to_email:
         logger.warning(
-            "SMTP is not configured; no waitlist alert to %s for %s", ALERT_TO, _shown(email)
+            "Neither KB_WAITLIST_ALERT_TO nor KB_SMTP_FROM is set; no waitlist alert for %s",
+            _shown(email),
         )
         return
     try:
-        await asyncio.to_thread(notify.send_message, render_waitlist_alert(email))
+        await asyncio.to_thread(notify.send_message, render_waitlist_alert(email, to_email))
     except Exception:  # best-effort, like the waitlist mail
         logger.exception("Waitlist alert for %s failed; dropped", _shown(email))
 

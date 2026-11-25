@@ -298,8 +298,10 @@ describe("Project home's reads", () => {
       params: Promise.resolve({ projectId: PROJECT }),
     });
     const found = findElement(page, WorkspacePanel);
+    // The Workspace once; the role read (the head's switch is the owner's, P78-s2.F1) beside it.
     expect(calls).toEqual([
       `http://kb.test:8766/app/projects/${PROJECT}/workspace`,
+      "http://kb.test:8766/app/members",
     ]);
     expect(found?.props.part).toEqual(
       workspacePart({ state: "ready", value: NAMED }, PROJECT),
@@ -339,7 +341,7 @@ describe("Workspace panel: not linked", () => {
     expect(w.run).toEqual({
       before: "Run ",
       command:
-        "python3 workflow/scripts/workflow.py link https://sikstack.com/projects/p_42",
+        "sikstack link https://sikstack.com/projects/p_42",
       after: " in the project’s repo.",
     });
     expect(w).not.toHaveProperty("badge");
@@ -403,7 +405,7 @@ describe("Workspace panel: not linked", () => {
       const html = panel(part);
       expect(html).toContain("No workspace linked yet.");
       expect(html).toContain(
-        `<code class="mono ph-cmd">python3 workflow/scripts/workflow.py link https://sikstack.com/projects/${PROJECT}</code>`,
+        `<code class="mono ph-cmd">sikstack link https://sikstack.com/projects/${PROJECT}</code>`,
       );
       expect(html).not.toContain("Coming");
       expect(html).not.toContain("See all in Workspace");

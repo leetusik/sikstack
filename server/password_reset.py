@@ -8,8 +8,10 @@ Routes (public ``/auth/*``, beside sign-in; the change needs a session):
   high-entropy URL-safe token; the row keeps its sha256, revision ``0015``, and it
   lives ``RESET_TTL``, 1 hour) and one mail goes from ``KB_SMTP_FROM`` with
   ``<KB_PUBLIC_BASE_URL>/reset?code=<code>``. Limited per client (the sign-in
-  limiter, ``KB_AUTH_RATE_LIMIT``) and per address (``ADDRESS_LIMIT`` an hour,
-  counted for every address alike, so its 429 says nothing either).
+  limiter, ``KB_AUTH_RATE_LIMIT``). An account gets at most ``MAIL_LIMIT`` reset mails
+  an hour: past that the request makes no code and sends nothing, and still answers
+  the same 202. The cap only stops mails, never refuses, so a stranger asking for
+  someone's address can never keep its owner from a reset.
 - ``POST /auth/password/reset/check {code}``: ``200 {"state": "valid"}``, or ``410``
   for a code that is unknown, used or expired (one answer for all three). The reset
   page reads it before it draws the form. Limited per client.
@@ -41,7 +43,7 @@ from email.message import EmailMessage
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from server import auth_api, config
 from server.accounts.auth import AuthContext, extract_bearer_token, require_user
@@ -67,10 +69,10 @@ RESET_TTL = timedelta(hours=1)
 CODE_PREFIX = "pwr_"
 #: A carried code longer than this is no code of ours (refused without a lookup).
 MAX_CODE_CHARS = 200
-#: Reset requests per address per ``ADDRESS_WINDOW_S``, counted whether or not an
-#: account has the address.
-ADDRESS_LIMIT = 5
-ADDRESS_WINDOW_S = 3600
+#: Reset mails an account gets per ``MAIL_WINDOW`` (counted from its stored codes);
+#: a request past it sends nothing and answers the same.
+MAIL_LIMIT = 3
+MAIL_WINDOW = timedelta(hours=1)
 
 RESET_SUBJECT = "Reset your sikstack password"
 RESET_BODY = """\
@@ -109,9 +111,8 @@ def render_reset_message(to_email: str, code: str) -> EmailMessage:
 
 # --- limits -------------------------------------------------------------------------
 
-# address -> (window_start_monotonic, count). One uvicorn worker (server/main.py), so
-# an in-process counter is coherent, like the sign-in limiter it sits beside.
-_address_windows: dict[str, tuple[float, int]] = {}
+# key -> (window_start_monotonic, count). One uvicorn worker (server/main.py), so an
+# in-process counter is coherent, like the sign-in limiter it sits beside.
 _MAX_KEYS = 20_000
 
 
@@ -138,10 +139,6 @@ def _count(windows: dict[str, tuple[float, int]], key: str, limit: int, window_s
             detail="too many requests — please retry later",
             headers={"Retry-After": str(max(1, int(window_s - (now - start))))},
         )
-
-
-def _limit_address(email: str) -> None:
-    _count(_address_windows, email, ADDRESS_LIMIT, ADDRESS_WINDOW_S)
 
 
 def _limit_account(ctx: AuthContext) -> None:
@@ -190,9 +187,12 @@ def _refused() -> JSONResponse:
 
 
 async def send_reset(email: str) -> None:
-    """Make a code for the account with ``email`` and mail it; nothing for no account.
+    """Make a code for the account with ``email`` and mail it; nothing for no account,
+    and nothing once the account has had ``MAIL_LIMIT`` codes in ``MAIL_WINDOW``.
 
-    Runs after the forgot's response, best-effort: it never raises.
+    Runs after the forgot's response, best-effort: it never raises. The count and the
+    new code share one transaction under the account's row lock, so two requests at
+    once never both pass the cap.
     """
 
     try:
@@ -205,6 +205,20 @@ async def send_reset(email: str) -> None:
         code = new_code()
         now = utc_now()
         async with get_session_maker()() as session, session.begin():
+            await session.get(UserModel, user.id, with_for_update=True)
+            recent = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(PasswordResetModel)
+                    .where(
+                        PasswordResetModel.user_id == user.id,
+                        PasswordResetModel.created_at > now - MAIL_WINDOW,
+                    )
+                )
+            ).scalar_one()
+            if recent >= MAIL_LIMIT:
+                logger.info("Reset mail cap reached for an account; no mail this time")
+                return
             session.add(
                 PasswordResetModel(
                     user_id=user.id,
@@ -234,7 +248,6 @@ async def forgot(
 
     _require_accounts_plane()
     auth_api._enforce_rate_limit(request)
-    _limit_address(payload.email)
     background_tasks.add_task(send_reset, payload.email)
     return {"status": "sent"}
 

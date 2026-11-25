@@ -51,11 +51,18 @@ STATE_EXPIRED = "expired"
 STATE_REVOKED = "revoked"
 STATE_USED = "used"
 
-INVITE_SUBJECT = "Join {org} on sikstack"
+#: Fixed: an org's name is any text its owner chose, so it never goes in a subject.
+INVITE_SUBJECT = "You're invited to an org on sikstack"
+#: The org's name and the inviter's address are data, each on its own labelled line of
+#: a plain-text mail (an org name holds no control character, ``server.orgs_api``);
+#: the only link is the invite's own.
 INVITE_BODY = """\
 Hi,
 
-{inviter} invited you to join {org} on sikstack as a member.
+You're invited to join an org on sikstack as a member.
+
+Org: {org}
+Invited by: {inviter}
 
 Join here: {url}
 
@@ -159,7 +166,7 @@ def render_invite_message(to_email: str, org_name: str, inviter: str, code: str)
     """The invite mail: who invites, into which org, the link, and the address it is for."""
 
     body = INVITE_BODY.format(inviter=inviter, org=org_name, url=invite_url(code), email=to_email)
-    return _message(INVITE_SUBJECT.format(org=org_name), body, to_email)
+    return _message(INVITE_SUBJECT, body, to_email)
 
 
 async def send_invite_mail(to_email: str, org_name: str, inviter: str, code: str) -> None:

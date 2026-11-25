@@ -54,11 +54,18 @@ export function NewOrgForm({ create, current, phase: initialPhase = "ready", dra
 
   useEffect(() => {
     // An error puts the focus back on the field it is about.
-    if (phase === "empty" || phase === "taken" || phase === "failed") nameRef.current?.focus();
+    if (phase === "empty" || phase === "taken" || phase === "limit" || phase === "failed") nameRef.current?.focus();
   }, [phase]);
 
   const busy = phase === "creating";
-  const error = phase === "empty" ? NEW_ORG.errors.empty : phase === "taken" ? NEW_ORG.errors.taken(draft.trim()) : null;
+  const error =
+    phase === "empty"
+      ? NEW_ORG.errors.empty
+      : phase === "taken"
+        ? NEW_ORG.errors.taken(draft.trim())
+        : phase === "limit"
+          ? NEW_ORG.errors.limit
+          : null;
   const ids = { name: `${uid}-name`, error: `${uid}-error`, notice: `${uid}-notice` };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -118,7 +125,7 @@ export function NewOrgForm({ create, current, phase: initialPhase = "ready", dra
               aria-describedby={error ? ids.error : phase === "failed" ? ids.notice : undefined}
               onChange={(e) => {
                 setDraft(e.target.value);
-                if (phase === "empty" || phase === "taken") setPhase("ready");
+                if (phase === "empty" || phase === "taken" || phase === "limit") setPhase("ready");
               }}
             />
             {error ? (

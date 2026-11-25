@@ -923,7 +923,7 @@ describe("the page", () => {
       "No workspace linked yet. Run this in the project’s repo.",
     );
     expect(unlinked).toContain(
-      `python3 workflow/scripts/workflow.py link http://p67.localhost:8080/projects/${PROJECT}`,
+      `sikstack link http://p67.localhost:8080/projects/${PROJECT}`,
     );
     expect(unlinked).not.toContain("agenda-part");
     reads.readWorkspace.mockResolvedValue({

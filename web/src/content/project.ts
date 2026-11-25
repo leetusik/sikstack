@@ -240,7 +240,7 @@ export const PROJECT_HOME = {
       before: "Run ",
       after: " in the project’s repo.",
       command: (origin: string, projectId: string): string =>
-        `python3 workflow/scripts/workflow.py link ${origin}/projects/${projectId}`,
+        `sikstack link ${origin}/projects/${projectId}`,
     },
   },
   library: {

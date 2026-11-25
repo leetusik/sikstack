@@ -13,6 +13,7 @@ import {
   getProjectUsage,
 } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
+import { getMembers } from "@/lib/knowledge/orgs";
 import type { KbIdentity, KbProjectUsage } from "@/lib/knowledge/types";
 import { orgSegment, projectLibraryHref } from "@/lib/reader-href";
 import { readWorkspace } from "@/lib/workspace/read";
@@ -131,6 +132,15 @@ async function loadFeedback(
   return { rows: feedbackRows(list.value.records, projectId, format), count };
 }
 
+/** The viewer's role in the org (`GET /app/members`); `null` when the read fails (the head then draws no switch). */
+async function readRole(token: string): Promise<"owner" | "member" | null> {
+  try {
+    return (await getMembers(token)).role;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ProjectHomePage({
   params,
 }: {
@@ -143,11 +153,12 @@ export default async function ProjectHomePage({
 
   const usage = await loadProject(token, projectId);
   const { project } = usage;
-  const [documents, rows, feedback, workspace] = await Promise.all([
+  const [documents, rows, feedback, workspace, role] = await Promise.all([
     getDocuments(token, { project: project.id, limit: 1 }),
     loadLibraryRows(token, identity, project.name),
     loadFeedback(token, project.id, format),
     readWorkspace(token, project.id),
+    readRole(token),
   ]);
   const count = libraryCount(documents.total);
   const origin = requestOrigin(await headers());
@@ -162,6 +173,7 @@ export default async function ProjectHomePage({
         org={org}
         created={date(project.created_at, format)}
         visibility={project.visibility}
+        owner={role === "owner"}
       />
       <WorkspacePanel
         part={workspacePart(workspace, project.id)}

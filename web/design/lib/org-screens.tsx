@@ -21,6 +21,8 @@ import {
   designCreate,
   designInvite,
   designJoin,
+  designLeave,
+  designRemove,
   designRevoke,
   INVITE_VIEW,
   INVITES_MANY,
@@ -212,6 +214,8 @@ export function MembersRoute() {
               invites={s.invites}
               invite={designInvite(s.members, s.invites)}
               revoke={designRevoke}
+              remove={designRemove}
+              leave={designLeave}
               format={FORMAT}
               phase={s.phase}
               draft={s.draft}

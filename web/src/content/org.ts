@@ -19,6 +19,8 @@ export const NEW_ORG = {
   errors: {
     empty: "Enter a name for the org.",
     taken: (name: string) => `You already have an org named ${name}.`,
+    /** P78-s2.F1: an account makes at most 10 orgs a day. */
+    limit: "You made as many orgs as you can today. Try again tomorrow.",
   },
   failed: "Could not create the org. Try again.",
   /** The toast on the new org's home, where a create lands. */
@@ -36,7 +38,7 @@ export const ORG_NAME = {
   cancel: "Cancel",
   save: "Save",
   saving: "Saving…",
-  errors: NEW_ORG.errors,
+  errors: { empty: NEW_ORG.errors.empty, taken: NEW_ORG.errors.taken },
   saveFailed: "Could not save the org's name. Try again.",
 } as const;
 
@@ -49,6 +51,16 @@ export const MEMBERS = {
     role: "Role",
     joined: "Joined",
     you: "You",
+    /**
+     * P78-s2.F1: membership ends in the invites' Revoke pattern (a quiet button at the row's end, no confirm, a
+     * toast): an owner removes a member; a member leaves, from its own row, and lands on its next org's home.
+     */
+    remove: "Remove",
+    removeLabel: (email: string) => `Remove ${email} from the org`,
+    removed: (email: string) => `${email} removed.`,
+    leave: "Leave",
+    leaveLabel: (org: string) => `Leave ${org}`,
+    leaveFailed: (org: string) => `Could not leave ${org}. Try again.`,
   },
   roles: { owner: "Owner", member: "Member" },
   invites: {
@@ -72,6 +84,9 @@ export const MEMBERS = {
       address: "Enter an email address, like name@example.com.",
       member: (email: string, org: string) => `${email} is already a member of ${org}.`,
       invited: (email: string) => `${email} already has a pending invite.`,
+      /** P78-s2.F1: an account sends at most 10 invites an hour and 30 a day; an address gets at most 3 a day. */
+      limit: "You sent as many invites as you can for now. Try again later.",
+      recipient: (email: string) => `${email} got as many invites as it can today. Try again tomorrow.`,
     },
     failed: "Could not send the invite. Try again.",
   },

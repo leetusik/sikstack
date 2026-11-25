@@ -531,3 +531,224 @@ def test_org_level_writes_are_the_owners_alone(org):
     project_id = made.json()["project"]["id"]
     key = org.post(f"/app/projects/{project_id}/credentials", json={"name": "k"}, headers=as_member)
     assert key.status_code == 201, key.text
+
+
+# --- invite mail is bounded ----------------------------------------------------------------
+
+
+def _backdate(client, sql: str, params: dict) -> None:
+    with client.db.begin() as conn:
+        conn.execute(text(sql), params)
+
+
+def _age_invites_by(client, email: str, interval: str) -> None:
+    """Move every invite ``email`` sent back by ``interval`` (a Postgres interval)."""
+
+    _backdate(
+        client,
+        "UPDATE org_invites SET created_at = created_at - CAST(:i AS interval) "
+        "WHERE invited_by = (SELECT id FROM users WHERE email = :e)",
+        {"i": interval, "e": email},
+    )
+
+
+def test_an_inviter_sends_at_most_10_invite_mails_an_hour_and_30_a_day(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Busy Org")
+    h = _in(owner["h"], org_id)
+    org.sent.clear()
+
+    def send(n: int) -> list:
+        return [org.post("/app/invites", json={"email": _email()}, headers=h) for _ in range(n)]
+
+    assert [r.status_code for r in send(10)] == [201] * 10
+    over = org.post("/app/invites", json={"email": _email()}, headers=h)
+    assert over.status_code == 429 and over.json()["reason"] == "limit", over.text
+    assert len(org.sent) == 10
+
+    # An hour on, ten more; again; then the day's 30 are spent.
+    _age_invites_by(org, owner["email"], "61 minutes")
+    assert [r.status_code for r in send(11)] == [201] * 10 + [429]
+    _age_invites_by(org, owner["email"], "61 minutes")
+    assert [r.status_code for r in send(10)] == [201] * 10
+    _age_invites_by(org, owner["email"], "61 minutes")
+    day = org.post("/app/invites", json={"email": _email()}, headers=h)
+    assert day.status_code == 429 and day.json()["reason"] == "limit"
+    assert len(org.sent) == 30
+
+    # A day on, the inviter sends again.
+    _age_invites_by(org, owner["email"], "1 day")
+    assert send(1)[0].status_code == 201
+
+
+def test_one_address_gets_at_most_3_invite_mails_a_day_across_orgs(org):
+    target = _email()
+    owners = [_account(org) for _ in range(4)]
+    answers = []
+    for owner in owners:
+        org_id = _new_org(org, owner, "Some Org")
+        org.sent.clear()
+        answers.append(
+            org.post("/app/invites", json={"email": target}, headers=_in(owner["h"], org_id))
+        )
+    assert [r.status_code for r in answers] == [201, 201, 201, 429]
+    assert answers[-1].json()["reason"] == "recipient"
+    assert org.sent == []
+
+
+def test_revoke_and_resend_counts_against_the_limits(org):
+    """The code read's repro: 40 send/revoke cycles to one address mail it 3 times."""
+
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Loop Org")
+    h = _in(owner["h"], org_id)
+    victim = _email()
+    org.sent.clear()
+    statuses = []
+    for _ in range(40):
+        res = org.post("/app/invites", json={"email": victim}, headers=h)
+        statuses.append(res.status_code)
+        if res.status_code == 201:
+            invite_id = res.json()["invite"]["id"]
+            assert org.delete(f"/app/invites/{invite_id}", headers=h).status_code == 204
+    assert statuses.count(201) == 3 and statuses.count(429) == 37
+    assert [m["To"] for m in org.sent] == [victim] * 3
+
+
+def test_an_account_makes_at_most_10_new_orgs_a_day(org):
+    """The code read's repro: 30 new orgs with an invite each make 10 orgs and 10 mails."""
+
+    me = _account(org)
+    org.sent.clear()
+    made, refused = [], []
+    for n in range(30):
+        res = org.post("/app/orgs", json={"name": f"Spam {n}"}, headers=me["h"])
+        if res.status_code == 201:
+            made.append(res.json()["tenant"]["id"])
+        else:
+            refused.append(res)
+    assert len(made) == 10 and len(refused) == 20
+    assert all(r.status_code == 429 and r.json()["reason"] == "limit" for r in refused)
+    for org_id in made:
+        org.post("/app/invites", json={"email": _email()}, headers=_in(me["h"], org_id))
+    assert len(org.sent) == 10
+
+    # A day on, the account makes orgs again (its sign-up org never counted).
+    _backdate(
+        org,
+        "UPDATE tenant_members SET created_at = created_at - interval '1 day' "
+        "WHERE user_id = (SELECT id FROM users WHERE email = :e)",
+        {"e": me["email"]},
+    )
+    assert org.post("/app/orgs", json={"name": "Later"}, headers=me["h"]).status_code == 201
+
+
+def test_the_invite_subject_names_no_org_and_the_body_holds_it_as_plain_data(org):
+    owner = _account(org)
+    bait = "Your account is locked - verify at evil.example now"
+    org_id = _new_org(org, owner, bait)
+    org.sent.clear()
+    invited = _email()
+    res = org.post("/app/invites", json={"email": invited}, headers=_in(owner["h"], org_id))
+    assert res.status_code == 201, res.text
+    (mail,) = org.sent
+    assert bait not in mail["Subject"] and "evil" not in mail["Subject"]
+    assert mail["Subject"] == "You're invited to an org on sikstack"
+    body = mail.get_content()
+    assert f"Org: {bait}\n" in body and f"Invited by: {owner['email']}\n" in body
+    assert mail.get_content_type() == "text/plain"
+    # The only link is the invite's own.
+    assert re.findall(r"https?://\S+", body) == [CODE_LINK.search(body).group(0)]
+
+
+# --- membership ends -------------------------------------------------------------------------
+
+
+def _member_id(client, owner: dict, org_id: str, email: str) -> str:
+    members = client.get("/app/members", headers=_in(owner["h"], org_id)).json()["members"]
+    return next(m["id"] for m in members if m["email"] == email)
+
+
+def _joined(client, owner: dict, org_id: str) -> dict:
+    member = _account(client)
+    code = _invite(client, owner, org_id, member["email"])
+    assert client.post(f"/app/invite/{code}/accept", headers=member["h"]).status_code == 200
+    return member
+
+
+def test_the_owner_removes_a_member_and_access_ends_at_once(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Remove Org")
+    member = _joined(org, owner, org_id)
+    as_member = _in(member["h"], org_id)
+    assert org.get("/app/projects", headers=as_member).status_code == 200
+    mid = _member_id(org, owner, org_id, member["email"])
+
+    # A member removes no one; another org's owner cannot reach the row.
+    other_owner = _account(org)
+    assert org.delete(f"/app/members/{mid}", headers=as_member).status_code == 403
+    assert org.delete(f"/app/members/{mid}", headers=other_owner["h"]).status_code == 404
+    assert org.delete(f"/app/members/{uuid4()}", headers=_in(owner["h"], org_id)).status_code == 404
+
+    assert org.delete(f"/app/members/{mid}", headers=_in(owner["h"], org_id)).status_code == 204
+    assert _role(org, org_id, member["email"]) is None
+    # The next request in that org is refused; the account acts in its own org again.
+    assert org.get("/app/projects", headers=as_member).status_code == 403
+    assert org.get("/auth/me", headers=as_member).status_code == 403
+    me = org.get("/auth/me", headers=member["h"]).json()
+    assert org_id not in [t["id"] for t in me["tenants"]]
+    assert me["active_tenant_id"] == member["default_org"]
+    listed = org.get("/app/members", headers=_in(owner["h"], org_id)).json()["members"]
+    assert [m["email"] for m in listed] == [owner["email"]]
+    # Removing twice is a 404; the address may be invited again.
+    assert org.delete(f"/app/members/{mid}", headers=_in(owner["h"], org_id)).status_code == 404
+    assert _invite(org, owner, org_id, member["email"])
+
+
+def test_a_member_leaves_and_the_last_owner_can_neither_leave_nor_be_removed(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Leave Org")
+    member = _joined(org, owner, org_id)
+    as_member, as_owner = _in(member["h"], org_id), _in(owner["h"], org_id)
+
+    left = org.post("/app/tenant/leave", headers=as_member)
+    assert left.status_code == 204, left.text
+    assert _role(org, org_id, member["email"]) is None
+    assert org.get("/app/members", headers=as_member).status_code == 403
+
+    refused = org.post("/app/tenant/leave", headers=as_owner)
+    assert refused.status_code == 409 and refused.json()["reason"] == "last_owner"
+    oid = _member_id(org, owner, org_id, owner["email"])
+    removed = org.delete(f"/app/members/{oid}", headers=as_owner)
+    assert removed.status_code == 409 and removed.json()["reason"] == "last_owner"
+    assert _role(org, org_id, owner["email"]) == "owner"
+    # A sign-up org has one owner too: its owner never leaves it.
+    own = org.post("/app/tenant/leave", headers=owner["h"])
+    assert own.status_code == 409 and own.json()["reason"] == "last_owner"
+
+
+# --- publishing is an org act ----------------------------------------------------------------
+
+
+def test_a_projects_visibility_is_the_owners_alone(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Publish Org")
+    member = _joined(org, owner, org_id)
+    as_member, as_owner = _in(member["h"], org_id), _in(owner["h"], org_id)
+    made = org.post("/app/projects", json={"name": "shared"}, headers=as_member)
+    assert made.status_code == 201, made.text
+    project_id = made.json()["project"]["id"]
+
+    for visibility in ("public", "private"):
+        refused = org.patch(
+            f"/app/projects/{project_id}", json={"visibility": visibility}, headers=as_member
+        )
+        assert refused.status_code == 403, refused.text
+    assert org.get(f"/app/projects/{project_id}", headers=as_owner).json()["project"][
+        "visibility"
+    ] == "private"
+    for visibility in ("public", "private"):
+        done = org.patch(
+            f"/app/projects/{project_id}", json={"visibility": visibility}, headers=as_owner
+        )
+        assert done.status_code == 200 and done.json()["project"]["visibility"] == visibility

@@ -68,19 +68,17 @@ def kb(tmp_path, monkeypatch):
     for name in SMTP_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KB_SMTP_HOST", "smtp.invalid")
-    monkeypatch.setenv("KB_SMTP_FROM", "info@sikstack.com")
+    monkeypatch.setenv("KB_SMTP_FROM", "hi@example.com")
     monkeypatch.setenv("KB_PUBLIC_BASE_URL", "https://kb.example.com")
 
     import server.api_auth as api_auth
     import server.auth_api as auth_api
     import server.feedback.notify as notify
-    import server.password_reset as password_reset
     import server.persistence.engine as engine_mod
 
     sent: list = []
     monkeypatch.setattr(notify, "send_message", lambda message: sent.append(message))
     monkeypatch.setattr(auth_api, "_rate_windows", {})
-    monkeypatch.setattr(password_reset, "_address_windows", {})
     engine_mod._engine = None
     engine_mod._session_maker = None
     api_auth._tenant_one_cache = None
@@ -156,7 +154,7 @@ def test_forgot_answers_the_same_and_mails_only_an_account(kb):
     assert len(kb.sent) == 1
     message = kb.sent[0]
     assert message["To"] == me["email"]
-    assert message["From"] == "info@sikstack.com"
+    assert message["From"] == "hi@example.com"
     assert "password" in message["Subject"].lower()
     body = message.get_content()
     match = RESET_LINK.search(body)
@@ -251,21 +249,40 @@ def test_a_reset_ends_every_session_and_the_new_password_signs_in(kb):
 # --- C4: rate-limited per address and per client ----------------------------------------
 
 
-def test_forgot_is_limited_per_address(kb, monkeypatch):
-    import server.password_reset as password_reset
+def _from(client, email: str, address: str):
+    return client.post(
+        "/auth/password/forgot", json={"email": email}, headers={"X-Real-IP": address}
+    )
 
-    monkeypatch.setattr(password_reset, "ADDRESS_LIMIT", 2)
+
+def test_strangers_never_lock_an_owner_out_of_a_reset(kb):
+    """Five strangers' requests for an address leave its owner's own answered 202, like
+    any other; the address gets at most 3 reset mails an hour, and never a refusal."""
+
     me = _account(kb)
-    kb.sent.clear()
     unknown = _email()
-    for _ in range(2):
-        assert _forgot(kb, me["email"]).status_code == 202
-        assert _forgot(kb, unknown).status_code == 202
-    # The third ask for either address is refused alike, and mails nothing more.
-    assert _forgot(kb, me["email"]).status_code == 429
-    assert _forgot(kb, unknown).status_code == 429
-    assert len(kb.sent) == 2
-    assert _forgot(kb, _email()).status_code == 202
+    kb.sent.clear()
+    for n in range(5):
+        assert _from(kb, me["email"], f"203.0.113.{n + 1}").status_code == 202
+        assert _from(kb, unknown, f"203.0.113.{n + 1}").status_code == 202
+    own = _from(kb, me["email"], "198.51.100.7")
+    other = _from(kb, unknown, "198.51.100.7")
+    assert own.status_code == other.status_code == 202
+    assert own.json() == other.json() == {"status": "sent"}
+    assert [m["To"] for m in kb.sent] == [me["email"]] * 3
+
+    # An hour on, the owner's request mails again.
+    with kb.db.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE password_resets SET created_at = created_at - interval '61 minutes' "
+                "WHERE user_id = (SELECT id FROM users WHERE email = :e)"
+            ),
+            {"e": me["email"]},
+        )
+    kb.sent.clear()
+    assert _from(kb, me["email"], "198.51.100.7").status_code == 202
+    assert [m["To"] for m in kb.sent] == [me["email"]]
 
 
 def test_forgot_and_reset_are_limited_per_client(kb, monkeypatch):

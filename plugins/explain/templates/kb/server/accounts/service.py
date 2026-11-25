@@ -7,8 +7,10 @@ argon2), no token generation (callers pass pre-computed hashes).
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -59,6 +61,10 @@ class DuplicateOrgSlugError(AccountsPersistenceError):
     answers a clean 409 rather than a generic 500 (the ``get_or_create_project``
     ``IntegrityError`` precedent).
     """
+
+
+class OrgLimitError(RuntimeError):
+    """Raised when an account has made as many orgs as ``create_org``'s limit allows."""
 
 
 class AccountsService:
@@ -227,15 +233,29 @@ class AccountsService:
         self,
         user_id: UUID,
         name: str,
+        *,
+        limit: tuple[int, datetime] | None = None,
     ) -> tuple[TenantRecord, TenantMemberRecord, ProjectRecord]:
         """Make an org named ``name``: the tenant, ``user_id`` as its ``owner`` and one
         project ``"default"``, in one transaction (sign-up's ``"default"`` org is one).
 
-        The caller validates ``name`` (``server.orgs_api``).
+        With ``limit`` ``(most, since)``, ``OrgLimitError`` when the account already
+        made ``most`` orgs since ``since`` (its first org, the sign-up one, aside); the
+        count and the new org share the transaction under a lock per account, so two
+        creates at once never both pass. The caller validates ``name``
+        (``server.orgs_api``).
         """
 
         async with self._session_maker() as session:
             repository = AccountsRepository(session)
+            if limit is not None:
+                most, since = limit
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                    {"key": f"org-create:{user_id}"},
+                )
+                if await repository.count_orgs_made_since(user_id, since) >= most:
+                    raise OrgLimitError("the account made as many orgs as it may for now")
             try:
                 tenant = await repository.create_tenant(name)
                 member = await repository.add_tenant_member(

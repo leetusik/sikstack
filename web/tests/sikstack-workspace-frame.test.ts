@@ -409,7 +409,7 @@ describe("the Workspace head (F41, F40)", () => {
 
   it("draws the link command to copy when no workspace is linked", () => {
     const command =
-      "python3 workflow/scripts/workflow.py link https://sikstack.com/projects/platform";
+      "sikstack link https://sikstack.com/projects/platform";
     const out = html(
       createElement(WsNav, {
         current: "agenda",

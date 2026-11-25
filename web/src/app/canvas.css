@@ -39,3 +39,12 @@ html:has(.ui .app.reader[data-scheme="light"]) {
 html:has(.ui .app.reader[data-scheme="sepia"]) {
   --page-canvas: #f7f0e2;
 }
+
+/* An old page inside the Shell (`LegacyPage`, `.kb-app.kb-legacy-page`) paints its own paper over the main column,
+   and every old rule that fades to the paper reads it too: in the light scheme that paper is the system's ground
+   (tokens.css's light `--bg`), never the old beige. Its dark paper (the dark system setting) stays as it was. */
+@media not (prefers-color-scheme: dark) {
+  .kb-app.kb-legacy-page {
+    --kb-paper: #f2f4f7;
+  }
+}

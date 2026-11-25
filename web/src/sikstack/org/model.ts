@@ -4,12 +4,12 @@
 
 // ── New org ───────────────────────────────────────────────────────────────────────────────────
 
-export type NewOrgPhase = "ready" | "empty" | "taken" | "creating" | "failed";
+export type NewOrgPhase = "ready" | "empty" | "taken" | "limit" | "creating" | "failed";
 
 /** What the create action answers: the new org (its cookie is set; the page lands on its home), or why not. */
 export type CreateOrgResult =
   | { ok: true; id: string; name: string }
-  | { ok: false; reason: "empty" | "taken" | "failed" };
+  | { ok: false; reason: "empty" | "taken" | "limit" | "failed" };
 
 /** A name of 1 to 100 characters once trimmed (the API's bound is the build slice's to confirm). */
 export function checkOrgName(draft: string): boolean {
@@ -42,8 +42,11 @@ export interface InviteRow {
   expiresAt: string;
 }
 
-/** Why an invite was not sent: not an address, a member already, invited already, or no answer. */
-export type InviteRefusal = "address" | "member" | "invited" | "failed";
+/**
+ * Why an invite was not sent: not an address, a member already, invited already, the inviter's limit, the
+ * address's limit, or no answer.
+ */
+export type InviteRefusal = "address" | "member" | "invited" | "limit" | "recipient" | "failed";
 
 export type InvitePhase = "list" | "open" | "sending" | InviteRefusal;
 
@@ -61,7 +64,13 @@ export function inviteFormOpen(phase: InvitePhase): boolean {
 
 /** A field error (under Email) for the refusals about the address; the failed send is a notice instead. */
 export function inviteFieldError(phase: InvitePhase): Exclude<InviteRefusal, "failed"> | null {
-  return phase === "address" || phase === "member" || phase === "invited" ? phase : null;
+  return phase === "address" ||
+    phase === "member" ||
+    phase === "invited" ||
+    phase === "limit" ||
+    phase === "recipient"
+    ? phase
+    : null;
 }
 
 /** Newest first: an invite just sent is the table's first row. */

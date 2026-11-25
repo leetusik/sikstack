@@ -16,9 +16,10 @@ claims the caller's tenant's public **org slug** (the ``{org}`` of a pretty shar
 URL) — 422 on a malformed/reserved value, 409 when another tenant holds it.
 
 Org-level writes are the org owner's alone (``require_owner``, a **403** for a
-``member``): the slug claim and the org key mint and revoke here, the name and the
-invites in ``server.orgs_api``. A member keeps the project-level work: projects,
-their visibility and their keys.
+``member``): the slug claim, the org key mint and revoke and a project's visibility
+here (publishing is an org act: a public project's documents go into the public git
+history), the name, the invites and the members in ``server.orgs_api``. A member
+keeps the rest of the project-level work: projects and their keys.
 
 Ported from vocky ``app_api.py`` (Starlette → FastAPI): body binding and path
 params are FastAPI-native (malformed UUID / blank name → standard **422**, not
@@ -253,10 +254,11 @@ async def set_project_visibility(
 ) -> dict[str, object]:
     """Toggle a project's visibility (``private``/``public``); 404 if cross-tenant.
 
-    Session-only (``require_user``); the ``_load_scoped_project`` guard answers 404
-    for a missing *or* cross-tenant project, so the toggle never leaks another
-    tenant's project existence. An invalid ``visibility`` value gets a 422 from the
-    ``Literal`` before any DB work.
+    Session-only (``require_user``) and the org owner's (a member is a **403**,
+    ``require_owner``: publishing is an org act); the ``_load_scoped_project`` guard
+    answers 404 for a missing *or* cross-tenant project first, so the toggle never
+    leaks another tenant's project existence. An invalid ``visibility`` value gets a
+    422 from the ``Literal`` before any DB work.
 
     P34-n0.S2: for a tenant #1 project the git tree then follows the new visibility
     (``_mirror_visibility``): Postgres first, git second, so a git failure keeps the
@@ -265,6 +267,7 @@ async def set_project_visibility(
     """
 
     await _load_scoped_project(project_id, ctx)
+    await require_owner(ctx)
     updated = await get_accounts_service().set_project_visibility(
         project_id, payload.visibility
     )

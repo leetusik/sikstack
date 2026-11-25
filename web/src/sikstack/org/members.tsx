@@ -41,9 +41,12 @@ export interface MembersViewProps {
   members: readonly MemberRow[];
   /** The pending invites; an owner's view only (a member's view has none). */
   invites: readonly InviteRow[];
-  /** The page's actions (an owner's): send an invite, revoke one. */
+  /** The page's actions (an owner's): send an invite, revoke one, remove a member. */
   invite: (email: string) => Promise<InviteResult>;
   revoke: (id: string) => Promise<{ ok: boolean }>;
+  remove: (id: string) => Promise<{ ok: boolean }>;
+  /** A member's: leave the org (on success the page moves to the next org's home, so it answers only a refusal). */
+  leave: () => Promise<{ ok: boolean } | undefined>;
   format: FormatOptions;
   /** The invite form's first phase and address (the page opens with the form closed). */
   phase?: InvitePhase;
@@ -57,7 +60,9 @@ const I = MEMBERS.invites;
  * Members (`/members`, P78-s2.S2's design): the org's people, in two panels.
  *
  * - Members: every member's address, role (Owner, Member) and the day they joined; the signed-in account's row
- *   marked You. The owner first.
+ *   marked You. The owner first. Membership ends in Revoke's pattern (P78-s2.F1): in an owner's view each member's
+ *   row ends with Remove (no confirm; the row goes and the toast says so); in a member's view its own row ends with
+ *   Leave, which lands on its next org's home. An owner's row has neither (an org keeps its owner).
  * - Invites (an owner's view only): the head's Invite opens the form in place (Email, Cancel, Send invite), as
  *   Projects' New project does on org home; the pending invites, newest first, each with the day it was sent, the
  *   day it stops working, and Revoke at the row's end. With none, the empty line, and Invite is the page's primary.
@@ -75,6 +80,8 @@ export function MembersView({
   invites: initialInvites,
   invite,
   revoke,
+  remove,
+  leave,
   format,
   phase: initialPhase = "list",
   draft: initialDraft = "",
@@ -85,6 +92,8 @@ export function MembersView({
   const [draft, setDraft] = useState(initialDraft);
   const [invites, setInvites] = useState<InviteRow[]>(() => invitesNewestFirst(initialInvites));
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [people, setPeople] = useState<MemberRow[]>(() => membersInOrder(members));
+  const [ending, setEnding] = useState<string | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const inviteRef = useRef<HTMLButtonElement>(null);
   const focus = useRef<"email" | "invite" | null>(null);
@@ -106,7 +115,11 @@ export function MembersView({
         ? I.errors.member(address, org)
         : refusal === "invited"
           ? I.errors.invited(address)
-          : null;
+          : refusal === "limit"
+            ? I.errors.limit
+            : refusal === "recipient"
+              ? I.errors.recipient(address)
+              : null;
   const ids = { email: `${uid}-email`, error: `${uid}-error`, notice: `${uid}-notice` };
 
   const send = async (event: FormEvent<HTMLFormElement>) => {
@@ -153,7 +166,40 @@ export function MembersView({
     }
   };
 
-  const people = membersInOrder(members);
+  const dropMember = async (row: MemberRow) => {
+    if (ending) return;
+    setEnding(row.id);
+    let ok = false;
+    try {
+      ok = (await remove(row.id)).ok;
+    } catch {
+      ok = false;
+    }
+    setEnding(null);
+    if (ok) {
+      setPeople((rows) => rows.filter((r) => r.id !== row.id));
+      publishToast(M.removed(row.email));
+    }
+  };
+
+  const leaveOrg = async (row: MemberRow) => {
+    if (ending) return;
+    setEnding(row.id);
+    let refused = true;
+    try {
+      // A left org moves the page to the next org's home; only a refusal comes back.
+      refused = (await leave())?.ok === false;
+    } catch {
+      refused = true;
+    }
+    setEnding(null);
+    if (refused) publishToast(M.leaveFailed(org));
+  };
+
+  /** The control a row ends with: Remove (an owner's view, a member's row), Leave (a member's own row), or none. */
+  const control = (m: MemberRow): "remove" | "leave" | null =>
+    owner ? (m.role === "owner" ? null : "remove") : m.email === me.email ? "leave" : null;
+  const controls = people.some((m) => control(m) !== null);
 
   return (
     <div className="column">
@@ -173,6 +219,11 @@ export function MembersView({
               <th scope="col">{M.email}</th>
               <th scope="col">{M.role}</th>
               <th scope="col">{M.joined}</th>
+              {controls ? (
+                <th scope="col" className="at-end">
+                  <span className="sr-only">{owner ? M.remove : M.leave}</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -191,6 +242,31 @@ export function MembersView({
                   <span className="sr-only">{M.joined} </span>
                   {date(m.joinedAt, format)}
                 </td>
+                {controls ? (
+                  <td className="at-end to-end">
+                    {control(m) === "remove" ? (
+                      <Button
+                        variant="quiet"
+                        aria-label={M.removeLabel(m.email)}
+                        disabled={ending !== null}
+                        busy={ending === m.id}
+                        onClick={() => void dropMember(m)}
+                      >
+                        {M.remove}
+                      </Button>
+                    ) : control(m) === "leave" ? (
+                      <Button
+                        variant="quiet"
+                        aria-label={M.leaveLabel(org)}
+                        disabled={ending !== null}
+                        busy={ending === m.id}
+                        onClick={() => void leaveOrg(m)}
+                      >
+                        {M.leave}
+                      </Button>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

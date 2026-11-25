@@ -35,6 +35,9 @@ function Back({ org }: { org: string }) {
  *
  * The head stays mounted across the refresh a saved change brings (the button keeps focus); the
  * server's visibility is taken when it differs from what the head shows (`sync`).
+ *
+ * Publishing is an org act (P78-s2.F1): the switch is the org owner's, so a member's head (or one whose role read
+ * failed) shows the badge alone; the API refuses a member's change either way.
  */
 export function ProjectHead({
   projectId,
@@ -42,6 +45,7 @@ export function ProjectHead({
   org,
   created,
   visibility,
+  owner,
 }: {
   projectId: string;
   name: string;
@@ -49,6 +53,8 @@ export function ProjectHead({
   /** The created date, already formatted (`Mar 2`). */
   created: string;
   visibility: Visibility;
+  /** The viewer owns the org: only then is the public/private switch drawn. */
+  owner: boolean;
 }) {
   const [state, dispatch] = useReducer(visibilityReducer, {
     visibility,
@@ -93,27 +99,33 @@ export function ProjectHead({
             </Badge>
             <span className="meta">{W.created(created)}</span>
           </div>
-          <button
-            type="button"
-            className={buttonClass("default", "ph-end")}
-            data-busy={saving ? "true" : undefined}
-            aria-busy={saving ? true : undefined}
-            onClick={press}
-          >
-            <span className="ph-swap">
-              <span
-                className={!saving && shown === "private" ? "is-on" : undefined}
-              >
-                {W.makePublic}
+          {owner ? (
+            <button
+              type="button"
+              className={buttonClass("default", "ph-end")}
+              data-busy={saving ? "true" : undefined}
+              aria-busy={saving ? true : undefined}
+              onClick={press}
+            >
+              <span className="ph-swap">
+                <span
+                  className={
+                    !saving && shown === "private" ? "is-on" : undefined
+                  }
+                >
+                  {W.makePublic}
+                </span>
+                <span
+                  className={
+                    !saving && shown === "public" ? "is-on" : undefined
+                  }
+                >
+                  {W.makePrivate}
+                </span>
+                <span className={saving ? "is-on" : undefined}>{W.saving}</span>
               </span>
-              <span
-                className={!saving && shown === "public" ? "is-on" : undefined}
-              >
-                {W.makePrivate}
-              </span>
-              <span className={saving ? "is-on" : undefined}>{W.saving}</span>
-            </span>
-          </button>
+            </button>
+          ) : null}
         </div>
       </header>
       {state.phase === "failed" ? (

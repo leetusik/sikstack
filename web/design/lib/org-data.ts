@@ -69,6 +69,10 @@ export function designInvite(members: readonly MemberRow[], invites: readonly In
 
 export const designRevoke = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
 
+/** The design's Remove: the row goes. Its Leave: refused (the design never leaves the page it draws). */
+export const designRemove = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
+export const designLeave = (): Promise<{ ok: boolean }> => wait(400, { ok: false });
+
 /** The design's create: a name the account's orgs already have is `taken`; else made. */
 export function designCreate(name: string): Promise<CreateOrgResult> {
   const key = name.trim().toLowerCase();
