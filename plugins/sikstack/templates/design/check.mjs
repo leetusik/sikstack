@@ -90,11 +90,55 @@ export function discoverStep(p, width, base) {
   return { page: p.url, name: p.name, url: stateUrl(p.url, base, null), width, state: null, expect: null, fresh: true, discover: true };
 }
 
-class DriverError extends Error {}
+export class DriverError extends Error {}
+
+/** The page-side state reading, shared with canvas.mjs: defines `readState(page, C)`, which returns
+ * { states, shows, widget }: the keys the state widget lists (read when C.discover or no mark), the state on screen
+ * (the widget's data-design-current, else the pressed state), and whether the page has a widget. */
+export const READ_STATE = String.raw`const readState = async (page, C) => {
+    let states = [], shows = null;
+    // The state on screen: the widget's mark, given a moment to settle on the state the run names.
+    const pill = page.locator("[data-design-states] > button[aria-expanded]");
+    const widget = (await page.locator("[data-design-states]").count()) > 0;
+    if (widget && C.expect !== null)
+      await page.waitForFunction((k) => { const v = document.querySelector("[data-design-states]").getAttribute("data-design-current"); return v === null || v === k; }, C.expect, { timeout: 3000 }).catch(() => {});
+    if (widget) shows = await page.locator("[data-design-states]").first().getAttribute("data-design-current");
+    if (widget && (C.discover || shows === null) && (await pill.count())) {
+      await pill.first().click();
+      const listed = await page.locator("[data-design-state]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-design-state"), e.getAttribute("aria-pressed")]));
+      states = listed.map((s) => s[0]);
+      if (shows === null) shows = (listed.find((s) => s[1] === "true") || [null])[0];
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+    }
+    return { states, shows, widget };
+  };`;
+
+/** The playwright-cli driver, shared with canvas.mjs: one named session, run-code from a file in `scratch`.
+ * runCode(source, at) runs one page-side script and returns its parsed JSON answer; a failure is a DriverError. */
+export function makeDriver(session, scratch) {
+  const cli = (...a) => spawnSync("playwright-cli", [`-s=${session}`, ...a], { encoding: "utf8", cwd: scratch, maxBuffer: 64 << 20 });
+  const firstLines = (r) => `${r.error ? r.error.message : ""} ${r.stdout ?? ""} ${r.stderr ?? ""}`.trim().split("\n").slice(0, 3).join(" ");
+  const runCode = (source, at) => {
+    const file = path.join(scratch, "run.js");
+    writeFileSync(file, source);
+    const r = cli("--raw", "run-code", `--filename=${file}`);
+    if (r.status !== 0) throw new DriverError(`${at} :: ${firstLines(r)}`);
+    try {
+      let v = JSON.parse(r.stdout.trim());
+      if (typeof v === "string") v = JSON.parse(v);
+      return v;
+    } catch {
+      throw new DriverError(`${at} :: the page script answered no result: ${firstLines(r)}`);
+    }
+  };
+  return { cli, firstLines, runCode };
+}
 
 // The page-side run: one playwright-cli run-code call per step, in a fresh browser context it opens and closes.
 // It returns { failures: [...], states: [...], shows, widget }.
 const RUN = String.raw`async sessionPage => {
+  __READ_STATE__
   const C = __CFG__;
   const browser = sessionPage.context().browser();
   if (!browser) throw new Error("the session's browser cannot open a fresh context (a persistent profile?)");
@@ -115,20 +159,7 @@ const RUN = String.raw`async sessionPage => {
     if (resp.status() >= 400) failures.push({ kind: "request", detail: resp.status() + " " + C.url });
     await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.waitForTimeout(250);
-    // The state on screen: the widget's mark, given a moment to settle on the state the run names.
-    const pill = page.locator("[data-design-states] > button[aria-expanded]");
-    widget = (await page.locator("[data-design-states]").count()) > 0;
-    if (widget && C.expect !== null)
-      await page.waitForFunction((k) => { const v = document.querySelector("[data-design-states]").getAttribute("data-design-current"); return v === null || v === k; }, C.expect, { timeout: 3000 }).catch(() => {});
-    if (widget) shows = await page.locator("[data-design-states]").first().getAttribute("data-design-current");
-    if (widget && (C.discover || shows === null) && (await pill.count())) {
-      await pill.first().click();
-      const listed = await page.locator("[data-design-state]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-design-state"), e.getAttribute("aria-pressed")]));
-      states = listed.map((s) => s[0]);
-      if (shows === null) shows = (listed.find((s) => s[1] === "true") || [null])[0];
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(100);
-    }
+    ({ states, shows, widget } = await readState(page, C));
     if (C.discover) return JSON.stringify({ failures: [], states, shows, widget });
     if (C.expect !== null && shows !== C.expect) {
       const png = C.shot + "-state.png";
@@ -265,7 +296,7 @@ const RUN = String.raw`async sessionPage => {
     if (C.fresh) await ctx.close();
   }
   return JSON.stringify({ failures, states, shows, widget, tiles });
-}`;
+}`.replace("__READ_STATE__", () => READ_STATE);
 
 const slug = (s) => s.replace(/^https?:\/\/[^/]+/, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(-60) || "root";
 
@@ -320,22 +351,10 @@ function main(argv) {
   const scratch = mkdtempSync(path.join(tmpdir(), "design-check-"));
   mkdirSync(out, { recursive: true });
   if (shots) mkdirSync(shots, { recursive: true });
-  const cli = (...a) => spawnSync("playwright-cli", [`-s=${session}`, ...a], { encoding: "utf8", cwd: scratch, maxBuffer: 64 << 20 });
-  const firstLines = (r) => `${r.error ? r.error.message : ""} ${r.stdout ?? ""} ${r.stderr ?? ""}`.trim().split("\n").slice(0, 3).join(" ");
+  const { cli, firstLines, runCode } = makeDriver(session, scratch);
   const exec = (step, shot, tiles = null) => {
     const cfg = { url: step.url, width: step.width, fresh: step.fresh, expect: step.expect, discover: !!step.discover, shot, tiles };
-    const file = path.join(scratch, "run.js");
-    writeFileSync(file, RUN.replace("__CFG__", JSON.stringify(cfg)));
-    const r = cli("--raw", "run-code", `--filename=${file}`);
-    const at = `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`;
-    if (r.status !== 0) throw new DriverError(`${at} :: ${firstLines(r)}`);
-    try {
-      let v = JSON.parse(r.stdout.trim());
-      if (typeof v === "string") v = JSON.parse(v);
-      return v;
-    } catch {
-      throw new DriverError(`${at} :: the page script answered no result: ${firstLines(r)}`);
-    }
+    return runCode(RUN.replace("__CFG__", JSON.stringify(cfg)), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
   };
 
   let failures = 0, stateCount = 0, driver = null, tileCount = 0;

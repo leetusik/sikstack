@@ -21,9 +21,8 @@ A product repo's rules file names its design folder and the folder's commands on
 is the worked example: `web/design/`, with `pnpm --dir web design:record | design:build | design:serve |
 design:check` (the production-exclusion check: production holds none of the design; it measures no page) and
 `web/design/TASTE.md`. **The layout check** is the plugin's `templates/design/check.mjs`, run over the served build;
-it measures every page and state (`reference/folder.md`, *The layout check*). The folder is a second build of the
-product that renders production's own components on recorded data, held to the product's lint and typecheck, so
-applying a design moves files.
+it measures every page and state (`reference/folder.md`, *The layout check*). The folder renders production's own
+components on recorded data, so applying a design moves files.
 A product with no folder gets one in its first design slice, modelled on platform's; one starting from zero gets an
 options page first. `reference/folder.md` has the folder's rules: data, states, the layout check, options, a new folder.
 
@@ -53,12 +52,13 @@ apply   a separate slice moves the signed files into production
   (`reference/folder.md`, *The layout check*), never only the folder's production-exclusion check, and read its
   failures yourself. Commit the design folder, then stop `pending --stop-kind wave` and report the URL, the pages and states to open, the screenshots, what the drafter
   left open. Leave the server running for the operator; stop it when their words come back. Publish only when
-  their words ask to: `sikstack design-publish --folder <folder> [--repo <name>]` uploads the build to the
-  project's Design service, from the main checkout or a phase's worktree, and prints `url=` (the build's viewer),
-  `private=yes` for a real project's recording. When it refuses naming `design-link` (a local workspace with no
-  design link yet), set one with the operator first: `sikstack design-link --data-dir "${CLAUDE_PLUGIN_DATA}"`
-  (Bash timeout 600000 ms) prints a code and the connect page; they confirm it there, which makes a project named
-  after the repo (exit 3: run it again to keep waiting). For an existing project the operator runs
+  their words ask to, to sikstack web by default; to a claude.ai canvas when they ask for one or the repo's
+  `Design:` line says `publish: claude.ai` (`reference/claude-canvas.md`). `sikstack design-publish --folder
+  <folder> [--repo <name>]` uploads the build to the project's Design service (from the main checkout or a
+  worktree) and prints `url=`, the build's viewer. When it refuses naming `design-link` (no design link yet), set
+  one with the operator first: `sikstack design-link --data-dir "${CLAUDE_PLUGIN_DATA}"` (Bash timeout 600000 ms)
+  prints a code and the connect page; they confirm it there (a new project named after the repo; exit 3: run it
+  again to keep waiting). For an existing project the operator runs
   `sikstack design-link <server>/projects/<id>` in their own terminal and pastes a workspace key; never ask for a
   key. The workspace stays local. Then publish, and report the `url=`: sharing is turned on in that viewer, by a
   member, and the share link copied there is what a teammate with no account opens. Never publish unasked, and a

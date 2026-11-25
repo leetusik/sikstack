@@ -4870,6 +4870,84 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
     [ "$ck_drv_rc" = 2 ] && printf '%s\n' "$ck_drv" | grep -q '^driver error: ' && ! printf '%s\n' "$ck_drv" | grep -q '^FAIL ' \
       && ok "the layout check with no server prints a driver error and exits 2, with no FAIL line" \
       || bad "the layout check with no server (rc=$ck_drv_rc) -- $ck_drv"
+    # 0.6.0: the claude.ai canvas copy, without a browser. canvas.mjs --plan-only pairs shots already taken (fake PNG
+    # headers here) with a fake manifest's runs and writes plan.json: one artboard per page x state, its widths side by
+    # side, the first Main.dc.html, the artboards of a canvas page stacked apart, upload batches; over 40 pages, no
+    # canvas pages. A folder written from the plan with /_blob/ urls passes tests/canvas_check.mjs (the orchestrator's
+    # check), and the check fails on a placeholder left, a src not /_blob/, a missing file and an overlap.
+    newtmp CVT
+    cv_plan=$(CV_DIR="$CVT" CV_FILE="$PLUGIN/templates/design/canvas.mjs" CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      import { mkdirSync, writeFileSync } from "node:fs";
+      const cv = await import(pathToFileURL(process.env.CV_FILE).href), ck = await import(pathToFileURL(process.env.CK_FILE).href);
+      const assert = (c, msg) => { if (!c) { console.log("canvas: " + msg); process.exit(1); } };
+      const D = process.env.CV_DIR, manifest = { pages: [
+        { name: "Workspace · Agenda", entry: "/ws/", states: ["recorded", "behind", "loading"] },
+        { name: "All pages", entry: "/" },
+        { name: "Item", entry: "/ws/a/1/", states: ["open", "deferred"] } ] };
+      writeFileSync(D + "/manifest.json", JSON.stringify(manifest));
+      const pages = ck.pagesFromManifest(manifest); pages[1].states = [];
+      const shots = cv.shotList(ck.plan(pages, [1440, 390], "http://127.0.0.1:9"));
+      assert(shots.length === 12 && new Set(shots.map((s) => s.file)).size === 12, "shots " + shots.length);
+      mkdirSync(D + "/shots", { recursive: true });
+      shots.forEach((s, i) => {
+        const b = Buffer.alloc(24); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([900, 8000, 2400, 844][i % 4], 20);
+        writeFileSync(D + "/" + s.file, b);
+      });
+      // over 40 pages: no canvas pages; the first artboard is still Main.dc.html
+      const many = ck.pagesFromManifest({ pages: Array.from({ length: 41 }, (_, i) => ({ name: "P" + i, entry: "/p" + i + "/", states: ["a"] })) });
+      const big = cv.planCanvas(cv.shotList(ck.plan(many, [1440], "http://x")).map((s) => Object.assign(s, { w: 1440, h: 900, bytes: 1 })), { title: "Big" });
+      assert(big.canvas.pages.length === 0 && big.artboards.length === 41 && big.canvas.order[0] === "Main.dc.html"
+        && Object.values(big.canvas.boards).every((b) => b.page === undefined && b.w === 1440 && b.h === 932), "over 40 pages");
+      const small = cv.planCanvas(cv.shotList(ck.plan(many.slice(0, 40), [1440], "http://x")).map((s) => Object.assign(s, { w: 1440, h: 900, bytes: 1 })), { title: "Forty" });
+      assert(small.canvas.pages.length === 40, "40 pages");
+      console.log("fake ok");
+    ' 2>&1)
+    cv_run=$(node "$PLUGIN/templates/design/canvas.mjs" --plan-only "$CVT/shots" --manifest "$CVT/manifest.json" --out "$CVT" --title Fake 2>&1); cv_run_rc=$?
+    cv_shape=$(CV_DIR="$CVT" node --input-type=module -e '
+      import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+      const D = process.env.CV_DIR, p = JSON.parse(readFileSync(D + "/plan.json", "utf8"));
+      const assert = (c, msg) => { if (!c) { console.log("plan: " + msg); process.exit(1); } };
+      const { canvas, artboards, uploads } = p;
+      assert(artboards.length === 6 && canvas.order.length === 6 && canvas.order[0] === "Main.dc.html" && artboards[0].file === "Main.dc.html", "order " + canvas.order);
+      assert(artboards[0].title === "Workspace · Agenda · recorded" && artboards[3].file === "p02-all-pages--default.dc.html", "names " + artboards.map((a) => a.file + "=" + a.title));
+      assert(canvas.pages.length === 3 && canvas.boards["Main.dc.html"].page === canvas.pages[0].id && !("notes" in canvas) && canvas.createdOnFiles.at === null, "index");
+      const b0 = canvas.boards["Main.dc.html"], b1 = canvas.boards[canvas.order[1]];
+      assert(b0.w === 1910 && b0.h === 932 && b1.h === 8000 && b1.y === b0.y + b0.h + 120 && b1.x === 0, "frames " + JSON.stringify([b0, b1]));
+      assert(artboards.every((a) => (a.html.match(/@@shot:/g) || []).length === 2 && a.shots.every((s) => a.html.includes("@@shot:" + s + "@@"))), "placeholders");
+      assert(artboards[0].html.includes(">1440 px</p>") && artboards[0].html.indexOf("1440 px") < artboards[0].html.indexOf("390 px"), "captions");
+      assert(uploads.length === 1 && uploads[0].length === 12, "uploads");
+      // a folder written from the plan, as the orchestrator writes it; then four broken copies
+      const write = (dir, mut) => {
+        mkdirSync(dir + "/project", { recursive: true });
+        const c = JSON.parse(JSON.stringify(canvas)); c.createdOnFiles.at = "2026-11-25T00:00:00Z";
+        let n = 0; const html = Object.fromEntries(artboards.map((a) => [a.file, a.html.replace(/@@shot:[^@]+@@/g, () => "/_blob/x" + n++)]));
+        if (mut) mut(c, html);
+        writeFileSync(dir + "/project/canvas.json", JSON.stringify(c));
+        for (const [f, h] of Object.entries(html)) if (h !== null) writeFileSync(dir + "/project/" + f, h);
+      };
+      write(D + "/ok");
+      write(D + "/left", (c, h) => { h[artboards[2].file] = artboards[2].html; });
+      write(D + "/src", (c, h) => { h["Main.dc.html"] = h["Main.dc.html"].replace(/\/_blob\/x0/, "shots/a.png"); });
+      write(D + "/gone", (c, h) => { h[artboards[4].file] = null; });
+      write(D + "/over", (c, h) => { c.boards[c.order[1]].y = 100; });
+      console.log("plan ok");
+    ' 2>&1)
+    cv_ok=$(node "$PLUGIN/tests/canvas_check.mjs" "$CVT/ok" 2>&1); cv_ok_rc=$?
+    # each broken copy must fail (exit 1) naming its own problem
+    cv_bad=""
+    for cv_case in "left:a placeholder is left" "src:is not a /_blob/ url" "gone:missing file: project/" "over:frames overlap: "; do
+      cv_o=$(node "$PLUGIN/tests/canvas_check.mjs" "$CVT/${cv_case%%:*}" 2>&1) && cv_bad="$cv_bad ${cv_case%%:*}:passed"
+      printf '%s\n' "$cv_o" | grep -qF "${cv_case#*:}" || cv_bad="$cv_bad ${cv_case%%:*}:$(printf '%s' "$cv_o" | head -2 | tr '\n' '|')"
+    done
+    [ "$cv_plan" = "fake ok" ] && [ "$cv_run_rc" = 0 ] && printf '%s\n' "$cv_run" | grep -q '^artboards=6 shots=12 pages=3 widths=1440,390 cut=3 ' \
+      && [ "$cv_shape" = "plan ok" ] \
+      && ok "canvas.mjs --plan-only (no browser): plan.json holds one artboard per page x state with its widths side by side, Main.dc.html first, frames stacked 120 px apart, upload batches; over 40 pages, no canvas pages" \
+      || bad "canvas.mjs's plan is wrong -- $cv_plan / rc=$cv_run_rc $cv_run / $cv_shape"
+    [ "$cv_ok_rc" = 0 ] && [ "$cv_ok" = "canvas ok 6" ] && [ -z "$cv_bad" ] \
+      && ok "canvas_check passes a folder written from the plan with /_blob/ urls, and fails a placeholder left, a src not /_blob/, a missing file and an overlap" \
+      || bad "canvas_check -- ok: rc=$cv_ok_rc $cv_ok / broken:$cv_bad"
   else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
 else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 

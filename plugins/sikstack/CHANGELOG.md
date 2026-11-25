@@ -34,6 +34,24 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   is none, publishes, and reports the build's viewer (`url=`). Sharing is turned on in that viewer by a member, and
   the share link copied there is what a teammate with no account opens; the engine never turns sharing on.
   `/sikstack:sign-in` points to `design-link` for design sharing without cloud mode.
+- **A design's screens can also go onto a claude.ai Design canvas.** It is an option: on the operator's ask, or
+  when the repo's `Design:` line says `publish: claude.ai`. The design folder stays the source, and the clickable
+  build stays the sikstack web share link.
+  - `templates/design/canvas.mjs`, beside the layout check, imports that check's walk. It shoots every page, state
+    and width (1440, 390) of a served build in a fresh context. It confirms each run's state, hides the state widget,
+    and cuts a shot at 8000 px. Then it writes `plan.json`, never the canvas's files:
+    - the index;
+    - one artboard per page and state, its widths side by side under captions, with `Main.dc.html` first;
+    - the upload batches.
+
+    `--plan-only <shots dir>` plans again from shots already taken.
+  - design-cowork's `reference/claude-canvas.md` gives a session with the Artifact tool its steps, in the tool's
+    order: open the shots, create the canvas, upload, write `canvas.json` and `Main.dc.html` with its own file tool
+    and publish them together, then write and publish the other artboards. Nothing a script wrote is published.
+    `tests/canvas_check.mjs` checks the hand-written folder before the second publish. The engine never publishes
+    to claude.ai.
+  - `check.mjs` now exports its state reading and its `playwright-cli` driver for `canvas.mjs`, and behaves as
+    before.
 
 ## 0.5.1 — 2026-11-25
 
