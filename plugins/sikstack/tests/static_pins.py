@@ -288,6 +288,9 @@ for required in (
     # the viewer (the engine never turns it on), and the key is never asked for.
     "`sikstack design-link --data-dir \"${CLAUDE_PLUGIN_DATA}\"`", "never ask for a key", "The workspace stays local.",
     "sharing is turned on in that viewer, by a member, and the share link copied there is what a teammate with no account opens",
+    # 0.7.0: design-link leaves [design] uncommitted (the operator's call), and --folder needs a build this checkout sees.
+    "`design-link` leaves the `[design]` table uncommitted in the main checkout's `config.toml`; the operator commits it or not",
+    "`--folder` needs a built `out/` that this checkout can see",
 ):
     assert required in design, required
 assert "linked checkouts only" not in design  # 0.7.0: a local workspace publishes too
