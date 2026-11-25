@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { clientIp } from "./client-ip";
+import { clientIp, edgeAddress } from "./client-ip";
 import { checkRateLimit } from "./rate-limit";
 import {
   asOrgId,
@@ -30,7 +30,9 @@ import { ApiError } from "./knowledge/client";
 //   2. same-origin (CSRF layer 2)      → 403
 //   3. per-IP rate limit               → 429   (BEFORE parsing, so a flood is cheap)
 //   4. parse + zod-validate            → 400 (malformed JSON) / 422 (bad shape)
-//   5. call knowledge server-to-server → mapped status, detail text NEVER echoed
+//   5. call knowledge server-to-server → mapped status, detail text NEVER echoed; the visitor's
+//      address goes with it (`X-Real-IP`, P78), so knowledge's own per-client limit counts
+//      the visitor rather than this server, and its 429 passes through as the BFF's
 //   6. seal the knowledge token → cookie → 200
 //
 // P58 — the waitlist: a waitlisted account (sign-up's 202, sign-in's 403, both read in
@@ -101,8 +103,13 @@ export interface CredentialRouteOptions {
    * login attempts consume the signup budget (and vice-versa).
    */
   bucket: string;
-  /** The knowledge call — `signup` or `login` from `@/lib/knowledge/auth`. */
-  call: (email: string, password: string, invite?: string) => Promise<KbAuthAnswer>;
+  /** The knowledge call — `signup` or `login` from `@/lib/knowledge/auth`; `address` is the visitor's. */
+  call: (
+    email: string,
+    password: string,
+    invite?: string,
+    address?: string | null,
+  ) => Promise<KbAuthAnswer>;
   /**
    * knowledge statuses that are meaningful to the client and pass through verbatim
    * (login: 401, 400, 422; signup: 409, 400, 422). Any OTHER error becomes a 502 — an
@@ -161,12 +168,11 @@ export async function handleCredentialRoute(
   //    meaningful status passes through bare, anything else is an upstream fault.
   let answer: KbAuthAnswer;
   try {
-    answer = invite
-      ? await options.call(email, password, invite)
-      : await options.call(email, password);
+    answer = await options.call(email, password, invite, edgeAddress(req.headers));
   } catch (error) {
     if (error instanceof ApiError) {
-      if (options.passThroughStatuses.includes(error.status)) {
+      // knowledge's own per-client limit (P78): the same refusal as this route's step 3.
+      if (error.status === 429 || options.passThroughStatuses.includes(error.status)) {
         return json(error.status, { ok: false });
       }
       return json(502, { ok: false });

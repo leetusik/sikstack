@@ -14,13 +14,8 @@ import { ApiError, getRaw, sendJson } from "./client";
 // None names the active org (`org: null`): the read lists every org of the account, and
 // approve names the one picked in its body.
 
-/** The visitor's address as the edge recorded it, or the best guess behind no edge. */
-export function edgeAddress(h: Headers): string | null {
-  const real = h.get("x-real-ip")?.trim();
-  if (real) return real;
-  const first = h.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return first || null;
-}
+/** The visitor's address as the edge recorded it (`@/lib/client-ip`, the one reading for the web). */
+export { edgeAddress } from "../client-ip";
 
 /** The API's answer for a code (the raw JSON; `viewFromServer` reads it), or the status that refused it. */
 export async function readConnect(

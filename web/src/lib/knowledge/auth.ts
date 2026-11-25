@@ -132,17 +132,20 @@ export function authAnswer(
  * `POST /auth/signup` → 201 `{token, user, tenant}`, or 202 `{status: "waitlisted",
  * email}` (no token) with the waitlist on. Throws `ApiError` on 409 (duplicate email)
  * / 400 (validation) — the route maps the STATUS to the client without echoing
- * knowledge's detail text.
+ * knowledge's detail text. `address` is the visitor's (`edgeAddress`), sent as `X-Real-IP` so the API's per-client
+ * limit counts the visitor, not this server (P78).
  */
 export async function signup(
   email: string,
   password: string,
   invite?: string,
+  address?: string | null,
 ): Promise<KbAuthAnswer> {
   const raw = await sendJson<RawAuthResponse | RawWaitlisted>(
     "/auth/signup",
     "POST",
     invite ? { email, password, invite } : { email, password },
+    { address },
   );
   return authAnswer(raw, email);
 }
@@ -152,12 +155,13 @@ export async function signup(
  * password answers 403 `{detail: "waitlisted", …}`, returned as `KbWaitlisted`; any
  * other 403 still throws. Throws `ApiError` on 401 (identical for unknown-email and
  * bad-password — knowledge does not let callers enumerate accounts, and neither does
- * the BFF) / 400 (validation).
+ * the BFF) / 400 (validation). `address` as `signup`'s (P78).
  */
 export async function login(
   email: string,
   password: string,
   invite?: string,
+  address?: string | null,
 ): Promise<KbAuthAnswer> {
   let raw: RawAuthResponse | RawWaitlisted;
   try {
@@ -165,6 +169,7 @@ export async function login(
       "/auth/login",
       "POST",
       invite ? { email, password, invite } : { email, password },
+      { address },
     );
   } catch (error) {
     if (

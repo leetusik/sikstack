@@ -98,14 +98,17 @@ router = APIRouter()
 # problem and is exactly coherent. So the throttle is server-side, in-process, and
 # gates ``signup`` + ``login`` only.
 #
-# TRUST MODEL for the client IP. Keyed on ``X-Real-IP`` (nginx sets it from the
-# Cloudflare-restored real visitor IP, ``deploy/knowledge.conf`` real_ip +
-# proxy_set_header), then the first ``X-Forwarded-For`` hop, then
-# ``request.client.host``. This is only trustworthy because the API container is
-# reachable EXCLUSIVELY through the edge (it is not publicly bound), so these
-# headers are always edge-set — a directly reachable API could be spoofed. Locally
-# (no nginx, direct :8766) there is no such header and it falls back to the peer
-# address, which is still a stable per-client key.
+# TRUST MODEL for the client IP. Keyed on ``X-Real-IP``, then ``request.client.host``.
+# The API has two callers and no public port: the edge, which SETS ``X-Real-IP`` from
+# the Cloudflare-restored visitor address on every request it proxies (``deploy/
+# sikstack.conf`` real_ip + proxy_set_header), overwriting any a client sent; and the
+# web, inside the network, which passes on the ``X-Real-IP`` the edge set on the
+# request it is serving (``web/src/lib/client-ip.ts``, P78), so a sign-in through the
+# web counts its visitor rather than the web container. ``X-Forwarded-For`` is never
+# read (P78): the edge appends to what a client sent, so its first hop is the client's
+# to choose, and reading it would let a caller pick its own bucket. A directly
+# reachable API could be spoofed. Locally (no nginx, direct :8766) there is no such
+# header and it falls back to the peer address, which is still a stable per-client key.
 #
 # GENERIC-401 SAFETY. The check runs before any credential work and keys off the
 # IP, never the email, so it cannot leak whether an account exists: unknown-email
@@ -123,14 +126,9 @@ _RATE_MAX_KEYS = 20_000
 def _client_ip(request: Request) -> str:
     """The real client IP behind the edge — see the TRUST MODEL note above."""
 
-    real_ip = request.headers.get("X-Real-IP")
+    real_ip = (request.headers.get("X-Real-IP") or "").strip()
     if real_ip:
-        return real_ip.strip()
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        return real_ip
     client = request.client
     return client.host if client else "unknown"
 
