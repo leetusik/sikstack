@@ -2,8 +2,10 @@
 
 Every route but the invite's read needs a session (``require_user``) and acts in the
 session's active org (``X-Sikstack-Org``, else the first). An org's ``owner`` (who
-made it) renames it, invites, revokes and removes members; a ``member`` (who joined
-by an invite) reads its members and may leave. Routes:
+made it, or was made one) renames it, invites, revokes, removes members and makes a
+member an owner; a ``member`` (who joined by an invite) reads its members and may
+leave. Every account keeps at least one org: no membership ends that is the account's
+only one. Routes:
 
 - ``POST /app/orgs {name}``: a new org named ``name`` (1 to ``ORG_NAME_MAX``
   characters once trimmed, no control character; else 422), the caller its owner,
@@ -29,13 +31,19 @@ by an invite) reads its members and may leave. Routes:
   carries no code.
 - ``DELETE /app/invites/{id}`` (owner only): revoke, no confirm. 404 for an id that
   is not this org's, 409 for one already used; revoking twice is a 204 again.
+- ``POST /app/members/{id}/owner`` (owner only; ``id`` is a member row's, as
+  listed): the row's role becomes ``owner`` (its ``joined_at`` stays), so an owner can
+  hand the org over and then leave. 204; 404 for an id that is not this org's; a row
+  that is an owner already is a 204 that changes nothing. No route makes an owner a
+  member again.
 - ``DELETE /app/members/{id}`` (owner only; ``id`` is a member row's, as listed):
   the member is out of the org at once (its next request naming the org is the
   ``X-Sikstack-Org`` 403). 204; 404 for an id that is not this org's; 409
-  ``{"reason": "last_owner"}`` for the org's last owner.
+  ``{"reason": "last_owner"}`` for the org's last owner, else 409 ``{"reason":
+  "last_org"}`` when the org is that account's only one.
 - ``POST /app/tenant/leave``: the caller leaves the active org. 204; 409
-  ``{"reason": "last_owner"}`` for its last owner (so every account keeps the org it
-  signed up with, and always has one).
+  ``{"reason": "last_owner"}`` for its last owner, else 409 ``{"reason":
+  "last_org"}`` when it is the caller's only org (so every account always has one).
 - ``GET /app/invite/{code}`` (a session or none): the org's name and the invite's
   state (``valid``, ``expired``, ``revoked``, ``used``); on a valid invite also the
   invited address and the inviter's, which the invite page draws. Signed in, it adds
@@ -58,7 +66,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text, update
 
 from server import config, invites
 from server.accounts.auth import AuthContext, optional_user, require_owner, require_user
@@ -320,41 +328,91 @@ async def revoke_invite(invite_id: UUID, ctx: AuthContext = Depends(require_user
     return Response(status_code=204)
 
 
+def _locked_rows(tenant_id: UUID, user_id: UUID | None = None):
+    """The org's member rows, and ``user_id``'s own rows in every org, locked in id order.
+
+    One statement, ``ORDER BY id`` under ``FOR UPDATE``: Postgres sorts before it locks,
+    so every membership change takes the rows it shares with another in the same order
+    and two of them never deadlock; and two leaves of one account from two orgs at once
+    both lock the account's rows, so the later one counts them once the first commits.
+    """
+
+    where = TenantMemberModel.tenant_id == tenant_id
+    if user_id is not None:
+        where = or_(where, TenantMemberModel.user_id == user_id)
+    return select(TenantMemberModel).where(where).order_by(TenantMemberModel.id).with_for_update()
+
+
 async def _end_membership(
     tenant_id: UUID, *, member_id: UUID | None = None, user_id: UUID | None = None
 ) -> str:
-    """Delete one membership row of ``tenant_id``: ``ended``, ``unknown`` or ``last_owner``.
+    """Delete one membership row of ``tenant_id``: ``ended``, ``unknown``, ``last_owner``
+    or ``last_org``.
 
-    Every member row of the org is locked first, so two owners leaving at once can never
-    leave the org with none.
+    The org's member rows and every membership of the row's account are locked first
+    (``_locked_rows``), so two owners leaving at once never leave the org with none, and
+    one account leaving two orgs at once never ends up with none. The last owner's
+    refusal comes first, then the last org's.
     """
 
     async with get_session_maker()() as session, session.begin():
-        rows = (
-            await session.execute(
-                select(TenantMemberModel)
-                .where(TenantMemberModel.tenant_id == tenant_id)
-                .with_for_update()
-            )
-        ).scalars().all()
+        if user_id is None:
+            # The row's account, read unlocked: a row's account never changes, and the
+            # locked read below finds the row again or not at all.
+            user_id = (
+                await session.execute(
+                    select(TenantMemberModel.user_id).where(
+                        TenantMemberModel.id == member_id,
+                        TenantMemberModel.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if user_id is None:
+                return "unknown"
+        rows = (await session.execute(_locked_rows(tenant_id, user_id))).scalars().all()
+        in_org = [r for r in rows if r.tenant_id == tenant_id]
         target = next(
             (
                 r
-                for r in rows
-                if (member_id is not None and r.id == member_id)
-                or (user_id is not None and r.user_id == user_id)
+                for r in in_org
+                if r.user_id == user_id and (member_id is None or r.id == member_id)
             ),
             None,
         )
         if target is None:
             return "unknown"
-        if target.role == ROLE_OWNER and sum(r.role == ROLE_OWNER for r in rows) <= 1:
+        if target.role == ROLE_OWNER and sum(r.role == ROLE_OWNER for r in in_org) <= 1:
             return "last_owner"
+        if sum(r.user_id == user_id for r in rows) <= 1:
+            return "last_org"
         await session.execute(delete(TenantMemberModel).where(TenantMemberModel.id == target.id))
     return "ended"
 
 
-_LAST_OWNER = "an org keeps at least one owner"
+_REFUSALS = {
+    "last_owner": "an org keeps at least one owner",
+    "last_org": "an account keeps at least one org",
+}
+
+
+@router.post("/app/members/{member_id}/owner", status_code=204)
+async def make_owner(member_id: UUID, ctx: AuthContext = Depends(require_user)) -> Response:
+    """Make a member of the active org an owner (owner only; no confirm)."""
+
+    _require_accounts_plane()
+    await require_owner(ctx)
+    async with get_session_maker()() as session, session.begin():
+        rows = (await session.execute(_locked_rows(ctx.tenant.id))).scalars().all()
+        target = next((r for r in rows if r.id == member_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="member not found")
+        if target.role != ROLE_OWNER:
+            await session.execute(
+                update(TenantMemberModel)
+                .where(TenantMemberModel.id == target.id)
+                .values(role=ROLE_OWNER)
+            )
+    return Response(status_code=204)
 
 
 @router.delete("/app/members/{member_id}", status_code=204, response_model=None)
@@ -368,19 +426,19 @@ async def remove_member(
     ended = await _end_membership(ctx.tenant.id, member_id=member_id)
     if ended == "unknown":
         raise HTTPException(status_code=404, detail="member not found")
-    if ended == "last_owner":
-        return _refused(409, "last_owner", _LAST_OWNER)
+    if ended in _REFUSALS:
+        return _refused(409, ended, _REFUSALS[ended])
     return Response(status_code=204)
 
 
 @router.post("/app/tenant/leave", status_code=204, response_model=None)
 async def leave_org(ctx: AuthContext = Depends(require_user)) -> Response | JSONResponse:
-    """Leave the active org (not its last owner)."""
+    """Leave the active org (not as its last owner, and not the caller's only org)."""
 
     _require_accounts_plane()
     ended = await _end_membership(ctx.tenant.id, user_id=ctx.user.id)
-    if ended == "last_owner":
-        return _refused(409, "last_owner", _LAST_OWNER)
+    if ended in _REFUSALS:
+        return _refused(409, ended, _REFUSALS[ended])
     return Response(status_code=204)
 
 

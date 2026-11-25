@@ -26,11 +26,13 @@ import {
   inviteFormOpen,
   invitesNewestFirst,
   looksLikeEmail,
+  memberControls,
   membersInOrder,
   type InvitePhase,
   type InviteResult,
   type InviteRow,
   type MemberRow,
+  type MembershipResult,
   type OrgRole,
 } from "./model";
 
@@ -41,12 +43,16 @@ export interface MembersViewProps {
   members: readonly MemberRow[];
   /** The pending invites; an owner's view only (a member's view has none). */
   invites: readonly InviteRow[];
-  /** The page's actions (an owner's): send an invite, revoke one, remove a member. */
+  /** The page's actions (an owner's): send an invite, revoke one, make a member an owner, remove a member. */
   invite: (email: string) => Promise<InviteResult>;
   revoke: (id: string) => Promise<{ ok: boolean }>;
-  remove: (id: string) => Promise<{ ok: boolean }>;
-  /** A member's: leave the org (on success the page moves to the next org's home, so it answers only a refusal). */
-  leave: () => Promise<{ ok: boolean } | undefined>;
+  promote: (id: string) => Promise<{ ok: boolean }>;
+  remove: (id: string) => Promise<MembershipResult>;
+  /**
+   * Leave the org, from the account's own row: a member's, or an owner's when the org has another owner (on
+   * success the page moves to the next org's home, so it answers only a refusal).
+   */
+  leave: () => Promise<MembershipResult | undefined>;
   format: FormatOptions;
   /** The invite form's first phase and address (the page opens with the form closed). */
   phase?: InvitePhase;
@@ -60,9 +66,12 @@ const I = MEMBERS.invites;
  * Members (`/members`, P78-s2.S2's design): the org's people, in two panels.
  *
  * - Members: every member's address, role (Owner, Member) and the day they joined; the signed-in account's row
- *   marked You. The owner first. Membership ends in Revoke's pattern (P78-s2.F1): in an owner's view each member's
- *   row ends with Remove (no confirm; the row goes and the toast says so); in a member's view its own row ends with
- *   Leave, which lands on its next org's home. An owner's row has neither (an org keeps its owner).
+ *   marked You. The owners first. Membership changes in Revoke's pattern (P78-s2.F1; no confirm, the toast says
+ *   what happened): in an owner's view each member's row ends with Make owner (the row reads Owner, and moves up
+ *   with the owners) and Remove (the row goes); the owner's own row ends with Leave when the org has another owner,
+ *   and has nothing when it is the only one (an org keeps an owner); another owner's row has nothing (no one makes
+ *   an owner a member again). In a member's view its own row ends with Leave. Leave lands on the account's next
+ *   org's home. The API's refusals (the org's last owner, the account's only org) are the toast, the row kept.
  * - Invites (an owner's view only): the head's Invite opens the form in place (Email, Cancel, Send invite), as
  *   Projects' New project does on org home; the pending invites, newest first, each with the day it was sent, the
  *   day it stops working, and Revoke at the row's end. With none, the empty line, and Invite is the page's primary.
@@ -80,6 +89,7 @@ export function MembersView({
   invites: initialInvites,
   invite,
   revoke,
+  promote,
   remove,
   leave,
   format,
@@ -93,6 +103,7 @@ export function MembersView({
   const [invites, setInvites] = useState<InviteRow[]>(() => invitesNewestFirst(initialInvites));
   const [revoking, setRevoking] = useState<string | null>(null);
   const [people, setPeople] = useState<MemberRow[]>(() => membersInOrder(members));
+  /** The row action under way, as `<control>:<row id>` (one at a time). */
   const [ending, setEnding] = useState<string | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const inviteRef = useRef<HTMLButtonElement>(null);
@@ -166,40 +177,66 @@ export function MembersView({
     }
   };
 
-  const dropMember = async (row: MemberRow) => {
+  const promoteMember = async (row: MemberRow) => {
     if (ending) return;
-    setEnding(row.id);
+    setEnding(`promote:${row.id}`);
     let ok = false;
     try {
-      ok = (await remove(row.id)).ok;
+      ok = (await promote(row.id)).ok;
     } catch {
       ok = false;
     }
     setEnding(null);
     if (ok) {
+      setPeople((rows) => membersInOrder(rows.map((r) => (r.id === row.id ? { ...r, role: "owner" } : r))));
+      publishToast(M.madeOwner(row.email));
+    } else {
+      publishToast(M.makeOwnerFailed(row.email));
+    }
+  };
+
+  const dropMember = async (row: MemberRow) => {
+    if (ending) return;
+    setEnding(`remove:${row.id}`);
+    let result: MembershipResult;
+    try {
+      result = await remove(row.id);
+    } catch {
+      result = { ok: false };
+    }
+    setEnding(null);
+    if (result.ok) {
       setPeople((rows) => rows.filter((r) => r.id !== row.id));
       publishToast(M.removed(row.email));
+    } else {
+      publishToast(result.reason === "last_org" ? M.removeLastOrg(row.email, org) : M.removeFailed(row.email));
     }
   };
 
   const leaveOrg = async (row: MemberRow) => {
     if (ending) return;
-    setEnding(row.id);
-    let refused = true;
+    setEnding(`leave:${row.id}`);
+    let result: MembershipResult | undefined;
     try {
       // A left org moves the page to the next org's home; only a refusal comes back.
-      refused = (await leave())?.ok === false;
+      result = await leave();
     } catch {
-      refused = true;
+      result = { ok: false };
     }
     setEnding(null);
-    if (refused) publishToast(M.leaveFailed(org));
+    if (result?.ok !== false) return;
+    publishToast(
+      result.reason === "last_org"
+        ? M.leaveLastOrg(org)
+        : result.reason === "last_owner"
+          ? M.leaveLastOwner(org)
+          : M.leaveFailed(org),
+    );
   };
 
-  /** The control a row ends with: Remove (an owner's view, a member's row), Leave (a member's own row), or none. */
-  const control = (m: MemberRow): "remove" | "leave" | null =>
-    owner ? (m.role === "owner" ? null : "remove") : m.email === me.email ? "leave" : null;
-  const controls = people.some((m) => control(m) !== null);
+  /** The controls a row ends with (`memberControls`): Make owner and Remove, Leave, or none. */
+  const control = (m: MemberRow) => memberControls(m, me, people);
+  const controls = people.some((m) => control(m).length > 0);
 
   return (
     <div className="column">
@@ -221,7 +258,7 @@ export function MembersView({
               <th scope="col">{M.joined}</th>
               {controls ? (
                 <th scope="col" className="at-end">
-                  <span className="sr-only">{owner ? M.remove : M.leave}</span>
+                  <span className="sr-only">{M.actions}</span>
                 </th>
               ) : null}
             </tr>
@@ -244,27 +281,44 @@ export function MembersView({
                 </td>
                 {controls ? (
                   <td className="at-end to-end">
-                    {control(m) === "remove" ? (
-                      <Button
-                        variant="quiet"
-                        aria-label={M.removeLabel(m.email)}
-                        disabled={ending !== null}
-                        busy={ending === m.id}
-                        onClick={() => void dropMember(m)}
-                      >
-                        {M.remove}
-                      </Button>
-                    ) : control(m) === "leave" ? (
-                      <Button
-                        variant="quiet"
-                        aria-label={M.leaveLabel(org)}
-                        disabled={ending !== null}
-                        busy={ending === m.id}
-                        onClick={() => void leaveOrg(m)}
-                      >
-                        {M.leave}
-                      </Button>
-                    ) : null}
+                    <span className="cluster gap-2 to-end">
+                      {control(m).map((c) =>
+                        c === "promote" ? (
+                          <Button
+                            key={c}
+                            variant="quiet"
+                            aria-label={M.makeOwnerLabel(m.email)}
+                            disabled={ending !== null}
+                            busy={ending === `promote:${m.id}`}
+                            onClick={() => void promoteMember(m)}
+                          >
+                            {M.makeOwner}
+                          </Button>
+                        ) : c === "remove" ? (
+                          <Button
+                            key={c}
+                            variant="quiet"
+                            aria-label={M.removeLabel(m.email)}
+                            disabled={ending !== null}
+                            busy={ending === `remove:${m.id}`}
+                            onClick={() => void dropMember(m)}
+                          >
+                            {M.remove}
+                          </Button>
+                        ) : (
+                          <Button
+                            key={c}
+                            variant="quiet"
+                            aria-label={M.leaveLabel(org)}
+                            disabled={ending !== null}
+                            busy={ending === `leave:${m.id}`}
+                            onClick={() => void leaveOrg(m)}
+                          >
+                            {M.leave}
+                          </Button>
+                        ),
+                      )}
+                    </span>
                   </td>
                 ) : null}
               </tr>

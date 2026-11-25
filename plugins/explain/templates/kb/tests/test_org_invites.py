@@ -636,6 +636,13 @@ def test_an_account_makes_at_most_10_new_orgs_a_day(org):
     # A day on, the account makes orgs again (its sign-up org never counted).
     _backdate(
         org,
+        "UPDATE tenants SET created_at = created_at - interval '1 day' WHERE id IN "
+        "(SELECT tenant_id FROM tenant_members "
+        "WHERE user_id = (SELECT id FROM users WHERE email = :e))",
+        {"e": me["email"]},
+    )
+    _backdate(
+        org,
         "UPDATE tenant_members SET created_at = created_at - interval '1 day' "
         "WHERE user_id = (SELECT id FROM users WHERE email = :e)",
         {"e": me["email"]},
@@ -725,6 +732,198 @@ def test_a_member_leaves_and_the_last_owner_can_neither_leave_nor_be_removed(org
     # A sign-up org has one owner too: its owner never leaves it.
     own = org.post("/app/tenant/leave", headers=owner["h"])
     assert own.status_code == 409 and own.json()["reason"] == "last_owner"
+
+
+# --- owners hand an org over -------------------------------------------------------------------
+
+
+def _joined_at(client, org_id: str, email: str):
+    with client.db.connect() as conn:
+        return conn.execute(
+            text(
+                "SELECT m.created_at FROM tenant_members m JOIN users u ON u.id = m.user_id "
+                "WHERE m.tenant_id = :t AND u.email = :e"
+            ),
+            {"t": org_id, "e": email},
+        ).scalar_one()
+
+
+def _promote(client, owner: dict, org_id: str, email: str):
+    mid = _member_id(client, owner, org_id, email)
+    return client.post(f"/app/members/{mid}/owner", headers=_in(owner["h"], org_id))
+
+
+def _co_owned(client) -> tuple[dict, dict, str]:
+    """An account whose only org is its sign-up org, and a second account made its co-owner."""
+
+    first = _account(client)
+    org_id = first["default_org"]
+    second = _joined(client, first, org_id)
+    assert _promote(client, first, org_id, second["email"]).status_code == 204
+    return first, second, org_id
+
+
+def test_an_owner_makes_a_member_an_owner(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Promote Org")
+    member = _joined(org, owner, org_id)
+    as_member, as_owner = _in(member["h"], org_id), _in(owner["h"], org_id)
+    mid = _member_id(org, owner, org_id, member["email"])
+    joined = _joined_at(org, org_id, member["email"])
+
+    # A member promotes no one, itself included; another org's owner cannot reach the row.
+    assert org.post(f"/app/members/{mid}/owner", headers=as_member).status_code == 403
+    other_owner = _account(org)
+    assert org.post(f"/app/members/{mid}/owner", headers=other_owner["h"]).status_code == 404
+    assert org.post(f"/app/members/{uuid4()}/owner", headers=as_owner).status_code == 404
+    assert _role(org, org_id, member["email"]) == "member"
+    assert org.post(f"/app/members/{mid}/owner").status_code == 401
+
+    done = org.post(f"/app/members/{mid}/owner", headers=as_owner)
+    assert done.status_code == 204, done.text
+    assert _role(org, org_id, member["email"]) == "owner"
+    assert _joined_at(org, org_id, member["email"]) == joined
+    listed = org.get("/app/members", headers=as_owner).json()["members"]
+    assert [(m["email"], m["role"]) for m in listed] == [
+        (owner["email"], "owner"),
+        (member["email"], "owner"),
+    ]
+    # The new owner acts as one at once: it lists the invites and sends one.
+    assert "invites" in org.get("/app/members", headers=as_member).json()
+    assert _invite(org, member, org_id, _email())
+
+    # Promoting an owner (twice, or the caller's own row) is a success that changes nothing.
+    assert org.post(f"/app/members/{mid}/owner", headers=as_owner).status_code == 204
+    oid = _member_id(org, owner, org_id, owner["email"])
+    assert org.post(f"/app/members/{oid}/owner", headers=as_owner).status_code == 204
+    assert _role(org, org_id, member["email"]) == "owner"
+    assert _role(org, org_id, owner["email"]) == "owner"
+    assert _joined_at(org, org_id, member["email"]) == joined
+
+
+def test_a_co_owner_leaves_and_the_last_owner_still_cannot(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Handover Org")
+    heir = _joined(org, owner, org_id)
+    assert _promote(org, owner, org_id, heir["email"]).status_code == 204
+
+    left = org.post("/app/tenant/leave", headers=_in(owner["h"], org_id))
+    assert left.status_code == 204, left.text
+    assert _role(org, org_id, owner["email"]) is None
+    assert org.get("/app/members", headers=_in(owner["h"], org_id)).status_code == 403
+    me = org.get("/auth/me", headers=owner["h"]).json()
+    assert org_id not in [t["id"] for t in me["tenants"]]
+
+    refused = org.post("/app/tenant/leave", headers=_in(heir["h"], org_id))
+    assert refused.status_code == 409 and refused.json()["reason"] == "last_owner"
+    assert _role(org, org_id, heir["email"]) == "owner"
+
+
+def test_no_account_leaves_or_is_removed_from_its_only_org(org):
+    # An owner row: the sign-up org is the account's only one, and it has a co-owner.
+    first, second, org_id = _co_owned(org)
+    as_first, as_second = _in(first["h"], org_id), _in(second["h"], org_id)
+    left = org.post("/app/tenant/leave", headers=as_first)
+    assert left.status_code == 409 and left.json()["reason"] == "last_org"
+    fid = _member_id(org, second, org_id, first["email"])
+    removed = org.delete(f"/app/members/{fid}", headers=as_second)
+    assert removed.status_code == 409 and removed.json()["reason"] == "last_org"
+    assert _role(org, org_id, first["email"]) == "owner"
+
+    # A member row: the account joined another org, then left its sign-up org.
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+    assert org.post("/app/tenant/leave", headers=as_first).status_code == 204
+    me = org.get("/auth/me", headers=first["h"]).json()
+    assert [t["id"] for t in me["tenants"]] == [joined_id]
+    left = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
+    assert left.status_code == 409 and left.json()["reason"] == "last_org"
+    mid = _member_id(org, second, joined_id, first["email"])
+    removed = org.delete(f"/app/members/{mid}", headers=_in(second["h"], joined_id))
+    assert removed.status_code == 409 and removed.json()["reason"] == "last_org"
+    assert _role(org, joined_id, first["email"]) == "member"
+    # The last owner's refusal is checked first, as before.
+    lone = org.post("/app/tenant/leave", headers=as_second)
+    assert lone.status_code == 409 and lone.json()["reason"] == "last_owner"
+
+
+def test_leaving_two_orgs_back_to_back_keeps_the_last(org):
+    first, second, org_id = _co_owned(org)
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+
+    assert org.post("/app/tenant/leave", headers=_in(first["h"], org_id)).status_code == 204
+    second_leave = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
+    assert second_leave.status_code == 409 and second_leave.json()["reason"] == "last_org"
+    assert _role(org, joined_id, first["email"]) == "member"
+
+
+def test_a_leave_waits_on_the_accounts_other_membership_and_counts_after_it(org):
+    """Two leaves from two orgs at once: the second waits on the account's row in the first's
+    org, which the first holds, and counts the account's rows after it commits. The first leave
+    is replayed by hand in a transaction of the test's own: a lock on its org's rows only (the
+    account's row there among them; a leave locks more), then its delete, committed only once
+    the request waits on the lock. A leave that locked only its own org's rows would not wait."""
+
+    import threading
+    import time
+
+    first, second, org_id = _co_owned(org)
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+    with org.db.connect() as conn:
+        user_id = conn.execute(
+            text("SELECT id FROM users WHERE email = :e"), {"e": first["email"]}
+        ).scalar_one()
+
+    answers: dict[str, object] = {}
+    with org.db.connect() as other_leave:
+        held = other_leave.begin()
+        other_leave.execute(
+            text("SELECT id FROM tenant_members WHERE tenant_id = :t ORDER BY id FOR UPDATE"),
+            {"t": org_id},
+        )
+
+        def act() -> None:
+            answers["res"] = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
+
+        worker = threading.Thread(target=act)
+        worker.start()
+        waiting, until = 0, time.monotonic() + 15
+        while waiting == 0 and time.monotonic() < until and worker.is_alive():
+            with org.db.connect() as watch:
+                waiting = watch.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                ).scalar_one()
+            time.sleep(0.02)
+        assert waiting, "the leave never waited on the account's other membership"
+        other_leave.execute(
+            text("DELETE FROM tenant_members WHERE tenant_id = :t AND user_id = :u"),
+            {"t": org_id, "u": user_id},
+        )
+        held.commit()
+    worker.join(30)
+    assert not worker.is_alive()
+    res = answers["res"]
+    assert res.status_code == 409 and res.json()["reason"] == "last_org", res.text
+    assert _role(org, joined_id, first["email"]) == "member"
+
+
+def test_a_promoted_account_still_makes_its_new_orgs_for_the_day(org):
+    owner = _account(org)
+    promoted = _joined(org, owner, owner["default_org"])
+    assert _promote(org, owner, owner["default_org"], promoted["email"]).status_code == 204
+    statuses = [
+        org.post("/app/orgs", json={"name": f"Mine {n}"}, headers=promoted["h"]).status_code
+        for n in range(11)
+    ]
+    assert statuses == [201] * 10 + [429]
 
 
 # --- publishing is an org act ----------------------------------------------------------------

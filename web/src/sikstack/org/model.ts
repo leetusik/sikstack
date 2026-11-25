@@ -73,12 +73,43 @@ export function inviteFieldError(phase: InvitePhase): Exclude<InviteRefusal, "fa
     : null;
 }
 
+/**
+ * Why a Remove or a Leave was refused: the org's last owner (`last_owner`), the account's only org (`last_org`),
+ * or anything else, no answer included (`failed`).
+ */
+export type MembershipRefusal = "last_owner" | "last_org" | "failed";
+
+/** What Make owner, Remove and Leave answer; the page reads `reason` only to word its toast. */
+export interface MembershipResult {
+  ok: boolean;
+  reason?: MembershipRefusal;
+}
+
+/** The controls a member row ends with: Make owner, Remove, Leave. */
+export type MemberControl = "promote" | "remove" | "leave";
+
+/**
+ * The controls a row ends with, for the viewer `me`, in order. An owner's view: each member's row Make owner and
+ * Remove; the owner's own row Leave when the org has another owner (an org keeps one); another owner's row none
+ * (no one makes an owner a member again). A member's view: its own row Leave; the rest none.
+ */
+export function memberControls(
+  row: MemberRow,
+  me: { email: string; role: OrgRole },
+  rows: readonly MemberRow[],
+): MemberControl[] {
+  const mine = row.email === me.email;
+  if (me.role !== "owner") return mine ? ["leave"] : [];
+  if (row.role === "member") return ["promote", "remove"];
+  return mine && rows.some((r) => r.role === "owner" && r.id !== row.id) ? ["leave"] : [];
+}
+
 /** Newest first: an invite just sent is the table's first row. */
 export function invitesNewestFirst(rows: readonly InviteRow[]): InviteRow[] {
   return [...rows].sort((a, b) => Date.parse(b.invitedAt) - Date.parse(a.invitedAt));
 }
 
-/** The owner first, then members by the day they joined. */
+/** The owners first, then members, each by the day they joined. */
 export function membersInOrder(rows: readonly MemberRow[]): MemberRow[] {
   return [...rows].sort(
     (a, b) =>

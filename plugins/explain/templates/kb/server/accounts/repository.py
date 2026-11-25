@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from server.accounts.types import (
     ROLE_OWNER,
@@ -184,10 +185,14 @@ class AccountsRepository:
         return (await self._session.execute(statement)).scalar_one_or_none()
 
     async def count_orgs_made_since(self, user_id: UUID, since: datetime) -> int:
-        """How many orgs the user made (owns) since ``since``, its first org aside.
+        """How many orgs the user made since ``since``, its first org aside.
 
-        The first membership is the sign-up org, made with the account, never by
-        ``POST /app/orgs``.
+        An org the user made is one it owns that was created since ``since``
+        (``tenants.created_at``) and whose first membership is the user's own: the
+        maker's row is written with the org. An org the user was made owner of (its
+        maker's row came first), or one made earlier, never counts, however recent the
+        promotion. The user's first membership is the sign-up org, made with the
+        account, never by ``POST /app/orgs``.
         """
 
         first = (
@@ -197,11 +202,27 @@ class AccountsRepository:
             .limit(1)
             .scalar_subquery()
         )
-        statement = select(func.count()).where(
-            TenantMemberModel.user_id == user_id,
-            TenantMemberModel.role == ROLE_OWNER,
-            TenantMemberModel.created_at > since,
-            TenantMemberModel.id != first,
+        earlier = aliased(TenantMemberModel)
+        made_before = (
+            select(earlier.id)
+            .where(
+                earlier.tenant_id == TenantMemberModel.tenant_id,
+                earlier.user_id != TenantMemberModel.user_id,
+                earlier.created_at <= TenantMemberModel.created_at,
+            )
+            .exists()
+        )
+        statement = (
+            select(func.count())
+            .select_from(TenantMemberModel)
+            .join(TenantModel, TenantModel.id == TenantMemberModel.tenant_id)
+            .where(
+                TenantMemberModel.user_id == user_id,
+                TenantMemberModel.role == ROLE_OWNER,
+                TenantModel.created_at > since,
+                TenantMemberModel.id != first,
+                ~made_before,
+            )
         )
         return int((await self._session.execute(statement)).scalar_one())
 
