@@ -10,6 +10,38 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.6.0 — 2026-11-25
+
+- **An agenda holds items.** Each file under an agenda's `entries/` is now an item, open, done or dismissed: its state
+  is three keys on the file itself (`state`, `state_by`, `state_at`), absent meaning open, so every file an older
+  engine wrote reads open and no read or `check` rewrites it. `sikstack agenda-item add <A>` adds one (`agenda-entry`
+  still works); `agenda-item done | dismiss | reopen | delete <ref>... --author ...` deal with items by the reference
+  `agenda-show` prints, `<agenda>/<tail>` (`A7-m3/hnj0`, the agenda in any brief form) or the full file name, all or
+  none, one event each. An unknown or ambiguous reference is refused in one line and nothing is written; a new item
+  takes a tail its agenda does not hold.
+- **An agenda closes itself when its last open item goes.** After an item command, an Open, Proposed or In progress
+  agenda that held items and has none open is Solved when any item is done (`all items dealt with: N done, M
+  dismissed`), else Dropped (`every item dismissed or deleted`), in the same command with its own event. An agenda
+  with no items never closes by itself, and adding or reopening an item never reopens a closed one.
+- **`agenda-split <A> <tail>... --title ... --author ...`** moves the named items, files whole with their state, into a
+  new agenda (Open for a person, Proposed for an agent, as `agenda-add`); it is refused when it would take none or
+  every item. `agenda-merge` still moves every item and phase link.
+- **Deferred is gone; `agenda-propose <A>... --author ...` takes its place.** It moves an Open agenda back to Proposed
+  (stored `open` with `proposed: {by, at}`, out of the open order) until `agenda-accept` returns it. `agenda-defer` is
+  an unknown command. A `deferred` an older engine stored still reads, as Proposed, and passes `check`; no listing,
+  dashboard or `index.json` names Deferred.
+- **The agenda dashboard sits beside the backlog:** `.sikstack/agenda.md`, not `works/agenda.md`. A rebuild removes a
+  stale `works/agenda.md`, the sync never takes one for truth, and the stamp commit carries `agenda.md`.
+- **The web's inbox speaks items.** `propose` replaces `defer`; `item-done`, `item-dismiss`, `item-reopen` and
+  `item-delete` carry the one agenda id in `items` and the items' full file names in `fields.entries`; `split`
+  carries the agenda, `fields.entries`, `fields.title` and `minted_id`. A pending `defer` from before is refused with
+  one line and never run.
+- **Words.** Commands, their help, their output and the dashboards call the record under `works/agenda/<AID>/` an
+  agenda and a file under its `entries/` an item. `index.json`'s agenda rows gain `items_open`; `agenda_counts`
+  loses `deferred`; `backlog.md` says `Proposed agendas` and `Open agendas`.
+- **Migration notes.** None by hand: the first rebuild writes `.sikstack/agenda.md` and removes `works/agenda.md`;
+  commit both. A checkout still on 0.5.x reads a `state` key it does not know as nothing and keeps it.
+
 ## 0.5.1 — 2026-11-25
 
 - **Every request now names the plugin: `User-Agent: sikstack/<version>`.** The network in front of sikstack.com

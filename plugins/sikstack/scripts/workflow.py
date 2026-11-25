@@ -7,7 +7,7 @@ The engine is flat modules beside this file, each importing only the ones listed
   the acceptance gate, check and archive;
 - wf_cold.py: the reads of what a linked checkout keeps only in sikstack (through .sikstack/cache/), and `cold`;
 - wf_git.py: pull requests, the parallel worktrees, the repo registry and phase scope;
-- wf_design.py (design-sign), wf_agenda.py (the agenda, its threads and agenda-fold), wf_cloud.py: the named parts,
+- wf_design.py (design-sign), wf_agenda.py (the agenda, its items and agenda-fold), wf_cloud.py: the named parts,
   each its own file.
 wf_store imports none of the others: it calls them through its SEAMS, bound at the end of this file. The Claude
 Code side (executor routes, the meter, the compaction hook) is not here: it is the adapter folder,

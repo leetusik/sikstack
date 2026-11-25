@@ -419,14 +419,17 @@ SLICE_STOP_KINDS = {
 }
 # A kind a retired flow typed (2.0.0 retired the in-product mockup): an older pending record still validates.
 RETIRED_STOP_KINDS = ("mockup",)
-# An agenda item's STORED status. Proposed and In progress are never stored: both are derived from an item
-# stored `open` (Proposed: it carries the optional `proposed` key, an agent opened it and no one accepted it
-# yet; In progress: a linked phase is not done), so a listing shows six statuses. AGENDA_SHOWN is the one
-# table of their signed words, in the order the views list them. The four stored statuses never grow: an
-# older engine refuses a fifth (P72).
+# An agenda's STORED status. Proposed and In progress are never stored: both are derived from an agenda
+# stored `open` (Proposed: it carries the optional `proposed` key -- an agent opened it, or someone proposed it
+# back with agenda-propose -- and no one accepted it yet; In progress: a linked phase is not done), so a listing
+# shows five statuses. AGENDA_SHOWN is the one table of their signed words, in the order the views list them.
+# The engine writes only AGENDA_WRITTEN (0.6.0 retired Deferred: agenda-propose took agenda-defer's place); a
+# `deferred` an older engine stored stays readable, reads as Proposed, and changes only by a command (accept,
+# drop, solve, merge). The stored set never grows: an older engine refuses a fifth (P72).
 AGENDA_STATUSES = {"open", "deferred", "solved", "dropped"}
-AGENDA_SHOWN = {"proposed": "Proposed", "open": "Open", "in_progress": "In progress", "deferred": "Deferred",
-                "solved": "Solved", "dropped": "Dropped"}
+AGENDA_WRITTEN = ("open", "solved", "dropped")
+AGENDA_SHOWN = {"proposed": "Proposed", "open": "Open", "in_progress": "In progress", "solved": "Solved",
+                "dropped": "Dropped"}
 # agenda.json's keys, in the order every write gives them (any other key is kept, after these).
 AGENDA_KEYS = ("id", "title", "note", "status", "order", "created_at", "changed_at", "outcome", "reason")
 AGENDA_TITLE_MAX = 200
@@ -519,7 +522,7 @@ PINNED_MODE = "default"
 WORKTREES_DIR = ".claude/worktrees"
 # What the stamp commit carries besides the phase folder: the generated works/ files that
 # `rebuild_index_and_state` rewrites, plus the event log. Nothing else on the tree enters it.
-STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/agenda.md", "works/events.jsonl")
+STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "backlog.md", "agenda.md", "works/events.jsonl")
 # A default-stream phase in any of these states means main is mid-flight, so a phase
 # branch may not be merged into it yet (the quiet-point gate, `worktree gate`).
 BUSY_PHASE_STATUSES = ("in_progress", "in_review", "pending", "blocked")
@@ -543,7 +546,11 @@ EXPLAIN_UNITS = ("document", "book", "chapter")
 EXPLAIN_UNIT_DEFAULT = "book"
 # Regenerated from works/phases/** by `worktree merge-finish`; never merged by hand (see .gitattributes).
 # docs/current/*.md are plain files agents edit, so they are not among them.
-GENERATED_FILES = ("works/state.json", "works/index.json", "backlog.md", "works/agenda.md")
+GENERATED_FILES = ("works/state.json", "works/index.json", "backlog.md", "agenda.md")
+# Generated files an older engine wrote where this one writes none: the rebuild removes each one it finds (the
+# agenda dashboard moved beside backlog.md in 0.6.0), the sync never takes one for truth, and the quiet-point gate
+# reads a branch that removes one like a change to a generated file.
+RETIRED_GENERATED_FILES = ("works/agenda.md",)
 
 
 def _main_host_checkout(host: Path) -> Path:
@@ -1177,7 +1184,7 @@ def mint_phase_id() -> str:
 # (`7`, `A7-m3`). Two contexts, both in `normalize_id_args`, the ONE choke point after argparse:
 # CREATING an id (`phase new --phase`, `agenda-add --id`) reads the form statically (`brief_id`: `46` is `P46`);
 # REFERENCING one (every other argument) looks a number up among the stored ids (`resolve_id_ref`).
-ID_ARG_KINDS = {"P": "phase", "A": "agenda item"}
+ID_ARG_KINDS = {"P": "phase", "A": "agenda"}
 PHASE_ARG_HELP = ("the phase, in any brief form: 46 or P46 (numbered; type the tail, 46-k2, only when two phases share"
                   " the number), 7kq2 or P-7kq2 (a v73 id), any case")
 ID_ARG_EXAMPLES = {"P": ("P46-k2", "46", "P12", "P-7kq2", "7kq2"), "A": ("A7-m3", "7")}  # an agenda id has no old or minted-token shape
@@ -1209,7 +1216,7 @@ def id_arg_refusal(prefix: str, raw) -> str:
     text = str(raw).strip()
     if prefix == "A":
         tailed, number = ID_ARG_EXAMPLES["A"]
-        return (f"{raw!r} is not an agenda item id: write {number} or {tailed} (the tail typed only when two"
+        return (f"{raw!r} is not an agenda id: write {number} or {tailed} (the tail typed only when two"
                 f" share the number)")
     tailed, number, old, minted, bare = ID_ARG_EXAMPLES[prefix]
     msg = (f"{raw!r} is not a {ID_ARG_KINDS[prefix]} id: write {number} or {tailed} (numbered, the tail typed only when"
@@ -1322,7 +1329,7 @@ def normalize_id_args(args: argparse.Namespace) -> None:
     for attr in ("before_id", "after_id"):
         if cmd == "agenda-move" and isinstance(getattr(args, attr, None), str):
             setattr(args, attr, resolve_id_ref("A", getattr(args, attr)))
-    if cmd == "agenda-add" and isinstance(getattr(args, "id", None), str):
+    if cmd in ("agenda-add", "agenda-split") and isinstance(getattr(args, "id", None), str):
         args.id_typed = args.id
         args.id = brief_id("A", args.id) or args.id.strip()
     # `phase new --agenda` REFERENCES an item (S2 links); the command then refuses an id of a stored shape that
@@ -2901,8 +2908,8 @@ def rebuild_backlog(phases: list, state: dict, index: dict) -> None:
     live = {}  # phase id -> (phase data, slices, where) for every phase streams_section read from elsewhere
     version = installed_workspace_version()
     lines += [
-        f"- Proposed agenda items: `{(index.get('agenda_counts') or {}).get('proposed', 0)}`",
-        f"- Open agenda items: `{sum((index.get('agenda_counts') or {}).get(key, 0) for key in ('open', 'in_progress'))}`",
+        f"- Proposed agendas: `{(index.get('agenda_counts') or {}).get('proposed', 0)}`",
+        f"- Open agendas: `{sum((index.get('agenda_counts') or {}).get(key, 0) for key in ('open', 'in_progress'))}`",
         f"- sikstack version: `{'unknown' if version is None else version}`", "",
         *streams_section(phases, state, live),
         "## Active Phases", "", "| Phase | Status | Review | Name | Current Slice | Path |", "|---|---|---|---|---|---|",
@@ -4017,7 +4024,7 @@ def cmd_next(args: argparse.Namespace) -> None:
                 print(line)
             print("no open slice in the current phase; review/archive it or create a new phase")
         else:
-            print("no active slice; create a phase (from an agenda item or a new request)")
+            print("no active slice; create a phase (from an agenda or a new request)")
         return
     sdir = require_slice(current_slice)
     print(f"current_phase={current_slice.split('.', 1)[0]}")
@@ -4142,7 +4149,7 @@ def resume_card(spans=None, read_spans: bool = False) -> str:
         pr_stack = None
     if not phase_id:
         lines.append("pointer: no active phase")
-        lines.append("next action: create a phase (/create-phase), from an agenda item or a new request")
+        lines.append("next action: create a phase (/create-phase), from an agenda or a new request")
         if pr_open:
             lines.append(pr_open)
         if pr_stack:

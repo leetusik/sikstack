@@ -44,4 +44,4 @@ Only what the code cannot show: the journeys that matter, the UX rules and state
 
 - `phase`: grouped unit of work under `works/phases/active/` or `works/phases/archived/`
 - `slice`: concrete unit of work inside a phase
-- `agenda item`: the one home for work not being done now, under `works/agenda/` (Proposed, Open, In progress, Deferred, Solved, Dropped); a thread of entries (note, issue, feedback, question, decision) from people and agents, each with its author and source; never affects active selection; phases link to it
+- `agenda`: the one home for work not being done now, under `works/agenda/` (Proposed, Open, In progress, Solved, Dropped); it holds items (note, issue, feedback, question, decision), each open, done or dismissed, from people and agents with their author and source; never affects active selection; phases link to it

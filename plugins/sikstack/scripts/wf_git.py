@@ -21,6 +21,7 @@ from wf_store import (  # noqa: E402
     review_phase, validate,
     ACTIVE, all_active_phases, append_event, ARCHIVED, archived_phase_ids, BUSY_PHASE_STATUSES, current_stream,
     explain_phase, explain_unit, GATE_EXEMPT_ADDED_PREFIXES, GENERATED_FILES, git_current_branch, HOST_ANCHOR_KEYS,
+    RETIRED_GENERATED_FILES,
     HOST_ROOT, MAIN_HOST, NESTED, NESTED_HOST_BRANCH_ARG, NESTED_HOST_BRANCH_REQUIRED, NESTED_MARKER,
     nested_marker_problems, NESTED_REPO_NAME, nested_repo_path, nested_repos, NESTED_SET_NEEDS_HOST_BRANCH,
     now_iso, operator_wait_target, phase_acceptance, phase_dirs, phase_execution, phase_pinned, read_json,
@@ -1469,7 +1470,7 @@ def _gate_exemption(phase_id: str, main_side: str, branch_ref: str) -> tuple:
     for status, path in zip(fields[0::2], fields[1::2]):
         count += 1
         rel = path[len(prefix):] if prefix and path.startswith(prefix) else (path if not prefix else None)
-        if rel is not None and (rel.startswith(own) or rel in STAMP_WORKS_FILES
+        if rel is not None and (rel.startswith(own) or rel in STAMP_WORKS_FILES or rel in RETIRED_GENERATED_FILES
                                 or (status == "A" and rel.startswith(GATE_EXEMPT_ADDED_PREFIXES))):
             continue
         return False, f"{path} ({status})"
@@ -1486,7 +1487,7 @@ def parallel_gate(args: argparse.Namespace) -> None:
     * **main side** -- the default stream is quiet: every non-parallel active phase is `planned` or
       `done`. Merging into a live phase is what this gate exists to prevent. v86: a busy default
       stream is skipped when the branch's diff since its merge-base with the default side touches
-      only its own phase folder, the generated works/ files and added agenda items and entries
+      only its own phase folder, the generated files (a retired one's removal too) and added agendas and items
       (`_gate_exemption`, printed as `exemption=`): such a merge cannot collide with live work.
 
     Read-only advice (decision 2): `GATE OPEN`, or `GATE CLOSED reason=<reasons>`; exit 0 either way.
@@ -1584,7 +1585,7 @@ def parallel_merge_finish(args: argparse.Namespace) -> None:
     """Run on the default stream right after a phase branch's merge: regenerate, then report what is left.
 
     The generated files (`works/state.json`, `works/index.json`, `backlog.md`,
-    `works/agenda.md`) are derived, never authored, so a merge conflict in
+    `agenda.md`) are derived, never authored, so a merge conflict in
     them is resolved by taking either side and regenerating here -- which is why parallel mode
     needs no custom git merge driver (a driver would need per-clone `git config` and would not
     travel with the repo). `docs/current/*.md` are authored: a conflict there is resolved by hand,
