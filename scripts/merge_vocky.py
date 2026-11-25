@@ -905,6 +905,11 @@ async def build_plan(ctx: Context, session: AsyncSession, vconn: psycopg.Connect
     if not tenants:
         raise Refused("the operator has no org on the platform")
     t1 = tenants[0]
+    # Tenant #1 is pinned (server.api_auth.get_tenant_one_id). This tool reads it as the
+    # operator's first org, so it refuses rather than act on another org once the two differ.
+    pinned = await repo.get_tenant_one_pin(kb_user.id)
+    if pinned is not None and pinned != t1.id:
+        raise Refused(f"tenant #1 is pinned to {pinned}, not the operator's first org {t1.id}")
     if m.tenant_one_id and t1.id != m.tenant_one_id:
         raise Refused(f"the operator's first org is {t1.id}, not the mapping's {m.tenant_one_id}")
     t1_created = (await session.execute(

@@ -11,6 +11,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.accounts.types import (
@@ -33,6 +34,7 @@ from server.persistence.models import (
     ProjectModel,
     TenantMemberModel,
     TenantModel,
+    TenantOnePinModel,
     UserModel,
     utc_now,
 )
@@ -231,9 +233,9 @@ class AccountsRepository:
         Ordered by the **membership's** ``created_at`` (then the tenant's, then id), not
         the tenant's age: the first entry is the user's own first org (for the
         operator, tenant #1, made at signup), and joining an org later never moves
-        it, however old that org is. Tenant #1 (``server.api_auth.get_tenant_one_id``)
-        and a header-less session's org (``server.accounts.auth.active_tenant``) both
-        read the first entry.
+        it, however old that org is. A header-less session's org
+        (``server.accounts.auth.active_tenant``) reads the first entry, and so does
+        tenant #1 (``server.api_auth.get_tenant_one_id``), once, to write its pin.
         """
 
         statement = (
@@ -244,6 +246,31 @@ class AccountsRepository:
         )
         models = (await self._session.execute(statement)).scalars().all()
         return tuple(self._to_tenant_record(model) for model in models)
+
+    async def get_tenant_one_pin(self, user_id: UUID) -> UUID | None:
+        """The org pinned as tenant #1 for the operator account ``user_id``, or None."""
+
+        model = await self._session.get(TenantOnePinModel, user_id)
+        return model.tenant_id if model is not None else None
+
+    async def pin_tenant_one(self, user_id: UUID, tenant_id: UUID) -> UUID:
+        """Pin ``tenant_id`` as tenant #1 for ``user_id`` unless a pin exists; the pin.
+
+        ``INSERT … ON CONFLICT DO NOTHING`` on the account's key, then a read: of two
+        racing first pins one is written and both callers get it.
+        """
+
+        await self._session.execute(
+            pg_insert(TenantOnePinModel)
+            .values(user_id=user_id, tenant_id=tenant_id)
+            .on_conflict_do_nothing(index_elements=[TenantOnePinModel.user_id])
+        )
+        pinned = (
+            await self._session.execute(
+                select(TenantOnePinModel.tenant_id).where(TenantOnePinModel.user_id == user_id)
+            )
+        ).scalar_one()
+        return pinned
 
     # -- projects ---------------------------------------------------------
 

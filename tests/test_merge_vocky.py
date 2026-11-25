@@ -338,7 +338,18 @@ def _older_org(w):
                   {"i": uuid.uuid4(), "t": org, "u": w["ids"]["op"]})
 
 
-@pytest.mark.parametrize("arrange", [_taken, _no_vocky_operator, _no_attachment_source, _older_org])
+def _pinned_elsewhere(w):
+    """Tenant #1 is pinned to an org the operator left: the tool refuses, never acts on another."""
+    with w["engine"].begin() as c:
+        org = uuid.uuid4()
+        c.execute(text("INSERT INTO tenants (id, name) VALUES (:i, :n)"),
+                  {"i": org, "n": f"Pinned {w['tag']}"})
+        c.execute(text("INSERT INTO tenant_one_pins (user_id, tenant_id) VALUES (:u, :t)"),
+                  {"u": w["ids"]["op"], "t": org})
+
+
+@pytest.mark.parametrize("arrange", [_taken, _no_vocky_operator, _no_attachment_source, _older_org,
+                                     _pinned_elsewhere])
 def test_each_refusal_changes_nothing(world, arrange):
     arrange(world)
     before = _state(world)

@@ -9,9 +9,9 @@ Two modes, switched per-call on ``config.database_url()``:
   bearer/read-auth test passes unchanged.
 - **Tenant mode** (``DATABASE_URL`` set — the hosted SaaS): a bearer is resolved
   to a tenant via the Postgres accounts plane:
-    1. the pinned master ``KB_API_TOKEN`` -> tenant #1 (the operator's tenant,
-       identified by ``KB_OPERATOR_EMAIL``) — an un-revokable legacy special-case,
-       not a DB credential;
+    1. the pinned master ``KB_API_TOKEN`` -> tenant #1 (the org pinned for the
+       ``KB_OPERATOR_EMAIL`` account, see ``get_tenant_one_id``) — an un-revokable
+       legacy special-case, not a DB credential;
     2. a ``vk_`` credential -> its own ``tenant_id`` (org-scoped authorization); an
        org-level key (``project_id NULL``) carries no bound project, a project-bound
        key additionally carries its ``project_id`` for attribution;
@@ -21,6 +21,12 @@ Two modes, switched per-call on ``config.database_url()``:
        tenant (``server.accounts.auth.active_tenant``). Steps 1 and 2 never read
        the header: a key or the master bearer always acts in its own tenant.
   An unresolvable bearer (or none) -> a generic 401.
+
+Tenant #1 is the pinned org: a ``tenant_one_pins`` row for the ``KB_OPERATOR_EMAIL``
+account (revision ``0017``), first pinned from that account's first membership by the
+migration or, failing that, by the first resolution here. It holds the ``docs/``
+corpus, the master bearer and ``is_public``, and no membership change moves it: the
+operator can hand its sign-up org over and leave, and tenant #1 stays that org.
 
 Key scope (C3): every context carries ``scope``. The master bearer and sessions are
 ``"full"``; a ``vk_`` key carries its credential's own. ``resolve_api_read`` and
@@ -60,8 +66,8 @@ class ApiAuthContext:
     and session tokens — every ``vk_`` key is authorized at tenant/org scope.
 
     ``is_public`` marks the caller as the *public* content root — legacy mode
-    (``tenant_id is None``) or tenant #1 (the operator's own tenant, resolved via
-    ``KB_OPERATOR_EMAIL``). It stays ``True`` by default so legacy contexts are
+    (``tenant_id is None``) or tenant #1 (the org pinned for ``KB_OPERATOR_EMAIL``'s
+    account, ``get_tenant_one_id``). It stays ``True`` by default so legacy contexts are
     public; the resolvers set it to ``False`` for every non-#1 tenant, and S5's
     content plane routes public callers to ``docs/`` (git-published) and non-#1
     tenants to the namespaced ``tenants/<uuid>/`` root.
@@ -89,11 +95,11 @@ class ApiAuthContext:
 # dormant. Never mutated (the tenant-mode branches build fresh contexts).
 _LEGACY = ApiAuthContext()
 
-# Module-level cache for tenant #1's id (the operator's tenant, per KB_OPERATOR_EMAIL).
+# Module-level cache for tenant #1's id (the org pinned for KB_OPERATOR_EMAIL's account).
 # Cache-on-success ONLY: a None resolution (operator not seeded yet at boot, e.g.
 # the startup reindex runs before signup) is never cached, so a later request
-# re-resolves once the operator exists. Tenant #1's identity is stable for a
-# process lifetime, so a successful resolution is safe to memoize forever.
+# re-resolves once the operator exists. The pin never moves, so a successful
+# resolution is safe to memoize for the process's life.
 _tenant_one_cache: UUID | None = None
 
 
@@ -103,17 +109,21 @@ def _tenant_mode() -> bool:
 
 
 async def get_tenant_one_id() -> UUID | None:
-    """Resolve tenant #1's id (the operator's first tenant, by membership), or ``None``.
+    """Resolve tenant #1's id, the pinned org, or ``None``.
 
-    Tenant mode: ``KB_OPERATOR_EMAIL`` -> ``get_user_by_email`` ->
-    ``list_tenants_for_user()[0].id``, the org the operator joined first (their
-    signup org): an org joined later never takes its place, however old it is.
-    Legacy mode / no operator email / operator
-    not yet seeded -> ``None``. The result is memoized on first success (see
-    ``_tenant_one_cache``). Used both by the pinned-master bearer path (to map
-    ``KB_API_TOKEN`` -> tenant #1) and by ``is_public`` (to tell tenant #1 apart
-    from every other tenant), and by ``reindex`` to stamp tenant #1's ``docs/``
-    corpus with the right ``tenant_id``.
+    Tenant #1 is the org in ``tenant_one_pins`` for the ``KB_OPERATOR_EMAIL`` account.
+    With no pin yet (a database migrated without the email, or an operator who signed
+    up later), it is pinned here from that account's first membership
+    (``list_tenants_for_user()[0]``, its sign-up org), once and race-safe; after that no
+    membership change moves it. Legacy mode / no operator email / operator not yet
+    seeded or in no org -> ``None``, nothing pinned.
+
+    The result is memoized on first success (see ``_tenant_one_cache``), and that first
+    resolution prints one line naming the id and where it came from (``pin`` or
+    ``rule``), never the email; the boot reindex makes it the API's boot line. Every
+    reader of tenant #1 calls this: the master bearer (``KB_API_TOKEN`` -> tenant #1),
+    ``is_public``, the reindex's ``docs/`` stamping, ``documents_api``'s ``docs/``
+    versus ``tenants/<uuid>/`` roots, the registry reconcile and the seed.
     """
     global _tenant_one_cache
     if _tenant_one_cache is not None:
@@ -127,11 +137,17 @@ async def get_tenant_one_id() -> UUID | None:
     user = await service.get_user_by_email(email)
     if user is None:
         return None
-    tenants = await service.list_tenants_for_user(user.id)
-    if not tenants:
-        return None
-    _tenant_one_cache = tenants[0].id
-    return _tenant_one_cache
+    tenant_one = await service.get_tenant_one_pin(user.id)
+    source = "pin"
+    if tenant_one is None:
+        tenants = await service.list_tenants_for_user(user.id)
+        if not tenants:
+            return None
+        tenant_one = await service.pin_tenant_one(user.id, tenants[0].id)
+        source = "rule"
+    _tenant_one_cache = tenant_one
+    print(f"[kb-api] tenant #1: {tenant_one} (from the {source})", flush=True)
+    return tenant_one
 
 
 def _unauth() -> HTTPException:
@@ -161,8 +177,8 @@ async def _resolve_tenant_bearer(
     """
     service = get_accounts_service()
 
-    # 1. Pinned master: an exact KB_API_TOKEN -> tenant #1, the tenant owned by
-    #    the operator (looked up by KB_OPERATOR_EMAIL). This is the un-revokable
+    # 1. Pinned master: an exact KB_API_TOKEN -> tenant #1, the org pinned for the
+    #    operator's account (KB_OPERATOR_EMAIL; get_tenant_one_id). The un-revokable
     #    legacy bearer, NOT a DB credential — so the live hi2vi agent is unchanged.
     api_token = config.api_token()
     if api_token is not None and token == api_token:

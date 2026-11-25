@@ -392,6 +392,30 @@ class AccountsService:
                 await session.rollback()
                 raise AccountsReadError("failed to read tenants") from exc
 
+    async def get_tenant_one_pin(self, user_id: UUID) -> UUID | None:
+        """The org pinned as tenant #1 for the operator account ``user_id``, or None."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                return await repository.get_tenant_one_pin(user_id)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsReadError("failed to read the tenant #1 pin") from exc
+
+    async def pin_tenant_one(self, user_id: UUID, tenant_id: UUID) -> UUID:
+        """Pin ``tenant_id`` as tenant #1 for ``user_id`` unless a pin exists; the pin."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                pinned = await repository.pin_tenant_one(user_id, tenant_id)
+                await session.commit()
+                return pinned
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsPersistenceError("failed to pin tenant #1") from exc
+
     # -- projects ---------------------------------------------------------
 
     async def create_project(self, payload: CreateProject) -> ProjectRecord:
