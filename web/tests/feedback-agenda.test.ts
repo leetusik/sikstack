@@ -60,6 +60,7 @@ import {
 } from "@/sikstack/feedback/agenda";
 import { FeedbackItemBody } from "@/sikstack/feedback/item/body";
 import {
+  AGENDA_STATUS,
   agendaStatus,
   canAdd,
   itemTitle,
@@ -363,28 +364,28 @@ describe("itemTitle (F342)", () => {
   });
 });
 
-describe("the five statuses (F37, F301, D237-we)", () => {
-  it("reads each in the Workspace's word and shape; Deferred never reads Open", () => {
+describe("the four statuses (F37, D237-we; no Deferred)", () => {
+  it("reads each in the Workspace's word and shape; there is no Deferred", () => {
     const all: Record<AgendaStatus, [string, string]> = {
       open: ["Open", "idle"],
       in_progress: ["In progress", "live"],
-      deferred: ["Deferred", "idle"],
       solved: ["Solved", "done"],
       dropped: ["Dropped", "revoked"],
     };
     for (const [state, [word, shape]] of Object.entries(all)) {
       expect(agendaStatus(state as AgendaStatus)).toEqual({ word, shape });
     }
+    expect(Object.keys(AGENDA_STATUS)).toEqual(Object.keys(all));
     const html = renderToStaticMarkup(
       createElement(AgendaPart, {
         state: {
           kind: "filed",
-          items: [item({ state: "deferred", sync: null })],
+          items: [item({ state: "solved", sync: null })],
         },
       }),
     );
-    expect(html).toContain('<span class="status status-idle">Deferred</span>');
-    expect(html).not.toContain(">Open<");
+    expect(html).toContain('<span class="status status-done">Solved</span>');
+    expect(html).not.toContain("Deferred");
     // an item still Proposed reads Proposed, the Agenda's own mark
     const proposed = renderToStaticMarkup(
       createElement(AgendaPart, {
@@ -491,7 +492,6 @@ describe("the choice: a new item, or an item not ended (as drawn)", () => {
       { id: "A8-sf", title: "Proposed one", lang: "en", state: "proposed" },
       { id: "A10-3n", title: "Open one", lang: "en", state: "open" },
       { id: "A2-k5", title: "Running", lang: "en", state: "in_progress" },
-      { id: "A4-c1", title: "Set aside", lang: "en", state: "deferred" },
       { id: "A5-d2", title: "Done", lang: "en", state: "solved" },
       { id: "A6-e3", title: "Gone", lang: "en", state: "dropped" },
       { id: "A7-gg", title: "결제가 안 돼요", lang: "ko", state: "open" },
@@ -499,22 +499,21 @@ describe("the choice: a new item, or an item not ended (as drawn)", () => {
     expect(pickable(agenda, [{ id: "A10-3n" }]).map((i) => i.id)).toEqual([
       "A8-sf",
       "A2-k5",
-      "A4-c1",
       "A7-gg",
     ]);
     expect(pickable(agenda, []).find((i) => i.id === "A7-gg")?.lang).toBe("ko");
   });
 
-  it("draws A new item checked first, then each item; the sentence follows the choice", () => {
+  it("draws A new agenda checked first, then each agenda; the sentence follows the choice", () => {
     const items: PickItem[] = [
       { id: "A3-1z", title: "Uploads", lang: "en" },
       { id: "A7-gg", title: "결제가 안 돼요", lang: "ko" },
     ];
     const fresh = headEnd("confirm", [], undefined, items);
     expect(fresh).toContain('<legend class="label">Add it to</legend>');
-    expect(fresh.indexOf("A new item")).toBeLessThan(fresh.indexOf("A3-1z"));
+    expect(fresh.indexOf("A new agenda")).toBeLessThan(fresh.indexOf("A3-1z"));
     expect(fresh).toMatch(
-      /<input type="radio"[^>]*checked=""[^>]*\/><span>A new item<\/span>/,
+      /<input type="radio"[^>]*checked=""[^>]*\/><span>A new agenda<\/span>/,
     );
     expect(fresh).toContain(ADD.text);
     const existing = headEnd(
@@ -524,7 +523,7 @@ describe("the choice: a new item, or an item not ended (as drawn)", () => {
       items,
     );
     expect(existing).toContain(
-      "It joins A3-1z’s thread, with this message and a link back to it. You cannot undo this from here.",
+      "It joins A3-1z as an item, with this message and a link back to it. You cannot undo this from here.",
     );
     expect(existing).toContain('<span lang="ko">결제가 안 돼요</span>');
   });
@@ -569,7 +568,7 @@ describe("the add's markup, every state by props", () => {
   it("asking: the confirm's title, the choice, the text, Cancel then Add to agenda", () => {
     const html = headEnd("confirm");
     expect(html).toMatch(
-      /<dialog class="dlg" aria-label="Add this feedback to platform’s agenda\?"><div class="dlg-body"><h2>Add this feedback to platform’s agenda\?<\/h2><fieldset class="field fi-pick"><legend class="label">Add it to<\/legend><div class="fi-pick-list"><label class="check fi-pick-option"><input type="radio" name="[^"]+" checked=""\/><span>A new item<\/span><\/label><\/div><\/fieldset><p>It becomes the first open item there, with this message and a link back to it. You cannot undo this from here.<\/p><div class="dlg-actions"><button type="button" class="btn">Cancel<\/button><button type="button" class="btn btn-primary"><span class="swap"><span>Add to agenda<\/span><span>Adding…<\/span><\/span><\/button><\/div><\/div><\/dialog>/,
+      /<dialog class="dlg" aria-label="Add this feedback to platform’s agenda\?"><div class="dlg-body"><h2>Add this feedback to platform’s agenda\?<\/h2><fieldset class="field fi-pick"><legend class="label">Add it to<\/legend><div class="fi-pick-list"><label class="check fi-pick-option"><input type="radio" name="[^"]+" checked=""\/><span>A new agenda<\/span><\/label><\/div><\/fieldset><p>It becomes the first open item there, with this message and a link back to it. You cannot undo this from here.<\/p><div class="dlg-actions"><button type="button" class="btn">Cancel<\/button><button type="button" class="btn btn-primary"><span class="swap"><span>Add to agenda<\/span><span>Adding…<\/span><\/span><\/button><\/div><\/div><\/dialog>/,
     );
     expect(html).not.toContain('role="alert"');
   });

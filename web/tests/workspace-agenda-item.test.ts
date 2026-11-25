@@ -33,8 +33,8 @@ import type {
   WriteAnswer,
 } from "@/lib/workspace/types";
 
-// An agenda item's page: the head's buttons by the item's state, what a write leaves on the page (Defer then
-// Reopen, Delete, the form's refusals), Not found, and the reads the page makes. The fixture is a real item of
+// An agenda's page: the head's buttons by the agenda's state, its items with their state and actions, what a write
+// leaves on the page (Propose then Reopen, Delete, the form's refusals), Not found, and the reads the page makes. The fixture is a real item of
 // this kind: a product redesign with four linked phases, as the workspace writes them.
 
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
@@ -44,7 +44,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/workspace/actions", () => ({
   acceptAgendaItems: vi.fn(),
   noteAgendaItem: vi.fn(),
-  deferAgendaItems: vi.fn(),
+  proposeAgendaItems: vi.fn(),
+  changeAgendaEntries: vi.fn(),
+  splitAgenda: vi.fn(),
   deleteAgendaItems: vi.fn(),
   discardChange: vi.fn(),
   dropAgendaItems: vi.fn(),
@@ -176,16 +178,16 @@ function buttons(html: string): { labels: string[]; primary: string[] } {
 }
 
 describe("the head's actions by the item's state (F303, F309)", () => {
-  it("reads Delete, Edit, Defer, Drop, Solve open or in progress; Delete, Edit, Reopen set aside", () => {
+  it("reads Delete, Edit, Propose, Drop, Solve open or in progress; Delete, Edit, Reopen ended", () => {
     for (const s of ["open", "in_progress"] as const)
       expect(headActions(s)).toEqual([
         "delete",
         "edit",
-        "defer",
+        "propose",
         "drop",
         "solve",
       ]);
-    for (const s of ["deferred", "solved", "dropped"] as const)
+    for (const s of ["solved", "dropped"] as const)
       expect(headActions(s)).toEqual(["delete", "edit", "reopen"]);
   });
 
@@ -193,7 +195,7 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     // in progress: a linked phase runs
     let html = page({ state: "ready", ...read() });
     expect(buttons(html)).toEqual({
-      labels: ["Delete", "Edit", "Defer", "Drop", "Solve"],
+      labels: ["Delete", "Edit", "Propose", "Drop", "Solve"],
       primary: [],
     });
     expect(html).toContain('class="status status-live">In progress');
@@ -206,7 +208,7 @@ describe("the head's actions by the item's state (F303, F309)", () => {
       ...read({ state: "open", phases: ["P56-t8", "P55-m1"] }, done),
     });
     expect(buttons(html)).toEqual({
-      labels: ["Delete", "Edit", "Defer", "Drop", "Solve"],
+      labels: ["Delete", "Edit", "Propose", "Drop", "Solve"],
       primary: ["Solve"],
     });
     expect(html).toContain("<span>Every linked phase is done.</span>");
@@ -225,7 +227,6 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     );
 
     for (const [state, fact] of [
-      ["deferred", null],
       ["solved", "Outcome"],
       ["dropped", "Reason"],
     ] as const) {
@@ -246,17 +247,18 @@ describe("the head's actions by the item's state (F303, F309)", () => {
           label === fact,
         );
     }
-    // a deferred item keeps its note and dates, and no outcome or reason (F301)
+    // an open agenda keeps its note and dates, and no outcome or reason
     html = page({
       state: "ready",
       ...read({
-        state: "deferred",
+        state: "open",
         outcome: "kept by mistake",
         reason: "kept too",
       }),
     });
     expect(html).not.toMatch(/<dt>(Outcome|Reason)<\/dt>/);
     expect(html).toContain("<dt>Note</dt>");
+    expect(html).not.toContain("Deferred");
   });
 
   it("names the current slice under a running phase, its id alone when the store has no name", () => {
@@ -401,7 +403,7 @@ describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () =>
     expect(buttons(html).labels).toEqual([
       "Delete",
       "Edit",
-      "Defer",
+      "Propose",
       "Drop",
       "Solve",
     ]);
@@ -441,12 +443,12 @@ describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () =>
     expect(thread.indexOf("fold")).toBeLessThan(thread.indexOf("mina"));
     expect(thread.indexOf("mina")).toBeLessThan(thread.indexOf("Seen on the"));
     expect(html).toContain("<h2 id=");
-    expect(html).toContain(">Thread</h2>");
-    expect(html).toContain(">4 entries</p>");
+    expect(html).toContain(">Items</h2>");
+    expect(html).toContain(">4 items</p>");
     expect(html).toContain('<label class="label"');
     expect(html).toContain(">Add note<");
-    // Thread before Phases
-    expect(html.indexOf(">Thread</h2>")).toBeLessThan(
+    // Items before Phases
+    expect(html.indexOf(">Items</h2>")).toBeLessThan(
       html.indexOf("agendaitem-phases"),
     );
   });
@@ -471,7 +473,7 @@ describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () =>
     expect(html).not.toContain("Seen on the **2 GB** export too.");
   });
 
-  it("draws Item deleted for an item whose delete waits (`deleting`), on a reload (D309)", () => {
+  it("draws Agenda deleted for an agenda whose delete waits (`deleting`), on a reload (D309)", () => {
     const r: ItemPageRead = {
       state: "ready",
       ...read({ deleting: true, sync: "waiting" }),
@@ -481,7 +483,7 @@ describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () =>
       title: "One product at sikstack.com, designed new",
     });
     const html = page(r);
-    expect(html).toContain("Item deleted");
+    expect(html).toContain("Agenda deleted");
     expect(html).not.toContain("isn’t part of");
   });
 
@@ -500,7 +502,7 @@ describe("a Proposed item, the thread, and the fixes it carries (P61-e9)", () =>
 describe("what a write leaves on the page", () => {
   const send = (
     state: PageState,
-    busy: "defer" | "reopen" | "delete",
+    busy: "propose" | "reopen" | "delete",
     e: InboxEntry,
     title?: string,
   ) =>
@@ -512,20 +514,25 @@ describe("what a write leaves on the page", () => {
       title,
     });
 
-  it("Defer, then Reopen, puts the item back at the end of the open items, waiting for sync", () => {
-    const deferred = send(
+  it("Propose reads Proposed at once, waiting; then Reopen of a solved one puts it back at the end of the open agendas", () => {
+    const proposed = send(
       INITIAL,
-      "defer",
-      entry("defer", "6f1d2c3b-0a4e-4f5a-9b8c-7d6e5f4a3b21"),
+      "propose",
+      entry("propose", "6f1d2c3b-0a4e-4f5a-9b8c-7d6e5f4a3b21"),
     );
-    const v1 = itemView(read(), deferred.overlay);
-    expect(v1?.status).toBe("deferred");
-    expect(v1?.actions).toEqual(["delete", "edit", "reopen"]);
+    const v1 = itemView(read(), proposed.overlay);
+    expect(v1?.proposed).toEqual({ by: null, at: null });
+    expect(v1?.actions).toEqual(["delete", "edit", "drop", "accept"]);
     expect(v1?.waiting).toBe(true);
-    expect(deferred.focus?.on).toBe("reopen");
+    expect(proposed.focus?.on).toBe("edit");
 
+    const solved = send(
+      INITIAL,
+      "reopen",
+      entry("solve", "8b3f4e5d-2c6a-4b7c-9d0e-1f2a3b4c5d6e"),
+    );
     const reopened = send(
-      deferred,
+      solved,
       "reopen",
       entry("reopen", "7a2e3d4c-1b5f-4a6b-8c9d-0e1f2a3b4c5d"),
     );
@@ -575,7 +582,7 @@ describe("what a write leaves on the page", () => {
       label: "Agenda",
     });
     expect(model).toMatchObject({
-      title: "Item deleted",
+      title: "Agenda deleted",
       text: "“One product at sikstack.com, designed new” leaves the workspace at the next sync.",
       actions: [
         {
@@ -635,7 +642,11 @@ describe("what a write leaves on the page", () => {
       )?.[1];
     for (const [kind, pending] of [
       ["drop", "Dropping…"],
-      ["defer", "Deferring…"],
+      ["propose", "Proposing…"],
+      ["item-done", "Saving…"],
+      ["item-dismiss", "Dismissing…"],
+      ["item-delete", "Deleting…"],
+      ["split", "Splitting…"],
       ["solve", "Solving…"],
       ["reopen", "Reopening…"],
       ["delete", "Deleting…"],
@@ -732,7 +743,7 @@ describe("what a write leaves on the page", () => {
       '<p class="notice notice-danger" role="alert">the change is no longer open</p>',
     );
     expect(form("send-failed", null)).toContain(
-      "Could not save the item. Try again.",
+      "Could not save the agenda. Try again.",
     );
     const refusedTitle = form("title-error", null);
     expect(refusedTitle).toContain('aria-invalid="true"');
@@ -784,11 +795,11 @@ describe("a change that takes the item from under the page", () => {
     ...read(item),
   });
   const GONE: ItemPageRead = { state: "not-found", projectName: "platform" };
-  const AGENDA = `/projects/${PROJECT}/workspace?deferred=2`;
+  const AGENDA = `/projects/${PROJECT}/workspace`;
   const at = (shown: string) => ({
     project: PROJECT,
     shown,
-    from: { list: "agenda" as const, deferred: 2 },
+    from: { list: "agenda" as const },
     back: AGENDA,
   });
   const press = (
@@ -931,10 +942,12 @@ describe("a change that takes the item from under the page", () => {
     for (const kind of [
       "edit",
       "move",
-      "defer",
+      "propose",
       "solve",
       "drop",
       "reopen",
+      "item-done",
+      "split",
     ] as const) {
       const r = ready({
         ...ITEM,
@@ -1069,9 +1082,9 @@ describe("reading an agenda item", () => {
       missing: false,
     });
     const html = page({ state: "not-found", projectName: "platform" });
-    expect(html).toContain("Agenda item not found");
+    expect(html).toContain("Agenda not found");
     expect(html).toContain(
-      "This agenda item doesn’t exist, or it isn’t part of platform.",
+      "This agenda doesn’t exist, or it isn’t part of platform.",
     );
     expect(html).toContain("Back to Agenda");
     expect(html).toContain("Synced 2m ago");

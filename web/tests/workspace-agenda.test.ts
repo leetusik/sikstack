@@ -15,8 +15,8 @@ import type {
   Workspace,
 } from "@/lib/workspace/types";
 
-// The Agenda at rest (design job 02, `AgendaList.dc.html`, frame.md F300 to F303): the three parts' membership and
-// order, the Deferred part's page from the address, Show all over five, the end cell's words, the confirm's focus,
+// The Agenda at rest (design job 02, `AgendaList.dc.html`, frame.md F300 to F303): the parts' membership and order
+// (no Deferred: a stored one reads Proposed), Show all over five, the end cell's words, the confirm's focus,
 // an add's title refusal under the field, and one Workspace read a page load. Node only: models, server renders,
 // and the page with its reads mocked.
 
@@ -71,8 +71,6 @@ const {
   AgendaConfirm,
   AgendaList,
   agendaParts,
-  deferredPageFrom,
-  deferredPlace,
   endedShown,
   unplacedDone,
   writeShown,
@@ -136,12 +134,17 @@ const PLATFORM: AgendaItem[] = [
   item(
     "A11-f4",
     "A weekly mail of what changed in each project",
-    "deferred",
+    "proposed",
     "2026-11-09",
-    { phases: ["P56-t8"] },
+    { phases: ["P56-t8"], proposed: { by: null, at: null } },
   ),
-  item("A10-h5", "Sign-in emails land in spam", "open", "2026-11-02"),
-  item("A8-r5", "하이라이트 색을 직접 고르고 싶어요", "deferred", "2026-11-06"),
+  item("A10-h5", "Sign-in emails land in spam", "open", "2026-11-02", {
+    itemsOpen: 2,
+    entryCount: 3,
+  }),
+  item("A8-r5", "하이라이트 색을 직접 고르고 싶어요", "proposed", "2026-11-06", {
+    proposed: { by: null, at: null },
+  }),
   item(
     "A7-m3",
     "Keep the reading place across devices",
@@ -149,7 +152,9 @@ const PLATFORM: AgendaItem[] = [
     "2026-11-12",
     { phases: ["P52-d6"], outcome: "Shipped with the reader in P52-d6." },
   ),
-  item("A6-j2", "Import highlights from Kindle", "deferred", "2026-10-26"),
+  item("A6-j2", "Import highlights from Kindle", "proposed", "2026-10-26", {
+    proposed: { by: null, at: null },
+  }),
   item("A5-q8", "Search inside a book’s notes", "dropped", "2026-11-14", {
     reason: "The Library's search covers it.",
   }),
@@ -188,7 +193,7 @@ const OPEN_TITLES = [
   "Copy of the backlog behind",
 ];
 
-const DEFERRED_TITLES = [
+const PROPOSED_TITLES = [
   "커넥터마다 동기화 시각을 따로 정하기",
   "Schema drift alerts for the nightly export",
   "Webhook signatures on the retry queue",
@@ -216,18 +221,18 @@ const DEFERRED_TITLES = [
   "Copy commands for each place",
 ];
 
-/** A long agenda (`fn-14`'s shape): 21 open, 25 deferred over the last two weeks, 13 ended. */
+/** A long agenda (`fn-14`'s shape): 21 open, 25 proposed over the last two weeks, 13 ended. */
 function longAgenda(): AgendaItem[] {
   const out: AgendaItem[] = [];
   OPEN_TITLES.forEach((t, i) =>
     out.push(item(`A${10 + i}-k${i % 9}`, t, "open", "2026-11-01")),
   );
-  DEFERRED_TITLES.forEach((t, i) =>
+  PROPOSED_TITLES.forEach((t, i) =>
     out.push(
       item(
         `A${35 + i}-n${(i % 8) + 1}`,
         t,
-        "deferred",
+        "proposed",
         `2026-11-${String(1 + (i % 14)).padStart(2, "0")}`,
       ),
     ),
@@ -248,17 +253,13 @@ const parts = (agenda: AgendaItem[]) =>
   agendaParts(agenda, phaseLookup(PHASES), fmt.date);
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
-const list = (
-  agenda: AgendaItem[],
-  extra: { page?: number | null; unplaced?: Unplaced[] } = {},
-) =>
+const list = (agenda: AgendaItem[], extra: { unplaced?: Unplaced[] } = {}) =>
   html(
     createElement(AgendaList, {
       project: PROJECT,
       read: { agenda, unplaced: extra.unplaced ?? [] },
       phases: PHASES,
       timeZone: "Asia/Seoul",
-      deferredPage: extra.page ?? null,
     }),
   );
 
@@ -283,7 +284,13 @@ describe("Proposed, apart and first (P61-e9)", () => {
 
   it("lists the Proposed items in their own part, before Open, each with who proposed it and the day", () => {
     const p = parts([...PROPOSED, ...PLATFORM]);
-    expect(ids(p.proposed)).toEqual(["A8-sf", "A9-hb"]);
+    expect(ids(p.proposed)).toEqual([
+      "A8-sf",
+      "A9-hb",
+      "A11-f4",
+      "A8-r5",
+      "A6-j2",
+    ]);
     expect(ids(p.open)).not.toContain("A8-sf");
     expect(p.proposed[0].status).toEqual({
       word: "Proposed",
@@ -314,7 +321,7 @@ describe("Proposed, apart and first (P61-e9)", () => {
       ...PLATFORM,
     ];
     const p = parts(waiting);
-    expect(ids(p.proposed)).toEqual(["A8-sf"]);
+    expect(ids(p.proposed)).toEqual(["A8-sf", "A11-f4", "A8-r5", "A6-j2"]);
     expect(ids(p.open)[0]).toBe("A9-hb");
     expect(p.open[0].mark).toBe("waiting");
     const out = list(waiting);
@@ -325,73 +332,87 @@ describe("Proposed, apart and first (P61-e9)", () => {
   });
 });
 
-describe("the three parts", () => {
-  it("puts each item in its part from its stored state, deferred winning over a running phase", () => {
+describe("the parts (no Deferred)", () => {
+  it("puts each agenda in its part from its state; a stored Deferred reads Proposed, Proposed over a running phase", () => {
     const p = parts(PLATFORM);
     expect(ids(p.open)).toEqual(["A12-p3", "A10-h5", "A4-c1"]);
-    expect(ids(p.deferred)).toEqual(["A11-f4", "A8-r5", "A6-j2"]);
+    expect(ids(p.proposed)).toEqual(["A11-f4", "A8-r5", "A6-j2"]);
     expect(ids(p.ended)).toEqual(["A5-q8", "A7-m3"]);
-    const weekly = p.deferred[0];
-    expect(weekly.status).toEqual({
-      word: "Deferred",
-      cls: "status status-idle",
+    expect(Object.keys(p)).toEqual(["proposed", "open", "ended"]);
+    expect(p.proposed[0].status).toEqual({
+      word: "Proposed",
+      cls: "status status-pending",
     });
     expect(p.open[0].status.word).toBe("In progress");
     expect(p.open[1].status.word).toBe("Open");
     expect(p.ended.map((r) => r.status.word)).toEqual(["Dropped", "Solved"]);
   });
 
-  it("keeps the operator's order for the open part and sorts the others newest first, ties in order", () => {
+  it("keeps the operator's order for the open part and sorts the ended newest first, ties in order", () => {
     const agenda = [
       item("A3-b2", "Second open", "open", "2026-11-01"),
-      item("A2-c3", "Deferred early", "deferred", "2026-11-01"),
+      item("A2-c3", "Solved early", "solved", "2026-11-01"),
       item("A1-d4", "First open", "open", "2026-11-17"),
-      item("A9-e5", "Deferred later", "deferred", "2026-11-10"),
-      item("A8-f6", "Deferred later too", "deferred", "2026-11-10"),
+      item("A9-e5", "Solved later", "solved", "2026-11-10"),
+      item("A8-f6", "Dropped later too", "dropped", "2026-11-10"),
     ];
     const p = parts(agenda);
     expect(ids(p.open)).toEqual(["A3-b2", "A1-d4"]);
-    expect(ids(p.deferred)).toEqual(["A9-e5", "A8-f6", "A2-c3"]);
+    expect(ids(p.ended)).toEqual(["A9-e5", "A8-f6", "A2-c3"]);
   });
 
-  it("draws the parts in their order, the Deferred and the ended parts only when they hold an item", () => {
+  it("draws the parts in their order, Proposed and the ended part only when they hold an agenda; no Deferred", () => {
     const out = list(PLATFORM);
     const heads = [...out.matchAll(/<h2 id="[^"]+">([^<]+)<\/h2>/g)].map(
       (m) => m[1],
     );
     expect(heads).toEqual([
+      "Proposed",
       "Open and in progress",
-      "Deferred",
       "Solved and dropped",
     ]);
-    expect(out).toContain('<p class="meta agenda-head-count">3 items</p>');
+    expect(out).not.toContain("Deferred");
+    expect(out).not.toContain('class="pager"');
+    expect(out).toContain('<p class="meta agenda-head-count">3 agendas</p>');
     const only = list([item("A1-d4", "First open", "open", "2026-11-17")]);
     expect(only.match(/<h2 /g)).toHaveLength(1);
-    expect(only).toContain('<p class="meta agenda-head-count">1 item</p>');
+    expect(only).toContain('<p class="meta agenda-head-count">1 agenda</p>');
   });
 
-  it("says the empty sentences and makes Add item primary only for an empty agenda", () => {
+  it("says the empty sentences and makes Add agenda primary only for an empty workspace", () => {
     const none = list([]);
     expect(none).toContain(
-      "No items yet. Add what you want done or dealt with, at any size.",
+      "No agendas yet. Add what you want done or dealt with, at any size.",
     );
-    expect(none).toContain('class="btn btn-primary">Add item</button>');
-    expect(none).toContain('<p class="meta agenda-head-count">0 items</p>');
+    expect(none).toContain('class="btn btn-primary">Add agenda</button>');
+    expect(none).toContain('<p class="meta agenda-head-count">0 agendas</p>');
     const noOpen = list([
-      item("A6-j2", "Import highlights from Kindle", "deferred", "2026-10-26"),
+      item("A6-j2", "Import highlights from Kindle", "solved", "2026-10-26"),
     ]);
     expect(noOpen).toContain(
-      "No open items. Add what you want done or dealt with next.",
+      "No open agendas. Add what you want done or dealt with next.",
     );
-    expect(noOpen).toContain('class="btn">Add item</button>');
+    expect(noOpen).toContain('class="btn">Add agenda</button>');
   });
 });
 
 describe("a row", () => {
-  it("ends with how far its phases are, or the day it changed", () => {
+  it("ends with its open items (`itemsOpen`) and how far its phases are, or the day it changed", () => {
     const p = parts(PLATFORM);
-    expect(p.open.map((r) => r.end)).toEqual(["1 of 2 phases done", "", ""]);
-    expect(p.deferred.map((r) => r.end)).toEqual(["Nov 9", "Nov 6", "Oct 26"]);
+    expect(p.open.map((r) => r.end)).toEqual([
+      "1 of 2 phases done",
+      "2 open items",
+      "",
+    ]);
+    expect(
+      parts([
+        item("A3-b2", "One", "open", "2026-11-01", {
+          itemsOpen: 1,
+          phases: ["P55-m1"],
+        }),
+        item("A2-c3", "None open", "open", "2026-11-01", { itemsOpen: 0 }),
+      ]).open.map((r) => r.end),
+    ).toEqual(["1 open item · 1 of 1 phase done", ""]);
     expect(p.ended.map((r) => r.end)).toEqual(["Nov 14", "Nov 12"]);
     // an item's deferred jobs are folded onto its thread (P61-e9): its end cell names none
     const none = parts([item("A3-b2", "No phase", "open", "2026-11-01")]);
@@ -404,7 +425,10 @@ describe("a row", () => {
       /<li class="row agenda-row" data-row="A12-p3"><button type="button" class="agenda-grip" aria-label="Reorder: Say so when the copy has been behind for a day" aria-describedby="[^"]+-how" aria-pressed="false"><\/button><label class="check agenda-check"><input type="checkbox"\/><span class="sr-only">Select: Say so when the copy has been behind for a day<\/span><\/label><div class="agenda-body"><div class="ws-row agenda-cells"><span class="ws-id">A12-p3<\/span>/,
     );
     expect(out).toContain('<span class="dim ws-end">1 of 2 phases done</span>');
-    expect(out).not.toMatch(/data-row="A10-h5">.*?ws-end.*?data-row="A4-c1"/);
+    expect(out).toMatch(
+      /data-row="A10-h5">.*?<span class="dim ws-end">2 open items<\/span>.*?data-row="A4-c1"/,
+    );
+    expect(out).not.toMatch(/data-row="A4-c1">(?:(?!data-row=).)*ws-end/);
     expect(out).toContain(
       '<span class="ws-name-text" lang="ko">하이라이트 색을 직접 고르고 싶어요</span>',
     );
@@ -420,56 +444,19 @@ describe("a row", () => {
   });
 });
 
-describe("the Deferred part's pages", () => {
-  it("reads the page from the address and holds one past the last page to the last page", () => {
-    expect(deferredPageFrom("3")).toBe(3);
-    for (const bad of [undefined, "", "0", "02", "-1", "2.5", "x", ["2"]])
-      expect(deferredPageFrom(bad)).toBeNull();
-    expect(deferredPlace(3, 25)).toEqual({
-      page: 3,
-      pages: 3,
-      from: 20,
-      to: 25,
-      paged: true,
-    });
-    // An action that empties the last page (`?deferred=3`, its rows deleted) lands on the new last page.
-    expect(deferredPlace(4, 25)).toEqual({
-      page: 3,
-      pages: 3,
-      from: 20,
-      to: 25,
-      paged: true,
-    });
-    expect(deferredPlace(3, 20)).toMatchObject({ page: 2, from: 10, to: 20 });
-    expect(deferredPlace(99, 0)).toMatchObject({ page: 1, from: 0, to: 0 });
-    expect(deferredPlace(null, 25)).toMatchObject({ page: 1, from: 0, to: 10 });
-    expect(deferredPlace(2, 10)).toMatchObject({ page: 1, paged: false });
-  });
-
-  it("shows ten a page with the pager, its links on the address, and the way back carrying the page", () => {
+describe("no Deferred part, no pages", () => {
+  it("lists every Proposed agenda unpaged and links each agenda with no way back to carry", () => {
     const long = longAgenda();
-    const page2 = list(long, { page: 2 });
-    const deferred = page2.slice(
-      page2.indexOf(">Deferred</h2>"),
-      page2.indexOf(">Solved and dropped</h2>"),
+    const out = list(long);
+    const proposed = out.slice(
+      out.indexOf(">Proposed</h2>"),
+      out.indexOf(">Open and in progress</h2>"),
     );
-    expect(deferred.match(/data-row=/g)).toHaveLength(10);
-    expect(deferred).toContain(
-      '<p class="meta agenda-head-count">25 items</p>',
-    );
-    expect(deferred).toContain('aria-label="Deferred items, pages"');
-    expect(deferred).toContain("11–20 of 25");
-    expect(deferred).toContain(
-      `href="/projects/${PROJECT}/workspace?deferred=3"`,
-    );
-    expect(deferred).toContain(`href="/projects/${PROJECT}/workspace"`);
-    expect(deferred).toContain(`/workspace/agenda/A`);
-    expect(deferred).toContain(
-      `?from=%2Fprojects%2F${PROJECT}%2Fworkspace%3Fdeferred%3D2`,
-    );
-    const out = list(long, { page: 9 });
-    expect(out).toContain("21–25 of 25");
-    expect(list(PLATFORM)).not.toContain('class="pager"');
+    expect(proposed.match(/data-row=/g)).toHaveLength(25);
+    expect(out).not.toContain('class="pager"');
+    expect(out).not.toContain("?deferred=");
+    expect(out).not.toContain("from=");
+    expect(out).toContain(`href="/projects/${PROJECT}/workspace/agenda/A35-n1"`);
   });
 });
 
@@ -514,7 +501,7 @@ describe("the add form", () => {
   it("puts an add's title refusal, the route's 422, under the field", () => {
     const shown = writeShown(
       { ok: false, reason: "title", message: TITLE_REFUSAL },
-      "Could not add the item. Try again.",
+      "Could not add the agenda. Try again.",
     );
     expect(shown).toEqual({ kind: "title", message: TITLE_REFUSAL });
     const out = form("title-error");
@@ -529,11 +516,11 @@ describe("the add form", () => {
     expect(
       writeShown(
         { ok: false, reason: "failed" },
-        "Could not add the item. Try again.",
+        "Could not add the agenda. Try again.",
       ),
     ).toEqual({
       kind: "notice",
-      message: "Could not add the item. Try again.",
+      message: "Could not add the agenda. Try again.",
     });
     expect(
       writeShown(
@@ -548,9 +535,9 @@ describe("the add form", () => {
       kind: "notice",
       message: "note must be text of at most 20000 characters",
     });
-    const out = form("failed", "Could not add the item. Try again.");
+    const out = form("failed", "Could not add the agenda. Try again.");
     expect(out).toContain(
-      '<p class="notice notice-danger" role="alert">Could not add the item. Try again.</p>',
+      '<p class="notice notice-danger" role="alert">Could not add the agenda. Try again.</p>',
     );
     expect(out).not.toContain("field-error");
   });
@@ -609,7 +596,7 @@ describe("the confirm", () => {
       '<h2>Delete “<span lang="en">Sign-in emails land in spam</span>”?</h2>',
     );
     expect(out).toContain(
-      "<p>It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.</p>",
+      "<p>It leaves the workspace for good, with its items. Its phases stay. You cannot undo this.</p>",
     );
     expect(out).toMatch(
       />Cancel<\/button><button type="button" class="btn btn-danger"><span class="swap"><span>Yes, delete<\/span><span>Deleting…<\/span>/,
@@ -627,10 +614,10 @@ describe("the confirm", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("says the thread goes with the item and only its phases stay, on the item page's Delete too", () => {
-    // a delete removes the item's whole thread, folded deferred jobs included (P61-e9)
+  it("says the items go with the agenda and only its phases stay, on the agenda page's Delete too", () => {
+    // a delete removes the agenda with all its items, folded jobs included (P61-e9)
     expect(AGENDA_ITEM.confirm.text).toBe(
-      "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
+      "It leaves the workspace for good, with its items. Its phases stay. You cannot undo this.",
     );
   });
 
@@ -685,7 +672,8 @@ describe("the open changes no row carries", () => {
         },
       ],
     });
-    const top = out.slice(0, out.indexOf('<ul class="ws-list"'));
+    const open = out.slice(out.indexOf(">Open and in progress</h2>"));
+    const top = open.slice(0, open.indexOf('<ul class="ws-list"'));
     expect(top).toContain(
       '<span class="ws-id">A3-x9</span><span class="badge is-waiting">Waiting for sync</span>',
     );
@@ -717,7 +705,9 @@ describe("the open changes no row carries", () => {
       )?.[1];
     for (const [kind, pending] of [
       ["drop", "Dropping…"],
-      ["defer", "Deferring…"],
+      ["propose", "Proposing…"],
+      ["item-done", "Saving…"],
+      ["split", "Splitting…"],
       ["add", "Adding…"],
       ["move", "Saving…"],
     ] as const)
@@ -882,11 +872,10 @@ describe("the page", () => {
     agenda,
     unplaced: [],
   });
-  const render = async (query: Record<string, string> = {}) =>
+  const render = async () =>
     html(
       (await AgendaPage({
         params: Promise.resolve({ projectId: PROJECT }),
-        searchParams: Promise.resolve(query),
       })) as ReactElement,
     );
 
@@ -905,12 +894,12 @@ describe("the page", () => {
       state: "ready",
       value: workspace(longAgenda()),
     });
-    const out = await render({ deferred: "2" });
+    const out = await render();
     expect(reads.readWorkspace).toHaveBeenCalledTimes(1);
     expect(reads.readWorkspace).toHaveBeenCalledWith("t", PROJECT);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     expect(out).toContain('<a class="subnav-item" aria-current="page"');
-    expect(out).toContain("11–20 of 25");
+    expect(out).toContain('<p class="meta agenda-head-count">25 agendas</p>');
   });
 
   it("draws WsNav alone when the workspace is not linked, the head and the failed part when the read failed", async () => {
@@ -936,7 +925,7 @@ describe("the page", () => {
     expect(failed).toContain("The agenda did not load.");
     expect(failed).toContain(">Try again</button>");
     expect(failed).not.toContain("agenda-head-count");
-    expect(failed).not.toContain("Add item");
+    expect(failed).not.toContain("Add agenda");
     reads.readWorkspace.mockResolvedValue({ state: "not-found" });
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
     expect(reads.readWorkspace).toHaveBeenCalledTimes(4);

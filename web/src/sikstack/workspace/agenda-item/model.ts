@@ -6,20 +6,26 @@
  *
  * - `itemLines(item, workspace)`: the rows the page draws of other records: the item's phases in the backlog's
  *   order (the running one first, then newest first: the Workspace's own order). A phase the Workspace does not
- *   hold is not drawn. (A deferred job the engine folded onto the item reads as its `issue` entry in the thread.)
- * - `headActions(state, proposed)`: the head's buttons in F309's one order: **Delete, Edit, Defer, Drop, Solve**
- *   while the item is open or in progress; **Delete, Edit, Reopen** while it is deferred, solved or dropped;
- *   **Delete, Edit, Drop, Accept** while it is Proposed (P61-e9: an agent opened it and no one accepted it yet),
- *   Accept the primary.
+ *   hold is not drawn. (A deferred job the engine folded onto the agenda reads as its `issue` item.)
+ * - `headActions(state, proposed)`: the head's buttons in F309's one order: **Delete, Edit, Propose, Drop, Solve**
+ *   while the agenda is open or in progress; **Delete, Edit, Reopen** while it is solved or dropped; **Delete,
+ *   Edit, Drop, Accept** while it is Proposed (P61-e9: an agent opened it, or someone proposed it back, and no one
+ *   accepted it yet), Accept the primary.
  * - `itemView(read, overlay)`: the item as the page shows it, its state, the primary Solve (only while it is
  *   open and every linked phase is done), its marks (Waiting for sync, a refused change), its long facts and
  *   the Phases panel's form (rows, the command to plan one, or none on an ended item); null when this page
  *   deleted it. It draws the item the page now shows, which is another id only after Try again on a refused add.
  *   A Proposed item reads Proposed and who proposed it and when; one whose Accept waits for the sync (`accepting`)
- *   reads Open already. The view carries the item's thread (`entries`, oldest first) for the Thread panel.
+ *   reads Open already. The view carries the agenda's items (`entries`, oldest first) for the Items panel, each
+ *   with its state as the read predicts it while a change waits (an auto-close shows in the head the same way).
  */
 
-import { PROPOSED, THREAD } from "@/content/workspace/agenda-thread";
+import {
+  ITEM,
+  PROPOSED,
+  SPLIT,
+  THREAD,
+} from "@/content/workspace/agenda-thread";
 import { WS_ACTIONS } from "@/content/workspace/frame";
 import {
   everyPhaseDone,
@@ -92,11 +98,11 @@ export function itemLines(
 
 /** A button of the item's head. */
 export type HeadAction =
-  "delete" | "edit" | "defer" | "drop" | "solve" | "reopen" | "accept";
+  "delete" | "edit" | "propose" | "drop" | "solve" | "reopen" | "accept";
 
-const SET_ASIDE: readonly ItemState[] = ["deferred", "solved", "dropped"];
+const SET_ASIDE: readonly ItemState[] = ["solved", "dropped"];
 
-/** Whether the item is set aside or ended: its head offers Reopen and it has no Defer, Drop or Solve. */
+/** Whether the agenda has ended: its head offers Reopen and it has no Propose, Drop or Solve. */
 export function isSetAside(state: ItemState): boolean {
   return SET_ASIDE.includes(state);
 }
@@ -106,7 +112,7 @@ export function headActions(state: ItemState, proposed = false): HeadAction[] {
   if (proposed) return ["delete", "edit", "drop", "accept"];
   return isSetAside(state)
     ? ["delete", "edit", "reopen"]
-    : ["delete", "edit", "defer", "drop", "solve"];
+    : ["delete", "edit", "propose", "drop", "solve"];
 }
 
 export interface ItemView {
@@ -126,7 +132,7 @@ export interface ItemView {
   phasesPanel: "rows" | "command" | null;
   /** While the item reads Proposed: who opened it and when (Accept is then the head's primary); else null. */
   proposed: Proposed | null;
-  /** Its thread, oldest first (a waiting web entry last), as the item read gives it. */
+  /** Its items, oldest first (a waiting web note last), as the agenda read gives them. */
   thread: ThreadEntry[];
 }
 
@@ -197,13 +203,18 @@ export const PENDING_LABEL: Record<ChangeKind, string> = {
   add: WS_ACTIONS.add[1],
   edit: WS_ACTIONS.save[1],
   move: WS_ACTIONS.save[1],
-  defer: WS_ACTIONS.defer[1],
+  propose: WS_ACTIONS.propose[1],
   solve: WS_ACTIONS.solve[1],
   drop: WS_ACTIONS.drop[1],
   reopen: WS_ACTIONS.reopen[1],
   delete: WS_ACTIONS.delete[1],
   entry: THREAD.composer.add[1],
   accept: PROPOSED.accept[1],
+  "item-done": ITEM.done[1],
+  "item-dismiss": ITEM.dismiss[1],
+  "item-reopen": ITEM.reopen[1],
+  "item-delete": ITEM.delete[1],
+  split: SPLIT.submit[1],
 };
 
 /**

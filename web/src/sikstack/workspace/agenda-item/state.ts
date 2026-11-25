@@ -10,7 +10,7 @@
  *   longer open (a 409) shows the route's line over the fields; one that got no answer shows F45's
  *   `Could not … Try again.`; the form stays open with what was typed.
  * - **A write that landed** is laid over the read (`optimistic.ts`) and waits for sync; the focus goes to Edit
- *   after a save or a Reopen, to Reopen after a solve, a drop or a Defer.
+ *   after a save, a Reopen or a Propose, to Reopen after a solve or a drop.
  * - **Delete asks first**; after it the page says Item deleted (`gone`), whatever the next read says.
  * - **Try again and Discard** on a refused change: the old entry closes, Try again's new one waits; the notice
  *   that held the pressed button is gone, so the focus goes to Edit (F303's rule for a finished action).
@@ -46,10 +46,11 @@ import { itemView, type ItemPageRead, type ItemView } from "./model";
 export type FormKind = "edit" | "solve" | "drop";
 export type FormPhase = "rest" | "sending" | "title-error" | "send-failed";
 /** What is being sent: a form, one of the head's buttons, the confirm's Yes, or the refused notice's buttons. */
-export type Busy = "form" | "defer" | "reopen" | "delete" | "retry" | "discard";
+export type Busy =
+  "form" | "propose" | "reopen" | "delete" | "retry" | "discard";
 /** What takes the focus next: a head button, or the open form's first field. */
 export type FocusKey =
-  "edit" | "solve" | "drop" | "reopen" | "defer" | "delete" | "first";
+  "edit" | "solve" | "drop" | "reopen" | "propose" | "delete" | "first";
 
 export interface Draft {
   title: string;
@@ -132,7 +133,7 @@ export type PageEvent =
   | { type: "change"; field: keyof Draft; value: string }
   | { type: "cancel" }
   | { type: "submit" }
-  /** Defer, Reopen, Yes delete, Try again or Discard was pressed. */
+  /** Propose, Reopen, Yes delete, Try again or Discard was pressed. */
   | { type: "send"; busy: Exclude<Busy, "form"> }
   | { type: "ask" }
   | { type: "ask-cancel" }
@@ -148,6 +149,13 @@ export type PageEvent =
     }
   /** A new read of the item, and the Workspace's sync instant it carried. */
   | { type: "read"; item: AgendaItem; synced?: string | null }
+  /** An item change the Items panel wrote: the agenda waits until a read shows it taken (the read predicts the rest). */
+  | {
+      type: "written";
+      entry: InboxEntry;
+      timeZone: string;
+      now?: number | Date;
+    }
   /** A new read holds no item under the page's id. */
   | { type: "missing" };
 
@@ -160,7 +168,7 @@ const AFTER: Record<Busy | FormKind, FocusKey | null> = {
   solve: "reopen",
   drop: "reopen",
   form: null,
-  defer: "reopen",
+  propose: "edit",
   reopen: "edit",
   delete: null,
   retry: "edit",
@@ -225,6 +233,12 @@ export function reduce(state: PageState, event: PageEvent): PageState {
       return { ...state, asking: false };
     case "answer":
       return answer(state, event);
+    case "written":
+      return {
+        ...state,
+        overlay: written(state.overlay, event.entry, event.timeZone, event.now),
+        kinds: { ...state.kinds, [event.entry.id]: event.entry.kind },
+      };
     case "read": {
       const held = state.discarding;
       // a read after Discard on a refused add still holds an item under its id: that item stays, its mark gone

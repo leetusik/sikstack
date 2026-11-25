@@ -17,8 +17,6 @@ import { useRouter } from "next/navigation";
 import { AGENDA, type AgendaAct } from "@/content/workspace/agenda";
 import { PROPOSED } from "@/content/workspace/agenda-thread";
 import { Dialog, DialogActions } from "@/sikstack/frame/dialog";
-import { Pager } from "@/sikstack/library/pager";
-import { pagerRange } from "@/sikstack/library/pager-model";
 import { Swap } from "@/sikstack/ui";
 import { retryLabel } from "@/sikstack/workspace/agenda-item/model";
 import {
@@ -35,7 +33,7 @@ import {
   moveAgendaItem,
   retryChange,
 } from "@/lib/workspace/actions";
-import { agendaHref, agendaItemHref } from "@/lib/workspace/address";
+import { agendaItemHref } from "@/lib/workspace/address";
 import { cx } from "@/lib/cx";
 import { dates, phaseLookup } from "@/lib/workspace/model";
 import {
@@ -56,7 +54,6 @@ import { BulkStrip, Grip, PartBar, PartCheck, RowCheck } from "./controls";
 import { unplacedDone } from "./unplaced";
 import {
   addIsPrimary,
-  agendaFrom,
   agendaParts,
   AGENDA_SHOWN,
   emptyText,
@@ -101,8 +98,6 @@ export interface AgendaListProps {
   phases: readonly AgendaPhase[];
   /** The viewer's zone: a day a change is made under, and F2's dates. */
   timeZone: string;
-  /** The Deferred part's page the address names (`?deferred=N`), or null. */
-  deferredPage: number | null;
 }
 
 function without<T>(map: Record<string, T>, key: string): Record<string, T> {
@@ -156,20 +151,20 @@ interface Grab {
 }
 
 /**
- * The Agenda's list (`AgendaList.dc.html`, frame.md F301 to F303, F309): the three parts in a `.stack.gap-5`.
+ * The Agenda's list (`AgendaList.dc.html`, frame.md F301 to F303, F309): the parts in a `.stack.gap-5`, one row
+ * per agenda.
  *
- * - **Open and in progress** (always drawn): its head with the count and **Add item** (primary only while the
- *   agenda holds nothing; away while the form is open); the add form in place under the head; the open web changes
- *   no row carries (`unplaced`, F45's own notice); the rows in the operator's order, each led by its grip, or the
- *   empty sentence; the list's status line.
- * - **Deferred** (when any): newest first by `changed`, ten a page, the pager in its foot (`?deferred=N`).
- * - **Solved and dropped** (when any): newest first, five, then **Show all N**.
+ * - **Open and in progress** (always drawn): its head with the count and **Add agenda** (primary only while the
+ *   workspace holds none; away while the form is open); the add form in place under the head; the open web changes
+ *   no row carries (`unplaced`, F45's own notice); the rows in the operator's order, each led by its grip, its end
+ *   cell its open items and its phases, or the empty sentence; the list's status line.
+ * - **Solved and dropped** (when any): newest first, five, then **Show all N**. There is no Deferred part.
  *
  * **Reorder** (F302): the grip drags (pointer, touch) or lifts (Space, Enter; the arrows move, Escape or Tab puts it
  * back); a put down at another place writes one `move`, shown at once and Waiting for sync; each step is said.
  * **Picked rows** (F303, F309): each part's boxes cover its rows on screen; with any picked the head's count reads
- * `N of M selected` and the part's actions come in the head (52em of the part) or the strip at its end. Defer, Solve
- * and Reopen act at once; Drop and Delete ask. Every write is one inbox entry through the agenda's actions; the page
+ * `N of M selected` and the part's actions come in the head (52em of the part) or the strip at its end. Propose (an
+ * Open agenda back to Proposed), Solve and Reopen act at once; Drop and Delete ask. Every write is one inbox entry through the agenda's actions; the page
  * keeps what it wrote (`Overlay`) over each read until a read shows it applied or refused, and reads again after a
  * write (`router.refresh()`).
  *
@@ -183,14 +178,12 @@ export function AgendaList({
   read,
   phases,
   timeZone,
-  deferredPage,
 }: AgendaListProps) {
   const router = useRouter();
   const uid = useId();
   const ids = {
     proposed: `${uid}-proposed`,
     open: `${uid}-open`,
-    deferred: `${uid}-deferred`,
     ended: `${uid}-ended`,
     title: `${uid}-title`,
     note: `${uid}-note`,
@@ -274,46 +267,13 @@ export function AgendaList({
   const fmt = useMemo(() => dates(timeZone), [timeZone]);
   const shown = view(read, overlay);
   const parts = agendaParts(shown.agenda, phaseOf, fmt.date);
-  const on = rowsOnScreen(parts, deferredPage, all);
-  const place = on.place;
-  const deferredRows = on.deferred;
-  const from = agendaFrom(place.page);
-  const hrefOf = (row: AgendaRowModel) => agendaItemHref(project, row.id, from);
-
-  // Another page of the Deferred part: what was picked on the last one is not on screen any more.
-  const [pickedPage, setPickedPage] = useState(place.page);
-  if (pickedPage !== place.page) {
-    setPickedPage(place.page);
-    setPicks((p) => ({ ...p, deferred: [] }));
-  }
-
-  // A page asked for from the pager opens with the Deferred part's head in view:
-  // the page stays where it was while the next page is read, then the part's head comes to the top.
-  const deferredPart = useRef<HTMLElement>(null);
-  const paged = useRef(false);
-  useEffect(() => {
-    if (!paged.current) return;
-    paged.current = false;
-    deferredPart.current?.scrollIntoView({ block: "start" });
-  }, [place.page]);
-  const onPage = (n: number, event: MouseEvent<HTMLAnchorElement>) => {
-    if (
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    )
-      return;
-    event.preventDefault();
-    paged.current = true;
-    router.push(agendaHref(project, { deferred: n }), { scroll: false });
-  };
+  const on = rowsOnScreen(parts, all);
+  const hrefOf = (row: AgendaRowModel) => agendaItemHref(project, row.id);
 
   const open = parts.open;
   const openIds = open.map((r) => r.id);
   const titles = new Map(
-    [...parts.proposed, ...parts.open, ...parts.deferred, ...parts.ended].map(
+    [...parts.proposed, ...parts.open, ...parts.ended].map(
       (r) => [r.id, r],
     ),
   );
@@ -336,7 +296,7 @@ export function AgendaList({
       setFailed({ part, message: result.message });
   };
 
-  /** Show a change at once, send it, and keep it only if it was written (a drop of a drag, Defer, Solve, Reopen). */
+  /** Show a change at once, send it, and keep it only if it was written (a drop of a drag, Propose, Solve, Reopen). */
   const sendNow = async (
     change: Sending,
     send: () => Promise<WriteAnswer>,
@@ -603,10 +563,10 @@ export function AgendaList({
     pickIn(part, () => []);
   };
 
-  /** Defer, Solve, Reopen: at once, for every picked id; the box takes the focus. */
+  /** Propose, Solve, Reopen: at once, for every picked id; the box takes the focus. */
   const actNow = async (
     part: AgendaPartKey,
-    kind: "defer" | "solve" | "reopen",
+    kind: "propose" | "solve" | "reopen",
     items: string[],
   ) => {
     setFailed(null);
@@ -937,56 +897,6 @@ export function AgendaList({
           {said}
         </p>
       </section>
-
-      {parts.deferred.length > 0 ? (
-        <section
-          className="panel agenda-part"
-          aria-labelledby={ids.deferred}
-          ref={deferredPart}
-        >
-          <PartHead
-            headId={ids.deferred}
-            head={AGENDA.heads.deferred}
-            count={pickOf.deferred.count}
-            check={boxOf("deferred")}
-          >
-            {barOf("deferred")}
-          </PartHead>
-          {failedOf("deferred")}
-          <WsList>
-            {deferredRows.map((row) => (
-              <AgendaRow
-                key={row.id}
-                row={row}
-                href={hrefOf(row)}
-                className={cx(
-                  pickOf.deferred.picked.includes(row.id) && "is-selected",
-                )}
-                check={checkOf("deferred", row)}
-                onDelete={() => askDelete("deferred", row)}
-              />
-            ))}
-          </WsList>
-          {place.paged ? (
-            <div className="panel-foot agenda-foot">
-              <Pager
-                page={place.page}
-                pages={place.pages}
-                range={pagerRange(
-                  place.page,
-                  AGENDA.pager.per,
-                  parts.deferred.length,
-                )}
-                label={AGENDA.pager.label}
-                pageKey="deferred"
-                hrefFor={(n) => agendaHref(project, { deferred: n })}
-                onPage={onPage}
-              />
-            </div>
-          ) : null}
-          {stripOf("deferred")}
-        </section>
-      ) : null}
 
       {parts.ended.length > 0 ? (
         <section className="panel agenda-part" aria-labelledby={ids.ended}>

@@ -13,7 +13,7 @@ import {
   type Change,
   type MovePlace,
 } from "./rules";
-import type { InboxEntry, WriteAnswer } from "./types";
+import type { InboxEntry, ItemChangeKind, WriteAnswer } from "./types";
 
 /**
  * The web's agenda writes (F45, F301 to F303): every change to a workspace's agenda made on the web
@@ -22,10 +22,13 @@ import type { InboxEntry, WriteAnswer } from "./types";
  *
  * - add: `POST /app/projects/{id}/workspace/agenda {title, note?}` → `{entry, item}`, the id the
  *   route minted;
- * - edit, move (before or after another item), defer, solve, drop, reopen, delete, accept (a
- *   Proposed item made Open) and entry (a note on an item's thread, `{kind: "note", body}`; the
- *   server adds its author and source): `POST …/workspace/agenda/changes {kind, items, fields}` →
- *   `{entry}`, one entry for all the items (the engine's commands are all or none);
+ * - edit, move (before or after another agenda), propose (an Open agenda back to Proposed), solve,
+ *   drop, reopen, delete, accept (a Proposed agenda made Open) and entry (a note, one item on an
+ *   agenda, `{kind: "note", body}`; the server adds its author and source): `POST
+ *   …/workspace/agenda/changes {kind, items, fields}` → `{entry}`, one entry for all the agendas (the
+ *   engine's commands are all or none);
+ * - item-done, item-dismiss, item-reopen, item-delete (`{entries}`, the items' file names, on one
+ *   agenda) → `{entry}`; split (`{entries, title}`) → `{entry, agenda}`, the new agenda's id;
  * - discard: `POST …/workspace/inbox/{entry}/discard` → `{entry}` (a waiting or a refused change);
  * - retry (Try again): `POST …/workspace/inbox/{entry}/retry` → `{entry, item?}`, the same change
  *   as a new entry, the refused one closed with it.
@@ -69,7 +72,11 @@ async function send(
   const token = await getSession();
   if (!token) return { ok: false, reason: "signed-out" };
   try {
-    const answer = await sendJson<{ entry: InboxEntry; item?: string | null }>(
+    const answer = await sendJson<{
+      entry: InboxEntry;
+      item?: string | null;
+      agenda?: string | null;
+    }>(
       `/app/projects/${encodeURIComponent(project)}/workspace/${route}`,
       "POST",
       body,
@@ -78,7 +85,12 @@ async function send(
     if (!answer || typeof answer !== "object" || !answer.entry) {
       return { ok: false, reason: "failed" };
     }
-    return { ok: true, entry: answer.entry, item: answer.item ?? null };
+    // an add answers its id as `item`, a split (and Try again on one) its new agenda's as `agenda`
+    return {
+      ok: true,
+      entry: answer.entry,
+      item: answer.item ?? answer.agenda ?? null,
+    };
   } catch (error) {
     if (!(error instanceof ApiError)) return { ok: false, reason: "failed" };
     switch (error.status) {
@@ -134,12 +146,42 @@ export async function moveAgendaItem(
   return change(project, { kind: "move", items: [item], fields: place });
 }
 
-/** Defer items (F301). */
-export async function deferAgendaItems(
+/** Propose agendas back: each Open one reads Proposed again, out of the open order (Deferred is gone). */
+export async function proposeAgendaItems(
   project: string,
   items: string[],
 ): Promise<WriteAnswer> {
-  return change(project, { kind: "defer", items, fields: {} });
+  return change(project, { kind: "propose", items, fields: {} });
+}
+
+/**
+ * Done, Dismiss, Reopen or Delete items of one agenda, by their full file names (`ThreadEntry.file`): one entry for
+ * all of them. The last open item going closes the agenda at the sync (the read predicts it meanwhile).
+ */
+export async function changeAgendaEntries(
+  project: string,
+  kind: ItemChangeKind,
+  agenda: string,
+  entries: string[],
+): Promise<WriteAnswer> {
+  return change(project, { kind, items: [agenda], fields: { entries } });
+}
+
+/**
+ * Split items off an agenda onto a new one under `title`: the answer's `item` is the new agenda's id (the route
+ * minted it), whose page reads it with its items while the split waits.
+ */
+export async function splitAgenda(
+  project: string,
+  agenda: string,
+  entries: string[],
+  title: string,
+): Promise<WriteAnswer> {
+  return change(project, {
+    kind: "split",
+    items: [agenda],
+    fields: { entries, title },
+  });
 }
 
 /** Solve items, with an optional outcome. */
@@ -168,7 +210,7 @@ export async function dropAgendaItems(
   });
 }
 
-/** Reopen items (deferred, solved or dropped). */
+/** Reopen agendas (solved or dropped). */
 export async function reopenAgendaItems(
   project: string,
   items: string[],

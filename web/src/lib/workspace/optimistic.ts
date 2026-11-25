@@ -3,15 +3,16 @@
  * page shows of the changes it wrote while the workspace has not taken them yet.
  *
  * The read model lays each open change over the agenda only as a mark (`sync: 'waiting'` or
- * `{refused, entry}`): a waiting add is its own row and a waiting delete hides its item, but a
- * waiting edit, move, defer, solve, drop or reopen shows the stored values. So the page keeps what
- * it wrote here and lays it over every read:
+ * `{refused, entry}`): a waiting add is its own row and a waiting delete hides its agenda, but a
+ * waiting edit, move, solve, drop or reopen shows the stored values. (Item changes, a split and a
+ * propose the read predicts itself: an item's state, the counts, the auto-close, the new agenda.) So
+ * the page keeps what it wrote here and lays it over every read:
  *
- * - **A write marks its items Waiting for sync** and shows its result (F36's "After"): an edit's
- *   title and note, a move's place, Defer, Solve and Drop's state (with the outcome or reason),
- *   Reopen's Open at the end of the operator's order; an Accept's item reads `accepting` (Open,
- *   first in the open order); a thread entry only marks its item; a delete hides its items; an add
- *   is first.
+ * - **A write marks its agendas Waiting for sync** and shows its result (F36's "After"): an edit's
+ *   title and note, a move's place, Propose's Proposed, Solve and Drop's state (with the outcome or
+ *   reason), Reopen's Open at the end of the operator's order; an Accept's agenda reads `accepting`
+ *   (Open, first in the open order); a note, an item change or a split only marks its agenda; a
+ *   delete hides its agendas; an add is first.
  * - **It stays through reads that do not project it**: a read taken before the write, or one that
  *   shows the stored values with the mark.
  * - **It clears on a read that shows it applied or refused**: refused, the read carries the
@@ -248,7 +249,7 @@ function named(read: AgendaRead): {
   return { refused, waiting };
 }
 
-const ENDED = ["deferred", "solved", "dropped"];
+const ENDED = ["solved", "dropped"];
 
 /** Whether the read comes from after a sync that landed once the change was written. */
 function landedAfter(
@@ -268,8 +269,8 @@ function shown(change: PendingChange, read: AgendaRead): boolean {
     rows.length > 0 && rows.every(test);
   const f = change.fields;
   switch (change.kind) {
-    case "defer":
-      return all((r) => r.state === "deferred");
+    case "propose":
+      return all((r) => r.state === "proposed" && !r.accepting);
     case "solve":
       return all((r) => r.state === "solved");
     case "drop":
@@ -415,18 +416,36 @@ export function view(
           return touch(r, patch);
         });
         break;
-      case "defer":
+      case "propose":
+        // Proposed again, out of the open order, until the sync takes it (the read says who proposed it then)
+        rows = rows.map((r) =>
+          c.items.includes(r.id)
+            ? touch(r, {
+                state: "proposed",
+                accepting: false,
+                proposed: r.proposed ?? { by: null, at: null },
+                outcome: "",
+                reason: "",
+                changed: c.day,
+              })
+            : r,
+        );
+        break;
+      case "item-done":
+      case "item-dismiss":
+      case "item-reopen":
+      case "item-delete":
+      case "split":
+        // An item change: the agenda waits; the read itself predicts its items, counts and status (the
+        // engine's auto-close), so nothing more is laid over it here.
+        rows = rows.map((r) => (c.items.includes(r.id) ? touch(r, {}) : r));
+        break;
       case "solve":
       case "drop":
         rows = rows.map((r) =>
           c.items.includes(r.id)
             ? touch(r, {
-                state:
-                  c.kind === "defer"
-                    ? "deferred"
-                    : c.kind === "solve"
-                      ? "solved"
-                      : "dropped",
+                state: c.kind === "solve" ? "solved" : "dropped",
                 outcome: c.kind === "solve" ? text(c.fields.outcome) : "",
                 reason: c.kind === "drop" ? text(c.fields.reason) : "",
                 changed: c.day,

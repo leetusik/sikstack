@@ -30,7 +30,6 @@ describe("the addresses", () => {
   it("puts every page under the project's workspace", () => {
     expect(workspaceHref(PROJECT)).toBe(ws);
     expect(agendaHref(PROJECT)).toBe(ws);
-    expect(agendaHref(PROJECT, { deferred: 2 })).toBe(`${ws}?deferred=2`);
     expect(agendaItemHref(PROJECT, "A13-n1")).toBe(`${ws}/agenda/A13-n1`);
     expect(backlogHref(PROJECT, { archived: 3 })).toBe(
       `${ws}/backlog?archived=3`,
@@ -45,7 +44,6 @@ describe("the addresses", () => {
   });
 
   it("writes page 1 as no key", () => {
-    expect(agendaHref(PROJECT, { deferred: 1 })).toBe(ws);
     expect(backlogHref(PROJECT, { archived: 1 })).toBe(`${ws}/backlog`);
   });
 
@@ -55,7 +53,7 @@ describe("the addresses", () => {
   });
 
   it("carries the list an item was opened from", () => {
-    const from: WorkspaceList = { list: "agenda", deferred: 2 };
+    const from: WorkspaceList = { list: "agenda" };
     const href = agendaItemHref(PROJECT, "A20-a3", from);
     const url = new URL(href, "https://sikstack.test");
     expect(url.pathname).toBe(`${ws}/agenda/A20-a3`);
@@ -76,7 +74,6 @@ describe("the Workspace's from", () => {
   it("admits each list page of the same project, rebuilt from its parts", () => {
     const lists: WorkspaceList[] = [
       { list: "agenda" },
-      { list: "agenda", deferred: 3 },
       { list: "backlog" },
       { list: "backlog", archived: 6 },
       { list: "docs" },
@@ -125,11 +122,12 @@ describe("the Workspace's from", () => {
       `${ws}?page=2`,
       `${ws}/backlog?deferred=2`,
       `${ws}/docs?version=v0001`,
-      `${ws}?deferred=0`,
-      `${ws}?deferred=02`,
-      `${ws}?deferred=2&deferred=3`,
+      // the Agenda has no paged part since Deferred went: an old `?deferred=N` is no list of ours
+      `${ws}?deferred=2`,
+      `${ws}/backlog?archived=02`,
+      `${ws}/backlog?archived=2&archived=3`,
       `${ws}/backlog?archived=-1`,
-      `${ws}?deferred=two`,
+      `${ws}/backlog?archived=two`,
       `${ws}/backlog#archived`,
     ]) {
       expect(decodeWorkspaceFrom(raw, PROJECT), raw).toBeNull();
@@ -151,15 +149,11 @@ describe("the Workspace's from", () => {
 describe("the way back", () => {
   it("goes to the item's own list at the page it was opened from", () => {
     expect(
-      wayBack(
-        PROJECT,
-        { kind: "agenda-item" },
-        { list: "agenda", deferred: 2 },
-      ),
+      wayBack(PROJECT, { kind: "agenda-item" }, { list: "agenda" }),
     ).toEqual({
-      href: `${ws}?deferred=2`,
+      href: ws,
       to: "agenda",
-      list: { list: "agenda", deferred: 2 },
+      list: { list: "agenda" },
     });
     expect(
       wayBack(PROJECT, { kind: "phase" }, { list: "backlog", archived: 3 })
@@ -172,7 +166,7 @@ describe("the way back", () => {
 
   it("ignores a list that is not the item's own, so the label matches the link", () => {
     expect(
-      wayBack(PROJECT, { kind: "phase" }, { list: "agenda", deferred: 2 }),
+      wayBack(PROJECT, { kind: "phase" }, { list: "agenda" }),
     ).toEqual({
       href: `${ws}/backlog`,
       to: "backlog",

@@ -1,50 +1,44 @@
 import { plural } from "@/lib/format";
 
-import {
-  WS_ACTIONS,
-  WS_CHANGE,
-  WS_GLOSSARY,
-  WS_PAGER,
-  WS_STATES,
-} from "./frame";
+import { WS_ACTIONS, WS_CHANGE, WS_GLOSSARY, WS_STATES } from "./frame";
 
 /** An action on picked rows (F303). */
-export type AgendaAct = "delete" | "defer" | "reopen" | "drop" | "solve";
-/** The Agenda's three parts. */
-export type AgendaPartName = "open" | "deferred" | "ended";
+export type AgendaAct = "delete" | "propose" | "reopen" | "drop" | "solve";
+/** The Agenda's parts with picked rows (Proposed has none). */
+export type AgendaPartName = "open" | "ended";
 
 const PART_NAMES: Record<AgendaPartName, string> = {
-  open: "open items",
-  deferred: "deferred items",
-  ended: "solved and dropped items",
+  open: "open agendas",
+  ended: "solved and dropped agendas",
 };
 
 const ACTED: Record<Exclude<AgendaAct, "delete">, string> = {
-  defer: "deferred",
+  propose: "proposed again, out of the open agendas",
   solve: "solved",
   drop: "dropped",
-  reopen: "reopened, at the end of the open items",
+  reopen: "reopened, at the end of the open agendas",
 };
 
 const SAID_DELETED = (title: string): string =>
   `“${title}” deleted. It leaves the workspace at the next sync.`;
 const SAID_DELETED_MANY = (n: number): string =>
-  `${n} items deleted. They leave the workspace at the next sync.`;
+  `${n} agendas deleted. They leave the workspace at the next sync.`;
 
 /**
  * The Agenda's words (design job 02, rounds 01-workspace and 02-agenda-and-links: `AgendaList.dc.html`, frame.md
  * F36, F45, F49, F78, F301 to F303), verbatim. Imported by path (`@/content/workspace/agenda`). What the frame
- * already says (the heads, the actions, a change that waits, the part that failed, the pager's name) is taken from
- * `./frame`, never retyped.
+ * already says (the heads, the actions, a change that waits, the part that failed) is taken from `./frame`, never
+ * retyped. Each row is an **agenda**; what an agenda holds are its **items**.
  */
 export const AGENDA = {
   heads: {
     open: WS_GLOSSARY.heads.openAndInProgress,
-    deferred: WS_GLOSSARY.heads.deferred,
     ended: WS_GLOSSARY.heads.solvedAndDropped,
   },
-  /** A part's count: `5 items`, `1 item`, `0 items`. */
-  count: (n: number): string => plural(n, "item"),
+  /** A part's count: `5 agendas`, `1 agenda`, `0 agendas`. */
+  count: (n: number): string => plural(n, "agenda"),
+  /** An open agenda's open items, in its end cell: `2 open items`. */
+  itemsOpen: (n: number): string => `${n} open ${n === 1 ? "item" : "items"}`,
   addItem: WS_ACTIONS.addItem,
   form: {
     title: WS_ACTIONS.title,
@@ -74,9 +68,9 @@ export const AGENDA = {
     putBack: (title: string): string => `“${title}” put down where it was.`,
     cancelled: (title: string, at: number, of: number): string =>
       `Move cancelled. “${title}” is back at ${at} of ${of}.`,
-    /** An action on the picked rows (F303): `3 items deferred. They wait for the next sync.` */
+    /** An action on the picked rows (F303): `3 agendas solved. They wait for the next sync.` */
     acted: (kind: AgendaAct, n: number, title: string): string => {
-      const who = n === 1 ? `“${title}”` : `${n} items`;
+      const who = n === 1 ? `“${title}”` : `${n} agendas`;
       if (kind === "delete")
         return n === 1 ? SAID_DELETED(title) : SAID_DELETED_MANY(n);
       return `${who} ${ACTED[kind]}. ${n === 1 ? "It waits" : "They wait"} for the next sync.`;
@@ -85,7 +79,7 @@ export const AGENDA = {
   /** The grip (F302): named for its item, described by one hidden sentence. */
   grip: {
     label: (title: string): string => `Reorder: ${title}`,
-    how: "Space picks the item up. The arrow keys move it, Space puts it down, Escape puts it back.",
+    how: "Space picks the agenda up. The arrow keys move it, Space puts it down, Escape puts it back.",
   },
   /** Picked rows (F303, F309): the boxes, the count, Clear, the actions and the narrow strip. */
   pick: {
@@ -101,7 +95,7 @@ export const AGENDA = {
       `Act on the selected ${PART_NAMES[part]}`,
     acts: {
       delete: WS_ACTIONS.delete[0],
-      defer: WS_ACTIONS.defer[0],
+      propose: WS_ACTIONS.propose[0],
       reopen: WS_ACTIONS.reopen[0],
       drop: WS_ACTIONS.drop[0],
       solve: WS_ACTIONS.solve[0],
@@ -109,13 +103,13 @@ export const AGENDA = {
   },
   /** F4's sentence for an action or a move whose send got no usable answer (F45's pattern; listed for the walk). */
   actFailed: (kind: AgendaAct | "move", n: number): string =>
-    `Could not ${kind} the ${n === 1 ? "item" : "items"}. Try again.`,
+    `Could not ${kind} the ${n === 1 ? "agenda" : "agendas"}. Try again.`,
   /** Drop asks first (F303), naming what it acts on; one optional Reason. */
   confirmDrop: {
     title: (title: string): string => `Drop “${title}”?`,
     before: "Drop “",
     after: "”?",
-    titleMany: (n: number): string => `Drop ${n} items?`,
+    titleMany: (n: number): string => `Drop ${n} agendas?`,
     text: "It moves to Solved and dropped. Reopen brings it back.",
     textMany: "They move to Solved and dropped. Reopen brings one back.",
     reason: WS_ACTIONS.reason,
@@ -123,8 +117,8 @@ export const AGENDA = {
     yes: ["Yes, drop", WS_ACTIONS.drop[1]] as const,
   },
   empty: {
-    none: "No items yet. Add what you want done or dealt with, at any size.",
-    noOpen: "No open items. Add what you want done or dealt with next.",
+    none: "No agendas yet. Add what you want done or dealt with, at any size.",
+    noOpen: "No open agendas. Add what you want done or dealt with next.",
   },
   failed: WS_STATES.partFailed.agenda,
   retry: WS_STATES.retry,
@@ -140,15 +134,14 @@ export const AGENDA = {
     /** The title in the dialog's `h2`, around the item's own title (its `lang` kept). */
     before: "Delete “",
     after: "”?",
-    titleMany: (n: number): string => `Delete ${n} items?`,
-    text: "It leaves the agenda for good, with its thread. Its phases stay. You cannot undo this.",
+    titleMany: (n: number): string => `Delete ${n} agendas?`,
+    text: "It leaves the workspace for good, with its items. Its phases stay. You cannot undo this.",
     textMany:
-      "They leave the agenda for good, with their threads. Their phases stay. You cannot undo this.",
+      "They leave the workspace for good, with their items. Their phases stay. You cannot undo this.",
     cancel: WS_ACTIONS.cancel,
     yes: ["Yes, delete", WS_ACTIONS.delete[1]] as const,
     /** F4's sentence for a send that did not get an answer (F45's pattern; listed for the walk). */
-    failed: "Could not delete the item. Try again.",
+    failed: "Could not delete the agenda. Try again.",
   },
-  pager: WS_PAGER.deferredItems,
   showAll: WS_GLOSSARY.buttons.showAll,
 } as const;

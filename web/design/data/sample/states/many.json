@@ -49,7 +49,6 @@
       "waiting": []
     },
     "phases": [],
-    "deferred": [],
     "docs": [],
     "retired": [],
     "agenda": [
@@ -62,7 +61,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -76,7 +74,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -90,7 +87,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -104,7 +100,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -118,7 +113,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -132,7 +126,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -146,7 +139,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -160,7 +152,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -174,7 +165,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -188,7 +178,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -202,7 +191,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -216,7 +204,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -230,7 +217,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -244,7 +230,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -258,7 +243,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -272,7 +256,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -286,7 +269,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -300,7 +282,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -314,7 +295,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -328,7 +308,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -342,7 +321,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -356,7 +334,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -370,7 +347,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -380,196 +356,238 @@
         "title": "Write the pricing page FAQ",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A18-tw",
         "title": "Measure the first paint of the Agenda",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A19-dp",
         "title": "Add a filter for solved items",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A20-4w",
         "title": "Link the changelog from the footer",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A21-fk",
         "title": "Fix the focus ring on dark buttons",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A10-tt",
         "title": "Move billing under settings",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A11-ke",
         "title": "Show who changed an item",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A12-8a",
-        "title": "Group deferred items by month",
+        "title": "Group solved agendas by month",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A13-g8",
         "title": "Explain the waiting badge in help",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A14-f3",
         "title": "Rename Review to Inbox",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A15-md",
         "title": "Cache the agenda between tabs",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A16-js",
         "title": "Test the add form on a phone",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A8-ph",
         "title": "Add a keyboard shortcut for search",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A9-hk",
         "title": "Trim the welcome email",
         "lang": "en",
         "note": "",
-        "state": "deferred",
+        "state": "proposed",
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
-        "sync": null
+        "sync": null,
+        "proposed": {
+          "by": null,
+          "at": null
+        }
       },
       {
         "id": "A31-ty",
@@ -580,7 +598,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "Undo is enough",
         "sync": null
@@ -594,7 +611,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "The header shows Synced 4m ago",
         "reason": "",
         "sync": null
@@ -608,7 +624,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -622,7 +637,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "The light sidebar tested better",
         "sync": null
@@ -636,7 +650,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -650,7 +663,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "Shipped with the CLI",
         "reason": "",
         "sync": null
@@ -664,7 +676,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -678,7 +689,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -692,7 +702,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "Retry three times, then show Try again",
         "reason": "",
         "sync": null
@@ -710,7 +719,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -731,7 +739,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -752,7 +759,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -773,7 +779,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -794,7 +799,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -815,7 +819,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -836,7 +839,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -857,7 +859,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -878,7 +879,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -899,7 +899,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -920,7 +919,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -941,7 +939,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -962,7 +959,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -983,7 +979,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1004,7 +999,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1025,7 +1019,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1046,7 +1039,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1067,7 +1059,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1088,7 +1079,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1109,7 +1099,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1130,7 +1119,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1151,7 +1139,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1172,7 +1159,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1189,11 +1175,10 @@
       "title": "Write the pricing page FAQ",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1203,6 +1188,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A18-tw": {
@@ -1210,11 +1199,10 @@
       "title": "Measure the first paint of the Agenda",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1224,6 +1212,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A19-dp": {
@@ -1231,11 +1223,10 @@
       "title": "Add a filter for solved items",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1245,6 +1236,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A20-4w": {
@@ -1252,11 +1247,10 @@
       "title": "Link the changelog from the footer",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1266,6 +1260,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A21-fk": {
@@ -1273,11 +1271,10 @@
       "title": "Fix the focus ring on dark buttons",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1287,6 +1284,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A10-tt": {
@@ -1294,11 +1295,10 @@
       "title": "Move billing under settings",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1308,6 +1308,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A11-ke": {
@@ -1315,11 +1319,10 @@
       "title": "Show who changed an item",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1329,18 +1332,21 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A12-8a": {
       "id": "A12-8a",
-      "title": "Group deferred items by month",
+      "title": "Group solved agendas by month",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1350,6 +1356,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A13-g8": {
@@ -1357,11 +1367,10 @@
       "title": "Explain the waiting badge in help",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1371,6 +1380,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A14-f3": {
@@ -1378,11 +1391,10 @@
       "title": "Rename Review to Inbox",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1392,6 +1404,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A15-md": {
@@ -1399,11 +1415,10 @@
       "title": "Cache the agenda between tabs",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1413,6 +1428,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A16-js": {
@@ -1420,11 +1439,10 @@
       "title": "Test the add form on a phone",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1434,6 +1452,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A8-ph": {
@@ -1441,11 +1463,10 @@
       "title": "Add a keyboard shortcut for search",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1455,6 +1476,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A9-hk": {
@@ -1462,11 +1487,10 @@
       "title": "Trim the welcome email",
       "lang": "en",
       "note": "",
-      "state": "deferred",
+      "state": "proposed",
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1476,6 +1500,10 @@
           "state": "fresh",
           "at": "2026-11-20T08:59:20Z"
         }
+      },
+      "proposed": {
+        "by": null,
+        "at": null
       }
     },
     "A31-ty": {
@@ -1487,7 +1515,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "Undo is enough",
       "sync": null,
@@ -1508,7 +1535,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "The header shows Synced 4m ago",
       "reason": "",
       "sync": null,
@@ -1529,7 +1555,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1550,7 +1575,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "The light sidebar tested better",
       "sync": null,
@@ -1571,7 +1595,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1592,7 +1615,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "Shipped with the CLI",
       "reason": "",
       "sync": null,
@@ -1613,7 +1635,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1634,7 +1655,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -1655,7 +1675,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "Retry three times, then show Try again",
       "reason": "",
       "sync": null,
