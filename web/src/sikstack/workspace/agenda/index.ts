@@ -1,5 +1,5 @@
 // The Workspace's Agenda (design job 02, rounds 01-workspace and 02-agenda-and-links: `Agenda.dc.html`,
-// `AgendaList.dc.html`, frame.md F301 to F303, F309): its four parts (Proposed first, P61-e9), the add form, the rows with their grip, box and
+// `AgendaList.dc.html`, frame.md F301 to F303, F309): its three parts (Proposed first, P61-e9; no Deferred), the add form, the rows with their grip, box and
 // Delete, the picked rows' actions in the head or the strip, Drop's and Delete's confirm, the open changes no row
 // carries, its loading and failed parts. Words: `@/content/workspace/agenda`.
 //
@@ -12,8 +12,7 @@
 //   `sendAct` sends one action for the picked ids.
 // - `AgendaFailed` (client): the part that failed, with Try again.
 // - `AgendaLoading`, `PartHead`, `AgendaRow`, `LoadingRows`: the parts with no state of their own.
-// - The pure model: `agendaParts`, `deferredPageFrom`, `deferredPlace`, `endedShown`, `emptyText`, `addIsPrimary`,
-//   `agendaFrom`, `workspaceHrefs`, `workspaceProjectId`, `writeShown`; `unplacedDone`, what Discard or Try again on
+// - The pure model: `agendaParts`, `openEnd`, `endedShown`, `emptyText`, `addIsPrimary`, `workspaceHrefs`, `workspaceProjectId`, `writeShown`; `unplacedDone`, what Discard or Try again on
 //   an open change no row carries leaves (the overlay, and the box that takes the focus).
 export {
   AddForm,
@@ -28,21 +27,17 @@ export {
 export { AgendaLoading, AgendaRow, LoadingRows, PartHead } from "./parts";
 export {
   addIsPrimary,
-  AGENDA_PER,
   AGENDA_SHOWN,
-  agendaFrom,
   agendaParts,
-  deferredPageFrom,
-  deferredPlace,
   emptyText,
   endedShown,
+  openEnd,
   workspaceHrefs,
   workspaceProjectId,
   writeShown,
   type AgendaPartKey,
   type AgendaParts,
   type AgendaRowModel,
-  type DeferredPlace,
   type WriteShown,
 } from "./model";
 export { BulkStrip, Grip, PartBar, PartCheck, RowCheck } from "./controls";

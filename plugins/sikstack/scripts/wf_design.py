@@ -1,4 +1,4 @@
-"""The design part: `design-sign`, and (2.1.0) `design-publish`, `design-builds` and `design-delete`, and (0.6.0)
+"""The design part: `design-sign`, and (2.1.0) `design-publish`, `design-builds` and `design-delete`, and (0.7.0)
 `design-link`. Imports wf_store; the publish verbs import wf_cloud when they run, for the link, the key and the
 transport.
 
@@ -176,10 +176,7 @@ def _design_link(prog: str, nothing: str):
     one line naming design-link, before any request."""
     import wf_cloud
     if wf_cloud.cloud_linked():
-        try:
-            return wf_cloud.CloudLink()
-        except wf_cloud.CloudError as exc:
-            raise SystemExit(f"{prog}: {exc}")
+        return wf_cloud.api_link(prog, nothing)  # the link every API verb shares
     try:
         link, path = design_read_link()
     except (OSError, ValueError) as exc:
@@ -292,46 +289,10 @@ def _design_link_with(prog: str, server: str, project: str, org, key: str, targe
 
 def _design_call(link, prog: str, nothing: str, method: str, suffix: str = "", body=None) -> dict:
     """One request to the design API; the 2xx answer's JSON, else one line (the server's own, with its status)."""
-    import urllib.request
     from urllib.parse import quote
     import wf_cloud
-    import wf_setup
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *a, **k):
-            return None
-
-    url = f"{link.server}/api/design/{quote(link.project, safe='')}/builds{suffix}"
-    headers = {"Authorization": "Bearer " + link._key, "Accept": "application/json",
-               "X-Sikstack-Checkout": link.checkout, "X-Sikstack-Engine": link.engine,
-               "User-Agent": wf_setup.user_agent()}
-    if body is not None:
-        headers["Content-Type"] = "application/gzip"
-    wire = wf_cloud._CloudWire()
-    handlers = [NoRedirect()] + wf_cloud._cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if link.local else [])
-    request = urllib.request.Request(url, data=body, method=method, headers=headers)
-    try:
-        status, raw, kind = link._exchange(urllib.request.build_opener(*handlers), request, wire)
-    except wf_cloud.CloudUnreachable as exc:
-        raise SystemExit(f"{prog}: sikstack is not reachable at {link.server} ({exc}): {nothing}")
-    blocked = wf_setup.block_line(status, raw, kind, link._key)
-    if blocked:
-        raise SystemExit(f"{prog}: the request to {link.server} was {blocked}, by something in front of it ({nothing})")
-    try:
-        payload = json.loads(raw.decode("utf-8")) if raw else {}
-    except (UnicodeDecodeError, ValueError):
-        payload = {}
-    payload = payload if isinstance(payload, dict) else {}
-    if 200 <= status < 300:
-        return payload
-    detail = payload.get("detail") if payload.get("detail") is not None else payload.get("error")
-    if isinstance(detail, list) and detail and isinstance(detail[0], dict):
-        detail = detail[0].get("msg")
-    detail = " ".join(str(detail).split())[:300] if detail else f"HTTP {status}"
-    hint = {401: "; make a workspace key under Keys on the project's page and link again",
-            403: "; this is not a workspace key: make one under Keys on the project's page"}.get(status, "")
-    line = f"{prog}: sikstack refused (HTTP {status}): {detail}{hint} ({nothing})"
-    raise SystemExit(line.replace(link._key, "<key>") if link._key else line)
+    return wf_cloud.api_call(link, prog, nothing, method, f"/api/design/{quote(link.project, safe='')}/builds{suffix}",
+                             body=body, content_type="application/gzip")
 
 
 def _build_folder(args, prog: str) -> Path:

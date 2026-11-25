@@ -13,7 +13,7 @@ import type { WsSyncLine } from "./sync-model";
 
 /**
  * An item page that did not load (frame.md F49, F84; F5's app error), one drawing for the phase, the slice, the
- * agenda item, the deferred job and the doc: the back row with the sync line when the workspace answered (its bar
+ * agenda and the doc: the back row with the sync line when the workspace answered (its bar
  * while Try again reads the page again, F40; unknown, the way back alone and the bar while it reads), then
  * **This page did not load**, F5's sentence, **Try again** (primary) and the item's own way back, and the
  * reference when the error has a digest (the route's boundary; a read that failed has none).

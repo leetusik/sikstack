@@ -49,7 +49,6 @@
       "waiting": []
     },
     "phases": [],
-    "deferred": [],
     "docs": [],
     "retired": [],
     "agenda": [
@@ -62,7 +61,6 @@
         "created": "2026-11-19",
         "changed": "2026-11-19",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": "waiting"
@@ -76,7 +74,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -90,7 +87,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": "waiting"
@@ -104,7 +100,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": null
@@ -118,7 +113,6 @@
         "created": "2026-11-20",
         "changed": "2026-11-20",
         "phases": [],
-        "deferred": [],
         "outcome": "",
         "reason": "",
         "sync": "waiting"
@@ -136,7 +130,6 @@
       "created": "2026-11-19",
       "changed": "2026-11-19",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": "waiting",
@@ -157,7 +150,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -178,7 +170,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": "waiting",
@@ -199,7 +190,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": null,
@@ -220,7 +210,6 @@
       "created": "2026-11-20",
       "changed": "2026-11-20",
       "phases": [],
-      "deferred": [],
       "outcome": "",
       "reason": "",
       "sync": "waiting",

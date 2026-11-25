@@ -1152,3 +1152,245 @@ def test_the_key_routes_keep_their_cursor_contract(fb):
         assert set(rest) == {"records"} and [r["id"] for r in rest["records"]] == newest_first[2:]
         # ``page`` is not theirs: it is ignored, never a numbered read.
         assert fb.get(f"{base}limit=2&page=2", headers=_h(key)).json() == first
+
+
+# --- triage: the engine's feedback on the agenda (0.6.0) ------------------------------
+
+_ENGINE = {"X-Sikstack-Checkout": "test-checkout", "X-Sikstack-Engine": "v99"}
+
+
+def _ws_put(path: str, content: str) -> dict:
+    import hashlib
+
+    return {"op": "put", "path": path, "base_rev": None,
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(), "content": content}
+
+
+def _ws_commit(client: TestClient, project_id: str, workspace: dict, ops: list) -> None:
+    res = client.post(f"/api/workspace/{project_id}/commit", headers={**_h(workspace), **_ENGINE},
+                      json={"batch_id": str(uuid4()), "command": ["agenda-item", "add"],
+                            "origin": "command", "ops": ops, "events": [], "derived": [],
+                            "inbox": []})
+    assert res.status_code == 200, res.text
+
+
+def _ws_agenda(aid: str, items: dict[str, str]) -> list[dict]:
+    """``aid``'s agenda.json and one item per ``{file name: source}``."""
+
+    import json
+
+    record = {"id": aid, "title": "Export", "note": None, "status": "open", "order": 1.0,
+              "created_at": "2026-11-24T10:00:00Z", "changed_at": "2026-11-24T10:00:00Z",
+              "outcome": None, "reason": None}
+    ops = [_ws_put(f"works/agenda/{aid}/agenda.json", json.dumps(record) + "\n")]
+    for name, source in items.items():
+        item = {"kind": "feedback", "author": "person:op", "source": source,
+                "created_at": "2026-11-24T10:00:00Z", "body": "x"}
+        ops.append(_ws_put(f"works/agenda/{aid}/entries/{name}.json", json.dumps(item) + "\n"))
+    return ops
+
+
+def _triage(client: TestClient, project_id: str, workspace: dict, query: str = ""):
+    return client.get(f"/api/feedback/{project_id}/triage{query}", headers=_h(workspace))
+
+
+def _mark(client: TestClient, project_id: str, workspace: dict, feedback_id: str, **body):
+    return client.post(f"/api/feedback/{project_id}/triage/{feedback_id}", json=body,
+                       headers=_h(workspace))
+
+
+def test_triage_lists_the_keys_projects_untriaged_feedback_newest_first(fb):
+    owner = _signup(fb)
+    pid = owner["project"]["id"]
+    workspace = _key(fb, owner, scope="workspace", project=True)
+    capture = _key(fb, owner, scope="capture", project=True)
+    a = _capture(fb, _h(capture), message="Export hangs at 99%", channel="web", feedback_value=2,
+                 comment="on a 2 GB file", target_type="surface", target_id="export")["request_id"]
+    b = _capture(fb, _h(capture), message="Search is slow")["request_id"]
+    c = _capture(fb, _h(capture), message="Love the new pager")["request_id"]
+
+    res = _triage(fb, pid, workspace)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["project"] == pid and body["more"] is False
+    assert [f["id"] for f in body["feedback"]] == [c, b, a]
+    assert body["feedback"][2] == {
+        "id": a, "at": body["feedback"][2]["at"], "product": "app-x", "channel": "web",
+        "value": 2, "message": "Export hangs at 99%", "comment": "on a 2 GB file",
+        "target": {"type": "surface", "id": "export", "role": None, "text": None},
+        "url": f"http://localhost:8765/feedback/{a}"}
+    assert body["feedback"][2]["at"].endswith("Z") and body["feedback"][0]["target"] is None
+
+    # bounded: ``limit`` cuts it and says there is more; out of range is a 400
+    cut = _triage(fb, pid, workspace, "?limit=2").json()
+    assert [f["id"] for f in cut["feedback"]] == [c, b] and cut["more"] is True
+    for bad in ("0", "101", "x"):
+        assert _triage(fb, pid, workspace, f"?limit={bad}").status_code == 400, bad
+
+    # one piece, with its triage state
+    one = fb.get(f"/api/feedback/{pid}/triage/{a}", headers=_h(workspace)).json()["feedback"]
+    assert one["message"] == "Export hangs at 99%" and one["triage"] == {
+        "state": "untriaged", "agenda": None, "reason": None, "by": None, "at": None,
+        "agendas": []}
+
+
+def test_filed_and_dismissed_feedback_never_lists_again_and_the_latest_mark_wins(fb):
+    owner = _signup(fb)
+    pid = owner["project"]["id"]
+    workspace = _key(fb, owner, scope="workspace", project=True)
+    capture = _key(fb, owner, scope="capture", project=True)
+    a, b, c = (_capture(fb, _h(capture), message=m)["request_id"] for m in ("one", "two", "three"))
+
+    res = _mark(fb, pid, workspace, a, state="filed", agenda="A7-m3", by="agent:claude-opus-5-5")
+    assert res.status_code == 200, res.text
+    assert res.json()["feedback"] == a
+    assert {k: res.json()["triage"][k] for k in ("state", "agenda", "reason", "by")} == {
+        "state": "filed", "agenda": "A7-m3", "reason": None, "by": "agent:claude-opus-5-5"}
+    res = _mark(fb, pid, workspace, b, state="dismissed", reason=" a duplicate of one ",
+                by="person:op")
+    assert res.status_code == 200 and res.json()["triage"]["reason"] == "a duplicate of one"
+    assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [c]
+
+    # dismissed, then filed: the latest wins, and it still never lists
+    assert _mark(fb, pid, workspace, b, state="filed", agenda="A8-k2", by="person:op").status_code == 200
+    got = fb.get(f"/api/feedback/{pid}/triage/{b}", headers=_h(workspace)).json()["feedback"]
+    assert got["triage"]["state"] == "filed" and got["triage"]["agenda"] == "A8-k2"
+    assert got["triage"]["reason"] is None and got["triage"]["at"].endswith("Z")
+    assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [c]
+    assert _mark(fb, pid, workspace, c, state="dismissed", by="person:op").status_code == 200
+    assert _triage(fb, pid, workspace).json()["feedback"] == []
+
+    # a bad mark is a 400 with one line, and changes nothing
+    for bad, detail in (
+        ({"state": "done", "by": "person:op"}, "state must be one of filed, dismissed"),
+        ({"state": "filed", "agenda": "A7", "by": "person:op"}, "agenda must be a full agenda id (A7-m3)"),
+        ({"state": "filed", "by": "person:op"}, "agenda must be a full agenda id (A7-m3)"),
+        ({"state": "filed", "agenda": "A7-m3", "reason": "x", "by": "person:op"}, "a filed mark takes no reason"),
+        ({"state": "dismissed", "agenda": "A7-m3", "by": "person:op"}, "a dismissed mark takes no agenda"),
+        ({"state": "dismissed", "reason": "two\nlines", "by": "person:op"},
+         "reason must be one line of at most 500 characters"),
+        ({"state": "dismissed", "by": "op"},
+         "by must be person:<name> or agent:<name>, one line of at most 120 characters"),
+        ({"state": "dismissed", "by": "person:op", "note": "x"}, "a mark takes no note"),
+    ):
+        res = _mark(fb, pid, workspace, a, **bad)
+        assert res.status_code == 400 and res.json()["detail"] == detail, (bad, res.text)
+    assert fb.get(f"/api/feedback/{pid}/triage/{a}",
+                  headers=_h(workspace)).json()["feedback"]["triage"]["agenda"] == "A7-m3"
+
+
+def test_feedback_an_agenda_item_names_counts_as_filed(fb):
+    """The web's "file on the agenda" and the engine's agree: a feedback an item names by
+    its source, stored or in a pending inbox entry, never lists."""
+
+    owner = _signup(fb)
+    pid = owner["project"]["id"]
+    workspace = _key(fb, owner, scope="workspace", project=True)
+    capture = _key(fb, owner, scope="capture", project=True)
+    a, b, c = (_capture(fb, _h(capture), message=m)["request_id"] for m in ("one", "two", "three"))
+    # not linked yet: nothing is derived, everything lists
+    assert len(_triage(fb, pid, workspace).json()["feedback"]) == 3
+
+    _ws_commit(fb, pid, workspace, _ws_agenda("A2-k5", {
+        "20261124T010000.000001Z-aaaa": f"feedback:{a}",
+        "20261124T010000.000002Z-bbbb": "slice:P8-q4.S1"}))
+    assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [c, b]
+    got = fb.get(f"/api/feedback/{pid}/triage/{a}", headers=_h(workspace)).json()["feedback"]
+    assert got["triage"] == {"state": "filed", "agenda": "A2-k5", "reason": None, "by": None,
+                             "at": None, "agendas": ["A2-k5"]}
+
+    # the web files b on A2-k5: a pending inbox entry, before any engine applies it
+    res = fb.post(f"/app/feedback/{b}/agenda", json={"item": "A2-k5"}, headers=owner["session"])
+    assert res.status_code == 201, res.text
+    assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [c]
+
+
+def test_triage_is_the_workspace_keys_own_project_only(fb):
+    owner = _signup(fb)
+    pid = owner["project"]["id"]
+    workspace = _key(fb, owner, scope="workspace", project=True)
+    capture = _key(fb, owner, scope="capture", project=True)
+    mine = _capture(fb, _h(capture), message="mine")["request_id"]
+    stranger = _signup(fb)
+    spid = stranger["project"]["id"]
+    their_key = _key(fb, stranger, scope="workspace", project=True)
+    theirs = _capture(fb, _h(_key(fb, stranger, scope="capture", project=True)),
+                      message="theirs")["request_id"]
+
+    # another project's key on this project: 404, read or mark alike
+    assert _triage(fb, pid, their_key).status_code == 404
+    assert fb.get(f"/api/feedback/{pid}/triage/{mine}", headers=_h(their_key)).status_code == 404
+    assert _mark(fb, pid, their_key, mine, state="dismissed", by="person:x").status_code == 404
+    # this project's key, another project's feedback: 404, and nothing is marked
+    assert fb.get(f"/api/feedback/{pid}/triage/{theirs}", headers=_h(workspace)).json() == {
+        "detail": "feedback not found"}
+    assert _mark(fb, pid, workspace, theirs, state="dismissed", by="person:x").status_code == 404
+    assert [f["id"] for f in _triage(fb, spid, their_key).json()["feedback"]] == [theirs]
+    assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [mine]
+    # a malformed project or feedback id is a 404 too
+    assert _triage(fb, "not-a-uuid", workspace).status_code == 404
+    assert fb.get(f"/api/feedback/{pid}/triage/nope", headers=_h(workspace)).status_code == 404
+
+    # any other caller: a full key or a session is a 403; no key or a revoked one a 401
+    full = _key(fb, owner)
+    assert _triage(fb, pid, full).status_code == 403
+    assert fb.get(f"/api/feedback/{pid}/triage", headers=owner["session"]).status_code == 403
+    assert fb.get(f"/api/feedback/{pid}/triage").status_code == 401
+    res = fb.delete(f"/app/projects/{pid}/credentials/{workspace['id']}", headers=owner["session"])
+    assert res.status_code == 204, res.text
+    assert _triage(fb, pid, workspace).status_code == 401
+
+
+def test_the_triage_migration_applies_on_a_fresh_database(monkeypatch):
+    """``0018`` creates ``feedback_triage`` as the model declares it; a downgrade to
+    ``0017`` drops it and only it."""
+
+    if not _RAW_DSN:
+        pytest.skip("set KB_TEST_DATABASE_URL to a disposable Postgres to run the migration test")
+    from pathlib import Path
+
+    ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    if not ini.is_file():
+        pytest.skip("no alembic/ here (the plugin template ships none)")
+    from alembic import command
+    from alembic.autogenerate import compare_metadata
+    from alembic.config import Config
+    from alembic.migration import MigrationContext
+
+    from server.persistence import models  # noqa: F401
+    from server.persistence.base import Base
+
+    base = make_url(_RAW_DSN).set(drivername="postgresql+psycopg")
+    name = f"kb_triage_{uuid4().hex[:10]}"
+    admin = create_engine(base.render_as_string(hide_password=False), isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{name}"'))
+    except Exception as exc:  # pragma: no cover - environment dependent
+        admin.dispose()
+        pytest.skip(f"cannot create a scratch database: {exc}")
+    url = base.set(database=name).render_as_string(hide_password=False)
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = Config(str(ini))
+    engine = create_engine(url)
+    count = text("SELECT count(*) FROM pg_tables WHERE tablename = 'feedback_triage'")
+    pins = text("SELECT count(*) FROM pg_tables WHERE tablename = 'tenant_one_pins'")
+    try:
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            assert conn.execute(count).scalar_one() == 1
+            assert compare_metadata(
+                MigrationContext.configure(conn, opts={"compare_type": True}), Base.metadata
+            ) == []
+        command.downgrade(cfg, "0017_tenant_one_pin")
+        with engine.connect() as conn:
+            assert conn.execute(count).scalar_one() == 0
+            assert conn.execute(pins).scalar_one() == 1
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            assert conn.execute(count).scalar_one() == 1
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()

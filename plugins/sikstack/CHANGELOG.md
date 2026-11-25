@@ -10,7 +10,7 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
-## 0.6.0 — 2026-11-25
+## 0.7.0 — 2026-11-25
 
 - **A local workspace publishes design builds: `sikstack design-link`.** `design-publish`, `design-builds` and
   `design-delete` used to need a cloud-linked checkout, and a linked checkout runs no worktree phases. A design link
@@ -52,6 +52,64 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
     to claude.ai.
   - `check.mjs` now exports its state reading and its `playwright-cli` driver for `canvas.mjs`, and behaves as
     before.
+
+## 0.6.0 — 2026-11-25
+
+- **An agenda holds items.** Each file under an agenda's `entries/` is now an item, open, done or dismissed: its state
+  is three keys on the file itself (`state`, `state_by`, `state_at`), absent meaning open, so every file an older
+  engine wrote reads open and no read or `check` rewrites it. `sikstack agenda-item add <A>` adds one (`agenda-entry`
+  still works); `agenda-item done | dismiss | reopen | delete <ref>... --author ...` deal with items by the reference
+  `agenda-show` prints, `<agenda>/<tail>` (`A7-m3/hnj0`, the agenda in any brief form) or the full file name, all or
+  none, one event each. An unknown or ambiguous reference is refused in one line and nothing is written; a new item
+  takes a tail its agenda does not hold.
+- **An agenda closes itself when its last open item goes.** After an item command, an Open, Proposed or In progress
+  agenda that held items and has none open is Solved when any item is done (`all items dealt with: N done, M
+  dismissed`), else Dropped (`every item dismissed or deleted`), in the same command with its own event. An agenda
+  with no items never closes by itself, and adding or reopening an item never reopens a closed one.
+- **`agenda-split <A> <tail>... --title ... --author ...`** moves the named items, files whole with their state, into a
+  new agenda (Open for a person, Proposed for an agent, as `agenda-add`); it is refused when it would take none or
+  every item. `agenda-merge` still moves every item and phase link.
+- **Deferred is gone; `agenda-propose <A>... --author ...` takes its place.** It moves an Open agenda back to Proposed
+  (stored `open` with `proposed: {by, at}`, out of the open order) until `agenda-accept` returns it. `agenda-defer` is
+  an unknown command. A `deferred` an older engine stored still reads, as Proposed, and passes `check`; no listing,
+  dashboard or `index.json` names Deferred.
+- **The agenda dashboard sits beside the backlog:** `.sikstack/agenda.md`, not `works/agenda.md`. A rebuild removes a
+  stale `works/agenda.md`, the sync never takes one for truth, and the stamp commit carries `agenda.md`.
+- **The web's inbox speaks items.** `propose` replaces `defer`; `item-done`, `item-dismiss`, `item-reopen` and
+  `item-delete` carry the one agenda id in `items` and the items' full file names in `fields.entries`; `split`
+  carries the agenda, `fields.entries`, `fields.title` and `minted_id`. A pending `defer` from before is refused with
+  one line and never run.
+- **Words.** Commands, their help, their output and the dashboards call the record under `works/agenda/<AID>/` an
+  agenda and a file under its `entries/` an item. `index.json`'s agenda rows gain `items_open`; `agenda_counts`
+  loses `deferred`; `backlog.md` says `Proposed agendas` and `Open agendas`.
+- **`/agenda` handles the agendas, on the operator's word.** Still started only by the operator, it shows the
+  agendas and their items, proposes a triage with a reason each (per agenda: open, propose, solve, drop, merge,
+  split; per item: done, dismiss, delete) and runs only what the operator says yes to.
+- **Items first for loose ends.** The contract's "Nothing parks" exception is now an item on its agenda, and every
+  rule that files one (`create-phase`'s "Not now", the review's playbook and reference, `review-phase`, `read-code`,
+  the slice executor) says: closely related to an existing agenda (the phase's linked one first) means an item on it
+  (`agenda-item add`), never a new agenda and never a deferral; only unrelated work opens a new Proposed agenda. A
+  review lists the linked agenda's items the phase fixed (`agenda_items`), and the orchestrator marks them done
+  (`agenda-item done <A>/<tail> --author agent:<model>`). A phase linked to an agenda takes its open items as the
+  scope its `DECOMP` cuts.
+- **`/create-phase open agendas`** (or bare, with no request) lists the Open agendas with open items and no live
+  phase, proposes one phase per agenda (two together only with a stated reason), each objective drawn from its open
+  items and each made by `phase new --agenda <A>` after the operator confirms its name and objective; Proposed
+  agendas are skipped until accepted.
+- **`/agenda` triages the product's users' feedback.** In a linked checkout, `sikstack agenda-feedback list` prints
+  the project's feedback that is neither filed nor dismissed, newest first, one line each led by its id;
+  `agenda-feedback file <id> --agenda <A>` adds it as a `feedback` item (source `feedback:<id>`, its message and its
+  page on sikstack), `--new --title "…"` instead opens a new agenda holding it (Open for a person, Proposed for an
+  agent), and `agenda-feedback dismiss <id> [--reason "…"]` dismisses it. sikstack keeps the mark, so a triaged piece
+  never lists again on any checkout; a piece an agenda item names, the web's "file on the agenda" included, counts as
+  filed. `file` records the mark after it writes the item: a failed record leaves the item and one line saying to run
+  it again, which then only records. `/agenda` reads the list and suggests, per piece, an agenda to file it on, a new
+  agenda or a dismissal, each with a reason, and runs only what the operator says. An unlinked checkout is told how
+  to link in one line.
+- **One link for the API verbs.** The design verbs and `agenda-feedback` share `wf_cloud.api_link` and `api_call`
+  (the link, the key and the one-line refusals); the design verbs send and print what they did before.
+- **Migration notes.** None by hand: the first rebuild writes `.sikstack/agenda.md` and removes `works/agenda.md`;
+  commit both. A checkout still on 0.5.x reads a `state` key it does not know as nothing and keeps it.
 
 ## 0.5.1 — 2026-11-25
 

@@ -58,7 +58,7 @@ pw localstorage-clear
 pw reload
 see "$(shows "Synced just now")" "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
   "$(inpart "Proposed" "Retry a sync once after a network error")" "$(inpart "Proposed" "Show who wrote each note on an item")" \
-  "$(inpart "Deferred" "Draft the release note")" "$(inpart "Solved and dropped" "Try a darker sidebar")"
+  "$(inpart "Proposed" "Draft the release note")" "$(inpart "Solved and dropped" "Try a darker sidebar")" "!($(shows "Deferred"))"
 shot 01-agenda
 logs
 
@@ -70,36 +70,37 @@ pw drag 'role=button[name="Reorder: Pick a name for the export button"]' 'role=b
 see "$(open_is "$T10 | Pick a name for the export button | Show the sync time in the header | Write the onboarding checklist | Check the empty state copy")"
 shot 02-reordered
 
-# 3. Pick rows and Defer, Solve, Drop (with a reason), Reopen, Delete.
-pick "Show the sync time in the header"; act "Open and in progress" Defer
-see "$(inpart "Deferred" "Show the sync time in the header")"
+# 3. Pick rows and Propose (back to Proposed: there is no Deferred), Solve, Drop (with a reason); Delete; Accept a
+#    Proposed one (first in the open order, marked waiting as the read gives an accept).
+pick "Show the sync time in the header"; act "Open and in progress" Propose
+see "$(inpart "Proposed" "Show the sync time in the header")"
 pick "Check the empty state copy"; act "Open and in progress" Solve
 see "$(inpart "Solved and dropped" "Check the empty state copy")"
 pick "Pick a name for the export button"; act "Open and in progress" Drop
 pw fill 'role=textbox[name="Reason (optional)"]' "Export reads best"
 pw click 'role=button[name="Yes, drop"]'
 see "$(inpart "Solved and dropped" "Pick a name for the export button")"
-pick "Draft the release note"; act Deferred Reopen
-see "$(open_is "$T10 | Write the onboarding checklist | Draft the release note")"
 pw click 'role=button[name="Delete: Try a darker sidebar"]'
 pw click 'role=button[name="Yes, delete"]'
 see "$(norow "Try a darker sidebar")" "!($(shows "Waiting for sync"))"
+pw click 'role=button[name="Accept: Draft the release note"]'
+see "$(open_is "Draft the release note | $T10 | Write the onboarding checklist")"
 shot 03-acted
 
 # 4. Every change survives a reload.
 pw reload
-see "$(open_is "$T10 | Write the onboarding checklist | Draft the release note")" "$(inpart "Deferred" "Show the sync time in the header")" \
+see "$(open_is "Draft the release note | $T10 | Write the onboarding checklist")" "$(inpart "Proposed" "Show the sync time in the header")" \
   "$(inpart "Solved and dropped" "Check the empty state copy")" "$(inpart "Solved and dropped" "Pick a name for the export button")" \
   "$(norow "Try a darker sidebar")"
 shot 04-reloaded
 logs
 
-# 5. Add an item with a Markdown note, then open it: its page exists although the build never saw it.
-pw click 'role=button[name="Add item"]'
+# 5. Add an agenda with a Markdown note, then open it: its page exists although the build never saw it.
+pw click 'role=button[name="Add agenda"]'
 pw fill 'role=textbox[name="Title"]' "Plan the design review"
 pw fill 'role=textbox[name="Note (optional)"]' "$(printf 'Bring:\n\n- the **static build**\n- two screenshots')"
 pw click 'role=button[name="Add"]'
-see "$(open_is "Plan the design review | $T10 | Write the onboarding checklist | Draft the release note")"
+see "$(open_is "Plan the design review | Draft the release note | $T10 | Write the onboarding checklist")"
 pw click 'role=link[name="Plan the design review"]'
 see 'location.pathname.includes("/agenda/A11-")' 'document.querySelector("h1")?.innerText.includes("Plan the design review")' \
   'document.querySelectorAll("main ul li").length === 2' 'document.querySelector("main strong")?.textContent === "static build"'
@@ -117,9 +118,9 @@ see 'document.querySelector("h1")?.innerText.includes("Plan the design review wi
 shot 06-edited
 logs
 
-# 7. Back to the Agenda by its link; a recorded item's Markdown note; a page the design does not draw.
+# 7. Back to the Agenda by its link; a recorded agenda's Markdown note; a page the design does not draw.
 pw click 'main >> role=link[name="Agenda"]'
-see "$(open_is "Plan the design review with the team | $T10 | Write the onboarding checklist | Draft the release note")"
+see "$(open_is "Plan the design review with the team | Draft the release note | $T10 | Write the onboarding checklist")"
 pw click 'role=link[name="Write the onboarding checklist"]'
 see 'document.querySelectorAll("main ul li").length === 3' 'document.querySelector("main code")?.textContent === "sikstack link"'
 shot 07-recorded-item
@@ -135,7 +136,7 @@ see "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in th
   "$(inpart "Solved and dropped" "Try a darker sidebar")" "$(norow "Plan the design review with the team")"
 pw reload
 see "$(open_is "$T10 | Write the onboarding checklist | Show the sync time in the header | Check the empty state copy | Pick a name for the export button")" \
-  "$(inpart "Deferred" "Draft the release note")"
+  "$(inpart "Proposed" "Draft the release note")"
 shot 08-reset
 logs
 
@@ -154,8 +155,8 @@ state() { # page tag, state key, then texts the state shows
 pw goto "$AGENDA"
 widget
 states_are "recorded many empty waiting web-waiting behind loading unlinked never failed not-found error"
-state agenda many "23 items" "Write tests for the reorder keys"
-state agenda empty "No items yet."
+state agenda many "23 agendas" "Write tests for the reorder keys"
+state agenda empty "No agendas yet."
 state agenda waiting "A6-r2" "Plan the design review"
 state agenda web-waiting "Synced 1m ago" "A11-vz" "The Agenda list gets long. I would like to collapse the Solved part."
 state agenda behind "Last synced 3d ago"
@@ -169,44 +170,44 @@ state agenda recorded "Synced just now" "$T10"
 pw goto "$AGENDA?state=never"
 see "$(shows "Nothing has synced yet.")"
 pw goto "$AGENDA?state=many"
-see "$(shows "23 items")"
+see "$(shows "23 agendas")"
 pw reload
-see "$(shows "23 items")" "$(shows "Write tests for the reorder keys")"
+see "$(shows "23 agendas")" "$(shows "Write tests for the reorder keys")"
 widget
 see "$(pressed many)"
 ITEM="$WEB/projects/$P/workspace/agenda/A46-mr/"
 pw click 'role=link[name="Write tests for the reorder keys"]'
 see 'location.pathname.includes("/agenda/A46-mr")'
 widget
-states_are "open proposed note-waiting deferred solved dropped waiting loading not-found project-not-found failed error"
+states_are "open proposed note-waiting items solved dropped waiting loading not-found project-not-found failed error"
 see "document.querySelector('[data-design-state=open]').getAttribute('aria-pressed') === 'true'"
 state item proposed "Proposed by" "Accept"
 state item note-waiting "Waiting for sync"
-state item deferred "Reopen"
+state item items "Done" "Dismissed" "A46-mr/mad1" "Split"
 state item solved "Outcome"
 state item dropped "Reason"
 state item waiting "Waiting for sync"
 state item loading "Loading…"
-state item not-found "Agenda item not found"
+state item not-found "Agenda not found"
 state item project-not-found "Project not found"
 state item failed "This page did not load" "Synced just now"
 state item error "This page did not load" "Back to Agenda"
-state item open "Write tests for the reorder keys" "Defer"
+state item open "Write tests for the reorder keys" "Propose"
 pw goto "$ITEM?state=solved"   # a reload of a state's address; the item's state is the Agenda's data too
 see "$(shows "Outcome")"
 pw goto "$AGENDA"
-see "$(shows "22 items")" "$(inpart "Solved and dropped" "Write tests for the reorder keys")"
+see "$(shows "22 agendas")" "$(inpart "Solved and dropped" "Write tests for the reorder keys")"
 logs
 
-# 9b. The entry item (A3-1z, the item with the longest thread): its six entries oldest first, each with its author
-#     and kind, the two feedback entries' kinds linking to their feedback. Then the feedback pages: f3 (on no item)
-#     and f1 (on A10-3n and A3-1z), each widget listing exactly its states, each state shown.
+# 9b. The agenda with the most items (A3-1z): its six items oldest first, each with its ref, state, author and kind,
+#     the two feedback items' kinds linking to their feedback. Then the feedback pages: f3 (on no agenda) and f1 (on
+#     A10-3n and A3-1z), each widget listing exactly its states, each state shown.
 before() { printf '(t => t.indexOf(%s) >= 0 && t.indexOf(%s) > t.indexOf(%s))(document.querySelector("main").innerText)' "$(q "$1")" "$(q "$2")" "$(q "$1")"; }
 FB="$WEB/projects/$P/feedback/00000000-0000-4000-8000-0000000000f"
 pw goto "$AGENDA?state=recorded"
 pw goto "$WEB/"
 pw click 'role=link[name="Agenda item"]'
-see 'location.pathname.endsWith("/agenda/A3-1z/")' "$(shows "6 entries")" \
+see 'location.pathname.endsWith("/agenda/A3-1z/")' "$(shows "6 items, 6 open")" "$(shows "A3-1z/cfwk")" \
   "$(before "Folded from deferred job D1-k4" "Download reads like a file save")" "$(before "Download reads like a file save" "On a phone the button is an icon only")" \
   "$(before "On a phone the button is an icon only" "Going with Export")" "$(before "Going with Export" "I could not find where to export")" \
   "$(before "I could not find where to export" "$T10")" "$(before "Issue · P2-m7.S3" "Question · P2-m7.S4")" "$(shows "mina")" \
@@ -225,8 +226,8 @@ by_address() { # page tag, key, texts: the confirm is modal and covers the widge
   see "${e[@]}"
   shot "09-$tag-$key"
 }
-by_address feedback confirm-new "A new item" "It becomes the first open item there"
-by_address feedback confirm-existing "It joins A3-1z’s thread"
+by_address feedback confirm-new "A new agenda" "It becomes the first open item there"
+by_address feedback confirm-existing "It joins A3-1z as an item"
 by_address feedback adding "Adding…"
 by_address feedback failed "Could not add this feedback to the agenda. Try again."
 pw goto "${FB}3/?state=waiting"
@@ -258,10 +259,10 @@ pw press Tab
 see 'document.activeElement?.dataset.designState === "recorded"'
 pw press Tab
 pw press Space
-see "$(pressed many)" "$(shows "23 items")"
+see "$(pressed many)" "$(shows "23 agendas")"
 pw press Tab
 pw press Enter
-see "$(pressed empty)" "$(shows "No items yet.")"
+see "$(pressed empty)" "$(shows "No agendas yet.")"
 pw press Escape
 see 'document.querySelector("[data-design-state]") === null' 'document.activeElement?.getAttribute("aria-label") === "Design states: Agenda, Empty agenda"'
 shot 10-keyboard

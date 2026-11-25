@@ -14,7 +14,6 @@ import {
   AgendaFailed,
   AgendaList,
   AgendaLoading,
-  deferredPageFrom,
   workspaceHrefs,
 } from "@/sikstack/workspace/agenda";
 import {
@@ -139,11 +138,9 @@ export type AgendaState = (typeof AGENDA_STATES.list)[number]["key"];
 
 export function AgendaScreen({
   state = "recorded",
-  deferred,
   retry = () => {},
 }: {
   state?: AgendaState;
-  deferred?: string;
   retry?: () => void;
 }) {
   const ws = useWorkspace();
@@ -205,7 +202,6 @@ export function AgendaScreen({
             read={read}
             phases={phases}
             timeZone={TIME_ZONE}
-            deferredPage={deferredPageFrom(deferred)}
           />
         </div>
       );
@@ -297,6 +293,7 @@ function itemImplied(item: AgendaItem | undefined): ItemState | null {
   if (item.sync === "waiting" && !(item.entries ?? []).some((e) => e.sync === "waiting")) return "waiting";
   if ((item.entries ?? []).some((e) => e.sync === "waiting")) return "note-waiting";
   if (item.state === "proposed") return "proposed";
+  if ((item.entries ?? []).some((e) => e.state === "done" || e.state === "dismissed")) return "items";
   const s = itemState(item);
   return s === "in_progress" ? null : s;
 }
@@ -336,15 +333,64 @@ function enterItem(id: string, key: ItemState) {
           body: WAITING_NOTE,
           job: null,
           sync: "waiting",
+          file: null,
+          ref: null,
+          state: "open",
+          stateBy: null,
+          stateAt: null,
+          deleting: false,
         },
       ],
     });
   }
-  if (key !== "open" && key !== "deferred" && key !== "solved" && key !== "dropped") return;
+  if (key === "items") {
+    // made: the agenda's first item done and its second dismissed, by the design's account, at the recording's clock;
+    // an agenda holding fewer than two items gets made ones (each a note by the account, with its file and ref)
+    let n = 0;
+    const kept = (item.entries ?? []).filter((e) => e.sync === null);
+    const made = ["mad1", "mad2", "mad3"].slice(0, Math.max(0, 3 - kept.filter((e) => e.file).length)).map((tail, i) => {
+      const at = ME.indexOf(":");
+      const name = `20261120T0${i}0000.00000${i + 1}Z-${tail}`;
+      return {
+        id: name,
+        file: `${name}.json`,
+        ref: `${id}/${tail}`,
+        state: "open",
+        stateBy: null,
+        stateAt: null,
+        deleting: false,
+        kind: "note",
+        author: ME,
+        by: "person" as const,
+        name: ME.slice(at + 1),
+        source: "web:agenda",
+        created: RECORDING.now,
+        body: ["Check the copy on a phone.", "Ask the team about the label.", "Write it down once agreed."][i],
+        job: null,
+        sync: null,
+      };
+    });
+    const entries = [...made, ...kept]
+      .map((e) => {
+        if (!e.file || n > 1) return e;
+        const state = n++ === 0 ? "done" : "dismissed";
+        return { ...e, state, stateBy: ME, stateAt: RECORDING.now };
+      });
+    return setItem(id, {
+      state: "open",
+      sync: null,
+      entries,
+      entryCount: entries.filter((e) => e.file).length,
+      itemsOpen: entries.filter((e) => e.file && (e.state ?? "open") === "open").length,
+    });
+  }
+  if (key !== "open" && key !== "solved" && key !== "dropped") return;
   const fields: Partial<AgendaItem> = {
     state: key,
     sync: null,
-    entries: (item.entries ?? []).filter((e) => e.sync === null),
+    entries: (item.entries ?? [])
+      .filter((e) => e.sync === null)
+      .map((e) => ({ ...e, state: "open", stateBy: null, stateAt: null })),
   };
   if (key === "solved") fields.outcome = item.outcome || endedWords("solved");
   if (key === "dropped") fields.reason = item.reason || endedWords("dropped");
@@ -382,18 +428,12 @@ export function AwayScreen({ path }: { path: string }) {
   );
 }
 
-/** The Agenda at its address, in the state `?state=` names; `?deferred=N` read in the browser. */
+/** The Agenda at its address, in the state `?state=` names. */
 export function AgendaRoute() {
   const data = dataOf(useSnap());
   return (
     <StatePage states={AGENDA_STATES} implied={data} enter={enterAgenda} reset={reset}>
-      {(state, pick, query) => (
-        <AgendaScreen
-          state={state}
-          deferred={query?.get("deferred") ?? undefined}
-          retry={() => pick(data)}
-        />
-      )}
+      {(state, pick) => <AgendaScreen state={state} retry={() => pick(data)} />}
     </StatePage>
   );
 }

@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgendaItem, PhaseRow } from "@/lib/workspace/types";
 
 // The Agenda's picked rows (design job 02, `AgendaList.dc.html`, frame.md F303, F309, round:Q2, round:Q3): each
-// part's boxes cover its rows on screen only (a Deferred page, the five ended rows shown), the count, Clear and the
+// part's boxes cover its rows on screen only (the five ended rows shown; there is no Deferred part), the count, Clear and the
 // actions in their one order in the head and in the narrow strip, Drop and Delete asking while the others act at
 // once, and each action written as one change for exactly the picked ids (Solve with no outcome, Reopen to the end
 // of the open order). Node only: the pure model, server renders, and the actions mocked.
@@ -33,7 +33,7 @@ vi.mock("@/sikstack/frame/dialog", async () => {
 });
 const actions = vi.hoisted(() => ({
   addAgendaItem: vi.fn(),
-  deferAgendaItems: vi.fn(),
+  proposeAgendaItems: vi.fn(),
   deleteAgendaItems: vi.fn(),
   discardChange: vi.fn(),
   dropAgendaItems: vi.fn(),
@@ -107,7 +107,7 @@ const OPEN_TITLES = [
   "Import preview before the first sync",
   "Nightly export to the archive",
 ];
-const DEFERRED_TITLES = [
+const PROPOSED_TITLES = [
   "커넥터마다 동기화 시각을 따로 정하기",
   "Schema drift alerts for the nightly export",
   "Webhook signatures on the retry queue",
@@ -146,12 +146,12 @@ const ENDED_TITLES = [
 ];
 
 /**
- * A long agenda (`fn-14`'s shape, fewer open): 5 open, 25 deferred over two weeks (each day twice, so ties keep the
- * operator's order), 8 ended; the parts interleaved in the operator's order as a real agenda file has them.
+ * A long agenda (`fn-14`'s shape, fewer open): 5 open, 25 proposed (a stored Deferred reads Proposed) over two weeks,
+ * 8 ended; the parts interleaved in the operator's order as a real agenda file has them.
  */
 function longAgenda(): AgendaItem[] {
   const out: AgendaItem[] = [];
-  DEFERRED_TITLES.forEach((t, i) => {
+  PROPOSED_TITLES.forEach((t, i) => {
     if (i < OPEN_TITLES.length)
       out.push(
         item(`A${10 + i}-k${i + 1}`, OPEN_TITLES[i], "open", "2026-11-01"),
@@ -160,7 +160,7 @@ function longAgenda(): AgendaItem[] {
       item(
         `A${35 + i}-n${(i % 8) + 1}`,
         t,
-        "deferred",
+        "proposed",
         `2026-11-${String(1 + (i % 14)).padStart(2, "0")}`,
       ),
     );
@@ -181,64 +181,47 @@ const parts = (agenda: readonly AgendaItem[]) =>
   agendaParts(agenda, phaseLookup(PHASES), fmt.date);
 const ids = (rows: readonly { id: string }[]) => rows.map((r) => r.id);
 
-const list = (agenda: AgendaItem[], page: number | null = null) =>
+const list = (agenda: AgendaItem[]) =>
   html(
     createElement(AgendaList, {
       project: PROJECT,
       read: { agenda, unplaced: [] },
       phases: PHASES,
       timeZone: TZ,
-      deferredPage: page,
     }),
   );
 
 describe("what is picked", () => {
-  it("is exactly the part's rows on screen that are ticked: a Deferred page's ten, the five ended rows shown", () => {
+  it("is exactly the part's rows on screen that are ticked: the five ended rows shown; no Deferred part", () => {
     const agenda = longAgenda();
     const p = parts(agenda);
-    expect(p.deferred).toHaveLength(25);
-    const on = rowsOnScreen(p, 2, false);
-    const page2 = ids(p.deferred.slice(10, 20));
-    expect(ids(on.deferred)).toEqual(page2);
+    expect(p.proposed).toHaveLength(25);
+    expect(Object.keys(NO_PICKS)).toEqual(["open", "ended"]);
+    const on = rowsOnScreen(p, false);
     expect(ids(on.ended)).toEqual(ids(p.ended.slice(0, 5)));
     // The part's box picks the rows on screen, never the whole part.
     const before = partPicks(on, p, NO_PICKS);
-    expect(before.deferred.allLabel).toBe(
-      "Select the 10 deferred items on this page",
-    );
     expect(before.ended.allLabel).toBe(
-      "Select the 5 solved and dropped items on this page",
+      "Select the 5 solved and dropped agendas on this page",
     );
-    expect(before.open.allLabel).toBe("Select all 5 open items");
-    expect(toggleAll(before.deferred)).toEqual(page2);
+    expect(before.open.allLabel).toBe("Select all 5 open agendas");
     expect(toggleAll(before.ended)).toEqual(ids(p.ended.slice(0, 5)));
-    const ticked = {
-      ...NO_PICKS,
-      deferred: toggleAll(before.deferred),
-      ended: toggleAll(before.ended),
-    };
+    const ticked = { ...NO_PICKS, ended: toggleAll(before.ended) };
     const after = partPicks(on, p, ticked);
-    expect(after.deferred.picked).toEqual(page2);
-    expect(after.deferred).toMatchObject({
+    expect(after.ended.picked).toEqual(ids(p.ended.slice(0, 5)));
+    expect(after.ended).toMatchObject({
       all: true,
       some: false,
-      count: "10 of 25 selected",
+      count: "5 of 8 selected",
     });
-    expect(after.ended.picked).toEqual(ids(p.ended.slice(0, 5)));
-    expect(after.ended.count).toBe("5 of 8 selected");
-    // Ids ticked on another page, or every id of the part, still pick only what is on screen.
-    const everything = partPicks(on, p, {
-      ...NO_PICKS,
-      deferred: ids(p.deferred),
-      ended: ids(p.ended),
-    });
-    expect(everything.deferred.picked).toEqual(page2);
+    // Every id of the part still picks only what is on screen.
+    const everything = partPicks(on, p, { ...NO_PICKS, ended: ids(p.ended) });
     expect(everything.ended.picked).toEqual(ids(p.ended.slice(0, 5)));
     // Pressed again with all of them picked, the box clears them.
-    expect(toggleAll(after.deferred)).toEqual([]);
+    expect(toggleAll(after.ended)).toEqual([]);
     // Show all brings the rest on screen, and the box then names all of them.
-    const allEnded = partPicks(rowsOnScreen(p, 2, true), p, NO_PICKS).ended;
-    expect(allEnded.allLabel).toBe("Select all 8 solved and dropped items");
+    const allEnded = partPicks(rowsOnScreen(p, true), p, NO_PICKS).ended;
+    expect(allEnded.allLabel).toBe("Select all 8 solved and dropped agendas");
   });
 
   it("half sets the box when some are picked, counts them against the whole part, and draws it named", () => {
@@ -252,40 +235,38 @@ describe("what is picked", () => {
     });
     expect(toggleRow(one.picked, "A11-k2")).toEqual([]);
     const none = partPick("open", shown, 3, []);
-    expect(none).toMatchObject({ some: false, all: false, count: "3 items" });
+    expect(none).toMatchObject({ some: false, all: false, count: "3 agendas" });
     expect(
       html(
         createElement(PartCheck, { pick: partPick("open", shown, 3, shown) }),
       ),
     ).toBe(
-      '<label class="check agenda-check"><input type="checkbox" checked=""/><span class="sr-only">Select all 3 open items</span></label>',
+      '<label class="check agenda-check"><input type="checkbox" checked=""/><span class="sr-only">Select all 3 open agendas</span></label>',
     );
   });
 
-  it("draws every part's box and every row's box on the page, the Deferred box named for the page on screen", () => {
-    const out = list(longAgenda(), 2);
+  it("draws the open and ended parts' boxes and their rows' boxes on the page; Proposed rows have none", () => {
+    const out = list(longAgenda());
     expect(out).toContain(
-      '<span class="sr-only">Select the 10 deferred items on this page</span>',
+      '<span class="sr-only">Select all 5 open agendas</span>',
     );
     expect(out).toContain(
-      '<span class="sr-only">Select all 5 open items</span>',
+      '<span class="sr-only">Select the 5 solved and dropped agendas on this page</span>',
     );
     expect(out).toContain(
-      '<span class="sr-only">Select the 5 solved and dropped items on this page</span>',
+      '<label class="check agenda-check"><input type="checkbox"/><span class="sr-only">Select: Retry failed uploads</span></label>',
     );
-    expect(out).toContain(
-      '<label class="check agenda-check"><input type="checkbox"/><span class="sr-only">Select: 실패한 행만 골라 다시 내려받기</span></label>',
-    );
-    // 5 open + 10 deferred + 5 ended rows, and three part boxes; nothing picked yet, so no bar and no strip.
-    expect(out.match(/class="check agenda-check"/g)).toHaveLength(23);
+    expect(out).not.toContain("Select: 실패한 행만 골라 다시 내려받기");
+    // 5 open + 5 ended rows, and two part boxes; nothing picked yet, so no bar and no strip.
+    expect(out.match(/class="check agenda-check"/g)).toHaveLength(12);
     expect(out).not.toContain("agenda-bulk");
     expect(out).not.toContain(">Clear<");
-    // An agenda with no open item draws no box over the open part.
+    // A workspace with no open agenda draws no box over the open part.
     const noOpen = list([
-      item("A6-j2", "Import highlights from Kindle", "deferred", "2026-10-26"),
+      item("A6-j2", "Import highlights from Kindle", "solved", "2026-10-26"),
     ]);
-    expect(noOpen).not.toContain("Select all 0 open items");
-    expect(noOpen).toContain("Select all 1 deferred items");
+    expect(noOpen).not.toContain("Select all 0 open agendas");
+    expect(noOpen).toContain("Select all 1 solved and dropped agendas");
   });
 });
 
@@ -297,25 +278,21 @@ describe("the actions", () => {
       ),
     ].map((m) => m[1]);
 
-  it("come in one order in the head and in the strip: Open, Deferred, Solved and dropped", () => {
-    const pick = (part: "open" | "deferred" | "ended") =>
+  it("come in one order in the head and in the strip: Open (Propose where Defer was), Solved and dropped", () => {
+    const pick = (part: "open" | "ended") =>
       partPick(part, ["A10-k1", "A11-k2", "A12-k3"], 7, ["A10-k1", "A12-k3"]);
     expect(texts(html(createElement(PartBar, { pick: pick("open") })))).toEqual(
-      ["Clear", "Delete", "Defer", "Drop", "Solve"],
+      ["Clear", "Delete", "Propose", "Drop", "Solve"],
     );
-    expect(
-      texts(html(createElement(PartBar, { pick: pick("deferred") }))),
-    ).toEqual(["Clear", "Delete", "Reopen", "Drop", "Solve"]);
     expect(
       texts(html(createElement(PartBar, { pick: pick("ended") }))),
     ).toEqual(["Clear", "Delete", "Reopen"]);
-    for (const part of ["open", "deferred", "ended"] as const)
+    for (const part of ["open", "ended"] as const)
       expect(
         texts(html(createElement(BulkStrip, { pick: pick(part) }))),
       ).toEqual(texts(html(createElement(PartBar, { pick: pick(part) }))));
     expect(PART_ACTS).toEqual({
-      open: ["delete", "defer", "drop", "solve"],
-      deferred: ["delete", "reopen", "drop", "solve"],
+      open: ["delete", "propose", "drop", "solve"],
       ended: ["delete", "reopen"],
     });
   });
@@ -326,11 +303,11 @@ describe("the actions", () => {
       "A12-k3",
     ]);
     expect(html(createElement(PartBar, { pick }))).toBe(
-      '<button type="button" class="btn agenda-wide">Clear</button><div class="cluster agenda-head-acts agenda-wide"><button type="button" class="btn">Delete</button><button type="button" class="btn">Defer</button><button type="button" class="btn">Drop</button><button type="button" class="btn">Solve</button></div>',
+      '<button type="button" class="btn agenda-wide">Clear</button><div class="cluster agenda-head-acts agenda-wide"><button type="button" class="btn">Delete</button><button type="button" class="btn">Propose</button><button type="button" class="btn">Drop</button><button type="button" class="btn">Solve</button></div>',
     );
     const strip = html(createElement(BulkStrip, { pick }));
     expect(strip).toMatch(
-      /^<div class="agenda-bulk" role="group" aria-label="Act on the selected open items"><p class="meta agenda-bulk-count">2 of 3 selected<\/p><button type="button" class="btn">Clear<\/button><div class="cluster agenda-bulk-acts">/,
+      /^<div class="agenda-bulk" role="group" aria-label="Act on the selected open agendas"><p class="meta agenda-bulk-count">2 of 3 selected<\/p><button type="button" class="btn">Clear<\/button><div class="cluster agenda-bulk-acts">/,
     );
     expect(
       html(
@@ -338,12 +315,12 @@ describe("the actions", () => {
           pick: partPick("ended", ["A60-r1"], 8, ["A60-r1"]),
         }),
       ),
-    ).toContain('aria-label="Act on the selected solved and dropped items"');
+    ).toContain('aria-label="Act on the selected solved and dropped agendas"');
   });
 
-  it("ask first for Drop and Delete only; Defer, Solve and Reopen act at once", () => {
+  it("ask first for Drop and Delete only; Propose, Solve and Reopen act at once", () => {
     expect(
-      (["delete", "defer", "reopen", "drop", "solve"] as const).map(actAsks),
+      (["delete", "propose", "reopen", "drop", "solve"] as const).map(actAsks),
     ).toEqual([true, false, false, true, false]);
   });
 
@@ -356,9 +333,9 @@ describe("the actions", () => {
     });
     const picked = ["A37-n3", "A35-n1", "A40-n6"];
 
-    it("Defer, Solve with no outcome, Reopen, Drop with its reason or none, Delete", async () => {
-      await sendAct(PROJECT, "defer", picked);
-      expect(actions.deferAgendaItems).toHaveBeenCalledWith(PROJECT, picked);
+    it("Propose, Solve with no outcome, Reopen, Drop with its reason or none, Delete", async () => {
+      await sendAct(PROJECT, "propose", picked);
+      expect(actions.proposeAgendaItems).toHaveBeenCalledWith(PROJECT, picked);
       await sendAct(PROJECT, "solve", picked);
       expect(actions.solveAgendaItems.mock.calls).toEqual([[PROJECT, picked]]);
       await sendAct(PROJECT, "reopen", picked);
@@ -372,7 +349,7 @@ describe("the actions", () => {
       await sendAct(PROJECT, "delete", picked);
       expect(actions.deleteAgendaItems).toHaveBeenCalledWith(PROJECT, picked);
       for (const fn of [
-        actions.deferAgendaItems,
+        actions.proposeAgendaItems,
         actions.reopenAgendaItems,
         actions.deleteAgendaItems,
       ])
@@ -389,13 +366,9 @@ describe("the actions", () => {
     it("sends the ids in the agenda's order, so Reopen puts them at the end of the open order as the engine will", () => {
       const agenda = longAgenda();
       const p = parts(agenda);
-      // Page 1 of Deferred shows newest first; pick three of its rows in the order shown.
-      const on = rowsOnScreen(p, 1, false);
-      const shownOrder = [
-        on.deferred[0].id,
-        on.deferred[4].id,
-        on.deferred[7].id,
-      ];
+      // Solved and dropped shows newest first (all of them here); pick three of its rows in the order shown.
+      const on = rowsOnScreen(p, true);
+      const shownOrder = [on.ended[0].id, on.ended[4].id, on.ended[7].id];
       const sent = sendOrder(agenda, shownOrder);
       expect(new Set(sent)).toEqual(new Set(shownOrder));
       expect(sent).toEqual(
@@ -412,29 +385,29 @@ describe("the actions", () => {
       expect(after.open.slice(-3).every((r) => r.mark === "waiting")).toBe(
         true,
       );
-      expect(after.deferred).toHaveLength(22);
+      expect(after.ended).toHaveLength(5);
     });
   });
 
   it("say what they did in the status line", () => {
     const t = "Schema drift alerts for the nightly export";
-    expect(AGENDA.said.acted("defer", 3, t)).toBe(
-      "3 items deferred. They wait for the next sync.",
+    expect(AGENDA.said.acted("propose", 3, t)).toBe(
+      "3 agendas proposed again, out of the open agendas. They wait for the next sync.",
     );
     expect(AGENDA.said.acted("solve", 1, t)).toBe(
       "“Schema drift alerts for the nightly export” solved. It waits for the next sync.",
     );
     expect(AGENDA.said.acted("reopen", 1, t)).toBe(
-      "“Schema drift alerts for the nightly export” reopened, at the end of the open items. It waits for the next sync.",
+      "“Schema drift alerts for the nightly export” reopened, at the end of the open agendas. It waits for the next sync.",
     );
     expect(AGENDA.said.acted("drop", 2, t)).toBe(
-      "2 items dropped. They wait for the next sync.",
+      "2 agendas dropped. They wait for the next sync.",
     );
     expect(AGENDA.said.acted("delete", 1, t)).toBe(
       "“Schema drift alerts for the nightly export” deleted. It leaves the workspace at the next sync.",
     );
     expect(AGENDA.said.acted("delete", 4, t)).toBe(
-      "4 items deleted. They leave the workspace at the next sync.",
+      "4 agendas deleted. They leave the workspace at the next sync.",
     );
   });
 });
@@ -486,16 +459,16 @@ describe("Drop's and Delete's confirm", () => {
       reason: "Covered by the export",
     });
     expect(many).toContain(
-      "<h2>Drop 3 items?</h2><p>They move to Solved and dropped. Reopen brings one back.</p>",
+      "<h2>Drop 3 agendas?</h2><p>They move to Solved and dropped. Reopen brings one back.</p>",
     );
     expect(many).toContain('value="Covered by the export"');
-    expect(dialogs.props[1].label).toBe("Drop 3 items?");
+    expect(dialogs.props[1].label).toBe("Drop 3 agendas?");
   });
 
   it("asks Delete with no field and Yes, delete; many items say they leave for good", () => {
     const many = confirm({ kind: "delete", ids: ["A36-n2", "A35-n1"] });
     expect(many).toContain(
-      "<h2>Delete 2 items?</h2><p>They leave the agenda for good, with their threads. Their phases stay. You cannot undo this.</p>",
+      "<h2>Delete 2 agendas?</h2><p>They leave the workspace for good, with their items. Their phases stay. You cannot undo this.</p>",
     );
     expect(many).not.toContain("Reason (optional)");
     expect(many).toMatch(

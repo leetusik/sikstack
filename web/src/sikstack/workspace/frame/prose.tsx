@@ -6,8 +6,8 @@ import { splitIds } from "./ids";
 
 /**
  * Stored prose (frame.md F46, F80): a line the workspace wrote (a notebook's line, the gate's note and steps, the
- * review's note, a slice's outcome and its one sentence, a stop's words, a deferred job's reason and source, an
- * agenda item's note, outcome and reason, a doc version's summary, a phase's objective), drawn as the Markdown it
+ * review's note, a slice's outcome and its one sentence, a stop's words, an
+ * agenda's note, outcome and reason, a doc version's summary, a phase's objective), drawn as the Markdown it
  * is: its bold, emphasis and code as the `.md` text draws them (the verdict's sentences), never its marks as
  * characters. A link keeps only its text: the workspace's links name its own files (`topics/<slug>.md`), which
  * have no address here, and a line inside a row's link must hold no second link. Each workspace id stays whole
@@ -77,8 +77,7 @@ export function WsProse({
 }
 
 /**
- * A long value's stored prose (a fact on its own line, F80: an agenda item's note, outcome and reason, a deferred
- * job's reason): its lines and lists kept as written, in one column (`.ws-prose-block`).
+ * A long value's stored prose (a fact on its own line, F80: an agenda's note, outcome and reason): its lines and lists kept as written, in one column (`.ws-prose-block`).
  */
 export function WsProseBlock({ text }: { text: string }) {
   return (

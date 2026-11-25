@@ -1,6 +1,6 @@
 // The words of Add to agenda and the Agenda part (job 04 round 02, `FeedbackItemSend*`,
-// `FeedbackItemAgenda*`; frame.md F341 to F344, F143), verbatim. An agenda item's status words are the
-// Workspace's (job 02 round 02, frame.md F37's `item` kind and F301's Deferred; D237-we). The part's
+// `FeedbackItemAgenda*`; frame.md F341 to F344, F143), verbatim. An agenda's status words are the
+// Workspace's (job 02 round 02, frame.md F37's `item` kind; there is no Deferred; D237-we). The part's
 // name (`PARTS.agenda`) and the waiting mark (`WAITING`) are the frame's, `@/content/feedback-frame`.
 // Imported by its own path, never through `content/index.ts`.
 
@@ -32,11 +32,10 @@ export const AGENDA = {
     "This feedback has no project, so there is no agenda to add it to.",
 } as const;
 
-/** An agenda item's status, the Workspace's word for each of its five (F37 `item`, F301). */
+/** An agenda's status, the Workspace's word for each of its four (F37 `item`). */
 export const AGENDA_STATUS_WORDS = {
   open: "Open",
   in_progress: "In progress",
-  deferred: "Deferred",
   solved: "Solved",
   dropped: "Dropped",
 } as const;

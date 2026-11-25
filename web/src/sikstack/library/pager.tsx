@@ -32,7 +32,7 @@ export interface PagerProps {
   label?: string;
   /** The list's query parts other than the page, kept in each link. */
   query?: PagerQuery;
-  /** The query key that holds this list's page: `page` (default), `archived` or `deferred`. */
+  /** The query key that holds this list's page: `page` (default) or `archived`. */
   pageKey?: PagerKey;
   /** Where page `n` is, when a list's address is not `?…&page=n`. */
   hrefFor?: (n: number) => string;

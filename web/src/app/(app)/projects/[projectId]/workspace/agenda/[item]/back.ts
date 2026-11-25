@@ -3,9 +3,9 @@ import type { WsBack } from "@/sikstack/workspace/frame";
 import { decodeWorkspaceFrom, wayBack } from "@/lib/workspace/address";
 
 /**
- * An agenda item's way back (F36, F300): the Agenda, at the page of its Deferred part the item was opened from
- * when `?from=` names one of this project's Agenda pages; labelled with the destination's own name, never text
- * from the address. Pure, so the page, its loading state and its boundary share it.
+ * An agenda's way back (F36, F300): the Agenda (a `?from=` naming another list is ignored); labelled with the
+ * destination's own name, never text from the address. Pure, so the page, its loading state and its boundary share
+ * it.
  */
 export function agendaItemBack(
   project: string,

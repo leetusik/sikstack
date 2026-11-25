@@ -82,9 +82,13 @@ const SIGNED: Record<string, Record<string, [string, string]>> = {
   item: {
     open: ["Open", "status-idle"],
     in_progress: ["In progress", "status-live"],
-    deferred: ["Deferred", "status-idle"],
     solved: ["Solved", "status-done"],
     dropped: ["Dropped", "status-revoked"],
+  },
+  entry: {
+    open: ["Open", "status-idle"],
+    done: ["Done", "status-done"],
+    dismissed: ["Dismissed", "status-revoked"],
   },
   pr: {
     draft: ["Draft", "status-idle"],
@@ -119,7 +123,8 @@ const STORED: Record<string, string[]> = {
     "done",
   ],
   verdict: ["pending", "pass", "changes_requested", "blocked"],
-  item: ["open", "in_progress", "deferred", "solved", "dropped"],
+  item: ["open", "in_progress", "solved", "dropped"],
+  entry: ["open", "done", "dismissed"],
   pr: ["draft", "open", "merged", "closed"],
   gate: ["not_required", "required", "open", "cleared"],
   doc: ["current", "stale", "retired"],
@@ -265,7 +270,7 @@ describe("a Workspace row (F43)", () => {
           name: "하이라이트 색을 직접 고르고 싶어요",
           lang: "ko",
           href: "/projects/platform/workspace/agenda/A141-4r",
-          status: wsStatus("item", "deferred"),
+          status: wsStatus("item", "solved"),
           end: "Nov 9",
         }),
       ),
@@ -282,7 +287,7 @@ describe("a Workspace row (F43)", () => {
       '<span class="ws-name-text" lang="ko">하이라이트 색을 직접 고르고 싶어요</span>',
     );
     expect(out).toContain(
-      '<span class="status status-idle ws-state">Deferred</span><span class="ws-end">Nov 9</span>',
+      '<span class="status status-done ws-state">Solved</span><span class="ws-end">Nov 9</span>',
     );
   });
 });
@@ -588,7 +593,7 @@ describe("not found and error on an item's page (F49, F84)", () => {
     );
     expect(wsNotFoundState("doc", "vocky", back).title).toBe("Doc not found");
     expect(wsNotFoundState("item", "vocky", back).title).toBe(
-      "Agenda item not found",
+      "Agenda not found",
     );
   });
 
@@ -644,7 +649,7 @@ describe("the one pager takes its list's address key (F300)", () => {
     expect(
       pageHref(3, { q: "cache", status: "deferred", page: "9" }, "page"),
     ).toBe("?q=cache&status=deferred&page=3");
-    expect(pageHref(2, { page: "4" }, "deferred")).toBe("?page=4&deferred=2");
+    expect(pageHref(2, { page: "4" }, "archived")).toBe("?page=4&archived=2");
     expect(pageHref(2, { archived: "5" }, "archived")).toBe("?archived=2");
     // the Library's lists keep `?page=`
     expect(

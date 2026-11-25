@@ -17,15 +17,18 @@ import { NOW, RECORDING, type Recording } from "./recording";
  * <name>` from a sample project in that state:
  *
  * - `unlinked`: a project with no linked workspace; `never`: a workspace key that probed the head, no batch;
- * - `empty`: a linked, synced workspace with no agenda item; `many`: 46 items (23 open, 14 deferred, 9 ended);
- * - `waiting`: three web changes the engine has not taken yet (an add, a defer, an edit: rows marked waiting);
+ * - `empty`: a linked, synced workspace with no agenda; `many`: 46 agendas (14 Proposed, 23 open, 9 ended; the
+ *   recording's 14 stored Deferred, which the read now gives as Proposed);
+ * - `waiting`: three web changes the engine has not taken yet (an add and two edits: rows marked waiting, their
+ *   stored values shown);
  * - `web-waiting` (P61-e9): the recording's project after three web writes the engine has not taken yet: a note on
  *   A3-1z's thread (its entry last, waiting), the third piece of feedback filed on a new item (A11-vz, waiting) and
  *   an accept of A9-hb (the read keeps it Proposed, marked waiting, until the sync).
  *
- * The recording itself (P61-e9) holds two Proposed items (A8-sf, folded from a deferred job by `agent:fold`; A9-hb,
- * opened by `agent:claude-opus-5-5`), A3-1z's thread of agents' and people's entries, and three pieces of feedback:
- * f1 filed on a new item (A10-3n) and on A3-1z, f2 on A3-1z, f3 on none.
+ * The recording itself (P61-e9) holds three Proposed agendas (A8-sf, folded from an old job by `agent:fold`; A9-hb,
+ * opened by `agent:claude-opus-5-5`; A4-jq, stored Deferred, which reads Proposed), A3-1z's items by agents and
+ * people (each with its file, ref and state), and three pieces of feedback: f1 filed on a new agenda (A10-3n) and on
+ * A3-1z, f2 on A3-1z, f3 on none.
  *
  * Two are made here, because no API answer holds them on demand: `behind` (a sync older than the server's 24
  * hours, which only time makes) and `waiting`'s one open change that no row carries (the engine applies the
@@ -58,7 +61,7 @@ const BEHIND_AT = new Date(NOW - 3 * 86_400_000).toISOString().replace(/\.\d+Z$/
 /** Made, not recorded: one open change that no row carries, in the shape `GET …/workspace` lists it. */
 const UNPLACED: Unplaced = {
   entry: "5d2c7a8e-3f41-4b6a-9c0d-7e2f1a4b8c63",
-  kind: "defer",
+  kind: "propose",
   items: ["A6-r2"],
   fields: {},
   sync: "waiting",

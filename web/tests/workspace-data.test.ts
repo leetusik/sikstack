@@ -265,10 +265,7 @@ describe("an agenda item's state and end cell", () => {
     ),
   );
 
-  it("keeps the item's own states, deferred over a running phase", () => {
-    expect(
-      itemState(item({ state: "deferred", phases: ["P8-q4"] }), lookup),
-    ).toBe("deferred");
+  it("keeps the agenda's own ended states over a running phase; there is no Deferred", () => {
     expect(
       itemState(item({ state: "solved", phases: ["P8-q4"] }), lookup),
     ).toBe("solved");

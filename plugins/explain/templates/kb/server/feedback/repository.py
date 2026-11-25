@@ -18,7 +18,10 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, and_, bindparam, delete, func, or_, select, update
+from sqlalchemy import Select, all_, and_, bindparam, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.feedback.types import (
@@ -37,6 +40,7 @@ from server.feedback.types import (
     FeedbackMetricsQuery,
     FeedbackQueryFilters,
     FeedbackSummary,
+    FeedbackTriageRecord,
     ListFeedbackQuery,
     SummarizeFeedbackQuery,
 )
@@ -44,6 +48,7 @@ from server.persistence.models import (
     FeedbackAttachmentModel,
     FeedbackCommentModel,
     FeedbackEventModel,
+    FeedbackTriageModel,
     feedback_search_expression,
 )
 
@@ -560,6 +565,81 @@ class FeedbackRepository:
             records=tuple(self._to_record(model) for model in page_models),
             next_cursor=next_cursor,
             total=total,
+        )
+
+    # -- triage (what became of a piece of feedback on the agenda) ------------
+
+    async def list_untriaged_feedback(
+        self,
+        project_id: UUID,
+        *,
+        exclude: Collection[UUID] = (),
+        limit: int,
+    ) -> tuple[tuple[FeedbackEventRecord, ...], bool]:
+        """The project's feedback with no triage row and not in ``exclude`` (the ones an
+        agenda item names), newest first: ``(records, more)``, ``more`` when the limit
+        cut the list. ``exclude`` travels as one array parameter, however long."""
+
+        statement = (
+            select(FeedbackEventModel)
+            .outerjoin(
+                FeedbackTriageModel,
+                FeedbackTriageModel.feedback_id == FeedbackEventModel.id,
+            )
+            .where(
+                FeedbackEventModel.project_id == project_id,
+                FeedbackTriageModel.feedback_id.is_(None),
+            )
+        )
+        skipped = list(dict.fromkeys(exclude))
+        if skipped:
+            statement = statement.where(
+                FeedbackEventModel.id
+                != all_(bindparam("triage_skipped", skipped, type_=ARRAY(PG_UUID(as_uuid=True))))
+            )
+        statement = statement.order_by(
+            FeedbackEventModel.ingested_at.desc(), FeedbackEventModel.id.desc()
+        ).limit(limit + 1)
+        models = (await self._session.execute(statement)).scalars().all()
+        return tuple(self._to_record(model) for model in models[:limit]), len(models) > limit
+
+    async def get_feedback_triage(self, feedback_id: UUID) -> FeedbackTriageRecord | None:
+        """The latest mark of one piece of feedback, or None (untriaged)."""
+
+        model = await self._session.get(FeedbackTriageModel, feedback_id)
+        return self._to_triage_record(model) if model is not None else None
+
+    async def set_feedback_triage(
+        self,
+        feedback_id: UUID,
+        *,
+        state: str,
+        agenda: str | None,
+        reason: str | None,
+        by: str,
+    ) -> FeedbackTriageRecord:
+        """Mark one piece of feedback, replacing any earlier mark (the latest wins)."""
+
+        values = {"state": state, "agenda": agenda, "reason": reason, "triaged_by": by,
+                  "triaged_at": func.now()}
+        statement = (
+            pg_insert(FeedbackTriageModel)
+            .values(feedback_id=feedback_id, **values)
+            .on_conflict_do_update(index_elements=[FeedbackTriageModel.feedback_id], set_=values)
+            .returning(FeedbackTriageModel)
+            .execution_options(populate_existing=True)
+        )
+        model = (await self._session.execute(statement)).scalar_one()
+        return self._to_triage_record(model)
+
+    def _to_triage_record(self, model: FeedbackTriageModel) -> FeedbackTriageRecord:
+        return FeedbackTriageRecord(
+            feedback_id=model.feedback_id,
+            state=model.state,
+            agenda=model.agenda,
+            reason=model.reason,
+            by=model.triaged_by,
+            at=model.triaged_at,
         )
 
     async def summarize_feedback(

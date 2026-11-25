@@ -19,7 +19,7 @@ vi.mock("next/navigation", async (orig) => ({
 }));
 vi.mock("@/lib/workspace/actions", () => ({
   addAgendaItem: vi.fn(),
-  deferAgendaItems: vi.fn(),
+  proposeAgendaItems: vi.fn(),
   deleteAgendaItems: vi.fn(),
   discardChange: vi.fn(),
   dropAgendaItems: vi.fn(),
@@ -81,7 +81,7 @@ const PHASES: Pick<PhaseRow, "id" | "short" | "status">[] = [
   { id: "P55-m1", short: "P55", status: "done" },
 ];
 
-/** `platform`'s agenda in the operator's order: five open items with deferred and ended ones between them. */
+/** `platform`'s agenda in the operator's order: five open agendas with proposed and ended ones between them. */
 const AGENDA: AgendaItem[] = [
   item(
     "A12-p3",
@@ -93,7 +93,7 @@ const AGENDA: AgendaItem[] = [
   item(
     "A11-f4",
     "A weekly mail of what changed in each project",
-    "deferred",
+    "proposed",
     "2026-11-09",
   ),
   item("A10-h5", "Sign-in emails land in spam", "open", "2026-11-02"),
@@ -113,7 +113,7 @@ const AGENDA: AgendaItem[] = [
       sync: "waiting",
     },
   ),
-  item("A6-j2", "Import highlights from Kindle", "deferred", "2026-10-26"),
+  item("A6-j2", "Import highlights from Kindle", "proposed", "2026-10-26"),
   item("A3-n7", "Search inside a book’s notes", "open", "2026-10-30"),
 ];
 
@@ -143,7 +143,6 @@ describe("the grip", () => {
         read: { agenda: AGENDA, unplaced: [] },
         phases: PHASES,
         timeZone: TZ,
-        deferredPage: null,
       }),
     );
     const how = /aria-describedby="([^"]+-how)"/.exec(out)?.[1];
@@ -152,11 +151,14 @@ describe("the grip", () => {
       `<li class="row agenda-row" data-row="A10-h5"><button type="button" class="agenda-grip" aria-label="Reorder: Sign-in emails land in spam" aria-describedby="${how}" aria-pressed="false"></button><label class="check agenda-check">`,
     );
     expect(out).toContain(
-      `<p class="sr-only" id="${how}">Space picks the item up. The arrow keys move it, Space puts it down, Escape puts it back.</p>`,
+      `<p class="sr-only" id="${how}">Space picks the agenda up. The arrow keys move it, Space puts it down, Escape puts it back.</p>`,
     );
     expect(out.match(/class="agenda-grip"/g)).toHaveLength(5);
     expect(out).toContain(
-      '<li class="row agenda-row" data-row="A11-f4"><span class="agenda-nogrip" aria-hidden="true"></span><label class="check agenda-check">',
+      '<li class="row agenda-row" data-row="A7-m3"><span class="agenda-nogrip" aria-hidden="true"></span><label class="check agenda-check">',
+    );
+    expect(out).toContain(
+      '<li class="row agenda-row" data-row="A11-f4"><span class="agenda-nogrip" aria-hidden="true"></span><div class="agenda-body">',
     );
     expect(out.match(/class="agenda-nogrip"/g)).toHaveLength(3);
     expect(
@@ -251,7 +253,7 @@ describe("the keyboard", () => {
     );
   });
 
-  it("writes exactly the order the lift showed, for every move of every row, among deferred and ended items", () => {
+  it("writes exactly the order the lift showed, for every move of every row, among proposed and ended agendas", () => {
     const read = { agenda: AGENDA, unplaced: [] };
     for (const id of OPEN) {
       for (let at = 0; at < OPEN.length; at += 1) {
@@ -287,7 +289,7 @@ describe("the keyboard", () => {
           expect(r.mark).toBe(
             r.id === id || r.id === "A4-c1" ? "waiting" : null,
           );
-        expect(after.deferred.map((r) => r.id)).toEqual(["A11-f4", "A6-j2"]);
+        expect(after.proposed.map((r) => r.id)).toEqual(["A11-f4", "A6-j2"]);
         expect(after.ended.map((r) => r.id)).toEqual(["A7-m3"]);
       }
     }

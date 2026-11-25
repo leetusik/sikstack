@@ -79,7 +79,7 @@ What differs is the work it reviews, which is a book, a document or a chapter ra
      - at most ~5 decisions, such as a dispute it overruled that changes what the book teaches;
      - the rest in one "decided as drawn" list, the outline's `## Gaps` among it;
      - one line: making the book public is the operator's act, after accepting it (the project's visibility, in the reader);
-   - an agenda entry candidate for each translation `## Explain` asks for: "Translate <book> into <lang>", what makes it actionable "the book is accepted". You write it; the executor never runs `agenda-entry`.
+   - an agenda item candidate for each translation `## Explain` asks for: "Translate <book> into <lang>", what makes it actionable "the book is accepted". You write it; the executor never runs `agenda-item` or `agenda-entry`.
 
 ## Plan a document's or a chapter's review so the executor
 
@@ -101,12 +101,12 @@ The unit is one draft, `doc/body.md`, written by `S1` from the evidence `DECOMP`
    - **In the reader** when the manifest allows it: `## Operator Runtime` records a saved sign-in file for the reader. Load it in `playwright-cli` exactly as a book's step 6 does, open the page at the manifest's viewports, and check that it renders with no error block or raw block text, that every diagram, figure and image shows, that the quiz, where it has one, grades and shows its `explain`, and that every `chapter:` and `doc:` link lands.
    - **Otherwise, the API read-back,** with no stop: the gate is waived, so a missing manifest, browser or sign-in is reported, never a halt. `GET <KB_API_BASE_URL>/api/documents/by-path/<rel_path>` with the org key must return the version just published, its body `doc/body.md`'s. Name it in `result.md` as an API read-back, not a reading; never claim a reader run that was not made.
    - **A chapter's order check** reads its book: in the reader, the book page puts it at its position, and the earlier chapters it links to land; on the read-back, `GET <KB_API_BASE_URL>/api/books/<project>/<book>` lists it at its position, and the earlier chapters' bodies (by their `rel_path`) are what it recaps. Its order and recaps are judged by B5 *Critic (`explain:explain-critic`)*, *Order and prerequisites* and §4 *Write the chapter — native Markdown*, *Standalone*: a missing recap, or a link carrying an idea the reader needs, is a finding, and so is a long re-teach where a short recap would do.
-7. **Routes the questions.** The gate is waived, so no gate stage runs and no `## Regression Checklist` line is appended; every `## Operator Questions` entry is still routed, into the closing report's decisions or an agenda entry candidate.
+7. **Routes the questions.** The gate is waived, so no gate stage runs and no `## Regression Checklist` line is appended; every `## Operator Questions` entry is still routed, into the closing report's decisions or an agenda item candidate.
 8. **Returns:**
    - the `review_verdict`, with findings numbered and one proposed fix slice for the draft if it needs one;
    - the fixed pointer;
    - `walkthrough: none` (the gate is waived); instead, `result.md` carries a `## Report` section, the facts the orchestrator's closing report needs (§8 *D9: the report*): the title, `url` and version (or the prior it superseded); the writer's and the critic's models, from the critique (`writer_model`, `critic_model`); the evidence: the commit, the covering phases read (or `none: from the code alone`) and `doc/evidence.md`'s counts, with its `v2:` line for a v2; the sections signed and delivered, and each cut with its reason; the declared gaps, from `doc/evidence.md`'s `## Gaps`; the critic's verdict, the answers and your rulings; the instrument of step 6; the dossier's path; and, when `DECOMP` recorded a scoped-down topic, the book suggestion (§9.1 *The book suggestion*): the reason and the part left out;
-   - an agenda entry candidate for each translation `## Explain` asks for: "Translate <title> into <lang>", actionable once "the original is published".
+   - an agenda item candidate for each translation `## Explain` asks for: "Translate <title> into <lang>", actionable once "the original is published".
 
 ## Fix slices republish
 
@@ -125,7 +125,7 @@ The re-review then re-reads the changed drafts, and the chapters that link to th
 ## After a pass
 
 Follow `reference/review.md`:
-1. **a book:** `gate <P> open --walkthrough "<walkthrough>"`, write the translation entries (`agenda-add --author agent:<model>`, Proposed), then `check`, commit, report and STOP. The operator reads the book. `accept` clears the gate, and you record the pass. The book stays private until the operator makes it public;
+1. **a book:** `gate <P> open --walkthrough "<walkthrough>"`, write the translation items (`agenda-item add` on the agenda they belong to; a new one by `agenda-add --author agent:<model>`, Proposed, only when none is close), then `check`, commit, report and STOP. The operator reads the book. `accept` clears the gate, and you record the pass. The book stays private until the operator makes it public;
 2. **a document or a chapter:** the gate is waived, so record the pass with no stop, and write the translation entries;
 3. **then, for any unit run in a worktree,** it merges back by itself, with no stop: `reference/worktree.md` (*An explain phase merges back by itself*) and the `parallel-phase` skill (its §5 section of the same name) carry the gate, the merge, the teardown and the `merge_ready=` fallback. Do not restate them here;
 4. **the closing report comes last** (§8 *D9: the report*), after the merge and the teardown, from the default checkout (or from the worktree, with the unmerged note, when the merge could not run): `PUBLISHED — <title>`, the `url` and the version; the writer and the critic; the evidence (the commit, the covering phases and the counts); the declared gaps; how it was read back; the dossier's path (in a nested install, in the nested repo); and the book suggestion for a scoped-down topic, offered, never acted on: a book is a new explain, created only on the operator's word. Draw it from the review's `## Report` (a book: its walkthrough and `## Published` table). It is shown, not written: the facts are already on disk.

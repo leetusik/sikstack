@@ -2,7 +2,7 @@
  * The Workspace's addresses: every page under `/projects/<id>/workspace`, built here and only here,
  * and the way back from an item to the list page it was opened from.
  *
- * - `/projects/<id>/workspace`: the Agenda (`?deferred=N`, the Deferred part's page);
+ * - `/projects/<id>/workspace`: the Agenda;
  * - `…/workspace/agenda/<item>`;
  * - `…/workspace/backlog` (`?archived=N`), `…/workspace/phases/<phase>`, `…/workspace/slices/<slice>`;
  * - `…/workspace/docs`, `…/workspace/docs/<doc>`, `…/workspace/docs/<doc>?version=<stored id>`.
@@ -34,13 +34,13 @@ export const FROM_PARAM = "from";
 
 /** A Workspace list page an item can be opened from, at its place. */
 export type WorkspaceList =
-  | { list: "agenda"; deferred?: number }
+  | { list: "agenda" }
   | { list: "backlog"; archived?: number }
   | { list: "docs" };
 
 /** A list page's own address keys. */
 const LIST_KEYS: Record<WorkspaceList["list"], readonly string[]> = {
-  agenda: ["deferred"],
+  agenda: [],
   backlog: ["archived"],
   docs: [],
 };
@@ -77,15 +77,9 @@ export function workspaceHref(project: string): string {
   return base(project);
 }
 
-/** The Agenda, at the Deferred part's page. */
-export function agendaHref(
-  project: string,
-  place: { deferred?: number } = {},
-): string {
-  const query = new URLSearchParams();
-  const page = pageValue(place.deferred);
-  if (page) query.set("deferred", page);
-  return withQuery(base(project), query);
+/** The Agenda (it has no paged part: Deferred is gone). */
+export function agendaHref(project: string): string {
+  return base(project);
 }
 
 /** The backlog, at the Archived phases' page. */
@@ -108,7 +102,7 @@ export function docsHref(project: string): string {
 export function listHref(project: string, list: WorkspaceList): string {
   switch (list.list) {
     case "agenda":
-      return agendaHref(project, { deferred: list.deferred });
+      return agendaHref(project);
     case "backlog":
       return backlogHref(project, { archived: list.archived });
     case "docs":
@@ -227,12 +221,8 @@ export function decodeWorkspaceFrom(
   const value = (key: string) => url.searchParams.get(key);
 
   switch (list) {
-    case "agenda": {
-      const raw = value("deferred");
-      if (raw === null) return { list };
-      const page = pageOf(raw);
-      return page === null ? null : { list, deferred: page };
-    }
+    case "agenda":
+      return { list };
     case "backlog": {
       const raw = value("archived");
       if (raw === null) return { list };

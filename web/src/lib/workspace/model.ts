@@ -2,9 +2,9 @@
  * The Workspace's shared pure models: what more than one page derives from the read model, written
  * once. Nothing here reads, writes or formats a sync line (that is the frame's).
  *
- * - An agenda item's state (F301, the canvas's `WS.itemState`): deferred, solved and dropped are
- *   the item's own; otherwise In progress while a phase it holds is not done, else Open. A state
- *   the read model already derived as In progress stays so.
+ * - An agenda's state (the canvas's `WS.itemState`): solved and dropped are the agenda's own;
+ *   otherwise In progress while a phase it holds is not done, else Open. A state the read model
+ *   already derived as In progress stays so.
  * - An agenda item's end cell (F79): `1 of 4 phases done`, or nothing.
  * - A stale doc's notes (F42): `4 notes from P7-m3 and P8-q4`; a doc's `v<ordinal>`.
  * - Dates (F2) in the viewer's zone: `dates(timeZone)` binds the page's zone once.
@@ -31,11 +31,12 @@ export function phaseLookup(
   return (id) => byId.get(id) ?? null;
 }
 
-const OWN_STATES: readonly string[] = ["deferred", "solved", "dropped"];
+const OWN_STATES: readonly string[] = ["solved", "dropped"];
 
 /**
- * The state an item reads: deferred, solved and dropped are its own (deferred wins over a running
- * phase, F301); In progress while a phase it holds is known and not done; else Open.
+ * The state an agenda reads: solved and dropped are its own; In progress while a phase it holds is
+ * known and not done; else Open. (There is no Deferred: an older stored one reads Proposed, the
+ * server's word.)
  */
 export function itemState(
   item: Pick<AgendaItem, "state" | "phases">,

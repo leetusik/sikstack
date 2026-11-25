@@ -2,11 +2,11 @@
  * Picked rows (design job 02, `AgendaList.dc.html`, frame.md F303, F309): pure, so the client list and the tests
  * share it.
  *
- * - **Selection is a part's own** and covers the part's rows **on screen**: the Deferred part's page, the Solved and
- *   dropped part's newest five until Show all (round:Q2). A ticked id that is no longer on screen is not picked.
+ * - **Selection is a part's own** and covers the part's rows **on screen**: the Solved and dropped part's newest five
+ *   until Show all (round:Q2). A ticked id that is no longer on screen is not picked.
  * - The part's box picks every row on screen, or clears them when all are picked; it is half set when some are.
- * - The actions, in one order everywhere (F309): Open **Delete, Defer, Drop, Solve**; Deferred **Delete, Reopen, Drop,
- *   Solve**; Solved and dropped **Delete, Reopen**. **Drop and Delete ask**; Defer, Solve and Reopen act at once.
+ * - The actions, in one order everywhere (F309): Open **Delete, Propose, Drop, Solve**; Solved and dropped **Delete,
+ *   Reopen**. **Drop and Delete ask**; Propose, Solve and Reopen act at once.
  * - Each action is one change for all the picked ids, sent in the agenda's own order (the engine reopens in the
  *   order the ids are given, and the page shows a reopen in the agenda's order: the two agree).
  */
@@ -17,25 +17,18 @@ import {
 } from "@/content/workspace/agenda";
 import type { Sending } from "@/lib/workspace/optimistic";
 
-import {
-  deferredPlace,
-  endedShown,
-  type AgendaParts,
-  type AgendaRowModel,
-  type DeferredPlace,
-} from "./model";
+import { endedShown, type AgendaParts, type AgendaRowModel } from "./model";
 
 export type { AgendaAct };
 
 /** What is ticked, by part (ids; only those on screen count). */
 export type Picks = Record<AgendaPartName, readonly string[]>;
 
-export const NO_PICKS: Picks = { open: [], deferred: [], ended: [] };
+export const NO_PICKS: Picks = { open: [], ended: [] };
 
 /** Each part's actions, in the one order (F309). */
 export const PART_ACTS: Record<AgendaPartName, readonly AgendaAct[]> = {
-  open: ["delete", "defer", "drop", "solve"],
-  deferred: ["delete", "reopen", "drop", "solve"],
+  open: ["delete", "propose", "drop", "solve"],
   ended: ["delete", "reopen"],
 };
 
@@ -57,9 +50,9 @@ export interface PartPick {
   some: boolean;
   /** `3 of 25 selected`, or the part's count at rest. */
   count: string;
-  /** The box's name: `Select all 5 open items`, `Select the 10 deferred items on this page`. */
+  /** The box's name: `Select all 5 open agendas`, `Select the 5 solved and dropped agendas on this page`. */
   allLabel: string;
-  /** The strip's name: `Act on the selected open items`. */
+  /** The strip's name: `Act on the selected open agendas`. */
   bulkLabel: string;
   acts: readonly AgendaAct[];
 }
@@ -89,29 +82,19 @@ export function partPick(
   };
 }
 
-/** Each part's rows on screen: the open rows, the Deferred part's page, the Solved and dropped part's five or all. */
+/** Each part's rows on screen: the open rows, the Solved and dropped part's five or all. */
 export interface OnScreen {
   open: AgendaRowModel[];
-  deferred: AgendaRowModel[];
   ended: AgendaRowModel[];
-  /** The Deferred part's page. */
-  place: DeferredPlace;
   /** Show all's count, or null when every ended row is shown. */
   more: number | null;
 }
 
-export function rowsOnScreen(
-  parts: AgendaParts,
-  deferredPage: number | null,
-  all: boolean,
-): OnScreen {
-  const place = deferredPlace(deferredPage, parts.deferred.length);
+export function rowsOnScreen(parts: AgendaParts, all: boolean): OnScreen {
   const ended = endedShown(parts.ended, all);
   return {
     open: [...parts.open],
-    deferred: parts.deferred.slice(place.from, place.to),
     ended: ended.rows,
-    place,
     more: ended.more,
   };
 }
@@ -131,7 +114,6 @@ export function partPicks(
     );
   return {
     open: pick("open"),
-    deferred: pick("deferred"),
     ended: pick("ended"),
   };
 }
@@ -157,7 +139,7 @@ export function sendOrder(
 
 /** An action that acts at once, as the overlay shows it before its answer (Solve with no outcome, round:Q3). */
 export function actSending(
-  kind: "defer" | "solve" | "reopen",
+  kind: "propose" | "solve" | "reopen",
   items: readonly string[],
 ): Sending {
   return { kind, items: [...items], fields: {} };

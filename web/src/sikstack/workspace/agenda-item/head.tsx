@@ -22,7 +22,7 @@ import type { Busy } from "./state";
  * The head's actions (`AgendaItemHead.dc.html`; frame.md F81, F303, F309), at the title row's end: **Every linked
  * phase is done.** before the buttons when it holds, then the buttons in their one order. Solve is the primary
  * button only while every linked phase is done. While a send runs every button is disabled and the busy one
- * (Defer, Reopen) shows its pending label at the same width. While a form is open the whole group is away
+ * (Propose, Reopen) shows its pending label at the same width. While a form is open the whole group is away
  * (`.agendaitem-away`): it keeps its width, so the title wraps as before, and has no height.
  *
  * A Proposed item's **Accept** (P61-e9) ends the group, the page's primary, `Accepting…` while it is sent
@@ -52,7 +52,7 @@ export function HeadActions({
   };
   const button = (action: HeadAction) => {
     const swap =
-      action === "defer" || action === "reopen" || action === "accept";
+      action === "propose" || action === "reopen" || action === "accept";
     const sending = swap && (action === "accept" ? accepting : busy === action);
     const label =
       action === "edit"
@@ -65,7 +65,7 @@ export function HeadActions({
     const pending =
       action === "accept"
         ? PROPOSED.accept[1]
-        : action === "defer" || action === "reopen"
+        : action === "propose" || action === "reopen"
           ? WS_ACTIONS[action][1]
           : "";
     return (
@@ -120,7 +120,8 @@ export function HeadMarks({ view }: { view: ItemView }) {
 /**
  * The item's facts, 8 px under the title row (F44, F80): Outcome (solved) or Reason (dropped) when the line is not
  * empty, Note when there is one, each on its own line at the measure with its line breaks kept and every id whole;
- * then Created and Changed. A deferred item has no Outcome or Reason (F301).
+ * then Created and Changed. An agenda that closed itself (its last open item done, dismissed or deleted) reads its
+ * Outcome or Reason the same way, as the read predicts it while the change waits.
  */
 export function HeadFacts({
   view,
