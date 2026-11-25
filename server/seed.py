@@ -9,15 +9,17 @@ compose exec api python -m server.seed``) AFTER ``alembic upgrade head`` and wit
 2. the operator's **tenant #1**. On a fresh database this is the same signup
    primitive ``/auth/signup`` uses (``provision_signup`` — a ``"default"`` org +
    ``"default"`` project, atomically), so the seed and signup never drift. On an
-   existing database the operator's tenant is kept verbatim — its name is **not**
-   rewritten (prod tenant #1 keeps whatever it was first seeded as);
+   existing database tenant #1 is the pinned org (``get_tenant_one_id``, which pins
+   the operator's first membership when no pin exists), kept verbatim — its name is
+   **not** rewritten (prod tenant #1 keeps whatever it was first seeded as);
 3. a ``projects`` row for each **live ``docs/`` project**, derived from the tree by
    reindex's filename rule (never hardcoded), so the seeded project names line up
    exactly with what the content plane stamps on ``documents.project``. A
    ``"default"`` project already provisioned in step 2 is tolerated (skipped).
 
 Why this matters (the ordering coupling): ``server.api_auth.get_tenant_one_id()``
-resolves tenant #1 from ``KB_OPERATOR_EMAIL`` and **caches on first success only**.
+resolves tenant #1, the org pinned for ``KB_OPERATOR_EMAIL``'s account, and **caches on
+first success only**.
 The ``KB_API_TOKEN`` master bearer and the ``docs/`` re-stamp (boot reindex /
 ``POST /api/reindex``) both depend on that resolution, so the operator user + tenant
 MUST exist before either is exercised. Running the seed first, then restarting the
@@ -40,6 +42,7 @@ from pathlib import Path
 
 from server import config
 from server.accounts.security import hash_password
+from server.api_auth import get_tenant_one_id
 from server.accounts.service import DuplicateEmailError, get_accounts_service
 from server.accounts.types import CreateProject, CreateUser
 from server.persistence.engine import dispose_engine
@@ -118,20 +121,25 @@ async def main() -> None:
         if user is None:  # pragma: no cover - only on a torn-down DB mid-run
             raise SystemExit("failed to create or read the operator user")
 
-        # 2. Tenant #1 = the operator's first tenant. On a FRESH database this is
-        #    the same signup primitive /auth/signup uses (provision_signup): a
-        #    "default" org + "default" project, atomically, so the seed and signup
-        #    never drift. On an EXISTING database the operator already has a tenant,
-        #    so we keep it verbatim (its name is NOT rewritten — prod tenant #1 keeps
+        # 2. Tenant #1 = the pinned org (get_tenant_one_id). On a FRESH database the
+        #    operator has no org yet, so it gets the same signup primitive
+        #    /auth/signup uses (provision_signup): a "default" org + "default"
+        #    project, atomically, so the seed and signup never drift; the
+        #    resolution below then pins it. On an EXISTING database tenant #1 is
+        #    the pin (or, with none yet, the operator's first membership, pinned
+        #    now), kept verbatim (its name is NOT rewritten — prod tenant #1 keeps
         #    whatever it was seeded as; a "default" project is added lazily via
         #    get-or-create, or below in step 3 if it is a live docs/ project).
-        tenants = await service.list_tenants_for_user(user.id)
-        if not tenants:
-            tenant, _member, _project = await service.provision_signup(user.id)
+        created_tenant = False
+        if await service.get_tenant_one_pin(user.id) is None and not (
+            await service.list_tenants_for_user(user.id)
+        ):
+            await service.provision_signup(user.id)
             created_tenant = True
-        else:
-            tenant = tenants[0]
-            created_tenant = False
+        tenant_one_id = await get_tenant_one_id()
+        tenant = await service.get_tenant(tenant_one_id) if tenant_one_id else None
+        if tenant is None:  # pragma: no cover - only on a torn-down DB mid-run
+            raise SystemExit("failed to resolve tenant #1")
 
         # 3. A projects row per live docs/ project (derived from the tree, not
         #    hardcoded — matches documents.project after a reindex). The set-membership

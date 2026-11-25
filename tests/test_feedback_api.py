@@ -1342,7 +1342,8 @@ def test_triage_is_the_workspace_keys_own_project_only(fb):
 
 
 def test_the_triage_migration_applies_on_a_fresh_database(monkeypatch):
-    """``0017`` creates ``feedback_triage`` as the model declares it; a downgrade drops it."""
+    """``0018`` creates ``feedback_triage`` as the model declares it; a downgrade to
+    ``0017`` drops it and only it."""
 
     if not _RAW_DSN:
         pytest.skip("set KB_TEST_DATABASE_URL to a disposable Postgres to run the migration test")
@@ -1373,6 +1374,7 @@ def test_the_triage_migration_applies_on_a_fresh_database(monkeypatch):
     cfg = Config(str(ini))
     engine = create_engine(url)
     count = text("SELECT count(*) FROM pg_tables WHERE tablename = 'feedback_triage'")
+    pins = text("SELECT count(*) FROM pg_tables WHERE tablename = 'tenant_one_pins'")
     try:
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
@@ -1380,9 +1382,10 @@ def test_the_triage_migration_applies_on_a_fresh_database(monkeypatch):
             assert compare_metadata(
                 MigrationContext.configure(conn, opts={"compare_type": True}), Base.metadata
             ) == []
-        command.downgrade(cfg, "0016_tenant_made_by")
+        command.downgrade(cfg, "0017_tenant_one_pin")
         with engine.connect() as conn:
             assert conn.execute(count).scalar_one() == 0
+            assert conn.execute(pins).scalar_one() == 1
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
             assert conn.execute(count).scalar_one() == 1

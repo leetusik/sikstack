@@ -1,7 +1,7 @@
 """feedback triage: what became of a piece of feedback on the agenda
 
-Revision ID: 0017_feedback_triage
-Revises: 0016_tenant_made_by
+Revision ID: 0018_feedback_triage
+Revises: 0017_tenant_one_pin
 Create Date: 2026-11-25 00:00:00
 
 One table, ``feedback_triage``: one row per feedback event that was triaged from the
@@ -29,8 +29,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0017_feedback_triage"
-down_revision: str | None = "0016_tenant_made_by"
+revision: str = "0018_feedback_triage"
+down_revision: str | None = "0017_tenant_one_pin"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
