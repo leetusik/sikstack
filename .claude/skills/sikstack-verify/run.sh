@@ -269,9 +269,21 @@ signin() { # [other]: the test account in $SESSION; `other`, the second account 
     other_account || die "the second account could not be made (see $EV/run.log)"
     s="$SESSION-other"; auth="$EV/auth-state-other.json"; ev=SIKSTACK_DEV_OTHER_EMAIL; pv=SIKSTACK_DEV_OTHER_PASSWORD
   elif [ -n "${1:-}" ]; then die "usage: $0 signin [other]"; fi
+  email=$(sed -n "s/^$ev=//p" "$ENV_FILE" | tr -d '"')
+  pw=$(sed -n "s/^$pv=//p" "$ENV_FILE" | tr -d '"')
+  [ -n "$email" ] && [ -n "$pw" ] || die "no account $ev in $ENV_FILE"
   printf '{"outputDir": "%s"}\n' "$EV/cli-output" >"$EV/cli.config.json"
+  # The password is the session's CLI secret, never a value we hand the CLI: its daemon reads it from a 0600 file
+  # (PLAYWRIGHT_MCP_SECRETS_FILE) at `open`, which is removed at once; `fill` names the secret, and the CLI writes
+  # `<secret>…</secret>` in its place in everything it prints or saves (the snapshot taken while the form submits
+  # shows the disabled Password field's value). So no file under $EV, and nothing the CLI echoes, holds it.
+  local secret="$HOME_DIR/signin-secret.env"
+  (umask 077 && printf 'SIKSTACK_SIGNIN_PASSWORD=%s\n' "$pw" >"$secret") || die "cannot write $secret"
   playwright-cli -s="$s" close >/dev/null 2>&1 || true # this home's own session only
-  playwright-cli -s="$s" open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1 || die "playwright-cli open failed"
+  PLAYWRIGHT_MCP_SECRETS_FILE="$secret" playwright-cli -s="$s" open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1
+  local opened=$?
+  rm -f "$secret"
+  [ "$opened" -eq 0 ] || die "playwright-cli open failed"
   if [ -f "$auth" ]; then
     playwright-cli -s="$s" state-load "$auth" >>"$EV/run.log" 2>&1
     playwright-cli -s="$s" goto "$WEB/dashboard" >>"$EV/run.log" 2>&1
@@ -280,12 +292,8 @@ signin() { # [other]: the test account in $SESSION; `other`, the second account 
     say "signin: saved sign-in no longer valid; signing in again"
     playwright-cli -s="$s" goto "$WEB/login" >>"$EV/run.log" 2>&1
   fi
-  email=$(sed -n "s/^$ev=//p" "$ENV_FILE" | tr -d '"')
-  pw=$(sed -n "s/^$pv=//p" "$ENV_FILE" | tr -d '"')
-  [ -n "$email" ] && [ -n "$pw" ] || die "no account $ev in $ENV_FILE"
   playwright-cli -s="$s" fill 'role=textbox[name="Email"]' "$email" >>"$EV/run.log" 2>&1 || die "no Email field on /login"
-  # The CLI echoes filled text and a snapshot shows a field's value: the password goes nowhere but the page.
-  playwright-cli -s="$s" fill 'role=textbox[name="Password"]' "$pw" --submit >/dev/null 2>&1 || die "no Password field on /login"
+  playwright-cli -s="$s" fill 'role=textbox[name="Password"]' SIKSTACK_SIGNIN_PASSWORD --submit >>"$EV/run.log" 2>&1 || die "no Password field on /login"
   local i=0
   while [ "$i" -lt 20 ]; do
     url=$(playwright-cli -s="$s" --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
