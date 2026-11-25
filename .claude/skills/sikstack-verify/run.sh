@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | api [other] | expect | feature <name> | status | down
+# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | local <dir> | api [other] | expect | feature <name> | status | down
 #
 # Runs the whole product on loopback without touching the checkout: a throwaway
 # postgres:17 container, the API on the host (scratch KB_ROOT, KB_GIT_COMMIT=false),
@@ -426,6 +426,58 @@ PY
     "$project" "http://127.0.0.1:$API_PORT" "$DESIGN"
 }
 
+# local <dir>: a scratch *unlinked* nested install at <dir> (a product repo holding a `sikstack init` workspace, the
+# branch's engine) with phase P1 in its own worktree pair, cut before any link; then its design link, set from that
+# worktree by `design-link <api>/projects/<id>` with a workspace key minted through the API for the test account's
+# project `sikstack` and handed on stdin. No `[cloud]` table: the workspace stays local. The key lives only in this
+# home's XDG folder (0700; its key file 0600), which `down` removes. Prints shell assignments (WS, WT, XDG, SK,
+# PROJECT, API, DESIGN) for `eval`; never a key. `design-link`'s own output goes to `$EV/run.log`.
+local_install() {
+  load_state
+  [ -n "${API_PORT:-}" ] || die "not up: run '$0 up' first"
+  local dir xdg="$HOME_DIR/xdg" project wt sk="$REPO/plugins/sikstack/bin/sikstack"
+  dir=$(abs "${1:?usage: $0 local <dir>}")
+  [ -e "$dir" ] && die "$dir exists: name a new folder"
+  mkdir -p "$dir" "$xdg" && chmod 700 "$xdg" || die "cannot make $dir or $xdg"
+  local run=(env -i "${BASE_ENV[@]}" GIT_AUTHOR_NAME=verify GIT_AUTHOR_EMAIL=verify@example.invalid GIT_COMMITTER_NAME=verify
+    GIT_COMMITTER_EMAIL=verify@example.invalid XDG_CONFIG_HOME="$xdg" SIKSTACK_NO_OFFER=1)
+  wt=$(cd "$dir" && { "${run[@]}" git init -q && "${run[@]}" git commit -q --allow-empty -m "chore: start" && "${run[@]}" "$sk" init \
+    && "${run[@]}" git -C .sikstack add -A && "${run[@]}" git -C .sikstack commit -q --allow-empty -m install \
+    && "${run[@]}" "$sk" phase new --phase P1 --name "Probe" --objective "publish a design from a phase's worktree" \
+    && "${run[@]}" git -C .sikstack add -A && "${run[@]}" git -C .sikstack commit -q -m p1 \
+    && "${run[@]}" "$sk" worktree start P1 --host-branch feat/p1; } 2>>"$EV/run.log" | tee -a "$EV/run.log" | sed -n 's/^host_worktree=//p')
+  [ -n "$wt" ] && [ -d "$wt/.sikstack" ] || die "the install or its P1 worktree in $dir failed (see $EV/run.log)"
+  project=$("${run[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" SK="$sk" WT="$wt" LOG="$EV/run.log" python3 - <<'PY'
+import json, os, subprocess, urllib.error, urllib.request
+api, env = os.environ["API"], {}
+for line in open(os.environ["ENV_FILE"]):
+    k, _, v = line.strip().partition("=")
+    env[k] = v.strip('"')
+def call(method, path, body=None, token=None):
+    req = urllib.request.Request(api + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"{method} {path} answered {e.code}")
+token = call("POST", "/auth/login", {"email": env["SIKSTACK_DEV_TEST_EMAIL"], "password": env["SIKSTACK_DEV_TEST_PASSWORD"]})["token"]
+pid = next(p["id"] for p in call("GET", "/app/projects", token=token)["projects"] if p["name"] == "sikstack")
+key = call("POST", f"/app/projects/{pid}/credentials", {"name": "verify design link", "scope": "workspace"}, token=token)["key"]
+with open(os.environ["LOG"], "a") as log:
+    done = subprocess.run([os.environ["SK"], "design-link", f"{api}/projects/{pid}"], cwd=os.environ["WT"], input=key + "\n",
+                          text=True, stdout=log, stderr=log)
+if done.returncode != 0:
+    raise SystemExit(f"design-link answered {done.returncode}")
+print(pid)
+PY
+) || die "the design link from $wt failed (see $EV/run.log)"
+  [ -n "$project" ] || die "the design link from $wt gave no project"
+  say "local: $dir (unlinked, phase P1 in $wt) has its design link to project sikstack ($project); its workspace key is in $xdg only" >&2
+  printf "WS='%s'\nWT='%s'\nXDG='%s'\nSK='%s'\nPROJECT='%s'\nAPI='%s'\nDESIGN='%s'\n" "$dir" "$wt" "$xdg" "$sk" \
+    "$project" "http://127.0.0.1:$API_PORT" "$DESIGN"
+}
+
 seed() { # publish one sample document into the scratch library through the API
   load_state
   [ -n "${API_PORT:-}" ] || die "not up: run '$0 up' first"
@@ -538,11 +590,12 @@ case "${1:-}" in
   up) shift; up "$@" ;;
   signin) shift; signin "$@" ;;
   workspace) shift; workspace "$@" ;;
+  local) shift; local_install "$@" ;;
   api) shift; [ $# -ge 2 ] || die "usage: $0 api [other] <method> <path> [json]"; api "$@" ;;
   seed) seed ;;
   expect) shift; load_state; expect "$@" ;;
   feature) shift; [ $# -ge 1 ] || die "usage: $0 feature <name>"; for n in "$@"; do feature "$n" || exit 1; done ;;
   status) status ;;
   down) down ;;
-  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | api [other] <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
+  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | local <dir> | api [other] <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
 esac

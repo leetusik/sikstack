@@ -10,6 +10,53 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.7.0 — 2026-11-25
+
+- **A local workspace publishes design builds: `sikstack design-link`.** `design-publish`, `design-builds` and
+  `design-delete` used to need a cloud-linked checkout, and a linked checkout runs no worktree phases. A design link
+  is enough now. It is the `[design]` table of `.sikstack/config.toml`, holding `server` and `project_id` and never
+  the key. It is not cloud mode: `next` prints no `store=cloud`, nothing syncs, and `worktree start` still runs.
+  - `sikstack design-link --data-dir "${CLAUDE_PLUGIN_DATA}"` runs the connect-page sign-in, the same flow
+    `sign-in` uses. On approval it keeps the new project's workspace key and writes `[design]`, never `[cloud]`. The
+    project is named after the main host checkout's folder, even when it runs in a phase's worktree.
+  - `sikstack design-link <server>/projects/<project-id>` links an existing project. It reads a pasted workspace key
+    at a prompt (one stdin line otherwise), as `link` does, never from the command line.
+  - Either way the key is probed against the design API before anything is written. Then it is kept in
+    `$XDG_CONFIG_HOME/sikstack/workspace-keys.json` (0600, never printed), and the table goes into the workflow
+    repo's main checkout's `config.toml`, uncommitted, with its path printed. The verbs read the table from there
+    first, else from the checkout's own, so a phase's worktree cut before the link publishes too.
+  - It refuses with one line and writes nothing in a cloud-linked checkout (that link already publishes), with a key
+    file or folder open to group or others, for a key the design API refuses, and over a `[design]` table naming
+    another link unless `--replace`.
+- **With no link at all, the three verbs name `design-link`** (and `/sikstack:sign-in` for cloud mode) in their one
+  line, before any request. A cloud-linked checkout publishes exactly as before.
+- **`design-cowork`'s publish step works in a local workspace.** It sets the design link with the operator when there
+  is none, publishes, and reports the build's viewer (`url=`). Sharing is turned on in that viewer by a member, and
+  the share link copied there is what a teammate with no account opens; the engine never turns sharing on.
+  `/sikstack:sign-in` points to `design-link` for design sharing without cloud mode.
+- **A design's screens can also go onto a claude.ai Design canvas.** It is an option: on the operator's ask, or
+  when the repo's `Design:` line says `publish: claude.ai`. The design folder stays the source, and the clickable
+  build stays the sikstack web share link.
+  - `templates/design/canvas.mjs`, beside the layout check, imports that check's walk. It shoots every page, state
+    and width (1440, 390) of a served build in a fresh context. It confirms each run's state, hides the state widget,
+    and cuts a shot to fit an 8000 px artboard. Then it writes `plan.json`, never the canvas's files:
+    - the index;
+    - one artboard per page and state, its widths side by side under captions, with `Main.dc.html` first;
+    - the upload batches.
+
+    `--plan-only <shots dir>` plans again from shots already taken.
+  - Each shot is the page as a teammate scrolling it sees it: lazy images and iframes are loaded and decoded first,
+    and a page holding a fixed element (a modal's backdrop) is shot in a window as tall as the page, so the element
+    spans the shot; a page that grows with the window keeps its first height. Shots are cut at 7968 px, so the
+    32 px caption and the shot fit the 8000 px artboard whole. `tests/canvas_shoot.mjs` proves both in a browser.
+  - design-cowork's `reference/claude-canvas.md` gives a session with the Artifact tool its steps, in the tool's
+    order: open the shots, create the canvas, upload, write `canvas.json` and `Main.dc.html` with its own file tool
+    and publish them together, then write and publish the other artboards. Nothing a script wrote is published.
+    `tests/canvas_check.mjs` checks the hand-written folder before the second publish. The engine never publishes
+    to claude.ai.
+  - `check.mjs` now exports its state reading and its `playwright-cli` driver for `canvas.mjs`, and behaves as
+    before.
+
 ## 0.6.0 — 2026-11-25
 
 - **An agenda holds items.** Each file under an agenda's `entries/` is now an item, open, done or dismissed: its state

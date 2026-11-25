@@ -17,9 +17,10 @@
 #   so are Test 30 (setup, the registration retry, the rules card), Test 31 (migrate from an old install), Test 32
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
 #   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
-#   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release) and
-#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll) and
-#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes).
+#   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release),
+#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll),
+#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes) and
+#   Test 39 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -527,21 +528,21 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 44 in all, and no
+# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 45 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
-design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
+design = {"design-sign", "design-publish", "design-builds", "design-delete", "design-link"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes; 0.7.0 design-link
 agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-propose", "agenda-item", "agenda-entry", "agenda-show",
           "agenda-split", "agenda-merge", "agenda-fold", "agenda-edit", "agenda-move", "agenda-solve", "agenda-drop",
           "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink",
           "agenda-feedback"}  # 0.3.0: the four deferred-job verbs retired; 0.6.0: agenda-defer retired, agenda-feedback added
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed", "cold"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 44 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 44 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
+assert len(names) == 45 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 45 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs, design-link and the agenda, cloud and cold parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -5037,6 +5038,94 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
     [ "$ck_drv_rc" = 2 ] && printf '%s\n' "$ck_drv" | grep -q '^driver error: ' && ! printf '%s\n' "$ck_drv" | grep -q '^FAIL ' \
       && ok "the layout check with no server prints a driver error and exits 2, with no FAIL line" \
       || bad "the layout check with no server (rc=$ck_drv_rc) -- $ck_drv"
+    # 0.7.0: the claude.ai canvas copy, without a browser. canvas.mjs --plan-only pairs shots already taken (fake PNG
+    # headers here) with a fake manifest's runs and writes plan.json: one artboard per page x state, its widths side by
+    # side, the first Main.dc.html, the artboards of a canvas page stacked apart, upload batches; over 40 pages, no
+    # canvas pages. A folder written from the plan with /_blob/ urls passes tests/canvas_check.mjs (the orchestrator's
+    # check), and the check fails on a placeholder left, a src not /_blob/, a missing file and an overlap.
+    newtmp CVT
+    cv_plan=$(CV_DIR="$CVT" CV_FILE="$PLUGIN/templates/design/canvas.mjs" CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      import { mkdirSync, writeFileSync } from "node:fs";
+      const cv = await import(pathToFileURL(process.env.CV_FILE).href), ck = await import(pathToFileURL(process.env.CK_FILE).href);
+      const assert = (c, msg) => { if (!c) { console.log("canvas: " + msg); process.exit(1); } };
+      assert(cv.SHOT_MAX === 7968 && cv.MAX_H === 8000, "a shot is cut at 8000 less its 32 px caption");
+      const D = process.env.CV_DIR, manifest = { pages: [
+        { name: "Workspace · Agenda", entry: "/ws/", states: ["recorded", "behind", "loading"] },
+        { name: "All pages", entry: "/" },
+        { name: "Item", entry: "/ws/a/1/", states: ["open", "deferred"] } ] };
+      writeFileSync(D + "/manifest.json", JSON.stringify(manifest));
+      const pages = ck.pagesFromManifest(manifest); pages[1].states = [];
+      const shots = cv.shotList(ck.plan(pages, [1440, 390], "http://127.0.0.1:9"));
+      assert(shots.length === 12 && new Set(shots.map((s) => s.file)).size === 12, "shots " + shots.length);
+      mkdirSync(D + "/shots", { recursive: true });
+      shots.forEach((s, i) => {
+        const b = Buffer.alloc(24); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([900, cv.SHOT_MAX, 2400, 844][i % 4], 20);
+        writeFileSync(D + "/" + s.file, b);
+      });
+      // over 40 pages: no canvas pages; the first artboard is still Main.dc.html
+      const many = ck.pagesFromManifest({ pages: Array.from({ length: 41 }, (_, i) => ({ name: "P" + i, entry: "/p" + i + "/", states: ["a"] })) });
+      const big = cv.planCanvas(cv.shotList(ck.plan(many, [1440], "http://x")).map((s) => Object.assign(s, { w: 1440, h: 900, bytes: 1 })), { title: "Big" });
+      assert(big.canvas.pages.length === 0 && big.artboards.length === 41 && big.canvas.order[0] === "Main.dc.html"
+        && Object.values(big.canvas.boards).every((b) => b.page === undefined && b.w === 1440 && b.h === 932), "over 40 pages");
+      const small = cv.planCanvas(cv.shotList(ck.plan(many.slice(0, 40), [1440], "http://x")).map((s) => Object.assign(s, { w: 1440, h: 900, bytes: 1 })), { title: "Forty" });
+      assert(small.canvas.pages.length === 40, "40 pages");
+      console.log("fake ok");
+    ' 2>&1)
+    cv_run=$(node "$PLUGIN/templates/design/canvas.mjs" --plan-only "$CVT/shots" --manifest "$CVT/manifest.json" --out "$CVT" --title Fake 2>&1); cv_run_rc=$?
+    cv_shape=$(CV_DIR="$CVT" node --input-type=module -e '
+      import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+      const D = process.env.CV_DIR, p = JSON.parse(readFileSync(D + "/plan.json", "utf8"));
+      const assert = (c, msg) => { if (!c) { console.log("plan: " + msg); process.exit(1); } };
+      const { canvas, artboards, uploads } = p;
+      assert(artboards.length === 6 && canvas.order.length === 6 && canvas.order[0] === "Main.dc.html" && artboards[0].file === "Main.dc.html", "order " + canvas.order);
+      assert(artboards[0].title === "Workspace · Agenda · recorded" && artboards[3].file === "p02-all-pages--default.dc.html", "names " + artboards.map((a) => a.file + "=" + a.title));
+      assert(canvas.pages.length === 3 && canvas.boards["Main.dc.html"].page === canvas.pages[0].id && !("notes" in canvas) && canvas.createdOnFiles.at === null, "index");
+      const b0 = canvas.boards["Main.dc.html"], b1 = canvas.boards[canvas.order[1]];
+      assert(b0.w === 1910 && b0.h === 932 && b1.h === 8000 && b1.y === b0.y + b0.h + 120 && b1.x === 0, "frames " + JSON.stringify([b0, b1]));
+      assert(artboards.every((a) => (a.html.match(/@@shot:/g) || []).length === 2 && a.shots.every((s) => a.html.includes("@@shot:" + s + "@@"))), "placeholders");
+      assert(artboards[0].html.includes(">1440 px</p>") && artboards[0].html.indexOf("1440 px") < artboards[0].html.indexOf("390 px"), "captions");
+      assert(uploads.length === 1 && uploads[0].length === 12, "uploads");
+      // a folder written from the plan, as the orchestrator writes it; then four broken copies
+      const write = (dir, mut) => {
+        mkdirSync(dir + "/project", { recursive: true });
+        const c = JSON.parse(JSON.stringify(canvas)); c.createdOnFiles.at = "2026-11-25T00:00:00Z";
+        let n = 0; const html = Object.fromEntries(artboards.map((a) => [a.file, a.html.replace(/@@shot:[^@]+@@/g, () => "/_blob/x" + n++)]));
+        if (mut) mut(c, html);
+        writeFileSync(dir + "/project/canvas.json", JSON.stringify(c));
+        for (const [f, h] of Object.entries(html)) if (h !== null) writeFileSync(dir + "/project/" + f, h);
+      };
+      write(D + "/ok");
+      write(D + "/left", (c, h) => { h[artboards[2].file] = artboards[2].html; });
+      write(D + "/src", (c, h) => { h["Main.dc.html"] = h["Main.dc.html"].replace(/\/_blob\/x0/, "shots/a.png"); });
+      write(D + "/gone", (c, h) => { h[artboards[4].file] = null; });
+      write(D + "/over", (c, h) => { c.boards[c.order[1]].y = 100; });
+      console.log("plan ok");
+    ' 2>&1)
+    cv_ok=$(node "$PLUGIN/tests/canvas_check.mjs" "$CVT/ok" 2>&1); cv_ok_rc=$?
+    # each broken copy must fail (exit 1) naming its own problem
+    cv_bad=""
+    for cv_case in "left:a placeholder is left" "src:is not a /_blob/ url" "gone:missing file: project/" "over:frames overlap: "; do
+      cv_o=$(node "$PLUGIN/tests/canvas_check.mjs" "$CVT/${cv_case%%:*}" 2>&1) && cv_bad="$cv_bad ${cv_case%%:*}:passed"
+      printf '%s\n' "$cv_o" | grep -qF "${cv_case#*:}" || cv_bad="$cv_bad ${cv_case%%:*}:$(printf '%s' "$cv_o" | head -2 | tr '\n' '|')"
+    done
+    [ "$cv_plan" = "fake ok" ] && [ "$cv_run_rc" = 0 ] && printf '%s\n' "$cv_run" | grep -q '^artboards=6 shots=12 pages=3 widths=1440,390 cut=3 ' \
+      && [ "$cv_shape" = "plan ok" ] \
+      && ok "canvas.mjs --plan-only (no browser): plan.json holds one artboard per page x state with its widths side by side, Main.dc.html first, frames stacked 120 px apart, upload batches; over 40 pages, no canvas pages" \
+      || bad "canvas.mjs's plan is wrong -- $cv_plan / rc=$cv_run_rc $cv_run / $cv_shape"
+    [ "$cv_ok_rc" = 0 ] && [ "$cv_ok" = "canvas ok 6" ] && [ -z "$cv_bad" ] \
+      && ok "canvas_check passes a folder written from the plan with /_blob/ urls, and fails a placeholder left, a src not /_blob/, a missing file and an overlap" \
+      || bad "canvas_check -- ok: rc=$cv_ok_rc $cv_ok / broken:$cv_bad"
+    # 0.7.0: the shoot in a real browser, over a fixture build tests/canvas_shoot.mjs serves itself: a lazy image and
+    # iframe 6000 px down are drawn, a fixed tint covers a tall page's shot to its bottom row, a page that grows with
+    # the window keeps its first measured height, a 100vh page keeps its own, and a cut shot fits its artboard whole.
+    if command -v playwright-cli >/dev/null 2>&1; then
+      cv_shoot=$(node "$PLUGIN/tests/canvas_shoot.mjs" 2>&1); cv_shoot_rc=$?
+      [ "$cv_shoot_rc" = 0 ] && [ "$cv_shoot" = "shoot ok" ] \
+        && ok "canvas.mjs's shots (a browser over a fixture): lazy images and iframes drawn, a fixed overlay over the whole shot, a page that tracks the window not grown, a cut shot whole in its artboard" \
+        || bad "canvas.mjs's shots (rc=$cv_shoot_rc) -- $(printf '%s' "$cv_shoot" | head -4 | tr '\n' '|')"
+    else ok "canvas.mjs's shots in a browser (playwright-cli absent: skipped)"; fi
   else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
 else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 
@@ -5832,6 +5921,139 @@ if grep -rqF "$DPK" "$DPH" "$DPW"/*.txt "$DPW/fake" 2>/dev/null || printf '%s\n'
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$DP_PID" 2>/dev/null; wait "$DP_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 39: the design link in a local workspace, against the local fake sikstack -- with no [cloud] and no [design] table, design-publish, design-builds and design-delete each refuse in one line naming design-link, before any request; design-link refuses a cloud-linked checkout, a key folder open to others, a key the design API refuses (401, 403), and another project over a set link without --replace (and with it, a probe's 404), each with nothing written; from a phase's worktree it reads a pasted key (stdin, never argv), keeps it 0600 and writes [design] (server and project_id, no key) into the main checkout's config.toml, saying where; then the worktree cut before the link and the main checkout both publish and design-builds lists both, while next prints no store=cloud and worktree start still runs; the connect-page form run in a worktree names the new project after the main host folder and writes [design], never [cloud]; the key appears nowhere =="
+newtmp DLW; DLX="$DLW/xdg"; DLH="$DLW/dlhost"; DL2="$DLW/dlhost2"
+dl() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" "$@" ) 2>&1; }
+# dl_install <host>: a nested install with phase P1 in its own worktree pair, cut now (before any link); prints the host worktree.
+dl_install() {
+  mkhost "$1" >/dev/null && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m install >/dev/null \
+    && ( cd "$1" && python3 "$ENG" phase new --phase P1 --name "Probe" --objective "probe the design link" >/dev/null ) \
+    && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -q --allow-empty -m p1 >/dev/null \
+    && ( cd "$1" && python3 "$ENG" worktree start P1 --host-branch feat/p1 ) | sed -n 's/^host_worktree=//p'
+}
+DLT=$(dl_install "$DLH" 2>"$DLW/install.txt"); DL2T=$(dl_install "$DL2" 2>>"$DLW/install.txt")
+{ [ -d "$DLT/.sikstack" ] && [ -d "$DL2T/.sikstack" ]; } || bad "design link probe: an install or its worktree failed -- $(tail -3 "$DLW/install.txt")"
+DLK="design-link-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$DLK" > "$DLW/key"; chmod 600 "$DLW/key"
+python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$DLW/fake" --port-file "$DLW/port" --key-file "$DLW/key" \
+  --project proj-d --org org-d --lifetime 900 > "$DLW/fake.txt" 2>&1 &
+DL_PID=$!
+for _ in $(seq 1 100); do [ -s "$DLW/port" ] && break; sleep 0.1; done
+DLS="http://127.0.0.1:$(cat "$DLW/port" 2>/dev/null)"
+DLL="$DLW/fake/requests.jsonl"
+dl_n() { cat "$DLL" 2>/dev/null | grep -c '' | tr -d ' '; }  # every request the fake received
+dl_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$DLS/_fake/control" >/dev/null; }
+dl_cfg() { cat "$1/.sikstack/config.toml"; }
+dp_build "$DLH/web/design" design/data/sample/recording.json
+# (a) no [cloud], no [design]: each verb refuses in one line naming design-link, and the fake receives nothing.
+dl_a1=$(dl "$DLH" design-publish --folder "$DLH/web/design"; echo "rc=$?")
+dl_a2=$(dl "$DLT" design-builds; echo "rc=$?")
+dl_a3=$(dl "$DLT" design-delete bnotabuildbutwellformed; echo "rc=$?")
+dl_a_ok=1
+for dl_pair in "design-publish|nothing was published|$dl_a1" "design-builds|nothing was read|$dl_a2" "design-delete|nothing was deleted|$dl_a3"; do
+  dl_v=${dl_pair%%|*}; dl_rest=${dl_pair#*|}; dl_nw=${dl_rest%%|*}; dl_o=${dl_rest#*|}
+  { [ "$(printf '%s\n' "$dl_o" | grep -c '')" = 2 ] && [ "$(printf '%s\n' "$dl_o" | tail -1)" = rc=1 ] \
+    && printf '%s\n' "$dl_o" | head -1 | grep -q "^$dl_v: this checkout is not linked to sikstack .*run sikstack design-link .*/sikstack:sign-in .*($dl_nw)\$"; } || dl_a_ok=0
+done
+[ "$dl_a_ok" = 1 ] && [ "$(dl_n)" = 0 ] \
+  && ok "with no [cloud] and no [design] table, design-publish, design-builds and design-delete (main checkout and a phase's worktree) each refuse in one line naming design-link (and /sikstack:sign-in for cloud mode); the fake receives no request" \
+  || bad "the unlinked refusal naming design-link is wrong -- sent=$(dl_n) [$dl_a1] [$dl_a2] [$dl_a3]"
+# (b) design-link's refusals, each with nothing written: a cloud-linked checkout, a key folder open to others, a key the
+# design API refuses (401, 403).
+mkhost "$DLW/linked" >/dev/null 2>&1 && set_link "$DLW/linked/.sikstack" "$DLS"
+dl_c0=$(dl_cfg "$DLW/linked"); dl_n0=$(dl_n)
+dl_b1=$(printf '%s\n' "$DLK" | dl "$DLW/linked" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+dl_cfg0=$(dl_cfg "$DLH")
+mkdir -p "$DLX/sikstack" && chmod 755 "$DLX/sikstack"
+dl_b2=$(printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+chmod 700 "$DLX/sikstack"
+dl_n2=$(dl_n)
+dl_b3=$(printf 'wrong-key\n' | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+dl_ctl '{"design_answer": {"status": 403, "detail": "this key cannot reach a workspace"}}'
+dl_b4=$(printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d"; echo "rc=$?")
+[ "$(printf '%s\n' "$dl_b1" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b1" | head -1 | grep -q '^design-link: this checkout is linked to sikstack (cloud mode: the \[cloud\] table in .*), and that link already publishes design builds (nothing was written)$' \
+  && [ "$dl_n2" = "$dl_n0" ] && [ "$(dl_cfg "$DLW/linked")" = "$dl_c0" ] \
+  && [ "$(printf '%s\n' "$dl_b2" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b2" | grep -q '^design-link: .*can be read by group or others (mode 0755)' \
+  && [ "$(printf '%s\n' "$dl_b3" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b3" | grep -q '^design-link: sikstack refused (HTTP 401): .*(nothing was written)$' \
+  && [ "$(printf '%s\n' "$dl_b4" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_b4" | grep -q '^design-link: sikstack refused (HTTP 403): this key cannot reach a workspace.*(nothing was written)$' \
+  && [ "$(dl_cfg "$DLH")" = "$dl_cfg0" ] && ! grep -q '^\[design\]' "$DLT/.sikstack/config.toml" && [ ! -e "$DLX/sikstack/workspace-keys.json" ] \
+  && ok "design-link refuses a cloud-linked checkout (its link already publishes; no request), a key folder open to others, and a key the design API answers 401 or 403, each in one line with nothing written: no [design] table, no key file" \
+  || bad "a design-link refusal is wrong -- [$dl_b1] [$dl_b2] [$dl_b3] [$dl_b4] sent=$dl_n0/$dl_n2 keys=$(ls "$DLX/sikstack" 2>&1)"
+# (c) from the phase's worktree: the pasted key (stdin) is probed, kept 0600, and [design] lands in the main checkout's
+# config.toml, never the worktree's, and never [cloud].
+printf '%s\n' "$DLK" | dl "$DLT" design-link "$DLS/projects/proj-d" > "$DLW/c.txt"; dl_rc=$?
+dl_mode=$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$DLX/sikstack/workspace-keys.json" 2>/dev/null)
+dl_saved=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["proj-d"]["key"])' "$DLX/sikstack/workspace-keys.json" "$DLS" 2>/dev/null)
+dl_tbl=$(python3 - "$DLH/.sikstack/config.toml" <<'PY2'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r"^\[design\]\n((?:[^\[\n][^\n]*\n|\n)*)", text, re.M)
+print(" ".join(l.split(" = ")[0] for l in (m.group(1).splitlines() if m else []) if l.strip() and not l.startswith("#")))
+PY2
+)
+[ "$dl_rc" = 0 ] && grep -q "^design_link=written server=$DLS project=proj-d config=/.*/dlhost/\.sikstack/config\.toml\$" "$DLW/c.txt" \
+  && [ "$dl_mode" = 0o600 ] && [ "$dl_saved" = "$DLK" ] && [ "$dl_tbl" = "schema server project_id linked_at" ] \
+  && grep -qx "server = \"$DLS\"" "$DLH/.sikstack/config.toml" && grep -qx 'project_id = "proj-d"' "$DLH/.sikstack/config.toml" \
+  && ! grep -q '^\[cloud\]' "$DLH/.sikstack/config.toml" && ! grep -q '^\[design\]' "$DLT/.sikstack/config.toml" \
+  && ! grep -qF "$DLK" "$DLW/c.txt" "$DLH/.sikstack/config.toml" \
+  && ok "design-link from a phase's worktree reads the pasted key from stdin, keeps it in the key file (0600, never printed) and writes [design] (schema, server, project_id, linked_at; no key) into the main checkout's config.toml, naming that file; the worktree's own config.toml and [cloud] stay untouched" \
+  || bad "design-link (pasted key, from a worktree) is wrong -- rc=$dl_rc mode=$dl_mode table=[$dl_tbl] $(cat "$DLW/c.txt")"
+# (d) the worktree (cut before the link) and the main checkout both publish; design-builds lists both, newest first;
+# no workspace request, no cloud mode.
+dl_p1=$(dl "$DLT" design-publish --folder "$DLH/web/design"); dl_prc1=$?
+dl_p2=$(dl "$DLH" design-publish --folder "$DLH/web/design"); dl_prc2=$?
+dl_id1=$(printf '%s\n' "$dl_p1" | sed -n 's/^published=\([^ ]*\) .*/\1/p'); dl_id2=$(printf '%s\n' "$dl_p2" | sed -n 's/^published=\([^ ]*\) .*/\1/p')
+dl_ls=$(dl "$DLT" design-builds); dl_lrc=$?
+dl_nx1=$(dl "$DLH" next); dl_nx2=$(dl "$DLT" next)
+[ "$dl_prc1" = 0 ] && [ "$dl_prc2" = 0 ] && [ -n "$dl_id1" ] && [ -n "$dl_id2" ] && [ "$dl_id1" != "$dl_id2" ] \
+  && printf '%s\n' "$dl_p1" | grep -q "^published=$dl_id1 url=$DLS/projects/proj-d/design/$dl_id1 private=no .* host=http://$dl_id1.design.fake.localhost/\$" \
+  && [ "$dl_lrc" = 0 ] && [ "$(printf '%s\n' "$dl_ls" | sed -n 1p)" = "builds=2 project=proj-d" ] \
+  && printf '%s\n' "$dl_ls" | sed -n 2p | grep -q "^$dl_id2 url=" && printf '%s\n' "$dl_ls" | sed -n 3p | grep -q "^$dl_id1 url=" \
+  && [ "$(grep '"route": "design"' "$DLL" | grep '"method": "POST"' | grep -c '"auth": "ok"')" = 2 ] && ! grep -q '"/api/workspace/' "$DLL" \
+  && ! printf '%s\n' "$dl_nx1$dl_nx2" | grep -q 'store=cloud' && printf '%s\n' "$dl_nx2" | grep -q '^stream=phase/P1-' \
+  && ok "with [design] set, the worktree cut before the link and the main checkout each print published= (the viewer url=, the build's host=), and design-builds lists both, newest first; no workspace request; next prints no store=cloud in either checkout" \
+  || bad "publishing with the design link is wrong -- rc=$dl_prc1/$dl_prc2/$dl_lrc [$dl_p1] [$dl_p2] [$dl_ls] next=[$dl_nx2]"
+# (e) worktree start still runs; another project over the set link is refused unless --replace, and --replace probes
+# before writing (the fake has no proj-x: its 404), so the link stays.
+( cd "$DLH" && python3 "$ENG" phase new --phase P2 --name "Second" --objective "cut after the link" >/dev/null 2>&1 )
+dl_w2=$( cd "$DLH" && python3 "$ENG" worktree start P2 --host-branch feat/p2 2>&1 ); dl_wrc=$?
+dl_n3=$(dl_n)
+dl_r1=$(printf '%s\n' "$DLK" | dl "$DLH" design-link "$DLS/projects/proj-x"; echo "rc=$?")
+dl_n4=$(dl_n)
+dl_r2=$(printf '%s\n' "$DLK" | dl "$DLH" design-link --replace "$DLS/projects/proj-x"; echo "rc=$?")
+dl_r3=$(dl "$DLH" design-link --data-dir "$DLW/data" --no-browser --wait 1; echo "rc=$?")
+[ "$dl_wrc" = 0 ] && printf '%s\n' "$dl_w2" | grep -q '^branch=phase/P2-' \
+  && [ "$(printf '%s\n' "$dl_r1" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r1" | head -1 | grep -q '^design-link: this workspace already has a design link (server=.* project=proj-d).*--replace.*(nothing was written)$' \
+  && [ "$dl_n4" = "$dl_n3" ] \
+  && [ "$(printf '%s\n' "$dl_r2" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r2" | grep -q '^design-link: sikstack refused (HTTP 404): .*(nothing was written)$' \
+  && [ "$(printf '%s\n' "$dl_r3" | tail -1)" = rc=1 ] && printf '%s\n' "$dl_r3" | head -1 | grep -q '^design-link: this workspace already has a design link .*--replace' \
+  && grep -qx 'project_id = "proj-d"' "$DLH/.sikstack/config.toml" && [ "$(grep -c '^\[design\]' "$DLH/.sikstack/config.toml")" = 1 ] \
+  && ! grep -q '"route": "sign-in"' "$DLL" \
+  && ok "worktree start still runs after the link; another project over the set link is refused unless --replace (no request), --replace probes first (a 404 writes nothing), and the connect-page form refuses over a set link before any sign-in" \
+  || bad "worktree start or a replace refusal is wrong -- rc=$dl_wrc [$dl_r1] [$dl_r2] [$dl_r3] sent=$dl_n3/$dl_n4"
+# (f) the connect-page form, run in a phase's worktree of a second install: the new project is named after the main host
+# folder (never the worktree's), the key is kept, [design] lands in the main checkout's config.toml, never [cloud].
+( cd "$DL2" && CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
+( cd "$DL2T" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" design-link --data-dir "$DLW/data" --no-browser --wait 30 > "$DLW/f.txt" 2>&1; echo "rc=$?" >> "$DLW/f.txt" ) &
+dl_bg=$!
+for _ in $(seq 1 100); do grep -q '^code: ' "$DLW/f.txt" 2>/dev/null && break; sleep 0.1; done
+dl_code=$(sed -n 's/^code: \([A-Z0-9-]*\) .*/\1/p' "$DLW/f.txt" | head -1)
+curl -s -X POST "$DLS/_fake/sign-in" -d "{\"code\":\"$dl_code\",\"state\":\"approved\"}" >/dev/null; wait "$dl_bg"
+dl_nx3=$(dl "$DL2T" next)
+grep -q '^rc=0' "$DLW/f.txt" && [ -n "$dl_code" ] && grep -q "^connect page: $DLS/connect?code=$dl_code" "$DLW/f.txt" \
+  && grep '"route": "sign-in"' "$DLL" | grep -q '"repo": "dlhost2"' && ! grep '"route": "sign-in"' "$DLL" | grep -q '"repo": "P1-' \
+  && grep -q "^design_link=written server=$DLS project=proj-d config=/.*/dlhost2/\.sikstack/config\.toml\$" "$DLW/f.txt" \
+  && grep -qx 'project_id = "proj-d"' "$DL2/.sikstack/config.toml" && ! grep -q '^\[cloud\]' "$DL2/.sikstack/config.toml" \
+  && ! grep -q '^\[design\]' "$DL2T/.sikstack/config.toml" && ! grep -qF "$DLK" "$DLW/f.txt" "$DL2/.sikstack/config.toml" \
+  && ! printf '%s\n' "$dl_nx3" | grep -q 'store=cloud' && [ -z "$(ls "$DLW/data/sign-in" 2>/dev/null)" ] \
+  && ok "the connect-page form of design-link, run in a phase's worktree, names the new project after the main host folder, keeps the key unprinted and writes [design] (never [cloud]) into the main checkout's config.toml; next stays local" \
+  || bad "design-link's connect-page form is wrong -- code=$dl_code $(cat "$DLW/f.txt") sign-ins=$(grep '"route": "sign-in"' "$DLL")"
+if grep -rqF "$DLK" "$DLH" "$DL2" "$DLW"/*.txt "$DLW/fake" 2>/dev/null; then
+  bad "the workspace key leaked into a tree, the output or the request log"
+fi
+kill "$DL_PID" 2>/dev/null; wait "$DL_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo "== Test 36: the engine's agent, the block reading and sign-in --release, against the local fake sikstack behind its Cloudflare gate -- a request without a sikstack/ agent is the gate's text 403 (the gate is not vacuous) and the engine's are let through; a non-JSON 403 reads as a block (never as not a workspace key) at link, the cloud session's stop line, a commit and design-builds, and a JSON 403 reads as before; sign-in without --release sends exactly its three fields; --release sends release: true, drops the pending code for a new one, prints the released or the not-connected line, and a server that answers no released is refused with nothing kept; a release that is not a boolean is the fake's 400 =="

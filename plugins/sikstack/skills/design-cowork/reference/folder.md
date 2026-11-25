@@ -68,7 +68,8 @@ show the state its run names, else `FAIL state` and that run is not measured. A 
 exit 1 is layout failures, exit 2 a usage or driver error (`driver error: …`: no server, a `playwright-cli`
 failure), where nothing was checked. `--shots <dir>` also saves every measured run as viewport-height tiles, what a
 person sees, for the critic to open (it runs `--shots <slice folder>/shots`); a tile's name can start with `-`, so
-pass `--` before it in a shell command. A product may copy it into its folder. The drafter answers every failure
+pass `--` before it in a shell command. A product may copy it into its folder. Beside it, `canvas.mjs` walks the
+same runs into a claude.ai canvas copy (`claude-canvas.md`). The drafter answers every failure
 before it returns; you run it again before a stop.
 
 ## Options

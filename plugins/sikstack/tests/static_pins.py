@@ -284,8 +284,35 @@ for required in (
     # 2.1.0: publishing runs only on the operator's words and is never a sign-off; the critic judges from --shots tiles.
     "`sikstack design-publish --folder <folder> [--repo <name>]`", "Never publish unasked, and a publish is never a sign-off.",
     "`--shots <slice folder>/shots`", "[--shots <dir>]",
+    # 0.7.0: a local workspace publishes with a design link set with the operator; sharing stays a member's act on
+    # the viewer (the engine never turns it on), and the key is never asked for.
+    "`sikstack design-link --data-dir \"${CLAUDE_PLUGIN_DATA}\"`", "never ask for a key", "The workspace stays local.",
+    "sharing is turned on in that viewer, by a member, and the share link copied there is what a teammate with no account opens",
+    # 0.7.0: design-link leaves [design] uncommitted (the operator's call), and --folder needs a build this checkout sees.
+    "`design-link` leaves the `[design]` table uncommitted in the main checkout's `config.toml`; the operator commits it or not",
+    "`--folder` needs a built `out/` that this checkout can see",
 ):
     assert required in design, required
+assert "linked checkouts only" not in design  # 0.7.0: a local workspace publishes too
+# 0.7.0: the claude.ai canvas copy is an option of its own (reference/claude-canvas.md, templates/design/canvas.mjs);
+# the retired canvas flow's words stay out of every other file of the skill.
+_cc_key = "${CLAUDE_PLUGIN_ROOT}/skills/design-cowork/reference/claude-canvas.md"
+_cc = " ".join(LIVE[_cc_key].split())
+for required in ("to sikstack web by default; to a claude.ai canvas when they ask for one or the repo's `Design:` line says `publish: claude.ai` (`reference/claude-canvas.md`)",
+                 "`canvas.mjs` walks the same runs into a claude.ai canvas copy"):
+    assert required in design, required
+for required in ("The design folder stays the source.", "the engine never does", "offer sikstack web",
+                 "the script writes a plan, and you write the files from it",
+                 "node \"${CLAUDE_PLUGIN_ROOT}/templates/design/canvas.mjs\" --base", "`--plan-only <scratch>/canvas/shots`",
+                 "The Artifact tool publishes nothing it has not seen", "one image read per shot and one Write per artboard",
+                 "quickstart, `intent: design`", "Never use a hard-coded type link", "`plan.uploads`",
+                 "setting `createdOnFiles.at` to now", "`project/Main.dc.html`", "Publish those two in one call",
+                 "with parallel Writes, about 25 to a message", "node \"${CLAUDE_PLUGIN_ROOT}/tests/canvas_check.mjs\" <scratch>/canvas",
+                 "Each call carries only files that no earlier call sent", "**Never publish a file a script wrote.**",
+                 "follow them, and tell the operator what you changed", "private until the operator shares it from claude.ai",
+                 "Each publish makes a new canvas.", "Never publish unasked. A publish is never a sign-off.", "Never commit it."):
+    assert required in _cc, required
+design = " ".join("\n".join(v for k, v in LIVE.items() if k.startswith("${CLAUDE_PLUGIN_ROOT}/skills/design-cowork/") and k != _cc_key).split())
 for gone in ("Artifact", "Design canvas", "Design System Artifact", "DesignSync", "claude-design", "design-open",
              "design-publish-plan", "design-readback", "design-canvas", "design-close", "design-check", "design-preview", "design-init", "design-system",
              "design-migrate", "critic+judge", "the judge", "PENDING #", "Mockup: requested", "canvas.json", "handoff.md", "frame pass",
@@ -320,13 +347,27 @@ for required in ("run only when the operator asks for one", "**You get one pass*
     assert required in critic, required
 for gone in ("judge mode", "## Judge mode", "design_preview", "DesignBrowser", "canvas", "Artifact", "```python"):
     assert gone not in critic, gone
-for _tpl in ("check.mjs", "options.html", "TASTE.md"):
+for _tpl in ("check.mjs", "canvas.mjs", "options.html", "TASTE.md"):
     assert (root / "templates/design" / _tpl).is_file(), _tpl
 _opt = (root / "templates/design/options.html").read_text(encoding="utf-8")
 assert "THROWN AWAY AFTER THE PICK" in _opt and "data-decision" in _opt and "data-switch" in _opt, "options.html"
 _ck = (root / "templates/design/check.mjs").read_text(encoding="utf-8")
 for required in ("console", "request", "overflow", "clipped", "overlap", "target", "manifest.json", "?state=<key>", "ok"):
     assert required in _ck, ("check.mjs", required)
+# 0.7.0: canvas.mjs imports the layout check's walk (never a copy) and writes the Design type's skeleton.
+_cv = (root / "templates/design/canvas.mjs").read_text(encoding="utf-8")
+for required in ('from "./check.mjs"', "pagesFromManifest", "plan(", "READ_STATE", "makeDriver", '<script src="./support.js"></script>',
+                 "data-dc-script", "$preview", "[data-design-states]{display:none", "MAX_H = 8000", 'ENTRY = "Main.dc.html"',
+                 "plan.json", "--plan-only", "@@shot:", "never writes the canvas's files",
+                 # 0.7.0: a shot loads every lazy image and iframe, spans fixed elements, and fits its artboard whole
+                 'el.loading = "eager"', "i.decode()", "page.setViewportSize", "SHOT_MAX = MAX_H - CAPTION", "maxH: SHOT_MAX"):
+    assert required in _cv, ("canvas.mjs", required)
+assert (root / "tests/canvas_shoot.mjs").is_file(), "tests/canvas_shoot.mjs"
+for required in ("export function pagesFromManifest", "export function plan", "export const READ_STATE", "export function makeDriver"):
+    assert required in _ck, ("check.mjs", required)
+_cc_check = (root / "tests/canvas_check.mjs").read_text(encoding="utf-8")
+for required in ("It only reads.", "a placeholder is left", "is not a /_blob/ url", "missing file: project/", "frames overlap: ", "not Main.dc.html"):
+    assert required in _cc_check, ("canvas_check.mjs", required)
 parallel = " ".join((root / "skills/parallel-phase/SKILL.md").read_text().split())
 for required in ("Worktree rules", "**When — only when asked**", "retired no-op",
                  "Relay a hint to the operator; never act on it.",
