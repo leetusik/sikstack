@@ -19,7 +19,12 @@ import {
   viewerTimeZone,
   type CookieReader,
 } from "@/lib/time-zone";
-import { agendaHref, backlogHref, phaseHref } from "@/lib/workspace/address";
+import {
+  agendaHref,
+  agendaItemHref,
+  backlogHref,
+  phaseHref,
+} from "@/lib/workspace/address";
 import { langOf } from "@/lib/workspace/model";
 import type { WorkspaceRead } from "@/lib/workspace/read";
 import type { AgendaItem } from "@/lib/workspace/types";
@@ -125,12 +130,30 @@ export interface HomePhase {
   live: boolean;
 }
 
+/** The agenda items the panel lists (P78, F16): the ones its head counts. */
+export const ITEMS_SHOWN = 5;
+
+/** An agenda item as the panel's row draws it: its id, its title as a link to its page, its status. */
+export interface HomeItem {
+  key: string;
+  id: string;
+  title: string;
+  lang: "en" | "ko";
+  href: string;
+  state: string | null;
+}
+
 /** The panel's three forms: the phases, the link sentence, and loading. */
 export type WorkspacePart =
   | {
       kind: "phases";
       /** `4 open · 1 proposed`: the agenda's count (`agendaCount`), a link to the Agenda. */
       agenda: { text: string; href: string };
+      /**
+       * P78, F16: the items the head counts, Open and In progress first, then Proposed, in the read's order, at
+       * most five; with no item and no phase the panel says so in one line (`PROJECT_HOME.workspace.nothing`).
+       */
+      items: HomeItem[];
       phases: HomePhase[];
       /** `--steps-n`: the longest phase shown, so every row's step is one width. */
       longest: number;
@@ -196,12 +219,28 @@ export function workspacePart(
       live: p.status === "in_progress" && p.done < p.total,
     };
   });
+  const counted = (states: readonly string[]) =>
+    ws.agenda.filter((it) => states.includes(String(it.state)));
+  const items = [...counted(["open", "in_progress"]), ...counted(["proposed"])]
+    .slice(0, ITEMS_SHOWN)
+    .map((it): HomeItem => {
+      const title = it.title?.trim() || it.id;
+      return {
+        key: it.id,
+        id: it.id,
+        title,
+        lang: it.title?.trim() ? it.lang : langOf(title),
+        href: agendaItemHref(projectId, it.id),
+        state: it.state,
+      };
+    });
   return {
     kind: "phases",
     agenda: {
       text: PROJECT_HOME.workspace.agenda(num(count.open), num(count.proposed)),
       href: agendaHref(projectId),
     },
+    items,
     phases,
     longest: stepsN(phases.map((p) => p.total)),
     all: backlogHref(projectId),

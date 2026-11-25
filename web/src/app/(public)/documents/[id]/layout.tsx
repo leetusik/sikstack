@@ -1,42 +1,47 @@
-import { cookies } from "next/headers";
-import { unstable_rethrow } from "next/navigation";
+import { notFound, redirect, unstable_rethrow } from "next/navigation";
 
-import { ReaderSegment } from "@/sikstack/reader";
-import { requestNonce } from "@/sikstack/shell/data";
 import { optionalIdentity } from "@/lib/auth-guards";
-import { parseReaderCookie, READER_COOKIE } from "@/lib/reader-cookie";
+import { ApiError } from "@/lib/knowledge/client";
+import { loginHref } from "@/lib/next-path";
 
-// P63-fk.S12 — what a document's loading, not found and error screens need to know before (or without) the
-// document, on `[chapter]/layout.tsx`'s pattern: who is reading (Not found has a member's and a visitor's
-// words), the request's nonce (the reader routes' CSP) and the reader's display settings (Loading keeps the
-// reader's scheme and size). The session read is the page's own (`optionalIdentity` is cached per request);
-// a failure of it reads as a visitor here and leaves the page's own handling to the page.
-async function viewer(): Promise<boolean> {
-  try {
-    return (await optionalIdentity()) !== null;
-  } catch (error) {
-    unstable_rethrow(error);
-    return false;
-  }
-}
+import { documentIdOf, getDocumentOnce } from "./read";
+import { DocumentSegment } from "./segment";
 
+/**
+ * The document's segment (`./segment.tsx`: who reads, the nonce, the reader's settings), and (P78, F13) its
+ * misses as a real HTTP 404, decided here above the page's `loading.tsx`, before anything streams: an id no
+ * document can have (`/documents/abc`), refused before any read, and for a member a document the API does not
+ * give them (404 or 400: missing, or another org's private one; ids cannot be probed), by the page's own
+ * `cache`d read. Both land on `../not-found.tsx`, Document not found in the bar's frame. A visitor's miss (no
+ * document, or a private one: the two read alike) is sent to sign in with the way back (P30.S11), here as a real
+ * redirect rather than the page's streamed one; a fault is the page's to draw.
+ */
 export default async function DocumentLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ id: string }>;
 }) {
-  const [member, nonce, jar] = await Promise.all([
-    viewer(),
-    requestNonce(),
-    cookies(),
-  ]);
-  return (
-    <ReaderSegment
-      member={member}
-      nonce={nonce}
-      settings={parseReaderCookie(jar.get(READER_COOKIE)?.value)}
-    >
-      {children}
-    </ReaderSegment>
-  );
+  const id = documentIdOf((await params).id);
+  if (id === null) notFound();
+  let miss: "member" | "visitor" | null = null;
+  try {
+    const ctx = await optionalIdentity();
+    try {
+      await getDocumentOnce(ctx?.token, id);
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        (error.status === 404 || error.status === 400)
+      )
+        miss = ctx ? "member" : "visitor";
+      else throw error;
+    }
+  } catch (error) {
+    unstable_rethrow(error);
+  }
+  if (miss === "member") notFound();
+  if (miss === "visitor") redirect(loginHref(`/documents/${id}`));
+  return <DocumentSegment>{children}</DocumentSegment>;
 }

@@ -360,10 +360,13 @@ describe("the Workspace's sheets", () => {
     expect(imports.slice(first, first + ws.length)).toEqual(ws);
     expect(imports[first - 1]).toBe("./review/review.css");
     expect(imports[first + ws.length]).toBe("./library/boundary.css");
-    // the Library's boundary is last but for later jobs' sheets (Feedback's and Design's, which follow it)
+    // the Library's boundary is last but for later jobs' sheets (Feedback's, Design's and the org surfaces', which
+    // follow it)
     expect(
       imports
-        .filter((i) => !i.startsWith("./feedback/") && !i.startsWith("./design/"))
+        .filter(
+          (i) => !i.startsWith("./feedback/") && !i.startsWith("./design/") && i !== "./org.css",
+        )
         .at(-1),
     ).toBe(
       "./library/boundary.css",

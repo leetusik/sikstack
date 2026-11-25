@@ -100,6 +100,20 @@ export async function GET(req: Request): Promise<Response> {
       },
     );
   }
+  // A client-side navigation (a link, or a server action's redirect, as a removed member's
+  // next click is) fetches this as React Server Components (`RSC: 1`). Following a 303
+  // there would render only the page under the Shell, which would keep naming the org the
+  // account left. A response that is no RSC payload makes the router load this URL as a
+  // whole page instead, and that load is answered below: cleared, then `next`, the Shell
+  // and all drawn for the org the session now acts in.
+  if (req.headers.get("rsc") === "1") {
+    const res = new NextResponse(null, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+    });
+    res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+    return res;
+  }
   const res = seeOther(next);
   res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
   return res;

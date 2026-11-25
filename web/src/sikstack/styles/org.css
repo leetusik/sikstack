@@ -1,0 +1,34 @@
+/*
+ * The org surfaces' classes (P78-s2.S2's design): the org menu's rule before New org, New org's narrow
+ * form, and the Members panel's one top line (left for the build at the sign-off, P78-s2.S4). Imported by `index.css` after the Design service's
+ * sheet. Scoped like the system's sheets (./README.md): one `@scope (.ui) to ([data-ui-legacy])` block. It
+ * declares no custom property; every length and colour is a token.
+ */
+@scope (.ui) to ([data-ui-legacy]) {
+  /* the org menu: the orgs end, an action follows (New org); the line spans the menu's inner width */
+  .menu-rule {
+    display: block;
+    flex: none;
+    height: 1px;
+    margin: var(--space-1) calc(-1 * var(--space-1));
+    background: var(--line);
+  }
+
+  /* New org: one field and its two buttons, kept to a form's width on the column's left edge */
+  .org-form {
+    width: 100%;
+    max-width: 32em;
+  }
+
+  /* Members: its table is the panel's first child (no head, the count is beside the page's title), so the column
+     heads' top rule would sit on the panel's border as a 2 px line; the panel's border is the one line */
+  .org-members > .table-scroll > .table > thead > tr:first-child > th {
+    border-top: 0;
+  }
+  /* stacked (under 48em, feedback/frame.css section 9) the heads are hidden and each row draws the rule: not the first */
+  @container tstack (max-width: 48em) {
+    .org-members > .table-scroll > .table > tbody > tr:first-child {
+      border-top: 0;
+    }
+  }
+}

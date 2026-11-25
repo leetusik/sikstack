@@ -3,6 +3,7 @@
 import { useId, useReducer, useRef } from "react";
 
 import { KEYS, type KeysScope } from "@/content/sikstack-frame";
+import { StackLabel, StackTable } from "@/sikstack/feedback/stack-table";
 import { date, when, type FormatOptions } from "@/lib/format";
 import {
   Button,
@@ -60,6 +61,10 @@ export interface KeysProps {
   format?: FormatOptions;
   /** The panel's id (org home keeps `org-keys-head` on its head, for the landing's link). */
   headId?: string;
+  /**
+   * The list alone, for an org member (P78: org keys are the owner's to mint and revoke): no New key, no Revoke.
+   */
+  readOnly?: boolean;
 }
 
 /** The form's radio labels, by scope. */
@@ -85,6 +90,7 @@ export function Keys({
   loading = false,
   format,
   headId,
+  readOnly = false,
 }: KeysProps) {
   const heading = KEYS.heading[scope];
   const uid = useId();
@@ -141,21 +147,23 @@ export function Keys({
     <Panel aria-label={heading}>
       <PanelHead>
         <h2 id={headId}>{heading}</h2>
-        <Button
-          ref={triggerRef}
-          aria-expanded={formOpen}
-          disabled={busy}
-          onClick={() =>
-            state.phase === "mint"
-              ? closeForm()
-              : dispatch({ type: "toggle-form" })
-          }
-        >
-          {KEYS.newKey}
-        </Button>
+        {readOnly ? null : (
+          <Button
+            ref={triggerRef}
+            aria-expanded={formOpen}
+            disabled={busy}
+            onClick={() =>
+              state.phase === "mint"
+                ? closeForm()
+                : dispatch({ type: "toggle-form" })
+            }
+          >
+            {KEYS.newKey}
+          </Button>
+        )}
       </PanelHead>
 
-      {formOpen ? (
+      {formOpen && !readOnly ? (
         <form
           className="panel-body has-rule stack"
           noValidate
@@ -242,46 +250,52 @@ export function Keys({
       ) : null}
 
       {list.length > 0 ? (
-        <div className="table-scroll">
-          <table className="is-keys table">
-            <KeysHead />
-            <tbody>
-              {list.map((r) => {
-                const label = keyLabel(r);
-                return (
-                  <tr key={r.id}>
-                    <td className={r.name ? "strong" : "dim"}>
-                      {r.name || KEYS.unnamed}
-                    </td>
-                    <td className="mono nowrap">{r.prefix}…</td>
-                    <td className="nowrap">{accessWord(r.access)}</td>
-                    <td>
-                      <Status state={STATUS_STATE[r.status]}>
-                        {KEYS.status[r.status]}
-                      </Status>
-                    </td>
-                    <td className="nowrap">{date(r.created, format)}</td>
-                    <td className="nowrap">{when(r.lastUsed, format)}</td>
-                    <td className="at-end">
-                      {r.status !== "revoked" ? (
-                        <Button
-                          variant="quiet"
-                          aria-label={KEYS.revokeLabel(label)}
-                          onClick={(e) => {
-                            revokeOpener.current = e.currentTarget;
-                            dispatch({ type: "ask-revoke", id: r.id });
-                          }}
-                        >
-                          {KEYS.revoke}
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        // P78, F14: the table stacks under 48em of its width (`StackTable`, as Members does): a row is its name,
+        // then the other cells on one line, the dates with their column's name, Revoke at the line's end.
+        <StackTable className="is-keys">
+          <KeysHead />
+          <tbody>
+            {list.map((r) => {
+              const label = keyLabel(r);
+              return (
+                <tr key={r.id}>
+                  <td className={r.name ? "strong is-main" : "dim is-main"}>
+                    {r.name || KEYS.unnamed}
+                  </td>
+                  <td className="mono nowrap">{r.prefix}…</td>
+                  <td className="nowrap">{accessWord(r.access)}</td>
+                  <td>
+                    <Status state={STATUS_STATE[r.status]}>
+                      {KEYS.status[r.status]}
+                    </Status>
+                  </td>
+                  <td className="nowrap">
+                    <StackLabel>{KEYS.columns.created}</StackLabel>
+                    {date(r.created, format)}
+                  </td>
+                  <td className="nowrap">
+                    <StackLabel>{KEYS.columns.lastUsed}</StackLabel>
+                    {when(r.lastUsed, format)}
+                  </td>
+                  <td className="at-end">
+                    {r.status !== "revoked" && !readOnly ? (
+                      <Button
+                        variant="quiet"
+                        aria-label={KEYS.revokeLabel(label)}
+                        onClick={(e) => {
+                          revokeOpener.current = e.currentTarget;
+                          dispatch({ type: "ask-revoke", id: r.id });
+                        }}
+                      >
+                        {KEYS.revoke}
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </StackTable>
       ) : (
         <div className="panel-body has-rule block">
           <p className="block-text">{KEYS.empty[scope]}</p>

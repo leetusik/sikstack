@@ -9,11 +9,10 @@ import { Button, Panel, PanelBody, PanelHead, Skeleton } from "@/sikstack/ui";
 
 const P = ORG_HOME.projects;
 
-/** The projects table's declared columns (FG9): the same in the loaded table and its skeleton. */
-export const PROJECTS_TABLE_STYLE = {
-  tableLayout: "fixed",
-  minWidth: "57em",
-} as const;
+/*
+ * The projects table's declared columns (FG9) are `.orghome-projects` (`org-home.css`), the same in the loaded
+ * table and its skeleton: a class, not a style, so the loaded table drops them when it stacks (P78, F14).
+ */
 
 export function ProjectsTableHead() {
   return (
@@ -54,7 +53,7 @@ export function ProjectsTableLoading() {
   return (
     <>
       <div className="table-scroll">
-        <table className="table" style={PROJECTS_TABLE_STYLE}>
+        <table className="orghome-projects table">
           <ProjectsTableHead />
           <tbody>
             {PROJECT_ROWS.map(([name, created, used], i) => (

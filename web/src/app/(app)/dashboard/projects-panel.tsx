@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { ORG_HOME } from "@/content/dashboard";
+import { StackLabel, StackTable } from "@/sikstack/feedback/stack-table";
 import { publishToast } from "@/sikstack/shell";
 import {
   Block,
@@ -28,11 +29,7 @@ import {
 } from "@/sikstack/ui";
 import { plural } from "@/lib/format";
 
-import {
-  ProjectsLoading,
-  ProjectsTableHead,
-  PROJECTS_TABLE_STYLE,
-} from "./org-home-loading";
+import { ProjectsLoading, ProjectsTableHead } from "./org-home-loading";
 import {
   initialProjectsForm,
   projectNameError,
@@ -196,39 +193,48 @@ export function ProjectsPanel({ rows, create }: ProjectsPanelProps) {
         </form>
       ) : null}
       {rows.length > 0 ? (
-        <div
-          className={
-            projectsCapped(rows.length)
-              ? "table-scroll is-capped"
-              : "table-scroll"
-          }
+        // P78, F14: the table stacks under 48em of its width, as Members and the Design list do (`StackTable`): a
+        // row is its project's link, then its other cells on one line, each count and date with its column's name.
+        <StackTable
+          capped={projectsCapped(rows.length)}
+          className="orghome-projects"
         >
-          <table className="table" style={PROJECTS_TABLE_STYLE}>
-            <ProjectsTableHead />
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="has-control">
-                    <Link
-                      href={`/projects/${encodeURIComponent(r.id)}`}
-                      className="link-strong"
-                      lang={r.lang}
-                    >
-                      {r.name}
-                    </Link>
-                  </td>
-                  <td className="num">{r.docs}</td>
-                  <td className="num">{r.keys}</td>
-                  <td>
-                    <span className="badge">{r.visibility}</span>
-                  </td>
-                  <td className="nowrap">{r.created}</td>
-                  <td className="nowrap">{r.used}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          <ProjectsTableHead />
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="has-control is-main">
+                  <Link
+                    href={`/projects/${encodeURIComponent(r.id)}`}
+                    className="link-strong"
+                    lang={r.lang}
+                  >
+                    {r.name}
+                  </Link>
+                </td>
+                <td className="num">
+                  <StackLabel>{P.columns.documents}</StackLabel>
+                  {r.docs}
+                </td>
+                <td className="num">
+                  <StackLabel>{P.columns.keys}</StackLabel>
+                  {r.keys}
+                </td>
+                <td>
+                  <span className="badge">{r.visibility}</span>
+                </td>
+                <td className="nowrap">
+                  <StackLabel>{P.columns.created}</StackLabel>
+                  {r.created}
+                </td>
+                <td className="nowrap">
+                  <StackLabel>{P.columns.lastUsed}</StackLabel>
+                  {r.used}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </StackTable>
       ) : (
         <Block className="panel-body has-rule">
           <BlockText>{P.empty}</BlockText>

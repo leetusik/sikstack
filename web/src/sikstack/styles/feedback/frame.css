@@ -103,7 +103,15 @@
   .table-stack .table td.is-main.has-control { margin-bottom: calc(-1 * var(--space-2)); }
   .table-stack .table td.to-end { margin-left: auto; }
   .table-stack .table td > .rating-unrated::before { display: none; }
+  /* P78, F14: a table with declared widths (the keys table, org home's projects) drops them when it stacks, and a
+     cell whose value needs its column's name to read (a count, a date) shows it (`.stack-label`) */
+  .table-stack .table { min-width: 0; }
+  .table-stack .table .stack-label { display: inline; }
+  .table-stack .table td.at-end { margin-left: auto; }
 }
+/* a cell's column name, seen only while the table stacks (its heads then serve a screen reader alone, so the name
+   is hidden from one: `aria-hidden` on the span) */
+.stack-label { display: none; }
 /* the list's columns are set, never sized by what the rows hold (F139): Rating and When by their widest value (em of
    the head's 12 px step), Project and Product a share of the table, Feedback the rest; a name longer than its column
    goes on to a second line; a message's line stops at about 75 characters (F140). Under 48em the widths do not apply. */

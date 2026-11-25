@@ -1,8 +1,6 @@
-import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { PROJECT } from "@/content";
 import { Trend, Usage } from "@/sikstack/frame";
 import { Grid } from "@/sikstack/ui";
 import { requireIdentity } from "@/lib/auth-guards";
@@ -15,6 +13,7 @@ import {
   getProjectUsage,
 } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
+import { getMembers } from "@/lib/knowledge/orgs";
 import type { KbIdentity, KbProjectUsage } from "@/lib/knowledge/types";
 import { orgSegment, projectLibraryHref } from "@/lib/reader-href";
 import { readWorkspace } from "@/lib/workspace/read";
@@ -57,8 +56,7 @@ import "./project-home.css";
 //   project not linked or never synced, the link command from the request's origin (`headers()`).
 // Every date is in the viewer's zone (the `kb_tz` cookie), UTC until it is known (decision 5).
 //
-// The <title> stays the static `PROJECT.title`: a `generateMetadata` title would cost a second uncached read.
-export const metadata: Metadata = { title: PROJECT.title };
+// The <title> is the project's name (P78, F17), the folder's `layout.tsx`'s default: this page sets none.
 
 /** The project read; a missing or another org's id renders Not found (404-never-403). */
 async function loadProject(
@@ -134,6 +132,15 @@ async function loadFeedback(
   return { rows: feedbackRows(list.value.records, projectId, format), count };
 }
 
+/** The viewer's role in the org (`GET /app/members`); `null` when the read fails (the head then draws no switch). */
+async function readRole(token: string): Promise<"owner" | "member" | null> {
+  try {
+    return (await getMembers(token)).role;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ProjectHomePage({
   params,
 }: {
@@ -146,11 +153,12 @@ export default async function ProjectHomePage({
 
   const usage = await loadProject(token, projectId);
   const { project } = usage;
-  const [documents, rows, feedback, workspace] = await Promise.all([
+  const [documents, rows, feedback, workspace, role] = await Promise.all([
     getDocuments(token, { project: project.id, limit: 1 }),
     loadLibraryRows(token, identity, project.name),
     loadFeedback(token, project.id, format),
     readWorkspace(token, project.id),
+    readRole(token),
   ]);
   const count = libraryCount(documents.total);
   const origin = requestOrigin(await headers());
@@ -165,6 +173,7 @@ export default async function ProjectHomePage({
         org={org}
         created={date(project.created_at, format)}
         visibility={project.visibility}
+        owner={role === "owner"}
       />
       <WorkspacePanel
         part={workspacePart(workspace, project.id)}

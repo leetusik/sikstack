@@ -19,6 +19,10 @@ import type { KbIdentity, KbSession, KbTenant, KbUser } from "./types";
 // right password with `403 {detail: "waitlisted", status: "waitlisted", email}`. Both
 // calls return `KbWaitlisted` for it instead of a session, so nothing downstream can
 // seal a token that is not there.
+//
+// P78 — an org invite's code (`invite`, from the `/invite` page's sign-in pair) rides either body
+// when the form sends one. An account the code joined to its org (approved, if it was waitlisted)
+// answers a session with the additive `joined`; the BFF then starts the session in that org.
 
 /** The raw signup/login envelope before normalization (either tenant shape). */
 interface RawAuthResponse {
@@ -28,6 +32,8 @@ interface RawAuthResponse {
   tenant?: KbTenant;
   /** Login answers this. */
   tenants?: KbTenant[];
+  /** The org an invite code joined the account to (either route, additive). */
+  joined?: KbTenant;
 }
 
 /** The waitlisted answer's body (sign-up's 202; sign-in's 403 adds `detail`). */
@@ -91,7 +97,9 @@ export function activeTenant(raw: {
  * produce an identical result.
  */
 export function normalizeAuthResponse(raw: RawAuthResponse): KbSession {
-  return { token: raw.token, user: raw.user, tenant: activeTenant(raw) };
+  const session: KbSession = { token: raw.token, user: raw.user, tenant: activeTenant(raw) };
+  if (raw.joined && typeof raw.joined.id === "string") session.joined = raw.joined;
+  return session;
 }
 
 /**
@@ -124,16 +132,20 @@ export function authAnswer(
  * `POST /auth/signup` → 201 `{token, user, tenant}`, or 202 `{status: "waitlisted",
  * email}` (no token) with the waitlist on. Throws `ApiError` on 409 (duplicate email)
  * / 400 (validation) — the route maps the STATUS to the client without echoing
- * knowledge's detail text.
+ * knowledge's detail text. `address` is the visitor's (`edgeAddress`), sent as `X-Real-IP` so the API's per-client
+ * limit counts the visitor, not this server (P78).
  */
 export async function signup(
   email: string,
   password: string,
+  invite?: string,
+  address?: string | null,
 ): Promise<KbAuthAnswer> {
   const raw = await sendJson<RawAuthResponse | RawWaitlisted>(
     "/auth/signup",
     "POST",
-    { email, password },
+    invite ? { email, password, invite } : { email, password },
+    { address },
   );
   return authAnswer(raw, email);
 }
@@ -143,18 +155,21 @@ export async function signup(
  * password answers 403 `{detail: "waitlisted", …}`, returned as `KbWaitlisted`; any
  * other 403 still throws. Throws `ApiError` on 401 (identical for unknown-email and
  * bad-password — knowledge does not let callers enumerate accounts, and neither does
- * the BFF) / 400 (validation).
+ * the BFF) / 400 (validation). `address` as `signup`'s (P78).
  */
 export async function login(
   email: string,
   password: string,
+  invite?: string,
+  address?: string | null,
 ): Promise<KbAuthAnswer> {
   let raw: RawAuthResponse | RawWaitlisted;
   try {
     raw = await sendJson<RawAuthResponse | RawWaitlisted>(
       "/auth/login",
       "POST",
-      { email, password },
+      invite ? { email, password, invite } : { email, password },
+      { address },
     );
   } catch (error) {
     if (

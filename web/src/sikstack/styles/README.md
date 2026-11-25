@@ -20,6 +20,7 @@ class names are the signed ones; the only changes are the isolation below, liste
 | `feedback/frame.css` | The Feedback frame (job 04, round 02): its tokens (`--measure`, `--fact-min`, `--rating-mark`, `--json-lines`, `--seg-rule`), Rating, Tag, Absent, Raw JSON, Facts (`.facts.is-grid`), the search and filter bar with its `.seg` toggles, the table that stacks (`.stack-*`), Waiting. No pager: the list uses the Library's. Its changes from the signed sheet are listed at its top. |
 | `feedback/<part>.css` | One sheet a Feedback part, each owned by one slice and named in its header: `list`, `item`, `agenda`. |
 | `feedback/boundary.css` | The Feedback frame's five custom properties restored at the old-page boundary, as `library/boundary.css` does the Library's. |
+| `org.css` | The org surfaces (P78): `.menu-rule` (the org menu's rule before New org), `.org-form` (New org's form width), the Members panel's top edge. Loaded last; it declares no custom property. |
 
 ## How it stays out of the old pages
 

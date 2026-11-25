@@ -199,4 +199,18 @@ describe("GET /api/auth/org — the reset", () => {
       expect(res.headers.get("location")).toBe("/dashboard");
     }
   });
+
+  // P78-s2.F1: a removed member's next click reaches the reset as a client-side (RSC) fetch; an answer that is no
+  // RSC payload makes the router load the reset as a whole page, so the Shell is drawn again for the next org.
+  it("answers a client-side fetch with no RSC payload, the cookie cleared, so the page reloads whole", async () => {
+    const res = await orgGET(
+      new Request("http://localhost:3030/api/auth/org?next=%2Fdashboard", {
+        headers: { rsc: "1", "sec-fetch-site": "same-origin" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("content-type")).not.toMatch(/text\/x-component|text\/plain/);
+    expect(orgSetCookie(res)).toContain("Max-Age=0");
+  });
 });

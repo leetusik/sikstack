@@ -131,6 +131,11 @@ const FEEDBACK_MARKUP = [
   "/app/(app)/feedback/",
   "/app/(app)/projects/[projectId]/",
   "/sikstack/design/",
+  // Members (P78-s2.S2's signed design): its two tables are Feedback's table that stacks (`StackTable`, `td.is-main`).
+  "/sikstack/org/members.tsx",
+  // P78, F14: org home's Projects table and the keys table stack the same way (`StackTable`, `td.is-main`).
+  "/app/(app)/dashboard/projects-panel.tsx",
+  "/sikstack/frame/keys.tsx",
 ];
 
 describe("the Feedback frame's sheets", () => {
@@ -251,7 +256,7 @@ describe("the Feedback frame's sheets", () => {
       ...read(join(styles, "index.css")).matchAll(/@import "([^"]+)";/g),
     ].map((m) => m[1]);
     const first = imports.findIndex((i) => i.startsWith("./feedback/"));
-    // Feedback's run, then only the Design service's one sheet (P77), which follows it
+    // Feedback's run, then only the Design service's one sheet (P77) and the org surfaces' (P78), which follow it
     expect(imports.slice(first)).toEqual([
       "./feedback/frame.css",
       "./feedback/list.css",
@@ -259,6 +264,7 @@ describe("the Feedback frame's sheets", () => {
       "./feedback/agenda.css",
       "./feedback/boundary.css",
       "./design/design.css",
+      "./org.css",
     ]);
     expect(imports[first - 1]).toBe("./library/boundary.css");
     expect(new Set(imports).size).toBe(imports.length);

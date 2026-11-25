@@ -14,9 +14,10 @@ const SCROLLED_AT = 12;
  * first, in its band; the wordmark to the top, the four part links, Sign in (quiet) and Create account
  * (secondary). Under 56em of its width the wordmark and **Menu**: the menu opens over the page and
  * closes on a link, on Menu and on Escape (focus back to Menu). After 12 px of scroll it is the bar
- * (`.is-scrolled`).
+ * (`.is-scrolled`). Signed in (P78, F8), **Dashboard** (secondary) stands in for Sign in and Create account,
+ * in the bar and in the menu.
  */
-export function LandingHeader() {
+export function LandingHeader({ signedIn = false }: { signedIn?: boolean }) {
   const words = LANDING.header;
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -61,12 +62,26 @@ export function LandingHeader() {
           {links}
         </nav>
         <div className="lp-head-end">
-          <Link className={buttonClass("quiet")} href={LANDING_LINKS.signIn}>
-            {words.signIn}
-          </Link>
-          <Link className={buttonClass()} href={LANDING_LINKS.createAccount}>
-            {words.createAccount}
-          </Link>
+          {signedIn ? (
+            <Link className={buttonClass()} href={LANDING_LINKS.dashboard}>
+              {words.dashboard}
+            </Link>
+          ) : (
+            <>
+              <Link
+                className={buttonClass("quiet")}
+                href={LANDING_LINKS.signIn}
+              >
+                {words.signIn}
+              </Link>
+              <Link
+                className={buttonClass()}
+                href={LANDING_LINKS.createAccount}
+              >
+                {words.createAccount}
+              </Link>
+            </>
+          )}
         </div>
         <button
           ref={menuButton}
@@ -86,20 +101,32 @@ export function LandingHeader() {
             {links}
           </nav>
           <div className="lp-menu-actions center">
-            <Link
-              className={buttonClass()}
-              href={LANDING_LINKS.signIn}
-              onClick={close}
-            >
-              {words.signIn}
-            </Link>
-            <Link
-              className={buttonClass("primary")}
-              href={LANDING_LINKS.createAccount}
-              onClick={close}
-            >
-              {words.createAccount}
-            </Link>
+            {signedIn ? (
+              <Link
+                className={buttonClass("primary")}
+                href={LANDING_LINKS.dashboard}
+                onClick={close}
+              >
+                {words.dashboard}
+              </Link>
+            ) : (
+              <>
+                <Link
+                  className={buttonClass()}
+                  href={LANDING_LINKS.signIn}
+                  onClick={close}
+                >
+                  {words.signIn}
+                </Link>
+                <Link
+                  className={buttonClass("primary")}
+                  href={LANDING_LINKS.createAccount}
+                  onClick={close}
+                >
+                  {words.createAccount}
+                </Link>
+              </>
+            )}
           </div>
         </div>
       ) : null}

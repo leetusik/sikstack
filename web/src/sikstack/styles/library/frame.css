@@ -78,6 +78,11 @@ button.link-row { margin: 0; padding: 0; border: 0; background: transparent; fon
   .bar-long { display: none; }
   .bar-short { display: inline; }
   .bar-mid { display: none; }
+  /* P78, F19: on a phone the bar keeps one row: the way back takes the room left (its label cut with an ellipsis,
+     never pushing the tools onto a second row), and the tools sit closer, each still 44 px at least */
+  .bar-back { flex: 1 1 0; }
+  .bar .top-end { gap: var(--space-1); }
+  .bar .top-end .btn { min-width: var(--control-h); padding-inline: var(--space-3); }
 }
 @media (prefers-reduced-motion: reduce) { .bar, .bar-line, .foot-bar { transition: none; } }
 

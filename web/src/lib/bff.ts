@@ -3,13 +3,15 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { clientIp } from "./client-ip";
+import { clientIp, edgeAddress } from "./client-ip";
 import { checkRateLimit } from "./rate-limit";
 import {
+  asOrgId,
   assertSameOrigin,
   clearedOrgCookieOptions,
   clearLegacyCookies,
   ORG_COOKIE,
+  orgCookieOptions,
   sealSession,
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -28,14 +30,17 @@ import { ApiError } from "./knowledge/client";
 //   2. same-origin (CSRF layer 2)      → 403
 //   3. per-IP rate limit               → 429   (BEFORE parsing, so a flood is cheap)
 //   4. parse + zod-validate            → 400 (malformed JSON) / 422 (bad shape)
-//   5. call knowledge server-to-server → mapped status, detail text NEVER echoed
+//   5. call knowledge server-to-server → mapped status, detail text NEVER echoed; the visitor's
+//      address goes with it (`X-Real-IP`, P78), so knowledge's own per-client limit counts
+//      the visitor rather than this server, and its 429 passes through as the BFF's
 //   6. seal the knowledge token → cookie → 200
 //
 // P58 — the waitlist: a waitlisted account (sign-up's 202, sign-in's 403, both read in
 // `knowledge/auth.ts`) answers `200 {ok: false, waitlisted: true}` and sets NO cookie,
 // session or org: it has no token to seal. The client shows the waitlist state.
 //
-// The response body is only ever `{ok}` (plus `waitlisted`) — the client keys off the STATUS CODE, so
+// The response body is only ever `{ok}` (plus `waitlisted`, or `joined`: the name of the org an
+// invite code joined, P78) — the client keys off the STATUS CODE, so
 // knowledge's `detail` (and its unknown-email/bad-password indistinguishability)
 // never leaks through this boundary. Passwords are never logged, in any branch.
 
@@ -56,7 +61,37 @@ export function json(status: number, body: Record<string, unknown>): NextRespons
 const credentialsSchema = z.object({
   email: z.string().min(1).max(320),
   password: z.string().min(1).max(1024),
+  /** An org invite's code (P78: the `/invite` page's sign-in pair sends it); the API decides what it does. */
+  invite: z.string().min(1).max(200).optional(),
 });
+
+/**
+ * Steps 1–4 of the pipeline above for any other public JSON route (P78: the password reset's two, `forgot` and
+ * `reset`): JSON only (415), same-origin (403), the per-IP limit in its own `bucket` (429), the body parsed (400)
+ * and checked against `schema` (422). Answers the refusal to return, or the parsed body.
+ */
+export async function publicJsonGate<T>(
+  req: Request,
+  options: { bucket: string; limit: number; windowMs: number; schema: z.ZodType<T> },
+): Promise<{ refused: Response } | { body: T }> {
+  if (!(req.headers.get("content-type") ?? "").includes("application/json")) {
+    return { refused: json(415, { ok: false }) };
+  }
+  if (!assertSameOrigin(req)) return { refused: json(403, { ok: false }) };
+  const ip = clientIp(req.headers);
+  if (!checkRateLimit(`${options.bucket}:${ip}`, options.limit, options.windowMs).ok) {
+    return { refused: json(429, { ok: false }) };
+  }
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return { refused: json(400, { ok: false }) };
+  }
+  const parsed = options.schema.safeParse(raw);
+  if (!parsed.success) return { refused: json(422, { ok: false }) };
+  return { body: parsed.data };
+}
 
 export interface CredentialRouteOptions {
   /** Throttle: max attempts per IP per `windowMs`. */
@@ -68,8 +103,13 @@ export interface CredentialRouteOptions {
    * login attempts consume the signup budget (and vice-versa).
    */
   bucket: string;
-  /** The knowledge call — `signup` or `login` from `@/lib/knowledge/auth`. */
-  call: (email: string, password: string) => Promise<KbAuthAnswer>;
+  /** The knowledge call — `signup` or `login` from `@/lib/knowledge/auth`; `address` is the visitor's. */
+  call: (
+    email: string,
+    password: string,
+    invite?: string,
+    address?: string | null,
+  ) => Promise<KbAuthAnswer>;
   /**
    * knowledge statuses that are meaningful to the client and pass through verbatim
    * (login: 401, 400, 422; signup: 409, 400, 422). Any OTHER error becomes a 502 — an
@@ -119,7 +159,7 @@ export async function handleCredentialRoute(
     return json(422, { ok: false });
   }
   const email = parsed.data.email.trim();
-  const { password } = parsed.data;
+  const { password, invite } = parsed.data;
   if (email === "") {
     return json(422, { ok: false });
   }
@@ -128,10 +168,11 @@ export async function handleCredentialRoute(
   //    meaningful status passes through bare, anything else is an upstream fault.
   let answer: KbAuthAnswer;
   try {
-    answer = await options.call(email, password);
+    answer = await options.call(email, password, invite, edgeAddress(req.headers));
   } catch (error) {
     if (error instanceof ApiError) {
-      if (options.passThroughStatuses.includes(error.status)) {
+      // knowledge's own per-client limit (P78): the same refusal as this route's step 3.
+      if (error.status === 429 || options.passThroughStatuses.includes(error.status)) {
         return json(error.status, { ok: false });
       }
       return json(502, { ok: false });
@@ -155,11 +196,22 @@ export async function handleCredentialRoute(
     // SESSION_SECRET unset/unreadable → clean 500, never a leak.
     return json(500, { ok: false });
   }
-  const res = json(200, { ok: true });
+  // P78: an invite code that joined the account to its org starts the session in that
+  // org (the API just made the account a member of it) and names it for the client's
+  // toast; the body still carries nothing of knowledge's own text.
+  const joined = answer.joined ? asOrgId(answer.joined.id) : null;
+  const res = json(
+    200,
+    joined && answer.joined ? { ok: true, joined: answer.joined.name } : { ok: true },
+  );
   res.cookies.set(SESSION_COOKIE, sealed, sessionCookieOptions());
-  // A new session starts in its first org: the previous session's choice (perhaps
-  // another user's) never follows it.
-  res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  if (joined) {
+    res.cookies.set(ORG_COOKIE, joined, orgCookieOptions());
+  } else {
+    // A new session starts in its first org: the previous session's choice (perhaps
+    // another user's) never follows it.
+    res.cookies.set(ORG_COOKIE, "", clearedOrgCookieOptions());
+  }
   clearLegacyCookies(res);
   return res;
 }

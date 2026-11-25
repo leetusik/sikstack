@@ -27,15 +27,20 @@ const external = { target: "_blank", rel: "noopener noreferrer" } as const;
 export interface LandingProps {
   /** The feedback control's settings, read per request; left out where the server holds no key (F408). */
   sendFeedback?: { limit: number };
+  /**
+   * A live session reads the page (P78, F8): the header and the hero lead to the dashboard in place of Sign in
+   * and Create account.
+   */
+  signedIn?: boolean;
 }
 
-export function Landing({ sendFeedback }: LandingProps) {
+export function Landing({ sendFeedback, signedIn = false }: LandingProps) {
   const { picture, how, workspace, install, library, feedback, connect } =
     LANDING;
   return (
     <UiRoot lang="en">
       <div className="lp" id="top">
-        <LandingHeader />
+        <LandingHeader signedIn={signedIn} />
         <main className="lp-main" id="main" tabIndex={-1}>
           <section className="lp-part" aria-labelledby="lp-h1">
             <div className="center lp-row">
@@ -45,15 +50,29 @@ export function Landing({ sendFeedback }: LandingProps) {
                 </h1>
                 <p className="lp-lede">{LANDING.hero.lede}</p>
                 <div className="cluster">
-                  <Link
-                    className={buttonClass("primary")}
-                    href={LANDING_LINKS.createAccount}
-                  >
-                    {LANDING.hero.createAccount}
-                  </Link>
-                  <Link className={buttonClass()} href={LANDING_LINKS.signIn}>
-                    {LANDING.hero.signIn}
-                  </Link>
+                  {signedIn ? (
+                    <Link
+                      className={buttonClass("primary")}
+                      href={LANDING_LINKS.dashboard}
+                    >
+                      {LANDING.hero.dashboard}
+                    </Link>
+                  ) : (
+                    <>
+                      <Link
+                        className={buttonClass("primary")}
+                        href={LANDING_LINKS.createAccount}
+                      >
+                        {LANDING.hero.createAccount}
+                      </Link>
+                      <Link
+                        className={buttonClass()}
+                        href={LANDING_LINKS.signIn}
+                      >
+                        {LANDING.hero.signIn}
+                      </Link>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="lp-pic">

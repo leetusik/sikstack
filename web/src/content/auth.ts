@@ -73,3 +73,41 @@ export const WAITLIST_COPY = {
   },
   back: "Back to sign in",
 } as const;
+
+/**
+ * Password reset (P78, F10: no design round; the sign-in frame's pieces and words). `/login` links to `/forgot`;
+ * `/forgot` asks for the email and answers the same whatever the address; the mail's link opens `/reset?code=…`
+ * (a new password, then sign in), or its refused state for a link that is used, expired or unknown.
+ */
+export const FORGOT_COPY = {
+  /** The link under sign-in's panel. */
+  link: "Forgot password?",
+  href: "/forgot",
+  title: "Reset password",
+  submit: "Send link",
+  submitSending: "Sending…",
+  /** The confirmation, the same for every address. */
+  sentTitle: "Check your email",
+  sentText: (email: string) =>
+    `If an account uses ${email}, a link to set a new password is on its way. It works for 1 hour.`,
+  back: "Back to sign in",
+  invalid: "Enter your email address.",
+  failed: "Could not send the link. Try again.",
+} as const;
+
+export const RESET_COPY = {
+  title: "Set a new password",
+  label: "New password",
+  submit: "Save password",
+  submitSending: "Saving…",
+  short: "Enter a password of at least 8 characters.",
+  failed: "Could not save the password. Try again.",
+  /** Saved: every session of the account ended; sign in with the new one. */
+  doneTitle: "Password changed",
+  doneText: "Your password is changed and you are signed out everywhere. Sign in with the new one.",
+  signIn: "Sign in",
+  /** A link that is used, expired or unknown. */
+  refusedTitle: "Link no longer works",
+  refusedText: "This link was used already or has expired. Ask for a new one.",
+  again: "Reset password",
+} as const;

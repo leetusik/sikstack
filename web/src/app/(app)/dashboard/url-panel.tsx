@@ -37,6 +37,23 @@ export interface UrlPanelProps {
   save: (slug: string) => Promise<SaveSlugResult>;
 }
 
+/**
+ * Public URL for a member (P78: the slug is the owner's to claim): the claimed address with Copy, no Change and no
+ * form. The page shows no panel at all to a member while the org has no address.
+ */
+export function UrlReadPanel({ slug }: { slug: string }) {
+  return (
+    <Panel aria-label={U.heading}>
+      <PanelHead>
+        <h2>{U.heading}</h2>
+      </PanelHead>
+      <PanelBody rule>
+        <Copy text={U.address(slug)} label={U.copyLabel} />
+      </PanelBody>
+    </Panel>
+  );
+}
+
 const U = ORG_HOME.url;
 
 export function UrlPanel({ slug, save }: UrlPanelProps) {

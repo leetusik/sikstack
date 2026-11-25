@@ -233,12 +233,14 @@ export const PROJECT_HOME = {
     agenda: (open: string, proposed: string): string =>
       `${open} open · ${proposed} proposed`,
     all: "See all in Workspace",
+    /** P78, F16: a synced workspace with no open or proposed item and no phase, in one line. */
+    nothing: "Nothing open on the agenda, and no phases yet.",
     empty: "No workspace linked yet.",
     run: {
       before: "Run ",
       after: " in the project’s repo.",
       command: (origin: string, projectId: string): string =>
-        `python3 workflow/scripts/workflow.py link ${origin}/projects/${projectId}`,
+        `sikstack link ${origin}/projects/${projectId}`,
     },
   },
   library: {

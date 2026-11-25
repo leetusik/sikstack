@@ -253,7 +253,10 @@ describe("Project home's reads", () => {
     const store = { get: () => undefined };
     vi.mocked(headers.cookies).mockResolvedValue(store as never);
     vi.mocked(headers.headers).mockResolvedValue(
-      new Headers({ host: "sikstack.com", "x-forwarded-proto": "https" }) as never,
+      new Headers({
+        host: "sikstack.com",
+        "x-forwarded-proto": "https",
+      }) as never,
     );
     const guards = await import("@/lib/auth-guards");
     vi.mocked(guards.requireIdentity).mockResolvedValue({
@@ -295,8 +298,10 @@ describe("Project home's reads", () => {
       params: Promise.resolve({ projectId: PROJECT }),
     });
     const found = findElement(page, WorkspacePanel);
+    // The Workspace once; the role read (the head's switch is the owner's, P78-s2.F1) beside it.
     expect(calls).toEqual([
       `http://kb.test:8766/app/projects/${PROJECT}/workspace`,
+      "http://kb.test:8766/app/members",
     ]);
     expect(found?.props.part).toEqual(
       workspacePart({ state: "ready", value: NAMED }, PROJECT),
@@ -336,7 +341,7 @@ describe("Workspace panel: not linked", () => {
     expect(w.run).toEqual({
       before: "Run ",
       command:
-        "python3 workflow/scripts/workflow.py link https://sikstack.com/projects/p_42",
+        "sikstack link https://sikstack.com/projects/p_42",
       after: " in the project’s repo.",
     });
     expect(w).not.toHaveProperty("badge");
@@ -400,7 +405,7 @@ describe("Workspace panel: not linked", () => {
       const html = panel(part);
       expect(html).toContain("No workspace linked yet.");
       expect(html).toContain(
-        `<code class="mono ph-cmd">python3 workflow/scripts/workflow.py link https://sikstack.com/projects/${PROJECT}</code>`,
+        `<code class="mono ph-cmd">sikstack link https://sikstack.com/projects/${PROJECT}</code>`,
       );
       expect(html).not.toContain("Coming");
       expect(html).not.toContain("See all in Workspace");
@@ -567,5 +572,37 @@ describe("Keys: mint answer", () => {
       ok: false,
       reason: "failed",
     });
+  });
+});
+
+describe("Workspace panel: the items its head counts (P78, F16)", () => {
+  it("lists Open and In progress first, then Proposed, at most five, each a link to its page", () => {
+    const part = workspacePart({ state: "ready", value: WORKSPACE }, PROJECT);
+    if (part.kind !== "phases") throw new Error(part.kind);
+    expect(part.items.map((i) => [i.id, i.state])).toEqual([
+      ["A7-m3", "in_progress"],
+      ["A3-x0", "open"],
+      ["A4-x1", "open"],
+      ["A5-x2", "open"],
+      ["A9-k2", "proposed"],
+    ]);
+    const html = panel(part);
+    expect(html).toContain(
+      `href="/projects/${PROJECT}/workspace/agenda/A7-m3"`,
+    );
+    expect(html).not.toContain("A2-d1");
+  });
+
+  it("an empty workspace says so in one line, never an empty card", () => {
+    const empty = { ...WORKSPACE, phases: [], agenda: [] } as Workspace;
+    const part = workspacePart({ state: "ready", value: empty }, PROJECT);
+    if (part.kind !== "phases") throw new Error(part.kind);
+    expect(part.items).toEqual([]);
+    expect(panel(part)).toContain(
+      "Nothing open on the agenda, and no phases yet.",
+    );
+    expect(
+      panel(workspacePart({ state: "ready", value: WORKSPACE }, PROJECT)),
+    ).not.toContain("Nothing open on the agenda");
   });
 });

@@ -12,4 +12,9 @@
   .orghome-pair > .stack > :last-child {
     flex: 1 0 auto;
   }
+  /* the projects table's declared columns (FG9); a stacked table (`.table-stack`, P78 F14) drops the width */
+  .orghome-projects {
+    table-layout: fixed;
+    min-width: 57em;
+  }
 }

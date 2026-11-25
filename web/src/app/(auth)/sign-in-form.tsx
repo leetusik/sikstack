@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 
-import { SIGN_IN_COPY, WAITLIST_COPY } from "@/content/auth";
+import { FORGOT_COPY, SIGN_IN_COPY, WAITLIST_COPY } from "@/content/auth";
 import {
   Button,
   Field,
@@ -14,6 +14,9 @@ import {
   Label,
   Notice,
 } from "@/sikstack/ui";
+import { INVITE } from "@/content/org";
+import { publishToast } from "@/sikstack/shell/toast";
+import { inviteCodeOf } from "@/sikstack/org/model";
 import { isConnectNext } from "@/lib/connect/model";
 import { safeNextPath, SIGN_IN_LANDING_PATH } from "@/lib/next-path";
 
@@ -42,6 +45,11 @@ import { useAuthEmail } from "./auth-email";
  * - Sent from the connect page (`next` is `/connect?code=…`, job 09), a waitlisted answer
  *   goes back there instead: the email and that `next` ride in the `(auth)` layout's memory
  *   (`useAuthEmail().setWaitlisted`), and the connect page shows its own waitlisted state.
+ * - Sent from an invite link (`next` is `/invite?code=…`, P78), the form sends the code as `invite`;
+ *   an answer that says the code joined the account to its org (`joined`, the org's name) lands on
+ *   that org's home with the invite page's toast. Otherwise it returns to the invite, as before.
+ * - Sign in has "Forgot password?" on its own line under the link line (P78, F10): `/forgot`, the email typed
+ *   carried along by the same layout memory.
  */
 export type SignInScreen = "sign-in" | "sign-up";
 
@@ -82,6 +90,8 @@ export function SignInForm({
 }) {
   const router = useRouter();
   const next = safeNextPath(rawNext);
+  // Sent from an invite link (`next` is `/invite?code=…`), the form sends its code along (P78).
+  const invite = inviteCodeOf(next);
   const copy = SIGN_IN_COPY.screens[screen];
   const up = screen === "sign-up";
 
@@ -125,7 +135,7 @@ export function SignInForm({
       res = await fetch(ENDPOINT[screen], {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(invite ? { email, password, invite } : { email, password }),
       });
     } catch {
       // No answer: the password is kept.
@@ -134,11 +144,22 @@ export function SignInForm({
       return;
     }
     let waitlistedAnswer = false;
+    let joined: string | null = null;
     try {
-      const body = (await res.json()) as { waitlisted?: unknown } | null;
+      const body = (await res.json()) as { waitlisted?: unknown; joined?: unknown } | null;
       waitlistedAnswer = body?.waitlisted === true;
+      joined = typeof body?.joined === "string" ? body.joined : null;
     } catch {
       // a bare status is enough below
+    }
+    if (res.ok && joined !== null) {
+      // The invite's code joined the account to its org (approved, if it waited): the session
+      // starts there, and it lands on that org's home, as the invite page's Join does.
+      publishToast(INVITE.joined(joined));
+      setPhase("done");
+      router.replace(SIGN_IN_LANDING_PATH);
+      router.refresh();
+      return;
     }
     if (res.ok && waitlistedAnswer && isConnectNext(next)) {
       // Back to the connect page, which says the account waits (job 09).
@@ -289,6 +310,13 @@ export function SignInForm({
               {copy.altLink}
             </Link>
           </p>
+          {up ? null : (
+            <p className="cluster gap-1">
+              <Link href={FORGOT_COPY.href} className="link link-row signin-alt">
+                {FORGOT_COPY.link}
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -6,7 +6,6 @@ import {
   hasProjectSwitcher,
   newestFirst,
   nonceFromCsp,
-  orgSwitcherKind,
   railFor,
   reviewCount,
   showsProjectFilter,
@@ -14,17 +13,6 @@ import {
 
 // P58 — the Shell's rules (frame.md F9; the org rail per job 03 round 02, F320; Workspace a link to
 // the Agenda, F74). The look is verified live (S11), never here.
-
-describe("the org switcher", () => {
-  it("is a menu only for two or more orgs", () => {
-    expect([0, 1, 2, 5].map(orgSwitcherKind)).toEqual([
-      "plain",
-      "plain",
-      "menu",
-      "menu",
-    ]);
-  });
-});
 
 describe("the project switcher", () => {
   const named = (names: string[]) => names.map((name) => ({ name }));
@@ -93,11 +81,12 @@ describe("the rail", () => {
       expect(railFor(path).form).toBe("org");
   });
 
-  it("holds the signed items in order (no Documents in the org form)", () => {
+  it("holds the signed items in order (no Documents in the org form; Members after Feedback, P78)", () => {
     expect(railFor("/dashboard").items.map((i) => i.key)).toEqual([
       "overview",
       "library",
       "feedback",
+      "members",
     ]);
     expect(railFor("/projects/p1").items.map((i) => i.key)).toEqual([
       "overview",
@@ -114,6 +103,8 @@ describe("the rail", () => {
     expect(current("/feedback")).toEqual(["feedback"]);
     expect(current("/feedback/f1")).toEqual(["feedback"]);
     expect(current("/review")).toEqual(["review"]);
+    expect(current("/members")).toEqual(["members"]);
+    expect(railFor("/members").form).toBe("org");
     expect(current("/projects/p1")).toEqual(["overview"]);
     expect(current("/documents")).toEqual([]);
   });

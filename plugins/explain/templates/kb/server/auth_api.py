@@ -20,7 +20,16 @@ project (was ``"<localpart>'s workspace"``) and its response gained an additive
 The waitlist (``KB_SIGNUP_WAITLIST``, ``users.status``): with the switch on, signup
 creates the account ``waitlisted`` and answers 202 without a token; login answers a
 waitlisted account's right password with a 403, also without one. Both bodies carry
-``"status": "waitlisted"`` (``waitlisted_body``).
+``"status": "waitlisted"`` (``waitlisted_body``). A waitlisted sign-up also alerts the
+operator (``server.waitlist.alert_waitlist_signup``), after the response.
+
+An org invite's code may ride either body (``invite``, from the ``/invite`` page):
+when it names a valid invite to this very address, the account joins that org as
+``member`` and, if it is (or would be) waitlisted, is approved in the same step
+(``server.invites.accept``); the answer is the approved one, with the joined org as
+an additive ``joined``. A code for any other address, or one that no longer works,
+changes nothing: the answer is today's. Sign-in reads the code only for a waitlisted
+account; an approved one joins on the invite page.
 """
 
 from __future__ import annotations
@@ -32,7 +41,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
-from server import config
+from server import config, invites
 from server.accounts.auth import AuthContext, extract_bearer_token, require_user
 from server.accounts.security import (
     generate_opaque_token,
@@ -52,7 +61,7 @@ from server.accounts.types import (
 )
 from server.email_address import is_plain_address
 from server.persistence.models import utc_now
-from server.waitlist import notify_waitlisted
+from server.waitlist import alert_waitlist_signup, notify_waitlisted
 
 SESSION_TTL = timedelta(days=30)
 
@@ -89,14 +98,17 @@ router = APIRouter()
 # problem and is exactly coherent. So the throttle is server-side, in-process, and
 # gates ``signup`` + ``login`` only.
 #
-# TRUST MODEL for the client IP. Keyed on ``X-Real-IP`` (nginx sets it from the
-# Cloudflare-restored real visitor IP, ``deploy/knowledge.conf`` real_ip +
-# proxy_set_header), then the first ``X-Forwarded-For`` hop, then
-# ``request.client.host``. This is only trustworthy because the API container is
-# reachable EXCLUSIVELY through the edge (it is not publicly bound), so these
-# headers are always edge-set — a directly reachable API could be spoofed. Locally
-# (no nginx, direct :8766) there is no such header and it falls back to the peer
-# address, which is still a stable per-client key.
+# TRUST MODEL for the client IP. Keyed on ``X-Real-IP``, then ``request.client.host``.
+# The API has two callers and no public port: the edge, which SETS ``X-Real-IP`` from
+# the Cloudflare-restored visitor address on every request it proxies (``deploy/
+# sikstack.conf`` real_ip + proxy_set_header), overwriting any a client sent; and the
+# web, inside the network, which passes on the ``X-Real-IP`` the edge set on the
+# request it is serving (``web/src/lib/client-ip.ts``, P78), so a sign-in through the
+# web counts its visitor rather than the web container. ``X-Forwarded-For`` is never
+# read (P78): the edge appends to what a client sent, so its first hop is the client's
+# to choose, and reading it would let a caller pick its own bucket. A directly
+# reachable API could be spoofed. Locally (no nginx, direct :8766) there is no such
+# header and it falls back to the peer address, which is still a stable per-client key.
 #
 # GENERIC-401 SAFETY. The check runs before any credential work and keys off the
 # IP, never the email, so it cannot leak whether an account exists: unknown-email
@@ -114,14 +126,9 @@ _RATE_MAX_KEYS = 20_000
 def _client_ip(request: Request) -> str:
     """The real client IP behind the edge — see the TRUST MODEL note above."""
 
-    real_ip = request.headers.get("X-Real-IP")
+    real_ip = (request.headers.get("X-Real-IP") or "").strip()
     if real_ip:
-        return real_ip.strip()
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        return real_ip
     client = request.client
     return client.host if client else "unknown"
 
@@ -182,6 +189,8 @@ class _EmailPasswordInput(BaseModel):
 
     email: str
     password: str = Field(min_length=8)
+    #: An org invite's code, carried from the ``/invite`` page (``server.invites``).
+    invite: str | None = Field(default=None, max_length=200)
 
     @field_validator("email")
     @classmethod
@@ -314,19 +323,28 @@ async def signup(
         )
 
     tenant, _member, project = await service.provision_signup(user.id)
+    joined = None
+    if payload.invite:
+        result = await invites.accept(user, payload.invite, approve=True)
+        if result.accepted:
+            joined, waitlisted = result.tenant, False
     if waitlisted:
         response.status_code = 202
         background_tasks.add_task(notify_waitlisted, user.email)
+        background_tasks.add_task(alert_waitlist_signup, user.email)
         return waitlisted_body(user.email)
 
     token = await _mint_token(user.id)
 
-    return {
+    body: dict[str, object] = {
         "token": token,
         "user": serialize_user(user),
         "tenant": serialize_tenant(tenant),
         "project": serialize_project(project),
     }
+    if joined is not None:
+        body["joined"] = serialize_tenant(joined)
+    return body
 
 
 @router.post("/auth/login")
@@ -348,18 +366,29 @@ async def login(payload: LoginIn, request: Request, response: Response) -> dict[
     user = await service.get_user_by_email(payload.email)
     if user is None or not verify_password(user.password_hash, payload.password):
         raise HTTPException(status_code=401, detail=_INVALID_CREDENTIALS)
+    joined = None
     if not user.is_approved:
-        response.status_code = 403
-        return {"detail": USER_WAITLISTED, **waitlisted_body(user.email)}
+        result = (
+            await invites.accept(user, payload.invite, approve=True)
+            if payload.invite
+            else None
+        )
+        if result is None or not result.accepted:
+            response.status_code = 403
+            return {"detail": USER_WAITLISTED, **waitlisted_body(user.email)}
+        joined = result.tenant
 
     token = await _mint_token(user.id)
     tenants = await service.list_tenants_for_user(user.id)
 
-    return {
+    body: dict[str, object] = {
         "token": token,
         "user": serialize_user(user),
         "tenants": [serialize_tenant(tenant) for tenant in tenants],
     }
+    if joined is not None:
+        body["joined"] = serialize_tenant(joined)
+    return body
 
 
 @router.post("/auth/logout", status_code=204)

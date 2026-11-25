@@ -19,29 +19,37 @@ import { getActiveOrg, ORG_HEADER } from "@/lib/session";
 // token. Tokens/passwords are NEVER logged — `ApiError` carries the status and
 // knowledge's detail text only, and callers key off the STATUS, not the text.
 
-/** A non-2xx knowledge response, carrying the HTTP status + knowledge's `{detail}`. */
+/**
+ * A non-2xx knowledge response, carrying the HTTP status + knowledge's `{detail}`, and its
+ * `{reason}` when the route names one (the org routes' refusals, `server/orgs_api.py`:
+ * `taken`, `address`, `member`, `invited`, `other`), a word callers may key off.
+ */
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string | null;
+  readonly reason: string | null;
 
-  constructor(status: number, detail: string | null) {
+  constructor(status: number, detail: string | null, reason: string | null = null) {
     super(detail ? `${status} ${detail}` : `${status}`);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.reason = reason;
   }
 }
 
 /** Build an `ApiError` from a non-ok response, tolerating a missing/non-JSON body. */
 async function toError(res: Response): Promise<ApiError> {
   let detail: string | null = null;
+  let reason: string | null = null;
   try {
-    const body = (await res.json()) as { detail?: unknown };
+    const body = (await res.json()) as { detail?: unknown; reason?: unknown };
     if (typeof body.detail === "string") detail = body.detail;
+    if (typeof body.reason === "string") reason = body.reason;
   } catch {
     // no/!json body — status alone
   }
-  return new ApiError(res.status, detail);
+  return new ApiError(res.status, detail, reason);
 }
 
 /** Absolute knowledge URL for `path` (leading slash), trailing base slash stripped. */
@@ -62,6 +70,11 @@ export interface KbRequestOptions {
    */
   org?: string | null;
   signal?: AbortSignal;
+  /**
+   * The visitor's address as the edge recorded it (`edgeAddress`), sent as `X-Real-IP` so the API's
+   * per-client limit counts the visitor, not this server (`sendJson` only; `getRaw` takes `headers`).
+   */
+  address?: string | null;
 }
 
 /**
@@ -162,6 +175,7 @@ export async function sendJson<T>(
     headers: {
       Accept: "application/json",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(options.address ? { "X-Real-IP": options.address } : {}),
       ...(await authHeaders(options)),
     },
     body: body === undefined ? undefined : JSON.stringify(body),

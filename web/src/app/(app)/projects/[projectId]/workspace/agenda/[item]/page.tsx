@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { notFound, unstable_rethrow } from "next/navigation";
 import { cache } from "react";
 
-import { WS_HEAD } from "@/content/workspace/frame";
+import { WS_HEAD, WS_STATES } from "@/content/workspace/frame";
 import {
   wsFailedTitle,
   wsHeadOf,
@@ -44,6 +44,15 @@ export async function generateMetadata({
     const { token } = await requireIdentity();
     const read = await loadOnce(token, projectId, item);
     if (read.state === "error") return { title: wsFailedTitle(item) };
+    // P78, F17: the tab names the item (`A12-xy Retry the upload`), or says it is not found.
+    if (read.state === "ready")
+      return {
+        title: [read.item.id, read.item.title?.trim()]
+          .filter(Boolean)
+          .join(" "),
+      };
+    if (read.state === "not-found")
+      return { title: WS_STATES.notFound.title("item") };
   } catch (error) {
     unstable_rethrow(error);
   }

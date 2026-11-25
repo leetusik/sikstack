@@ -607,7 +607,7 @@ describe("the backlog page", () => {
     const html = await page();
     expect(html).toContain("No workspace linked yet.");
     expect(html).toContain(
-      `workflow.py link https://sikstack.localhost/projects/${PROJECT}`,
+      `sikstack link https://sikstack.localhost/projects/${PROJECT}`,
     );
     expect(html).not.toContain('aria-label="Now"');
   });

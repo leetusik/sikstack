@@ -73,6 +73,9 @@ export async function generateMetadata({
 }: {
   params: Promise<Params>;
 }): Promise<Metadata> {
+  // No `@`: no public address, a page that does not exist (P78, F12; the layout's 404).
+  if (!projectAt(await params))
+    return { title: SIKSTACK_STATES.notFound.title };
   try {
     const { read } = await readOnce(await params);
     return { title: read.project };

@@ -358,6 +358,15 @@ def smtp_configured() -> bool:
     return bool((smtp_host() or "").strip()) and bool((smtp_from() or "").strip())
 
 
+def waitlist_alert_to() -> str | None:
+    """Where a waitlisted sign-up is announced: this install's own operator.
+
+    ``KB_WAITLIST_ALERT_TO``, else ``KB_SMTP_FROM`` (never the SMTP login, which need
+    not be an address); None (no alert mail) with neither.
+    """
+    return _env("KB_WAITLIST_ALERT_TO") or _env("KB_SMTP_FROM")
+
+
 def gemini_api_key() -> str | None:
     """Gemini credential: GOOGLE_API_KEY preferred, GEMINI_API_KEY fallback.
 

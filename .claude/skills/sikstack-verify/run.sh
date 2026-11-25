@@ -269,9 +269,21 @@ signin() { # [other]: the test account in $SESSION; `other`, the second account 
     other_account || die "the second account could not be made (see $EV/run.log)"
     s="$SESSION-other"; auth="$EV/auth-state-other.json"; ev=SIKSTACK_DEV_OTHER_EMAIL; pv=SIKSTACK_DEV_OTHER_PASSWORD
   elif [ -n "${1:-}" ]; then die "usage: $0 signin [other]"; fi
+  email=$(sed -n "s/^$ev=//p" "$ENV_FILE" | tr -d '"')
+  pw=$(sed -n "s/^$pv=//p" "$ENV_FILE" | tr -d '"')
+  [ -n "$email" ] && [ -n "$pw" ] || die "no account $ev in $ENV_FILE"
   printf '{"outputDir": "%s"}\n' "$EV/cli-output" >"$EV/cli.config.json"
+  # The password is the session's CLI secret, never a value we hand the CLI: its daemon reads it from a 0600 file
+  # (PLAYWRIGHT_MCP_SECRETS_FILE) at `open`, which is removed at once; `fill` names the secret, and the CLI writes
+  # `<secret>…</secret>` in its place in everything it prints or saves (the snapshot taken while the form submits
+  # shows the disabled Password field's value). So no file under $EV, and nothing the CLI echoes, holds it.
+  local secret="$HOME_DIR/signin-secret.env"
+  (umask 077 && printf 'SIKSTACK_SIGNIN_PASSWORD=%s\n' "$pw" >"$secret") || die "cannot write $secret"
   playwright-cli -s="$s" close >/dev/null 2>&1 || true # this home's own session only
-  playwright-cli -s="$s" open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1 || die "playwright-cli open failed"
+  PLAYWRIGHT_MCP_SECRETS_FILE="$secret" playwright-cli -s="$s" open "$WEB/login" --config="$EV/cli.config.json" >>"$EV/run.log" 2>&1
+  local opened=$?
+  rm -f "$secret"
+  [ "$opened" -eq 0 ] || die "playwright-cli open failed"
   if [ -f "$auth" ]; then
     playwright-cli -s="$s" state-load "$auth" >>"$EV/run.log" 2>&1
     playwright-cli -s="$s" goto "$WEB/dashboard" >>"$EV/run.log" 2>&1
@@ -280,12 +292,8 @@ signin() { # [other]: the test account in $SESSION; `other`, the second account 
     say "signin: saved sign-in no longer valid; signing in again"
     playwright-cli -s="$s" goto "$WEB/login" >>"$EV/run.log" 2>&1
   fi
-  email=$(sed -n "s/^$ev=//p" "$ENV_FILE" | tr -d '"')
-  pw=$(sed -n "s/^$pv=//p" "$ENV_FILE" | tr -d '"')
-  [ -n "$email" ] && [ -n "$pw" ] || die "no account $ev in $ENV_FILE"
   playwright-cli -s="$s" fill 'role=textbox[name="Email"]' "$email" >>"$EV/run.log" 2>&1 || die "no Email field on /login"
-  # The CLI echoes filled text and a snapshot shows a field's value: the password goes nowhere but the page.
-  playwright-cli -s="$s" fill 'role=textbox[name="Password"]' "$pw" --submit >/dev/null 2>&1 || die "no Password field on /login"
+  playwright-cli -s="$s" fill 'role=textbox[name="Password"]' SIKSTACK_SIGNIN_PASSWORD --submit >>"$EV/run.log" 2>&1 || die "no Password field on /login"
   local i=0
   while [ "$i" -lt 20 ]; do
     url=$(playwright-cli -s="$s" --raw eval "() => location.pathname" 2>/dev/null | tr -d '"')
@@ -300,9 +308,13 @@ signin() { # [other]: the test account in $SESSION; `other`, the second account 
 
 # The second account: signed up once through the API with its own org, so it is a member of nothing the test
 # account owns. Its email and generated password go into the 0600 env file beside the test account's, never printed.
+# With the waitlist on (SIKSTACK_VERIFY_WAITLIST=1 at `up`) the sign-up answers 202: the password is kept all the
+# same, with a SIKSTACK_DEV_OTHER_WAITLISTED=1 mark, and the account is approved with the box's own command
+# (`python -m server.waitlist approve`, on this run's database, no mail); the mark goes once the approve lands, so a
+# failed approve is retried by the next `signin other`.
 other_account() {
-  grep -q '^SIKSTACK_DEV_OTHER_EMAIL=' "$ENV_FILE" && return 0
-  env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" python3 - <<'PY' >>"$EV/run.log" 2>&1
+  if ! grep -q '^SIKSTACK_DEV_OTHER_EMAIL=' "$ENV_FILE"; then
+    env -i "${BASE_ENV[@]}" API="http://127.0.0.1:$API_PORT" ENV_FILE="$ENV_FILE" python3 - <<'PY' >>"$EV/run.log" 2>&1 || return 1
 import json, os, secrets, urllib.error, urllib.request
 api, path = os.environ["API"], os.environ["ENV_FILE"]
 email, password = "other-verify@example.com", secrets.token_urlsafe(18)
@@ -313,12 +325,22 @@ try:
         status = r.status
 except urllib.error.HTTPError as e:
     status = e.code
-if status != 201:
+if status not in (201, 202):
     raise SystemExit(f"other account: sign-up of {email} answered {status}")
 with open(path, "a") as f:
     f.write(f"SIKSTACK_DEV_OTHER_EMAIL={email}\nSIKSTACK_DEV_OTHER_PASSWORD={password}\n")
-print(f"other account: created {email} (its own org)")
+    if status == 202:
+        f.write("SIKSTACK_DEV_OTHER_WAITLISTED=1\n")
+print(f"other account: created {email} (its own org){' on the waitlist' if status == 202 else ''}")
 PY
+  fi
+  grep -q '^SIKSTACK_DEV_OTHER_WAITLISTED=1' "$ENV_FILE" || return 0
+  local email
+  email=$(sed -n 's/^SIKSTACK_DEV_OTHER_EMAIL=//p' "$ENV_FILE" | tr -d '"')
+  (cd "$REPO" && exec env -i "${BASE_ENV[@]}" DATABASE_URL="postgresql+psycopg://kb:kb@127.0.0.1:$PG_PORT/kb" \
+    uv run python -m server.waitlist approve "$email") >>"$EV/run.log" 2>&1 || return 1
+  sed -i.bak '/^SIKSTACK_DEV_OTHER_WAITLISTED=/d' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  say "other account: approved $email (the waitlist is on)"
 }
 
 # api [other] <method> <path> [json]: one call to the API as the local test account, or with `other` as the second

@@ -6,8 +6,8 @@ a reader's anchors, quotes, snapshots and quiz responses), the five P41-sr.B1
 Listen tables (units, parts, jobs, runners and listening positions), vocky's
 three Feedback tables (events, comments, attachments; revision ``0009``), the
 eight workspace-store tables (revision ``0011``), the sikstack plugin's
-``installs`` and ``install_sign_ins`` (revision ``0012``), and ``design_builds``
-(revision ``0013``).
+``installs`` and ``install_sign_ins`` (revision ``0012``), ``design_builds``
+(revision ``0013``) and ``org_invites`` (revision ``0014``).
 """
 
 from __future__ import annotations
@@ -1258,3 +1258,59 @@ class DesignBuildModel(Base):
     share_on: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+
+
+# One row per org invite (``org_invites``, revision ``0014``): the org, the invited
+# address (trimmed, lowercase), the role it grants (``member``), the sha256 of the
+# invite's code (the code itself goes only into the mail), who invited and when, when
+# it stops working (7 days on), and when it was accepted (and by whom) or revoked
+# (``server.invites``, ``server.orgs_api``).
+
+
+class OrgInviteModel(Base):
+    """One invite into an org, bound to the invited address."""
+
+    __tablename__ = "org_invites"
+    __table_args__ = (
+        Index("ix_org_invites_tenant_id_created_at", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = _uuid_fk("tenants.id")
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(
+        Text, nullable=False, default="member", server_default=text("'member'")
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    invited_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = _ts()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = _ts(nullable=True)
+    accepted_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    revoked_at: Mapped[datetime | None] = _ts(nullable=True)
+
+
+class PasswordResetModel(Base):
+    """One password-reset code for an account (``server.password_reset``).
+
+    Only the code's sha256 is stored; it works once (``used_at``) and until
+    ``expires_at`` (1 hour after it was made).
+    """
+
+    __tablename__ = "password_resets"
+    __table_args__ = (Index("ix_password_resets_user_id", "user_id"),)
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = _uuid_fk("users.id")
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = _ts()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = _ts(nullable=True)

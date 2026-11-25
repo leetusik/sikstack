@@ -9,21 +9,36 @@ import { cx } from "@/lib/cx";
  * its other cells on one line in the second ink, the `td.to-end` cell at the line's end; the column
  * heads stay for a screen reader. `set` (`.stack-set`) sets the columns, never sized by what the rows
  * hold: the list's heads take `.stack-rating`, `.stack-project`, `.stack-product`, `.stack-when`, a cell
- * whose value may run long `.stack-wrap`, and its message stops at 56ch (F140).
+ * whose value may run long `.stack-wrap`, and its message stops at 56ch (F140). `capped` (P78): the system
+ * table's long form, scrolling inside itself under its kept header (`.is-capped`) while it does not stack.
  */
 export interface StackTableProps extends TableHTMLAttributes<HTMLTableElement> {
   set?: boolean;
+  capped?: boolean;
 }
 
 export function StackTable({
   set = false,
+  capped = false,
   className,
   ...rest
 }: StackTableProps) {
   return (
-    <div className="table-scroll table-stack">
+    <div className={cx("table-scroll table-stack", capped && "is-capped")}>
       <table {...rest} className={cx("table", set && "stack-set", className)} />
     </div>
+  );
+}
+
+/**
+ * A cell's column name, seen only while its table stacks (P78, F14): a count or a date that needs its column's name
+ * to read on the stacked line. Hidden from a screen reader, which keeps the column heads.
+ */
+export function StackLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="stack-label" aria-hidden="true">
+      {children}{" "}
+    </span>
   );
 }
 

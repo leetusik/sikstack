@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import {
   getSession,
   loginRedirectTarget,
+  orgResetHref,
   orgResetTarget,
   requireSession,
 } from "./session";
@@ -17,6 +18,9 @@ import type { KbIdentity } from "./knowledge/types";
 // P12.S2 — the composed page guards, one layer above `session.ts` (cookie/crypto)
 // and `knowledge/auth.ts` (the API calls). `session.ts` deliberately knows nothing
 // about knowledge and vice-versa; this module is where the two meet.
+
+/** Where an app page whose org the API refused lands, after the reset: the next org's home. */
+const ORG_HOME = "/dashboard";
 
 export interface AuthenticatedContext {
   /** The knowledge bearer token, unsealed from the cookie — for server-to-server calls. */
@@ -55,10 +59,12 @@ export const requireIdentity = cache(
         redirect(await loginRedirectTarget());
       }
       if (error instanceof ApiError && error.status === 403) {
-        // The org cookie names an org this user is not (or no longer) in. A server
-        // component cannot clear a cookie, so the reset route does it and returns
-        // here; without the cookie `/auth/me` acts in the first org and cannot 403.
-        redirect(await orgResetTarget());
+        // The org cookie names an org this user is not (or no longer) in: a removed
+        // member's, say. A server component cannot clear a cookie, so the reset route
+        // does it; without the cookie `/auth/me` acts in the first org and cannot 403.
+        // It lands on that org's home, as the switch does: the old org's pages (its
+        // projects, its members) are not the next org's.
+        redirect(orgResetHref(ORG_HOME));
       }
       throw error;
     }

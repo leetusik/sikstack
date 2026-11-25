@@ -294,8 +294,9 @@
     scroll-behavior: smooth;
   }
 
+  /* No background here: html and body take the page's own surface (canvas.css, P78 F4). */
   body {
-    @apply bg-canvas font-sans text-ink antialiased;
+    @apply font-sans text-ink antialiased;
     min-height: 100dvh;
   }
 

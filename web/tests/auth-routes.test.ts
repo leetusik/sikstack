@@ -1,9 +1,22 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
 import { POST as signupPOST } from "@/app/api/auth/signup/route";
-import { openSession, ORG_COOKIE, SESSION_COOKIE, sealSession } from "@/lib/session";
+import {
+  openSession,
+  ORG_COOKIE,
+  SESSION_COOKIE,
+  sealSession,
+} from "@/lib/session";
 
 // P12.S2 — the BFF route pipeline, driven against a STUBBED knowledge backend
 // (global fetch is replaced, so no backend is needed here; the live round-trip is
@@ -13,8 +26,16 @@ import { openSession, ORG_COOKIE, SESSION_COOKIE, sealSession } from "@/lib/sess
 // client.
 
 const TOKEN = "0GkQ3vJ8bYd1wZs5RfN7tXcA2eLmPqU9hVjK4oIyB6M";
-const USER = { id: "u1", email: "owner@example.com", created_at: "2026-07-16T00:00:00+00:00" };
-const TENANT = { id: "t1", name: "owner's workspace", created_at: "2026-07-16T00:00:00+00:00" };
+const USER = {
+  id: "u1",
+  email: "owner@example.com",
+  created_at: "2026-07-16T00:00:00+00:00",
+};
+const TENANT = {
+  id: "t1",
+  name: "owner's workspace",
+  created_at: "2026-07-16T00:00:00+00:00",
+};
 
 beforeAll(() => {
   process.env.SESSION_SECRET = "p12s2-test-secret-not-a-real-one";
@@ -52,7 +73,10 @@ function stubKb(status: number, body: unknown) {
 function makeReq(
   path: string,
   {
-    body = JSON.stringify({ email: "owner@example.com", password: "correct-horse" }),
+    body = JSON.stringify({
+      email: "owner@example.com",
+      password: "correct-horse",
+    }),
     headers = {},
     ip,
   }: { body?: string | null; headers?: Record<string, string>; ip: string },
@@ -77,7 +101,10 @@ const cookieValue = (setCookie: string) =>
 describe("POST /api/auth/login — ordered rejections", () => {
   it("415s a non-JSON content-type before anything else", async () => {
     const res = await loginPOST(
-      makeReq("/api/auth/login", { headers: { "content-type": "text/plain" }, ip: "10.0.0.1" }),
+      makeReq("/api/auth/login", {
+        headers: { "content-type": "text/plain" },
+        ip: "10.0.0.1",
+      }),
     );
     expect(res.status).toBe(415);
     expect(fetch).not.toHaveBeenCalled();
@@ -85,21 +112,29 @@ describe("POST /api/auth/login — ordered rejections", () => {
 
   it("403s a cross-site request (CSRF layer 2)", async () => {
     const res = await loginPOST(
-      makeReq("/api/auth/login", { headers: { "sec-fetch-site": "cross-site" }, ip: "10.0.0.2" }),
+      makeReq("/api/auth/login", {
+        headers: { "sec-fetch-site": "cross-site" },
+        ip: "10.0.0.2",
+      }),
     );
     expect(res.status).toBe(403);
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("400s a malformed JSON body", async () => {
-    const res = await loginPOST(makeReq("/api/auth/login", { body: "{not json", ip: "10.0.0.3" }));
+    const res = await loginPOST(
+      makeReq("/api/auth/login", { body: "{not json", ip: "10.0.0.3" }),
+    );
     expect(res.status).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("422s a well-formed body of the wrong shape", async () => {
     const res = await loginPOST(
-      makeReq("/api/auth/login", { body: JSON.stringify({ email: "" }), ip: "10.0.0.4" }),
+      makeReq("/api/auth/login", {
+        body: JSON.stringify({ email: "" }),
+        ip: "10.0.0.4",
+      }),
     );
     expect(res.status).toBe(422);
     expect(fetch).not.toHaveBeenCalled();
@@ -109,9 +144,65 @@ describe("POST /api/auth/login — ordered rejections", () => {
     stubKb(200, { token: TOKEN, user: USER, tenants: [TENANT] });
     const statuses: number[] = [];
     for (let i = 0; i < 6; i += 1) {
-      statuses.push((await loginPOST(makeReq("/api/auth/login", { ip: "10.0.0.5" }))).status);
+      statuses.push(
+        (await loginPOST(makeReq("/api/auth/login", { ip: "10.0.0.5" })))
+          .status,
+      );
     }
     expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+});
+
+describe("the visitor's address (P78): knowledge's per-client limit counts the visitor, not this server", () => {
+  const sentAddress = () =>
+    (vi.mocked(fetch).mock.calls[0][1]!.headers as Record<string, string>)[
+      "X-Real-IP"
+    ];
+
+  it("login and sign-up pass the edge's X-Real-IP on, never a forwarded-for hop the client wrote", async () => {
+    stubKb(200, { token: TOKEN, user: USER, tenants: [TENANT] });
+    await loginPOST(
+      makeReq("/api/auth/login", {
+        ip: "198.51.100.66",
+        headers: { "x-real-ip": "203.0.113.20" },
+      }),
+    );
+    expect(sentAddress()).toBe("203.0.113.20");
+    vi.mocked(fetch).mockClear();
+    stubKb(201, { token: TOKEN, user: USER, tenant: TENANT });
+    await signupPOST(
+      makeReq("/api/auth/signup", {
+        ip: "198.51.100.67",
+        headers: { "x-real-ip": "203.0.113.21" },
+      }),
+    );
+    expect(sentAddress()).toBe("203.0.113.21");
+  });
+
+  it("this route's own throttle keys on the edge's address too, so a forged forwarded-for buys no attempts", async () => {
+    stubKb(401, { detail: "invalid credentials" });
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const forged = { "x-real-ip": "203.0.113.30" };
+      statuses.push(
+        (
+          await loginPOST(
+            makeReq("/api/auth/login", {
+              ip: `198.51.100.${100 + i}`,
+              headers: forged,
+            }),
+          )
+        ).status,
+      );
+    }
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+  });
+
+  it("knowledge's own 429 reaches the form as the limit, not as an upstream fault", async () => {
+    stubKb(429, { detail: "too many requests — please retry later" });
+    const res = await loginPOST(makeReq("/api/auth/login", { ip: "10.0.9.1" }));
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({ ok: false });
   });
 });
 
@@ -144,7 +235,9 @@ describe("POST /api/auth/login — knowledge outcomes", () => {
   it("clears the active-org cookie, so a new session starts in its first org", async () => {
     stubKb(200, { token: TOKEN, user: USER, tenants: [TENANT] });
     const res = await loginPOST(makeReq("/api/auth/login", { ip: "10.0.1.5" }));
-    expect(setCookieOf(res)).toMatch(new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`));
+    expect(setCookieOf(res)).toMatch(
+      new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`),
+    );
   });
 
   it("expires the pre-prefix cookies this host set before, never reading them", async () => {
@@ -176,7 +269,9 @@ describe("POST /api/auth/login — knowledge outcomes", () => {
 
   it("passes knowledge's 400 through but maps an unexpected upstream status to 502", async () => {
     stubKb(400, { detail: "password: must have at least 8 characters" });
-    expect((await loginPOST(makeReq("/api/auth/login", { ip: "10.0.1.3" }))).status).toBe(400);
+    expect(
+      (await loginPOST(makeReq("/api/auth/login", { ip: "10.0.1.3" }))).status,
+    ).toBe(400);
 
     stubKb(500, { detail: "boom" });
     const res = await loginPOST(makeReq("/api/auth/login", { ip: "10.0.1.4" }));
@@ -188,16 +283,22 @@ describe("POST /api/auth/login — knowledge outcomes", () => {
 describe("POST /api/auth/signup", () => {
   it("normalizes knowledge's 201 + singular `tenant` into a 200 with a sealed cookie", async () => {
     stubKb(201, { token: TOKEN, user: USER, tenant: TENANT });
-    const res = await signupPOST(makeReq("/api/auth/signup", { ip: "10.0.2.1" }));
+    const res = await signupPOST(
+      makeReq("/api/auth/signup", { ip: "10.0.2.1" }),
+    );
 
     expect(res.status).toBe(200);
     expect(openSession(cookieValue(setCookieOf(res)!))).toBe(TOKEN);
-    expect(setCookieOf(res)).toMatch(new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`));
+    expect(setCookieOf(res)).toMatch(
+      new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`),
+    );
   });
 
   it("passes the duplicate-email 409 through with no cookie", async () => {
     stubKb(409, { detail: "a user with this email already exists" });
-    const res = await signupPOST(makeReq("/api/auth/signup", { ip: "10.0.2.2" }));
+    const res = await signupPOST(
+      makeReq("/api/auth/signup", { ip: "10.0.2.2" }),
+    );
 
     expect(res.status).toBe(409);
     expect(setCookieOf(res)).toBeNull();
@@ -206,8 +307,12 @@ describe("POST /api/auth/signup", () => {
 
   it("passes knowledge's 422 (its password minimum) through on both routes, never as a 502", async () => {
     // knowledge's pydantic body check answers 422 for a password under 8 characters.
-    stubKb(422, { detail: [{ type: "string_too_short", loc: ["body", "password"] }] });
-    const up = await signupPOST(makeReq("/api/auth/signup", { ip: "10.0.2.4" }));
+    stubKb(422, {
+      detail: [{ type: "string_too_short", loc: ["body", "password"] }],
+    });
+    const up = await signupPOST(
+      makeReq("/api/auth/signup", { ip: "10.0.2.4" }),
+    );
     expect(up.status).toBe(422);
     expect(setCookieOf(up)).toBeNull();
     await expect(up.json()).resolves.toEqual({ ok: false });
@@ -220,9 +325,12 @@ describe("POST /api/auth/signup", () => {
     stubKb(201, { token: TOKEN, user: USER, tenant: TENANT });
     const ip = "10.0.2.3";
     // Exhaust login's 5-per-window budget for this IP...
-    for (let i = 0; i < 6; i += 1) await loginPOST(makeReq("/api/auth/login", { ip }));
+    for (let i = 0; i < 6; i += 1)
+      await loginPOST(makeReq("/api/auth/login", { ip }));
     // ...signup from the same IP must still be allowed (separate bucket).
-    expect((await signupPOST(makeReq("/api/auth/signup", { ip }))).status).toBe(200);
+    expect((await signupPOST(makeReq("/api/auth/signup", { ip }))).status).toBe(
+      200,
+    );
   });
 });
 
@@ -234,7 +342,9 @@ describe("the waitlist", () => {
 
   it("a waitlisted sign-up (202) says waitlisted and sets no cookie", async () => {
     stubKb(202, WAITLISTED);
-    const res = await signupPOST(makeReq("/api/auth/signup", { ip: "10.0.4.1" }));
+    const res = await signupPOST(
+      makeReq("/api/auth/signup", { ip: "10.0.4.1" }),
+    );
     expect(res.status).toBe(200);
     expect(setCookieOf(res)).toBeNull();
     await expect(res.json()).resolves.toEqual({ ok: false, waitlisted: true });
@@ -257,7 +367,9 @@ describe("the waitlist", () => {
 
   it("a 2xx with no token and no waitlist is an upstream fault, never a token-less cookie", async () => {
     stubKb(201, { user: USER, tenant: TENANT });
-    const res = await signupPOST(makeReq("/api/auth/signup", { ip: "10.0.4.4" }));
+    const res = await signupPOST(
+      makeReq("/api/auth/signup", { ip: "10.0.4.4" }),
+    );
     expect(res.status).toBe(502);
     expect(setCookieOf(res)).toBeNull();
   });
@@ -284,7 +396,9 @@ describe("POST /api/auth/logout", () => {
     );
     expect(res.status).toBe(200);
     expect(setCookieOf(res)).toContain("Max-Age=0");
-    expect(setCookieOf(res)).toMatch(new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`));
+    expect(setCookieOf(res)).toMatch(
+      new RegExp(`${ORG_COOKIE}=;[^,]*Max-Age=0`),
+    );
     expect(setCookieOf(res)).toMatch(/(^|, )knowledge_session=;[^,]*Max-Age=0/);
     expect(setCookieOf(res)).toMatch(/(^|, )sikstack_org=;[^,]*Max-Age=0/);
   });
@@ -303,7 +417,9 @@ describe("POST /api/auth/logout", () => {
   });
 
   it("clears the cookie without calling knowledge when there is no valid session", async () => {
-    const res = await logoutPOST(makeReq("/api/auth/logout", { body: null, ip: "10.0.3.3" }));
+    const res = await logoutPOST(
+      makeReq("/api/auth/logout", { body: null, ip: "10.0.3.3" }),
+    );
     expect(res.status).toBe(200);
     expect(fetch).not.toHaveBeenCalled();
     expect(setCookieOf(res)).toContain("Max-Age=0");

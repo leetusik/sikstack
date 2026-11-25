@@ -22,6 +22,8 @@ export const LANDING_LINKS = {
   createAccount: "/signup",
   /** Org home's Org API keys head (`id="org-keys-head"`); sign-in comes first. */
   mintOrgKey: "/dashboard#org-keys-head",
+  /** A signed-in visitor's way on (P78, F8): the header and the hero lead here instead of sign-in. */
+  dashboard: "/dashboard",
 } as const;
 
 /** The four parts, in the app's rail order, then Connect (F250): the header's and footer's links. */
@@ -46,6 +48,8 @@ export const LANDING = {
     nav: "Landing",
     signIn: "Sign in",
     createAccount: "Create account",
+    /** Signed in (P78, F8): in place of Sign in and Create account. */
+    dashboard: "Dashboard",
     menu: "Menu",
     skip: "Skip to content",
   },
@@ -54,6 +58,8 @@ export const LANDING = {
     lede: "What your agents plan and run, what they write for you to read, and what your users said about it.",
     createAccount: "Create account",
     signIn: "Sign in",
+    /** Signed in (P78, F8): in place of Create account and Sign in. */
+    dashboard: "Open dashboard",
   },
   /** The hero's picture: platform's overview (F13), static. */
   picture: {
