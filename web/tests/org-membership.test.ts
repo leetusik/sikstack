@@ -3,11 +3,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // An org's membership ends, its invite mail is bounded, and publishing is the owner's (P78-s2.F1): the org actions
-// map the API's refusals (429 `limit` and `recipient`, 409 `last_owner` and `last_org`) to the forms' cases, Make
-// owner, Remove and Leave call the API's routes (Leave clears the org cookie and lands on the next org's home),
-// Members draws Make owner and Remove on an owner's member rows, Leave on a member's own row and on an owner's own
-// row when the org has another owner, and the project head hides the public/private switch from a member. The
-// session guard, Next's cache and cookies are mocked; the API is a stubbed fetch.
+// map the API's refusals (429 `limit` and `recipient`, 409 `last_owner`) to the forms' cases, Make owner, Remove and
+// Leave call the API's routes (Leave clears the org cookie and lands on the next org's home, a fresh one when it was
+// the account's only org), Members draws Make owner and Remove on an owner's member rows, Leave on a member's own row
+// and on an owner's own row when the org has another owner, words each answer's toast, and moves a promoted row up
+// with the owners; the project head hides the public/private switch from a member. The session guard, Next's cache
+// and cookies are mocked; the API is a stubbed fetch.
 
 const jar = { set: vi.fn() };
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -24,8 +25,8 @@ vi.mock("@/lib/auth-guards", () => ({
 const { createOrgAction, leaveOrgAction, makeOwnerAction, removeMemberAction, sendInviteAction } = await import(
   "@/app/(app)/orgs/actions"
 );
-const { memberControls } = await import("@/sikstack/org/model");
-const { MembersView } = await import("@/sikstack/org/members");
+const { memberControls, withOwner } = await import("@/sikstack/org/model");
+const { MembersView, leaveToast, promoteToast, removeToast } = await import("@/sikstack/org/members");
 const { ProjectHead } = await import("@/app/(app)/projects/[projectId]/project-head");
 const { MEMBERS, NEW_ORG } = await import("@/content/org");
 const { ORG_COOKIE } = await import("@/lib/session");
@@ -80,11 +81,11 @@ describe("membership ends", () => {
     expect(init.method).toBe("DELETE");
   });
 
-  it("a refused Remove (the last owner, the account's only org, a member's try) keeps the API's reason", async () => {
+  it("a refused Remove (the last owner, a member's try) keeps the API's reason", async () => {
     answer(409, { detail: "x", reason: "last_owner" });
     expect(await removeMemberAction(MEMBER_ID)).toEqual({ ok: false, reason: "last_owner" });
-    answer(409, { detail: "x", reason: "last_org" });
-    expect(await removeMemberAction(MEMBER_ID)).toEqual({ ok: false, reason: "last_org" });
+    answer(409, { detail: "x", reason: "something_else" });
+    expect(await removeMemberAction(MEMBER_ID)).toEqual({ ok: false, reason: "failed" });
     answer(403, { detail: "x" });
     expect(await removeMemberAction(MEMBER_ID)).toEqual({ ok: false, reason: "failed" });
     expect(await removeMemberAction("not-an-id")).toEqual({ ok: false, reason: "failed" });
@@ -117,17 +118,54 @@ describe("membership ends", () => {
     expect(jar.set).toHaveBeenCalledWith(ORG_COOKIE, "", expect.objectContaining({ maxAge: 0 }));
   });
 
-  it("a refused Leave stays, and says why", async () => {
+  it("a refused Leave stays, and keeps the API's reason", async () => {
     answer(409, { detail: "x", reason: "last_owner" });
     expect(await leaveOrgAction()).toEqual({ ok: false, reason: "last_owner" });
-    answer(409, { detail: "x", reason: "last_org" });
-    expect(await leaveOrgAction()).toEqual({ ok: false, reason: "last_org" });
     answer(500, { detail: "x" });
     expect(await leaveOrgAction()).toEqual({ ok: false, reason: "failed" });
     expect(jar.set).not.toHaveBeenCalled();
-    expect(MEMBERS.members.leaveLastOrg("Acme")).toContain("Acme");
-    expect(MEMBERS.members.leaveLastOwner("Acme")).toContain("Acme");
-    expect(MEMBERS.members.removeLastOrg("sora@example.com", "Acme")).toContain("sora@example.com");
+  });
+});
+
+describe("Members words each answer's toast", () => {
+  it("a Leave refused as the org's last owner asks for another owner first; any other refusal says try again", () => {
+    expect(leaveToast("Acme", { ok: false, reason: "last_owner" })).toBe(
+      "You can't leave Acme: make another member an owner first.",
+    );
+    expect(leaveToast("Acme", { ok: false, reason: "failed" })).toBe("Could not leave Acme. Try again.");
+    expect(leaveToast("Acme", { ok: false })).toBe("Could not leave Acme. Try again.");
+  });
+
+  it("a Remove says the member is out, or that it could not; a refusal of any kind is the same try again", () => {
+    expect(removeToast("sora@example.com", { ok: true })).toBe("sora@example.com removed.");
+    expect(removeToast("sora@example.com", { ok: false, reason: "failed" })).toBe(
+      "Could not remove sora@example.com. Try again.",
+    );
+    expect(removeToast("sora@example.com", { ok: false, reason: "last_owner" })).toBe(
+      "Could not remove sora@example.com. Try again.",
+    );
+  });
+
+  it("a Make owner says the member is an owner now, or that it could not", () => {
+    expect(promoteToast("sora@example.com", true)).toBe("sora@example.com is an owner now.");
+    expect(promoteToast("sora@example.com", false)).toBe("Could not make sora@example.com an owner. Try again.");
+  });
+
+  it("a promoted row reads Owner and moves up with the owners, by the day it joined", () => {
+    const rows = [
+      { id: "a", email: "a@example.com", role: "owner" as const, joinedAt: "2026-11-01T00:00:00Z" },
+      { id: "b", email: "b@example.com", role: "member" as const, joinedAt: "2026-11-02T00:00:00Z" },
+      { id: "c", email: "c@example.com", role: "owner" as const, joinedAt: "2026-11-04T00:00:00Z" },
+      { id: "d", email: "d@example.com", role: "member" as const, joinedAt: "2026-11-03T00:00:00Z" },
+    ];
+    expect(withOwner(rows, "d").map((r) => [r.id, r.role])).toEqual([
+      ["a", "owner"],
+      ["d", "owner"],
+      ["c", "owner"],
+      ["b", "member"],
+    ]);
+    expect(rows[3].role).toBe("member");
+    expect(withOwner(rows, "zzz").map((r) => r.id)).toEqual(["a", "c", "b", "d"]);
   });
 });
 

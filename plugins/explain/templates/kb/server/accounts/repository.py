@@ -12,10 +12,8 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from server.accounts.types import (
-    ROLE_OWNER,
     AuthTokenRecord,
     CreateAuthToken,
     CreateProject,
@@ -108,10 +106,14 @@ class AccountsRepository:
 
     # -- tenancy ----------------------------------------------------------
 
-    async def create_tenant(self, name: str) -> TenantRecord:
-        """Persist a tenant and return the stored record."""
+    async def create_tenant(self, name: str, *, made_by: UUID | None = None) -> TenantRecord:
+        """Persist a tenant and return the stored record.
 
-        model = TenantModel(name=name)
+        ``made_by``: the account that made it with ``POST /app/orgs`` (the one whose
+        daily new-org limit it counts against); None for an org made with an account.
+        """
+
+        model = TenantModel(name=name, made_by=made_by)
         self._session.add(model)
         await self._session.flush()
         await self._session.refresh(model)
@@ -185,44 +187,20 @@ class AccountsRepository:
         return (await self._session.execute(statement)).scalar_one_or_none()
 
     async def count_orgs_made_since(self, user_id: UUID, since: datetime) -> int:
-        """How many orgs the user made since ``since``, its first org aside.
+        """How many orgs the user made with ``POST /app/orgs`` since ``since``.
 
-        An org the user made is one it owns that was created since ``since``
-        (``tenants.created_at``) and whose first membership is the user's own: the
-        maker's row is written with the org. An org the user was made owner of (its
-        maker's row came first), or one made earlier, never counts, however recent the
-        promotion. The user's first membership is the sign-up org, made with the
-        account, never by ``POST /app/orgs``.
+        An org the user made is one whose ``tenants.made_by`` is the user and whose
+        ``tenants.created_at`` is after ``since``. ``made_by`` is written once, when the
+        org is made (``create_tenant``), so the count never depends on which member rows
+        still exist: an org the user was made owner of never counts, and one it made
+        still counts after it leaves or hands it over. An org made with the account (the
+        sign-up org, and the fresh org a last membership's end gives) has no maker.
         """
 
-        first = (
-            select(TenantMemberModel.id)
-            .where(TenantMemberModel.user_id == user_id)
-            .order_by(TenantMemberModel.created_at, TenantMemberModel.id)
-            .limit(1)
-            .scalar_subquery()
-        )
-        earlier = aliased(TenantMemberModel)
-        made_before = (
-            select(earlier.id)
-            .where(
-                earlier.tenant_id == TenantMemberModel.tenant_id,
-                earlier.user_id != TenantMemberModel.user_id,
-                earlier.created_at <= TenantMemberModel.created_at,
-            )
-            .exists()
-        )
         statement = (
             select(func.count())
-            .select_from(TenantMemberModel)
-            .join(TenantModel, TenantModel.id == TenantMemberModel.tenant_id)
-            .where(
-                TenantMemberModel.user_id == user_id,
-                TenantMemberModel.role == ROLE_OWNER,
-                TenantModel.created_at > since,
-                TenantMemberModel.id != first,
-                ~made_before,
-            )
+            .select_from(TenantModel)
+            .where(TenantModel.made_by == user_id, TenantModel.created_at > since)
         )
         return int((await self._session.execute(statement)).scalar_one())
 

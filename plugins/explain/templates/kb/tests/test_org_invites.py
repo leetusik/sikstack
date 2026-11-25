@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -819,82 +820,59 @@ def test_a_co_owner_leaves_and_the_last_owner_still_cannot(org):
     assert _role(org, org_id, heir["email"]) == "owner"
 
 
-def test_no_account_leaves_or_is_removed_from_its_only_org(org):
-    # An owner row: the sign-up org is the account's only one, and it has a co-owner.
-    first, second, org_id = _co_owned(org)
-    as_first, as_second = _in(first["h"], org_id), _in(second["h"], org_id)
-    left = org.post("/app/tenant/leave", headers=as_first)
-    assert left.status_code == 409 and left.json()["reason"] == "last_org"
-    fid = _member_id(org, second, org_id, first["email"])
-    removed = org.delete(f"/app/members/{fid}", headers=as_second)
-    assert removed.status_code == 409 and removed.json()["reason"] == "last_org"
-    assert _role(org, org_id, first["email"]) == "owner"
-
-    # A member row: the account joined another org, then left its sign-up org.
-    joined_id = second["default_org"]
-    code = _invite(org, second, joined_id, first["email"])
-    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
-    assert org.post("/app/tenant/leave", headers=as_first).status_code == 204
-    me = org.get("/auth/me", headers=first["h"]).json()
-    assert [t["id"] for t in me["tenants"]] == [joined_id]
-    left = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
-    assert left.status_code == 409 and left.json()["reason"] == "last_org"
-    mid = _member_id(org, second, joined_id, first["email"])
-    removed = org.delete(f"/app/members/{mid}", headers=_in(second["h"], joined_id))
-    assert removed.status_code == 409 and removed.json()["reason"] == "last_org"
-    assert _role(org, joined_id, first["email"]) == "member"
-    # The last owner's refusal is checked first, as before.
-    lone = org.post("/app/tenant/leave", headers=as_second)
-    assert lone.status_code == 409 and lone.json()["reason"] == "last_owner"
+def _orgs(client, who: dict) -> list[dict]:
+    return client.get("/auth/me", headers=who["h"]).json()["tenants"]
 
 
-def test_leaving_two_orgs_back_to_back_keeps_the_last(org):
-    first, second, org_id = _co_owned(org)
-    joined_id = second["default_org"]
-    code = _invite(org, second, joined_id, first["email"])
-    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
-
-    assert org.post("/app/tenant/leave", headers=_in(first["h"], org_id)).status_code == 204
-    second_leave = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
-    assert second_leave.status_code == 409 and second_leave.json()["reason"] == "last_org"
-    assert _role(org, joined_id, first["email"]) == "member"
+def _user_id(client, email: str):
+    with client.db.connect() as conn:
+        return conn.execute(
+            text("SELECT id FROM users WHERE email = :e"), {"e": email}
+        ).scalar_one()
 
 
-def test_a_leave_waits_on_the_accounts_other_membership_and_counts_after_it(org):
-    """Two leaves from two orgs at once: the second waits on the account's row in the first's
-    org, which the first holds, and counts the account's rows after it commits. The first leave
-    is replayed by hand in a transaction of the test's own: a lock on its org's rows only (the
-    account's row there among them; a leave locks more), then its delete, committed only once
-    the request waits on the lock. A leave that locked only its own org's rows would not wait."""
+def _a_fresh_default_org(client, who: dict, *, besides: list[str]) -> str:
+    """The account's one org is a new ``default``, as at sign-up: the account its only
+    member and owner, one project ``default``, and no maker (it never counts as made)."""
+
+    (only,) = _orgs(client, who)
+    assert only["name"] == "default" and only["id"] not in besides, only
+    listed = client.get("/app/members", headers=who["h"]).json()
+    assert listed["role"] == "owner"
+    assert [(m["email"], m["role"]) for m in listed["members"]] == [(who["email"], "owner")]
+    projects = client.get("/app/projects", headers=who["h"]).json()["projects"]
+    assert [p["name"] for p in projects] == ["default"]
+    with client.db.connect() as conn:
+        assert conn.execute(
+            text("SELECT made_by FROM tenants WHERE id = :t"), {"t": only["id"]}
+        ).scalar_one() is None
+    return only["id"]
+
+
+def _while_the_org_is_locked(client, org_id: str, act, meanwhile):
+    """``act()``'s answer, a request sent while the test holds ``org_id``'s member rows
+    ``FOR UPDATE`` (as another membership change would): once the request waits on that
+    lock, ``meanwhile(conn)`` runs in the holding transaction, which then commits."""
 
     import threading
     import time
 
-    first, second, org_id = _co_owned(org)
-    joined_id = second["default_org"]
-    code = _invite(org, second, joined_id, first["email"])
-    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
-    with org.db.connect() as conn:
-        user_id = conn.execute(
-            text("SELECT id FROM users WHERE email = :e"), {"e": first["email"]}
-        ).scalar_one()
-
     answers: dict[str, object] = {}
-    with org.db.connect() as other_leave:
-        held = other_leave.begin()
-        other_leave.execute(
+    with client.db.connect() as held_conn:
+        held = held_conn.begin()
+        held_conn.execute(
             text("SELECT id FROM tenant_members WHERE tenant_id = :t ORDER BY id FOR UPDATE"),
             {"t": org_id},
         )
 
-        def act() -> None:
-            answers["res"] = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
+        def run() -> None:
+            answers["res"] = act()
 
-        worker = threading.Thread(target=act)
+        worker = threading.Thread(target=run)
         worker.start()
         waiting, until = 0, time.monotonic() + 15
         while waiting == 0 and time.monotonic() < until and worker.is_alive():
-            with org.db.connect() as watch:
+            with client.db.connect() as watch:
                 waiting = watch.execute(
                     text(
                         "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
@@ -902,17 +880,111 @@ def test_a_leave_waits_on_the_accounts_other_membership_and_counts_after_it(org)
                     )
                 ).scalar_one()
             time.sleep(0.02)
-        assert waiting, "the leave never waited on the account's other membership"
-        other_leave.execute(
-            text("DELETE FROM tenant_members WHERE tenant_id = :t AND user_id = :u"),
-            {"t": org_id, "u": user_id},
-        )
+        assert waiting, "the request never waited on the org's rows"
+        meanwhile(held_conn)
         held.commit()
     worker.join(30)
     assert not worker.is_alive()
-    res = answers["res"]
-    assert res.status_code == 409 and res.json()["reason"] == "last_org", res.text
-    assert _role(org, joined_id, first["email"]) == "member"
+    return answers["res"]
+
+
+def test_a_last_org_leave_lands_the_account_in_a_fresh_default_org(org):
+    # The sign-up org is the account's only one, and it has a co-owner.
+    first, second, org_id = _co_owned(org)
+    left = org.post("/app/tenant/leave", headers=_in(first["h"], org_id))
+    assert left.status_code == 204, left.text
+    assert _role(org, org_id, first["email"]) is None
+    assert org.get("/app/members", headers=_in(first["h"], org_id)).status_code == 403
+    _a_fresh_default_org(org, first, besides=[org_id])
+    # The last owner's refusal stands.
+    lone = org.post("/app/tenant/leave", headers=_in(second["h"], org_id))
+    assert lone.status_code == 409 and lone.json()["reason"] == "last_owner"
+
+
+def test_an_owner_removes_a_member_whose_only_org_it_is(org):
+    # The account joined another org, then left its sign-up org: the joined org is its only one.
+    first, second, org_id = _co_owned(org)
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+    assert org.post("/app/tenant/leave", headers=_in(first["h"], org_id)).status_code == 204
+    assert [t["id"] for t in _orgs(org, first)] == [joined_id]
+
+    mid = _member_id(org, second, joined_id, first["email"])
+    removed = org.delete(f"/app/members/{mid}", headers=_in(second["h"], joined_id))
+    assert removed.status_code == 204, removed.text
+    assert _role(org, joined_id, first["email"]) is None
+    assert org.get("/app/members", headers=_in(first["h"], joined_id)).status_code == 403
+    _a_fresh_default_org(org, first, besides=[org_id, joined_id])
+
+
+def test_leaving_two_orgs_back_to_back_lands_in_a_fresh_org(org):
+    first, second, org_id = _co_owned(org)
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+
+    assert org.post("/app/tenant/leave", headers=_in(first["h"], org_id)).status_code == 204
+    second_leave = org.post("/app/tenant/leave", headers=_in(first["h"], joined_id))
+    assert second_leave.status_code == 204, second_leave.text
+    assert _role(org, joined_id, first["email"]) is None
+    _a_fresh_default_org(org, first, besides=[org_id, joined_id])
+
+
+def test_a_leave_waits_on_the_accounts_other_membership_and_counts_after_it(org):
+    """Two leaves from two orgs at once: the second waits on the account's row in the first's
+    org, which the first holds, and counts the account's rows after it commits, so it is the
+    last membership's end and makes the one fresh org. The first leave is replayed by hand in
+    a transaction of the test's own: a lock on its org's rows only (the account's row there
+    among them; a leave locks more), then its delete, committed only once the request waits on
+    the lock. A leave that locked only its own org's rows would not wait, would count two rows,
+    and would leave the account with no org."""
+
+    first, second, org_id = _co_owned(org)
+    joined_id = second["default_org"]
+    code = _invite(org, second, joined_id, first["email"])
+    assert org.post(f"/app/invite/{code}/accept", headers=first["h"]).status_code == 200
+    user_id = _user_id(org, first["email"])
+
+    res = _while_the_org_is_locked(
+        org,
+        org_id,
+        lambda: org.post("/app/tenant/leave", headers=_in(first["h"], joined_id)),
+        lambda conn: conn.execute(
+            text("DELETE FROM tenant_members WHERE tenant_id = :t AND user_id = :u"),
+            {"t": org_id, "u": user_id},
+        ),
+    )
+    assert res.status_code == 204, res.text
+    assert _role(org, joined_id, first["email"]) is None
+    _a_fresh_default_org(org, first, besides=[org_id, joined_id])
+
+
+def test_an_owner_removed_while_it_acts_changes_nothing(org):
+    """The code read's race: a co-owner's Make owner (then its Remove) waits on the org's rows
+    while another owner removes it; once that commits, the caller is no longer an owner there,
+    so its act is a 403 that changes nothing."""
+
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Race Org")
+    target = _joined(org, owner, org_id)
+    tid = _member_id(org, owner, org_id, target["email"])
+    for method, path in (("post", f"/app/members/{tid}/owner"), ("delete", f"/app/members/{tid}")):
+        other = _joined(org, owner, org_id)
+        assert _promote(org, owner, org_id, other["email"]).status_code == 204
+        other_id = _user_id(org, other["email"])
+        res = _while_the_org_is_locked(
+            org,
+            org_id,
+            lambda: getattr(org, method)(path, headers=_in(other["h"], org_id)),
+            lambda conn: conn.execute(
+                text("DELETE FROM tenant_members WHERE tenant_id = :t AND user_id = :u"),
+                {"t": org_id, "u": other_id},
+            ),
+        )
+        assert res.status_code == 403, (method, res.status_code, res.text)
+        assert _role(org, org_id, other["email"]) is None
+        assert _role(org, org_id, target["email"]) == "member", method
 
 
 def test_a_promoted_account_still_makes_its_new_orgs_for_the_day(org):
@@ -924,6 +996,128 @@ def test_a_promoted_account_still_makes_its_new_orgs_for_the_day(org):
         for n in range(11)
     ]
     assert statuses == [201] * 10 + [429]
+
+
+def test_a_handed_over_org_never_counts_against_its_new_owner(org):
+    """The code read's C01: the maker hands today's org over, then leaves it or is removed by
+    the new owner; the new owner still makes ``ORGS_PER_DAY`` orgs that day."""
+
+    from server.orgs_api import ORGS_PER_DAY
+
+    for maker_goes in ("leaves", "is removed"):
+        maker = _account(org)
+        org_id = _new_org(org, maker, "Handed Today")
+        heir = _joined(org, maker, org_id)
+        assert _promote(org, maker, org_id, heir["email"]).status_code == 204
+        if maker_goes == "leaves":
+            gone = org.post("/app/tenant/leave", headers=_in(maker["h"], org_id))
+        else:
+            mid = _member_id(org, heir, org_id, maker["email"])
+            gone = org.delete(f"/app/members/{mid}", headers=_in(heir["h"], org_id))
+        assert gone.status_code == 204, gone.text
+        statuses = [
+            org.post("/app/orgs", json={"name": f"Heir {n}"}, headers=heir["h"]).status_code
+            for n in range(ORGS_PER_DAY + 1)
+        ]
+        assert statuses == [201] * ORGS_PER_DAY + [429], maker_goes
+
+
+def test_an_account_that_left_its_signup_org_makes_exactly_the_days_orgs(org):
+    """The code read's C02: an account hands its sign-up org over and leaves it; the orgs it
+    made today all count, the first of them included."""
+
+    from server.orgs_api import ORGS_PER_DAY
+
+    me = _account(org)
+    heir = _joined(org, me, me["default_org"])
+    assert _promote(org, me, me["default_org"], heir["email"]).status_code == 204
+    assert org.post("/app/orgs", json={"name": "Mine 0"}, headers=me["h"]).status_code == 201
+    left = org.post("/app/tenant/leave", headers=_in(me["h"], me["default_org"]))
+    assert left.status_code == 204, left.text
+    statuses = [
+        org.post("/app/orgs", json={"name": f"Mine {n}"}, headers=me["h"]).status_code
+        for n in range(1, ORGS_PER_DAY + 1)
+    ]
+    assert statuses == [201] * (ORGS_PER_DAY - 1) + [429]
+
+
+def test_the_made_by_migration_backfills_each_orgs_maker(monkeypatch):
+    """``0016`` on a database at ``0015``: an org's maker is its earliest owner, unless the
+    org is that owner's own first membership (its sign-up org); an org with no owner has
+    none. A downgrade drops the column, and an upgrade again backfills the same."""
+
+    if not _RAW_DSN:
+        pytest.skip("set KB_TEST_DATABASE_URL to a disposable Postgres to run the migration test")
+    ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    if not ini.is_file():
+        pytest.skip("no alembic/ here (the plugin template ships none)")
+    from alembic import command
+    from alembic.config import Config
+
+    base = make_url(_RAW_DSN).set(drivername="postgresql+psycopg")
+    name = f"kb_made_{uuid4().hex[:10]}"
+    admin = create_engine(base.render_as_string(hide_password=False), isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{name}"'))
+    except Exception as exc:  # pragma: no cover - environment dependent
+        admin.dispose()
+        pytest.skip(f"cannot create a scratch database: {exc}")
+    url = base.set(database=name).render_as_string(hide_password=False)
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = Config(str(ini))
+    engine = create_engine(url)
+    ann, ben = uuid4(), uuid4()
+    # ann's and ben's sign-up orgs; an org ann made later, which ben joined; ann joined
+    # ben's sign-up org; an org with no members at all.
+    ann_own, ben_own, ann_made, empty = uuid4(), uuid4(), uuid4(), uuid4()
+    rows = [
+        (ann_own, ann, "owner", "2026-11-01"),
+        (ben_own, ben, "owner", "2026-11-02"),
+        (ben_own, ann, "member", "2026-11-03"),
+        (ann_made, ann, "owner", "2026-11-04"),
+        (ann_made, ben, "member", "2026-11-05"),
+    ]
+    made_by = text("SELECT id, made_by FROM tenants")
+    has_column = text(
+        "SELECT count(*) FROM information_schema.columns "
+        "WHERE table_name = 'tenants' AND column_name = 'made_by'"
+    )
+    try:
+        command.upgrade(cfg, "0015_password_resets")
+        with engine.begin() as conn:
+            for user in (ann, ben):
+                conn.execute(
+                    text("INSERT INTO users (id, email, password_hash) VALUES (:id, :e, 'x')"),
+                    {"id": user, "e": f"{user.hex}@example.com"},
+                )
+            for tenant in (ann_own, ben_own, ann_made, empty):
+                conn.execute(
+                    text("INSERT INTO tenants (id, name) VALUES (:id, 'x')"), {"id": tenant}
+                )
+            for tenant, user, role, day in rows:
+                conn.execute(
+                    text(
+                        "INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at) "
+                        "VALUES (:id, :t, :u, :r, CAST(:d AS timestamptz))"
+                    ),
+                    {"id": uuid4(), "t": tenant, "u": user, "r": role, "d": day},
+                )
+        want = {ann_own: None, ben_own: None, ann_made: ann, empty: None}
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            assert dict(conn.execute(made_by).all()) == want
+        command.downgrade(cfg, "-1")
+        with engine.connect() as conn:
+            assert conn.execute(has_column).scalar_one() == 0
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            assert dict(conn.execute(made_by).all()) == want
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
 
 
 # --- publishing is an org act ----------------------------------------------------------------

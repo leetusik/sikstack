@@ -69,12 +69,9 @@ export const MEMBERS = {
     removeLabel: (email: string) => `Remove ${email} from the org`,
     removed: (email: string) => `${email} removed.`,
     removeFailed: (email: string) => `Could not remove ${email}. Try again.`,
-    /** The API's 409 `last_org`: every account keeps at least one org. */
-    removeLastOrg: (email: string, org: string) => `${email} can't be removed: ${org} is their only org.`,
     leave: "Leave",
     leaveLabel: (org: string) => `Leave ${org}`,
     leaveFailed: (org: string) => `Could not leave ${org}. Try again.`,
-    leaveLastOrg: (org: string) => `You can't leave ${org}: it's your only org.`,
     /** The API's 409 `last_owner`: an org keeps at least one owner. */
     leaveLastOwner: (org: string) => `You can't leave ${org}: make another member an owner first.`,
   },

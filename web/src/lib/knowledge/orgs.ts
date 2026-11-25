@@ -9,7 +9,7 @@ import type { KbProject, KbTenant } from "./types";
 // every call does), but the invite link's two: its read lists the invite's own org, and its accept
 // joins that org, so neither names one (`org: null`), as the connect page's calls do. The refusals
 // keep the API's `reason` on the `ApiError` (`taken`, `address`, `member`, `invited`, `other`,
-// `limit`, `recipient`, `last_owner`, `last_org`).
+// `limit`, `recipient`, `last_owner`).
 
 /** `POST /app/orgs`: a new org, the caller its owner, with one project `default`. */
 export async function createOrg(

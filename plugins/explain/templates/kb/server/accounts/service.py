@@ -234,16 +234,19 @@ class AccountsService:
         user_id: UUID,
         name: str,
         *,
+        made_by_user: bool = False,
         limit: tuple[int, datetime] | None = None,
     ) -> tuple[TenantRecord, TenantMemberRecord, ProjectRecord]:
         """Make an org named ``name``: the tenant, ``user_id`` as its ``owner`` and one
         project ``"default"``, in one transaction (sign-up's ``"default"`` org is one).
 
-        With ``limit`` ``(most, since)``, ``OrgLimitError`` when the account already
-        made ``most`` orgs since ``since`` (its first org, the sign-up one, aside); the
-        count and the new org share the transaction under a lock per account, so two
-        creates at once never both pass. The caller validates ``name``
-        (``server.orgs_api``).
+        ``made_by_user`` records ``user_id`` as the org's maker (``tenants.made_by``):
+        ``POST /app/orgs`` passes it, sign-up does not, so only the orgs an account made
+        by hand count against its limit. With ``limit`` ``(most, since)``,
+        ``OrgLimitError`` when the account already made ``most`` orgs since ``since``
+        (``count_orgs_made_since``); the count and the new org share the transaction
+        under a lock per account, so two creates at once never both pass. The caller
+        validates ``name`` (``server.orgs_api``).
         """
 
         async with self._session_maker() as session:
@@ -257,7 +260,9 @@ class AccountsService:
                 if await repository.count_orgs_made_since(user_id, since) >= most:
                     raise OrgLimitError("the account made as many orgs as it may for now")
             try:
-                tenant = await repository.create_tenant(name)
+                tenant = await repository.create_tenant(
+                    name, made_by=user_id if made_by_user else None
+                )
                 member = await repository.add_tenant_member(
                     tenant_id=tenant.id,
                     user_id=user_id,

@@ -28,6 +28,7 @@ import {
   looksLikeEmail,
   memberControls,
   membersInOrder,
+  withOwner,
   type InvitePhase,
   type InviteResult,
   type InviteRow,
@@ -62,6 +63,21 @@ export interface MembersViewProps {
 const M = MEMBERS.members;
 const I = MEMBERS.invites;
 
+/** Make owner's toast: the member is an owner now, or it could not be made one. */
+export function promoteToast(email: string, ok: boolean): string {
+  return ok ? M.madeOwner(email) : M.makeOwnerFailed(email);
+}
+
+/** Remove's toast: the member is out, or it could not be removed (a refusal of any kind). */
+export function removeToast(email: string, result: MembershipResult): string {
+  return result.ok ? M.removed(email) : M.removeFailed(email);
+}
+
+/** A refused Leave's toast: the org's last owner asks for another owner first; anything else, try again. */
+export function leaveToast(org: string, result: MembershipResult): string {
+  return result.reason === "last_owner" ? M.leaveLastOwner(org) : M.leaveFailed(org);
+}
+
 /**
  * Members (`/members`, P78-s2.S2's design): the org's people, in two panels.
  *
@@ -71,7 +87,8 @@ const I = MEMBERS.invites;
  *   with the owners) and Remove (the row goes); the owner's own row ends with Leave when the org has another owner,
  *   and has nothing when it is the only one (an org keeps an owner); another owner's row has nothing (no one makes
  *   an owner a member again). In a member's view its own row ends with Leave. Leave lands on the account's next
- *   org's home. The API's refusals (the org's last owner, the account's only org) are the toast, the row kept.
+ *   org's home (a fresh `default` org when it was the account's only one). A refusal (the org's last owner, or no
+ *   answer) is the toast, the row kept.
  * - Invites (an owner's view only): the head's Invite opens the form in place (Email, Cancel, Send invite), as
  *   Projects' New project does on org home; the pending invites, newest first, each with the day it was sent, the
  *   day it stops working, and Revoke at the row's end. With none, the empty line, and Invite is the page's primary.
@@ -187,12 +204,8 @@ export function MembersView({
       ok = false;
     }
     setEnding(null);
-    if (ok) {
-      setPeople((rows) => membersInOrder(rows.map((r) => (r.id === row.id ? { ...r, role: "owner" } : r))));
-      publishToast(M.madeOwner(row.email));
-    } else {
-      publishToast(M.makeOwnerFailed(row.email));
-    }
+    if (ok) setPeople((rows) => withOwner(rows, row.id));
+    publishToast(promoteToast(row.email, ok));
   };
 
   const dropMember = async (row: MemberRow) => {
@@ -205,12 +218,8 @@ export function MembersView({
       result = { ok: false };
     }
     setEnding(null);
-    if (result.ok) {
-      setPeople((rows) => rows.filter((r) => r.id !== row.id));
-      publishToast(M.removed(row.email));
-    } else {
-      publishToast(result.reason === "last_org" ? M.removeLastOrg(row.email, org) : M.removeFailed(row.email));
-    }
+    if (result.ok) setPeople((rows) => rows.filter((r) => r.id !== row.id));
+    publishToast(removeToast(row.email, result));
   };
 
   const leaveOrg = async (row: MemberRow) => {
@@ -225,13 +234,7 @@ export function MembersView({
     }
     setEnding(null);
     if (result?.ok !== false) return;
-    publishToast(
-      result.reason === "last_org"
-        ? M.leaveLastOrg(org)
-        : result.reason === "last_owner"
-          ? M.leaveLastOwner(org)
-          : M.leaveFailed(org),
-    );
+    publishToast(leaveToast(org, result));
   };
 
   /** The controls a row ends with (`memberControls`): Make owner and Remove, Leave, or none. */

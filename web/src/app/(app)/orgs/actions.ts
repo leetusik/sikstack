@@ -37,9 +37,9 @@ import {
  * - `makeOwnerAction`: Make owner on a member's row (owner only).
  * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row, or on
  *   an owner's when the org has another. A left org is no longer the caller's, so Leave clears the org cookie (the
- *   session acts in its first org again) and lands on that org's home, as the switch does. Neither ever ends an
- *   org's last owner nor an account's only org (the API's 409 `last_owner` and `last_org`, kept as the `reason`
- *   the page words its toast by).
+ *   session acts in its first org again, a fresh `default` one when the left org was its only one) and lands on that
+ *   org's home, as the switch does. Neither ever ends an org's last owner (the API's 409 `last_owner`, kept as the
+ *   `reason` the page words its toast by).
  */
 
 type RenameResult = { ok: true; name: string } | { ok: false; reason: "empty" | "taken" | "failed" };
@@ -122,7 +122,7 @@ export async function revokeInviteAction(id: string): Promise<{ ok: boolean }> {
 /** The API's 409 on a membership's end, by its `reason`; anything else is `failed`. */
 function refusal(error: unknown): MembershipRefusal {
   if (error instanceof ApiError && error.status === 409) {
-    if (error.reason === "last_owner" || error.reason === "last_org") return error.reason;
+    if (error.reason === "last_owner") return error.reason;
   }
   return "failed";
 }

@@ -74,10 +74,10 @@ export function inviteFieldError(phase: InvitePhase): Exclude<InviteRefusal, "fa
 }
 
 /**
- * Why a Remove or a Leave was refused: the org's last owner (`last_owner`), the account's only org (`last_org`),
- * or anything else, no answer included (`failed`).
+ * Why a Remove or a Leave was refused: the org's last owner (`last_owner`), or anything else, no answer included
+ * (`failed`). An account's only org is no refusal: the API gives it a fresh org when its last membership ends.
  */
-export type MembershipRefusal = "last_owner" | "last_org" | "failed";
+export type MembershipRefusal = "last_owner" | "failed";
 
 /** What Make owner, Remove and Leave answer; the page reads `reason` only to word its toast. */
 export interface MembershipResult {
@@ -116,6 +116,11 @@ export function membersInOrder(rows: readonly MemberRow[]): MemberRow[] {
       (a.role === "owner" ? 0 : 1) - (b.role === "owner" ? 0 : 1) ||
       Date.parse(a.joinedAt) - Date.parse(b.joinedAt),
   );
+}
+
+/** The rows once Make owner on row `id` lands: that row reads Owner and moves up with the owners. */
+export function withOwner(rows: readonly MemberRow[], id: string): MemberRow[] {
+  return membersInOrder(rows.map((r) => (r.id === id ? { ...r, role: "owner" } : r)));
 }
 
 // ── The invite link ───────────────────────────────────────────────────────────────────────────

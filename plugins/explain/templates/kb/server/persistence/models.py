@@ -7,7 +7,8 @@ Listen tables (units, parts, jobs, runners and listening positions), vocky's
 three Feedback tables (events, comments, attachments; revision ``0009``), the
 eight workspace-store tables (revision ``0011``), the sikstack plugin's
 ``installs`` and ``install_sign_ins`` (revision ``0012``), ``design_builds``
-(revision ``0013``) and ``org_invites`` (revision ``0014``).
+(revision ``0013``) and ``org_invites`` (revision ``0014``); ``tenants.made_by`` is
+revision ``0016``.
 """
 
 from __future__ import annotations
@@ -90,6 +91,13 @@ class TenantModel(Base):
     ``plan`` is the org's plan (``'free'`` by default, 0008); its allowed values are
     ``server.accounts.types.TENANT_PLANS``, validated app-side, and no API route
     writes it.
+
+    ``made_by`` is the account that made the org with ``POST /app/orgs`` (0016), the
+    one whose daily new-org limit it counts against; it stays put when that account
+    leaves or hands the org over. NULL for an org made *with* an account (at sign-up,
+    and the fresh org an account gets when its last membership ends), and ``SET
+    NULL`` when the account is deleted. No index: the count reads one account's few
+    recent orgs.
     """
 
     __tablename__ = "tenants"
@@ -108,6 +116,11 @@ class TenantModel(Base):
         nullable=False,
         default=utc_now,
         server_default=text("CURRENT_TIMESTAMP"),
+    )
+    made_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
 
