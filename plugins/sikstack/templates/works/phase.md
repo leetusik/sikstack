@@ -18,7 +18,7 @@ _Durable cross-slice decisions, one gist line each. Replace a superseded line (`
 
 ## Operator Questions
 
-_Questions only the operator can answer, one entry each: `- **OQ<n> (<slice>):** <question>`. Append only (`section <P> "Operator Questions" --append`); an answered entry collapses with `section <P> --resolve OQ<n> --pointer <ref>`, never deleted. Every entry is routed at the review — folded into the acceptance walkthrough or resolved; otherwise fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable. An unrouted entry is a review finding._
+_Questions only the operator can answer, one entry each: `- **OQ<n> (<slice>):** <question>`. Append only (`section <P> "Operator Questions" --append`); an answered entry collapses with `section <P> --resolve OQ<n> --pointer <ref>`, never deleted. Every entry is routed at the review — folded into the acceptance walkthrough or resolved; otherwise fix it now, drop it with a reason, or (the exception) an item on its agenda that says what would make it actionable. An unrouted entry is a review finding._
 
 ## Notes for later slices
 

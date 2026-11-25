@@ -83,12 +83,13 @@ def with_offer(entry, tokens: list) -> int:
 # The verbs retired with deferred jobs in 0.3.0: each refuses in one line naming the agenda's way, exit 1, in any folder
 # (before the finder) and with no friction offer (the refusal is the design, not a fault).
 RETIRED_VERBS = {
-    "defer-job": "fix it now, drop it with a reason, or (the exception) add an entry that says what would make it "
-                 "actionable: sikstack agenda-entry <item> --kind issue --author agent:<name> --source slice:<P.S> "
-                 "--body \"...\" (a new item: agenda-add --author agent:<name>, which waits as Proposed)",
+    "defer-job": "fix it now, drop it with a reason, or (the exception) an item on its agenda that says what would make "
+                 "it actionable: sikstack agenda-item add <agenda> --kind issue --author agent:<name> --source slice:<P.S> "
+                 "--body \"...\" (a new agenda only when none is closely related: agenda-add --author agent:<name>, which "
+                 "waits as Proposed)",
     "deferred": "list the agenda: sikstack agenda (an older install's jobs arrive under Proposed after sikstack agenda-fold)",
-    "promote-deferred": "start the work from its agenda item: /create-phase <item> (sikstack phase new --agenda <item>)",
-    "drop-deferred": "drop the agenda item: sikstack agenda-drop <item> --reason \"...\"",
+    "promote-deferred": "start the work from its agenda: /create-phase <agenda> (sikstack phase new --agenda <agenda>)",
+    "drop-deferred": "drop the agenda: sikstack agenda-drop <agenda> --reason \"...\"",
 }
 if __name__ == "__main__" and sys.argv[1:2] and sys.argv[1] in RETIRED_VERBS:
     print(f"sikstack {sys.argv[1]} is retired (deferred jobs are agenda items now, since 0.3.0): {RETIRED_VERBS[sys.argv[1]]}",
@@ -185,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--order", type=float, help="sort position among phases; a fractional value (e.g. 4.5) inserts between two neighbors without renumbering")
     p.add_argument("--on-main", action="store_true", dest="on_main",
                    help="no-op since v43 (the default stream is the default); accepted so v42 habits and scripts keep working")
-    p.add_argument("--agenda", metavar="ITEM", help="link the new phase to this agenda item (" + AGENDA_ID_HELP + "); stored as `agenda` in phase.json; refused, nothing written, when it names no item")
+    p.add_argument("--agenda", metavar="AGENDA", help="link the new phase to this agenda (" + AGENDA_ID_HELP + "); stored as `agenda` in phase.json; refused, nothing written, when it names no agenda")
     p.set_defaults(func=new_phase)
 
     p = phase("status", help="Set any valid phase status")

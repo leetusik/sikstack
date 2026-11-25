@@ -601,7 +601,8 @@ assert "Reserved" not in _fb, "the reserved line is still under ## Feedback"
 # 0.6.0: the exception is an item on the agenda the loose end belongs to (items first), never a new agenda for it.
 FILING = "fix it now, drop it with a reason, or (the exception) an item on its agenda that says what would make it actionable"
 for rel in ("contract.md", "skills/review-phase/SKILL.md", "skills/do-whole-phase/playbooks/review.md",
-            "skills/do-whole-phase/reference/review.md", "skills/create-phase/SKILL.md", "skills/agenda/SKILL.md"):
+            "skills/do-whole-phase/reference/review.md", "skills/create-phase/SKILL.md", "skills/agenda/SKILL.md",
+            "templates/works/phase.md"):
     assert FILING in (root / rel).read_text(encoding="utf-8"), rel
 # 0.6.0: phases from the Open agendas -- one per agenda, linked, Proposed skipped, the confirmation the gate.
 _oa = (root / "skills/create-phase/SKILL.md").read_text(encoding="utf-8").split("## The open-agendas route", 1)[1].split("\n## ", 1)[0]
