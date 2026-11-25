@@ -1,5 +1,5 @@
 """Cloud mode (link, unlink, sync, mark-committed and the command boundary), moved as is from the one-file
-engine. Imports wf_store and wf_git; the parser it re-runs inbox entries with is a seam bound by the entry."""
+engine. Imports wf_store, wf_git and wf_agenda (one name); the parser it re-runs inbox entries with is a seam bound by the entry."""
 from __future__ import annotations
 
 import difflib
@@ -22,12 +22,15 @@ import wf_cold  # noqa: E402 -- the cache: the eviction keeps an archived phase.
 
 from wf_store import (  # noqa: E402
     _git, _git_available, _git_dir, _meter_ts, _one_line, _one_line_usage_errors, _worktree_entries, AGENDA,
-    AGENDA_ID_RE, all_active_phases, append_event, current_stream, GENERATED_FILES, HOST_ROOT,
+    AGENDA_ID_RE, all_active_phases, append_event, current_stream, GENERATED_FILES, HOST_ROOT, RETIRED_GENERATED_FILES,
     installed_workspace_version, NESTED, normalize_id_args, now_iso, phase_dirs, phase_in_flight, read_json,
     rebuild_index_and_state, require_slice, ROOT, shown, write_json, write_text,
 )
 from wf_git import (  # noqa: E402
     _in_worktree_set,
+)
+from wf_agenda import (  # noqa: E402 -- the item file name form the inbox's item kinds are checked against
+    ENTRY_NAME_RE,
 )
 
 # The names this module calls in a module above it. It never imports that module: the entry (workflow.py) binds
@@ -573,7 +576,7 @@ def cloud_truth_rel(rel: str) -> bool:
         return False
     if rel.startswith("works/templates/") or rel == "works/.workspace-version.json":
         return False
-    if any(fnmatch.fnmatchcase(rel, pattern) for pattern in GENERATED_FILES):
+    if any(fnmatch.fnmatchcase(rel, pattern) for pattern in GENERATED_FILES + RETIRED_GENERATED_FILES):
         return False
     return not (parts[-1].startswith(".tmp_") or parts[-1] == ".DS_Store")
 
@@ -845,6 +848,69 @@ class CloudLink:
                 text = text.replace(form, "<key>")
         text = (text.splitlines() or [""])[0]
         return text[:200] or name
+
+
+# The link the engine's other API verbs share (the design verbs, agenda-feedback): this checkout's [cloud] link and its
+# workspace key, over this module's transport, with one line for every way a request can fail. They touch no workspace
+# truth by themselves, so they never cross the cloud boundary on their own account.
+API_SIGNIN_LINE = ("this checkout is not linked to sikstack (no [cloud] table in config.toml): run /sikstack:sign-in "
+                   "(or sikstack link <server>/projects/<project-id>) first")
+
+
+def api_link(prog: str, nothing: str) -> CloudLink:
+    """The linked checkout's CloudLink (server, project, key), or one line: the sign-in line when unlinked."""
+    if not cloud_linked():
+        raise SystemExit(f"{prog}: {API_SIGNIN_LINE} ({nothing})")
+    try:
+        return CloudLink()
+    except CloudError as exc:
+        raise SystemExit(f"{prog}: {exc}")
+
+
+def api_call(link: CloudLink, prog: str, nothing: str, method: str, path: str, body=None,
+             content_type: str = "application/json") -> dict:
+    """One request to `<server><path>` with the workspace key as the Bearer; the 2xx answer's JSON, else one line
+    (the server's own words with their status, a block in front of it, or sikstack unreachable), the key never in it.
+    A dict or list `body` is sent as JSON; bytes as they are, under `content_type`."""
+    import urllib.request
+    import wf_setup
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    headers = {"Authorization": "Bearer " + link._key, "Accept": "application/json",
+               "X-Sikstack-Checkout": link.checkout, "X-Sikstack-Engine": link.engine,
+               "User-Agent": wf_setup.user_agent()}
+    if isinstance(body, (dict, list)):
+        body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    if body is not None:
+        headers["Content-Type"] = content_type
+    wire = _CloudWire()
+    handlers = [NoRedirect()] + _cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if link.local else [])
+    request = urllib.request.Request(f"{link.server}{path}", data=body, method=method, headers=headers)
+    try:
+        status, raw, kind = link._exchange(urllib.request.build_opener(*handlers), request, wire)
+    except CloudUnreachable as exc:
+        raise SystemExit(f"{prog}: sikstack is not reachable at {link.server} ({exc}): {nothing}")
+    blocked = wf_setup.block_line(status, raw, kind, link._key)
+    if blocked:
+        raise SystemExit(f"{prog}: the request to {link.server} was {blocked}, by something in front of it ({nothing})")
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, ValueError):
+        payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    if 200 <= status < 300:
+        return payload
+    detail = payload.get("detail") if payload.get("detail") is not None else payload.get("error")
+    if isinstance(detail, list) and detail and isinstance(detail[0], dict):
+        detail = detail[0].get("msg")
+    detail = " ".join(str(detail).split())[:300] if detail else f"HTTP {status}"
+    hint = {401: "; make a workspace key under Keys on the project's page and link again",
+            403: "; this is not a workspace key: make one under Keys on the project's page"}.get(status, "")
+    line = f"{prog}: sikstack refused (HTTP {status}): {detail}{hint} ({nothing})"
+    raise SystemExit(line.replace(link._key, "<key>") if link._key else line)
 
 
 def cloud_settle_pull(base: dict) -> None:
@@ -2184,11 +2250,20 @@ def cloud_keep_check(session: CloudSession, paths: list, side=None) -> None:
 # are dropped here and sikstack's copy pulled, never applied twice.
 CLOUD_INBOX_AT = ("next",)  # besides sync, the commands whose begin step applies the inbox
 # `entry` and `accept` (P72) wait for the server to send them: an entry's fields are its `kind`, `body`, and
-# optionally `author` and `source`; an add's and an entry's author is the web's writer, `person:web` unless the
-# entry names one, so a web add is Open at once, as before.
-CLOUD_INBOX_COMMANDS = {"add": "agenda-add", "edit": "agenda-edit", "move": "agenda-move", "defer": "agenda-defer",
+# optionally `author` and `source`; an add's, an entry's (an item's), a propose's, an item change's and a split's
+# author is the web's writer, `person:web` unless the entry names one, so a web add or split is Open at once.
+# 0.6.0: `propose` takes the retired `defer`'s place (no fields). The item kinds -- item-done, item-dismiss,
+# item-reopen, item-delete -- hold the one agenda id in `items` and its items' full file names in `fields.entries`
+# (never a brief tail: the web reads the names, so they are never ambiguous). `split` holds the agenda it splits in
+# `items`, the items it moves in `fields.entries`, the new agenda's title in `fields.title` and its id, minted as an
+# add's is, in `minted_id`. An old pending `defer` is refused with one line and never run.
+CLOUD_INBOX_COMMANDS = {"add": "agenda-add", "edit": "agenda-edit", "move": "agenda-move", "propose": "agenda-propose",
                         "solve": "agenda-solve", "drop": "agenda-drop", "reopen": "agenda-reopen",
-                        "delete": "agenda-delete", "entry": "agenda-entry", "accept": "agenda-accept"}
+                        "delete": "agenda-delete", "entry": "agenda-item add", "accept": "agenda-accept",
+                        "item-done": "agenda-item done", "item-dismiss": "agenda-item dismiss",
+                        "item-reopen": "agenda-item reopen", "item-delete": "agenda-item delete", "split": "agenda-split"}
+CLOUD_INBOX_RETIRED = {"defer": "Deferred is gone since 0.6.0, so propose the agenda back instead (kind propose)"}
+CLOUD_INBOX_ITEM_KINDS = ("item-done", "item-dismiss", "item-reopen", "item-delete")
 CLOUD_INBOX_AUTHOR = "person:web"
 CLOUD_INBOX_MAX = 500  # entries tried in one step (a bound: the rest wait for the next sync)
 
@@ -2198,11 +2273,15 @@ def _cloud_inbox_id_shown(raw) -> str:
 
 
 def cloud_inbox_tokens(entry: dict, prog: str) -> tuple:
-    """(argv, None) for an entry's agenda command, or (None, its usage line) when it is refused unrun: an
-    unknown kind, or any id (items, add's minted id, move's --before/--after) that does not fullmatch
-    AGENDA_ID_PATTERN. Brief forms are never resolved here: numbers are reused (no tombstone), so a brief id
-    could name a re-minted item. Texts go as --flag=value, so a value starting with a dash stays a value."""
+    """(argv, None) for an entry's agenda command, or (None, its usage line) when it is refused unrun: a retired
+    kind (`defer`), an unknown kind, any id (items, add's and split's minted id, move's --before/--after) that does
+    not fullmatch AGENDA_ID_PATTERN, or, for an item kind or a split, not exactly one agenda in `items` or an entry
+    name in `fields.entries` off the item file name form. Brief forms are never resolved here: numbers are reused (no
+    tombstone), so a brief id could name a re-minted agenda. Texts go as --flag=value, so a value starting with a
+    dash stays a value."""
     kind = entry.get("kind")
+    if isinstance(kind, str) and kind in CLOUD_INBOX_RETIRED:
+        return None, (f"{prog}: error: the inbox entry's kind {kind} is retired: {CLOUD_INBOX_RETIRED[kind]}; nothing ran")
     cmd = CLOUD_INBOX_COMMANDS.get(kind) if isinstance(kind, str) else None
     if cmd is None:
         return None, (f"{prog}: error: the inbox entry's kind {_cloud_inbox_id_shown(kind)} is not an agenda change "
@@ -2212,29 +2291,50 @@ def cloud_inbox_tokens(entry: dict, prog: str) -> tuple:
     ids = [entry.get("minted_id")] if kind == "add" else list(items)
     if kind == "move":
         ids += [fields[k] for k in ("before", "after") if fields.get(k) is not None]
+    if kind == "split":
+        ids.append(entry.get("minted_id"))
     for raw in ids:
         if not (isinstance(raw, str) and AGENDA_ID_RE.fullmatch(raw)):
             return None, (f"{prog} {cmd}: error: {_cloud_inbox_id_shown(raw)} is not a full agenda id (like A7-m3): "
                           "the inbox applies full ids only, so nothing ran")
+    names = []
+    if kind in CLOUD_INBOX_ITEM_KINDS or kind == "split":
+        if len(items) != 1:
+            return None, (f"{prog} {cmd}: error: an inbox {kind} names exactly one agenda in items, got {len(items)}: "
+                          "nothing ran")
+        names = fields.get("entries") if isinstance(fields.get("entries"), list) else []
+        if not names:
+            return None, f"{prog} {cmd}: error: an inbox {kind} names its items in fields.entries, got none: nothing ran"
+        for raw in names:
+            if not (isinstance(raw, str) and ENTRY_NAME_RE.fullmatch(raw)):
+                return None, (f"{prog} {cmd}: error: {_cloud_inbox_id_shown(raw)} is not an item's full file name "
+                              "(like 20261125T010203.000004Z-hnj0.json): the inbox applies full names only, so nothing ran")
 
     def text(flag: str, key: str) -> list:
         value = fields.get(key)
         return [f"--{flag}={value}"] if isinstance(value, str) else []
 
     author = [f"--author={fields['author'] if isinstance(fields.get('author'), str) else CLOUD_INBOX_AUTHOR}"]
+    words = cmd.split()
     if kind == "add":
-        return [cmd, f"--id={entry['minted_id']}"] + author + text("title", "title") + text("note", "note"), None
+        return words + [f"--id={entry['minted_id']}"] + author + text("title", "title") + text("note", "note"), None
     if kind == "entry":
         source = [f"--source={fields['source'] if isinstance(fields.get('source'), str) else 'web:inbox'}"]
-        return [cmd] + items + author + source + text("kind", "kind") + text("body", "body"), None
+        return words + items + author + source + text("kind", "kind") + text("body", "body"), None
+    if kind in CLOUD_INBOX_ITEM_KINDS:
+        return words + [f"{items[0]}/{name}" for name in names] + author, None
+    if kind == "split":
+        return words + items + names + author + text("title", "title") + [f"--id={entry['minted_id']}"], None
+    if kind == "propose":
+        return words + items + author, None
     if kind == "edit":
-        return [cmd] + items + text("title", "title") + text("note", "note"), None
+        return words + items + text("title", "title") + text("note", "note"), None
     if kind == "move":
         place = [f"--{k}" for k in ("first", "last") if fields.get(k) is True]
         place += [f"--{k}={fields[k]}" for k in ("before", "after") if isinstance(fields.get(k), str)]
-        return [cmd] + items + place, None
+        return words + items + place, None
     extra = text("outcome", "outcome") if kind == "solve" else text("reason", "reason") if kind == "drop" else []
-    return [cmd] + items + extra, None
+    return words + items + extra, None
 
 
 def cloud_inbox_run(parser: argparse.ArgumentParser, tokens: list) -> tuple:
@@ -2243,7 +2343,7 @@ def cloud_inbox_run(parser: argparse.ArgumentParser, tokens: list) -> tuple:
     command's first output line. An exception other than SystemExit propagates (the caller undoes it)."""
     import contextlib
     import io
-    out, err, cmd = io.StringIO(), io.StringIO(), tokens[0]
+    out, err, cmd = io.StringIO(), io.StringIO(), " ".join(tokens[:2]) if tokens[0] == "agenda-item" else tokens[0]
     saved = parser.error
     parser.error = lambda message: parser.exit(2, f"{parser.prog} {cmd}: error: {message}\n")
     code, line = 0, None
@@ -2324,7 +2424,7 @@ def cloud_inbox_apply(session: CloudSession, parser: argparse.ArgumentParser, en
     eid, kind = entry["id"], entry.get("kind")
     tokens, unrun = cloud_inbox_tokens(entry, parser.prog)
     items = entry.get("items") if isinstance(entry.get("items"), list) else []
-    named = [entry.get("minted_id")] if kind == "add" else items
+    named = [entry.get("minted_id")] if kind == "add" else items + ([entry.get("minted_id")] if kind == "split" else [])
     what = " ".join([CLOUD_INBOX_COMMANDS.get(kind, "agenda") if isinstance(kind, str) else "agenda"]
                     + [_cloud_inbox_id_shown(x) for x in named][:5] + (["..."] if len(named) > 5 else []))
     undo, snap, pre = {}, {}, {}

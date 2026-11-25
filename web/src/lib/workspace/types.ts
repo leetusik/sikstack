@@ -253,13 +253,16 @@ export interface Doc extends DocRow {
 
 // -- the agenda and the web's changes ------------------------------------------------------------
 
-export type ItemState =
-  "open" | "in_progress" | "deferred" | "solved" | "dropped";
+/**
+ * An agenda's state. There is no Deferred: an older stored `deferred` reads `proposed` (the server
+ * says so), and an agenda is proposed back instead (`propose`).
+ */
+export type ItemState = "open" | "in_progress" | "solved" | "dropped";
 
 /**
- * Every state the read gives an item: `ItemState`, and `proposed` (an agent opened it and no one
+ * Every state the read gives an agenda: `ItemState`, and `proposed` (an agent opened it and no one
  * accepted it yet: the engine's Proposed, listed apart from Open and before it). `itemState()`
- * draws a Proposed item as Open until the pages draw Proposed.
+ * draws a Proposed agenda as Open until the pages draw Proposed.
  */
 export type AgendaState = "proposed" | ItemState;
 
@@ -279,13 +282,28 @@ export interface Proposed {
   at: string | null;
 }
 
+/** An item's state on its agenda (absent or unknown stored reads `open`). */
+export type EntryState = "open" | "done" | "dismissed";
+
 /**
- * One entry of an item's thread (`works/agenda/<AID>/entries/`), oldest first. A web entry the
- * engine has not applied yet reads `sync` `waiting` (or its refusal), with the inbox entry's id.
+ * One item of an agenda (a file under `works/agenda/<AID>/entries/`), oldest first. A web note the
+ * engine has not applied yet reads `sync` `waiting` (or its refusal), with the inbox entry's id and
+ * no `file` or `ref`. While an item change waits, the read gives the state the engine will give it.
  */
 export interface ThreadEntry {
-  /** The entry's file name without `.json`, or a pending web entry's inbox id. */
+  /** The item's file name without `.json`, or a pending web note's inbox id. */
   id: string;
+  /** The full file name (`20261120T000000.000001Z-xa01.json`), what an item change sends; null for a pending note. */
+  file?: string | null;
+  /** What the engine's commands take (`A2-k5/xa01`); null for a pending note. */
+  ref?: string | null;
+  /** Its state, as predicted while a change waits (absent from an older read: open). */
+  state?: EntryState | string | null;
+  /** Who set the state, and when (null when never set). */
+  stateBy?: string | null;
+  stateAt?: string | null;
+  /** A delete of it waits for the sync: it stays listed, marked, and leaves the counts. */
+  deleting?: boolean;
   /** One of the engine's `ENTRY_KINDS`: `note`, `issue`, `feedback`, `question`, `decision`. */
   kind: string | null;
   /** As stored: `person:<handle>` or `agent:<name>`. */
@@ -322,8 +340,10 @@ export interface AgendaItem {
    * offered (absent from an older read).
    */
   accepting?: boolean;
-  /** How many entries its thread holds (absent from an older read). */
+  /** How many items it holds (absent from an older read). */
   entryCount?: number;
+  /** How many of its items are open, as predicted while changes wait (absent from an older read). */
+  itemsOpen?: number;
   /** Its latest activity: the day of its newest entry or last change (absent from an older read). */
   latest?: string | null;
   sync: ItemSync;
@@ -338,21 +358,29 @@ export interface AgendaItem {
 
 /**
  * The kinds of change the web's agenda pages write, each one engine agenda command, and every kind
- * an inbox entry carries (the server's `INBOX_KINDS`): `entry` is one entry on an item's thread
+ * an inbox entry carries (the server's `INBOX_KINDS`): `entry` is one item on an agenda
  * (`{kind, body}`; its author and source are the server's, never the client's), `accept` makes
- * Proposed items Open. Feedback filed on the agenda writes `add` and `entry` too.
+ * Proposed agendas Open and `propose` puts Open ones back to Proposed; the item kinds change items of
+ * one agenda by their files (`{entries}`), and `split` moves items to a new agenda (`{entries,
+ * title}`). Feedback filed on the agenda writes `add` and `entry` too.
  */
 export type ChangeKind =
   | "add"
   | "edit"
   | "move"
-  | "defer"
+  | "propose"
   | "solve"
   | "drop"
   | "reopen"
   | "delete"
   | "entry"
-  | "accept";
+  | "accept"
+  | ItemChangeKind
+  | "split";
+
+/** A change to items of one agenda, by their files. */
+export type ItemChangeKind =
+  "item-done" | "item-dismiss" | "item-reopen" | "item-delete";
 
 /** Every kind an inbox entry carries: the same set as `ChangeKind`. */
 export type InboxKind = ChangeKind;

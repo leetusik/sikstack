@@ -34,6 +34,7 @@ from server.feedback.types import (
     FeedbackMetricsQuery,
     FeedbackQueryFilters,
     FeedbackSummary,
+    FeedbackTriageRecord,
     ListFeedbackQuery,
     SummarizeFeedbackQuery,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "FeedbackReadError",
     "FeedbackService",
     "FeedbackSummary",
+    "FeedbackTriageRecord",
     "ListFeedbackQuery",
     "LocalFilesystemAttachmentStorage",
     "StorageError",

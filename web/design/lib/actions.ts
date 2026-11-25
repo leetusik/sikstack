@@ -9,7 +9,7 @@ import {
   type Change,
   type MovePlace,
 } from "@/lib/workspace/rules";
-import type { WriteAnswer } from "@/lib/workspace/types";
+import type { ItemChangeKind, WriteAnswer } from "@/lib/workspace/types";
 
 import { apply } from "./store";
 
@@ -28,7 +28,8 @@ async function change(value: Change): Promise<WriteAnswer> {
     fields: checked.body.fields as Record<string, unknown>,
   });
   if (!out.ok) return refused(out.refused);
-  return { ok: true, entry: out.entry, item: null };
+  // a split answers its new agenda's id, as the route's `{entry, agenda}`
+  return { ok: true, entry: out.entry, item: out.entry.minted_id };
 }
 
 export async function addAgendaItem(
@@ -58,11 +59,29 @@ export async function moveAgendaItem(
   return change({ kind: "move", items: [item], fields: place });
 }
 
-export async function deferAgendaItems(
+export async function proposeAgendaItems(
   _project: string,
   items: string[],
 ): Promise<WriteAnswer> {
-  return change({ kind: "defer", items, fields: {} });
+  return change({ kind: "propose", items, fields: {} });
+}
+
+export async function changeAgendaEntries(
+  _project: string,
+  kind: ItemChangeKind,
+  agenda: string,
+  entries: string[],
+): Promise<WriteAnswer> {
+  return change({ kind, items: [agenda], fields: { entries } });
+}
+
+export async function splitAgenda(
+  _project: string,
+  agenda: string,
+  entries: string[],
+  title: string,
+): Promise<WriteAnswer> {
+  return change({ kind: "split", items: [agenda], fields: { entries, title } });
 }
 
 export async function solveAgendaItems(

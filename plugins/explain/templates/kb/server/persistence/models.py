@@ -8,7 +8,8 @@ three Feedback tables (events, comments, attachments; revision ``0009``), the
 eight workspace-store tables (revision ``0011``), the sikstack plugin's
 ``installs`` and ``install_sign_ins`` (revision ``0012``), ``design_builds``
 (revision ``0013``) and ``org_invites`` (revision ``0014``); ``tenants.made_by`` is
-revision ``0016``, and ``tenant_one_pins`` revision ``0017``.
+revision ``0016``, ``tenant_one_pins`` revision ``0017`` and ``feedback_triage``
+revision ``0018``.
 """
 
 from __future__ import annotations
@@ -920,6 +921,34 @@ class FeedbackAttachmentModel(Base):
     claimed_user_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_source_product: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+
+class FeedbackTriageModel(Base):
+    """What became of one piece of feedback on the agenda (``feedback_triage``, revision
+    ``0018``):``filed`` on an agenda (its full id) or ``dismissed`` (an optional reason),
+    by whom (an entry author, ``person:``/``agent:``) and when. One row per event: a
+    later mark replaces it (the latest wins). No row is *untriaged*; a feedback an
+    agenda item names by ``source: feedback:<id>`` also reads filed, derived from the
+    workspace and never stored here (``server.feedback_api``). Value checks are
+    app-layer."""
+
+    __tablename__ = "feedback_triage"
+
+    feedback_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("feedback_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    agenda: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    triaged_by: Mapped[str] = mapped_column(Text, nullable=False)
+    triaged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,

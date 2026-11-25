@@ -335,25 +335,25 @@ def test_the_pin_migration_backfills_the_operators_first_membership(monkeypatch,
 
         # No KB_OPERATOR_EMAIL: the table, no pin.
         monkeypatch.delenv("KB_OPERATOR_EMAIL", raising=False)
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0017_tenant_one_pin")
         with engine.connect() as conn:
             assert conn.execute(has_table).scalar_one() == 1
             assert conn.execute(pins).all() == []
 
         # An email that names no account: no pin.
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "0016_tenant_made_by")
         monkeypatch.setenv("KB_OPERATOR_EMAIL", f"nobody-{uuid4().hex}@example.com")
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0017_tenant_one_pin")
         with engine.connect() as conn:
             assert conn.execute(pins).all() == []
 
         # The operator's email (as typed in .env, any case): its first membership.
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "0016_tenant_made_by")
         with engine.connect() as conn:
             assert conn.execute(has_table).scalar_one() == 0
         monkeypatch.setenv("KB_OPERATOR_EMAIL", f"  {op_email}  ")
         capsys.readouterr()
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0017_tenant_one_pin")
         said = capsys.readouterr().out
         with engine.connect() as conn:
             assert conn.execute(pins).all() == [(op_id, personal)]
@@ -361,8 +361,8 @@ def test_the_pin_migration_backfills_the_operators_first_membership(monkeypatch,
         assert op_email.lower() not in said.lower()
 
         # Down and up again: the same pin.
-        command.downgrade(cfg, "-1")
-        command.upgrade(cfg, "head")
+        command.downgrade(cfg, "0016_tenant_made_by")
+        command.upgrade(cfg, "0017_tenant_one_pin")
         with engine.connect() as conn:
             assert conn.execute(pins).all() == [(op_id, personal)]
     finally:

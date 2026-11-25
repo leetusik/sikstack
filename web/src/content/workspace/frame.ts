@@ -7,15 +7,15 @@ import { plural } from "@/lib/format";
 
 /** The kinds of thing a status word belongs to (F37, F301, F306). */
 export type WsStatusKind =
-  "phase" | "slice" | "verdict" | "item" | "pr" | "gate" | "doc";
+  "phase" | "slice" | "verdict" | "item" | "entry" | "pr" | "gate" | "doc";
 
 /**
  * F37's table: every stored value of each kind to its word and its status class, by meaning: `status-idle`
  * not started, `status-ready` approved, `status-live` running, the bare `status` handed on, `status-pending`
  * waiting on the operator, `status-blocked` cannot go on, `status-changes` sent back, `status-done` finished,
  * `status-revoked` ended without doing. A verdict's `pending` is **Not reviewed** (a phase's and a slice's
- * `pending` is **Waiting on operator**); a deferred agenda item reads **Deferred** (F301); a ready
- * pull request reads **Open** (F306).
+ * `pending` is **Waiting on operator**); an agenda (`item`) has no Deferred, and an agenda's item
+ * (`entry`) reads Open, Done or Dismissed; a ready pull request reads **Open** (F306).
  */
 export const WS_STATUS: Record<
   WsStatusKind,
@@ -48,9 +48,13 @@ export const WS_STATUS: Record<
   item: {
     open: ["Open", "status status-idle"],
     in_progress: ["In progress", "status status-live"],
-    deferred: ["Deferred", "status status-idle"],
     solved: ["Solved", "status status-done"],
     dropped: ["Dropped", "status status-revoked"],
+  },
+  entry: {
+    open: ["Open", "status status-idle"],
+    done: ["Done", "status status-done"],
+    dismissed: ["Dismissed", "status status-revoked"],
   },
   pr: {
     draft: ["Draft", "status status-idle"],
@@ -152,23 +156,23 @@ export const WS_CHANGE = {
   retry: "Try again",
   discard: "Discard",
   /** F45: a send that fails before it leaves the web. */
-  addFailed: "Could not add the item. Try again.",
-  saveFailed: "Could not save the item. Try again.",
-  solveFailed: "Could not solve the item. Try again.",
-  dropFailed: "Could not drop the item. Try again.",
+  addFailed: "Could not add the agenda. Try again.",
+  saveFailed: "Could not save the agenda. Try again.",
+  solveFailed: "Could not solve the agenda. Try again.",
+  dropFailed: "Could not drop the agenda. Try again.",
   titleError: "Enter a title of 1–200 characters.",
 } as const;
 
-/** F36: the actions, each with its pending label (F303 adds Defer, Delete). */
+/** F36: the actions, each with its pending label (F303 adds Delete; Propose puts an Open agenda back). */
 export const WS_ACTIONS = {
-  addItem: "Add item",
+  addItem: "Add agenda",
   add: ["Add", "Adding…"],
   edit: "Edit",
   save: ["Save", "Saving…"],
   solve: ["Solve", "Solving…"],
   drop: ["Drop", "Dropping…"],
   reopen: ["Reopen", "Reopening…"],
-  defer: ["Defer", "Deferring…"],
+  propose: ["Propose", "Proposing…"],
   delete: ["Delete", "Deleting…"],
   cancel: "Cancel",
   outcome: "Outcome (optional)",
@@ -184,7 +188,7 @@ const ITEM_NAMES: Record<WsItemKind, [title: string, thing: string]> = {
   phase: ["Phase", "phase"],
   slice: ["Slice", "slice"],
   doc: ["Doc", "doc"],
-  item: ["Agenda item", "agenda item"],
+  item: ["Agenda", "agenda"],
 };
 
 /** Empty, loading, error and not found in the Workspace (F49); the error's own words are F5's. */
@@ -205,9 +209,8 @@ export const WS_STATES = {
   retry: "Try again",
 } as const;
 
-/** The pager's names on the two Workspace lists, and their rows a page (F300, F304). */
+/** The pager's names on the Workspace's paged list, and its rows a page (F300, F304). */
 export const WS_PAGER = {
-  deferredItems: { label: "Deferred items, pages", per: 10, key: "deferred" },
   archived: { label: "Archived phases, pages", per: 10, key: "archived" },
 } as const;
 
@@ -229,9 +232,8 @@ export const WS_GLOSSARY = {
     plan: "Plan",
     result: "Result",
     intent: "Intent",
-    agendaItem: "Agenda item",
+    agendaItem: "Agenda",
     openAndInProgress: "Open and in progress",
-    deferred: "Deferred",
     solvedAndDropped: "Solved and dropped",
     now: "Now",
     waiting: "Waiting on operator",

@@ -7,8 +7,8 @@ works/events.jsonl merge=union
 # The files below are GENERATED -- never hand-authored -- from the folders that
 # hold the real truth (works/phases/**, works/agenda/**):
 #
-#   works/state.json   works/index.json   works/agenda.md
-#   backlog.md
+#   works/state.json   works/index.json
+#   backlog.md         agenda.md
 #
 # They deliberately get NO custom merge driver. A driver (merge=ours and friends)
 # only works where `git config merge.<driver>.driver` has been set in that clone,
@@ -31,5 +31,6 @@ works/events.jsonl merge=union
 # install never puts this state in a host PR at all (it lives in .sikstack/, its own
 # repo), so there these lines are harmless.
 works/** linguist-generated=true
+/agenda.md linguist-generated=true
 docs/versions/** linguist-generated=true
 docs/index.json linguist-generated=true

@@ -13,8 +13,8 @@
  * - The write, `fileAgendaItem` (`./agenda-actions`, a server action): `POST /app/feedback/{id}/agenda {item?}`
  *   files the record on a new item (the server mints its id, titles it `itemTitle(message)` and writes the add and
  *   the `feedback` entry) or on the item named (the entry alone), then answers `sent` anew.
- * - Statuses: an item reads one of the Workspace's five (`AgendaStatus`) in the Workspace's word and shape
- *   (`agendaStatus`), or Proposed. Deferred never reads Open.
+ * - Statuses: an agenda reads one of the Workspace's four (`AgendaStatus`) in the Workspace's word and shape
+ *   (`agendaStatus`), or Proposed. There is no Deferred (an older stored one reads Proposed, the server's word).
  *
  * Pure and NOT `server-only`: the Agenda part's client island reads the status map and the types.
  */
@@ -31,9 +31,8 @@ import { agendaItemHref } from "@/lib/workspace/address";
 /** The record fields the seam reads. */
 export type AgendaRecord = Pick<Feedback, "id" | "message" | "project_id">;
 
-/** An agenda item's status: the Workspace's five (F37's `item` kind, F301's Deferred). */
-export type AgendaStatus =
-  "open" | "in_progress" | "deferred" | "solved" | "dropped";
+/** An agenda's status: the Workspace's four (F37's `item` kind). */
+export type AgendaStatus = "open" | "in_progress" | "solved" | "dropped";
 
 /** An agenda item a piece of feedback is on, as its page's Agenda part draws it: the read's row and the item's page. */
 export interface AgendaItem extends FeedbackAgendaItem {
@@ -115,15 +114,14 @@ export interface AgendaStatusView {
 }
 
 /**
- * The Workspace's five statuses, each in its word and F37's shape: Open and Deferred the ring
- * (`status-idle`), In progress the accent dot (`status-live`), Solved the check (`status-done`), Dropped
- * the struck bar (`status-revoked`). Deferred is told from Open by its word.
+ * The Workspace's four statuses, each in its word and F37's shape: Open the ring (`status-idle`), In
+ * progress the accent dot (`status-live`), Solved the check (`status-done`), Dropped the struck bar
+ * (`status-revoked`).
  */
 export const AGENDA_STATUS: Readonly<Record<AgendaStatus, AgendaStatusView>> =
   Object.freeze({
     open: { word: AGENDA_STATUS_WORDS.open, shape: "idle" },
     in_progress: { word: AGENDA_STATUS_WORDS.in_progress, shape: "live" },
-    deferred: { word: AGENDA_STATUS_WORDS.deferred, shape: "idle" },
     solved: { word: AGENDA_STATUS_WORDS.solved, shape: "done" },
     dropped: { word: AGENDA_STATUS_WORDS.dropped, shape: "revoked" },
   });

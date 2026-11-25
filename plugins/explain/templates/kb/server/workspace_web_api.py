@@ -37,13 +37,19 @@ and whose result comes back in that sync's batch. Until then the item reads
 - ``POST …/workspace/agenda {title, note?}`` → 201 ``{entry, item}``: an add, under an
   id the web mints (:func:`mint_agenda_id`).
 - ``POST …/workspace/agenda/changes {kind, items, fields?}`` → 201 ``{entry}``: one
-  entry for the change, all its items together (the engine's commands are all or
+  entry for the change, all its agendas together (the engine's commands are all or
   none). ``kind`` is ``edit`` ``{title?, note?}``, ``move`` (one of ``first``, ``last``:
-  ``true``, or ``before``, ``after``: an id), ``defer``, ``solve`` ``{outcome?}``,
-  ``drop`` ``{reason?}``, ``reopen``, ``delete``, ``entry`` ``{kind, body}`` (one entry
-  on an item's thread: ``kind`` one of the engine's ``ENTRY_KINDS``, the web's ``note``)
-  or ``accept`` (Proposed items made Open; any other is refused in the engine's words);
-  ``edit``, ``move`` and ``entry`` take one item.
+  ``true``, or ``before``, ``after``: an id), ``propose`` (Open or In progress agendas
+  proposed back; any other is refused in the engine's words), ``solve``
+  ``{outcome?}``, ``drop`` ``{reason?}``, ``reopen``, ``delete``, ``entry`` ``{kind,
+  body}`` (one item added: ``kind`` one of the engine's ``ENTRY_KINDS``, the web's
+  ``note``), ``accept`` (Proposed agendas made Open; any other is refused in the
+  engine's words), ``item-done``, ``item-dismiss``, ``item-reopen`` or ``item-delete``
+  ``{entries}`` (items of the one agenda, by full file name, each one the agenda holds
+  as the overlay predicts it), or ``split`` ``{entries, title}`` (those items moved to a
+  new agenda under an id the server mints, refused when it would take every item: →
+  201 ``{entry, agenda}``, ``agenda`` the new id); ``edit``, ``move``, ``entry``, the item
+  kinds and ``split`` take one agenda. ``defer`` is retired (0.6.0): a 422.
 - ``POST /app/feedback/{feedback}/agenda {item?}`` → 201 ``{item, entries}``: files a
   piece of the org's feedback on its project's agenda as a ``feedback`` entry (source
   ``feedback:<id>``, its body the message and ``/feedback/<id>``): on ``item``, an item
@@ -54,22 +60,25 @@ and whose result comes back in that sync's batch. Until then the item reads
   piece of feedback is on, derived from the entries (stored or pending) whose source
   names it.
 
-**Authors.** Every add and entry the web writes carries ``author: person:<handle>``,
-the session's account handle (:func:`person_author`); the client never sends an author
-or a source (an ``entry`` naming either is a 422), and a note's source is
-``web:agenda``.
+**Authors.** Every add, entry, propose, item change and split the web writes carries
+``author: person:<handle>``, the session's account handle (:func:`person_author`); the
+client never sends an author or a source (a change naming either is a 422), and a
+note's source is ``web:agenda``.
 - ``POST …/workspace/inbox/{entry}/discard`` → 200 ``{entry}``: closes a pending or a
   refused entry; any other is a 409.
-- ``POST …/workspace/inbox/{entry}/retry`` → 201 ``{entry, item?}``: Try again on a
-  refused entry: the same change as a new entry (an add re-minted), the refused one
-  closed in the same transaction; any other is a 409.
+- ``POST …/workspace/inbox/{entry}/retry`` → 201 ``{entry, item?}`` (``{entry,
+  agenda}`` for a split): Try again on a refused entry: the same change as a new entry
+  (an add's or a split's new id re-minted, an authored kind's author the one trying
+  again), the refused one closed in the same transaction; any other is a 409.
 
 The early checks only (422 with one line): a title of 1 to 200 characters on one line
-with the signed refusal, full agenda ids (the engine's ``AGENDA_ID_PATTERN``), a known
-kind and its fields, and, on a change, ids the workspace holds now (a stored item or a
-pending add; the engine's own line, ``<id> names no agenda item``). Everything else is
-the engine's to refuse; a refused change whose item has gone since is listed in the
-Workspace's ``unplaced``, with its entry for Discard and Try again.
+with the signed refusal, full agenda ids (the engine's ``AGENDA_ID_PATTERN``), full item
+file names (``ENTRY_NAME_PATTERN``), a known kind and its fields, and, on a change, ids
+the workspace holds now (a stored agenda or a pending add's or split's; the engine's own
+line, ``<id> names no agenda``) and items their agenda holds (``<id>/<file> names no
+item of <id>``). Everything else is the engine's to refuse; a refused change whose
+agenda has gone since is listed in the Workspace's ``unplaced``, with its entry for
+Discard and Try again.
 """
 
 from __future__ import annotations
@@ -101,14 +110,18 @@ from server.workspace.types import (
     AGENDA_TITLE_REFUSAL,
     ENTRY_AUTHOR_PATTERN,
     ENTRY_KINDS,
+    ENTRY_NAME_PATTERN,
     ENTRY_SOURCE_PATTERN,
     ID_TAIL_ALPHABET,
     ID_TAIL_LETTERS,
     INBOX_ACCEPT,
     INBOX_ADD,
     INBOX_ENTRY,
+    INBOX_ITEM_KINDS,
     INBOX_KINDS,
+    INBOX_PROPOSE,
     INBOX_REFUSED,
+    INBOX_SPLIT,
     WEB_AUTHOR,
     WEB_NOTE_SOURCE,
     InboxEntry,
@@ -258,17 +271,26 @@ _MAX_TEXT = 20_000
 _KIND_FIELDS: dict[str, tuple[str, ...]] = {
     "edit": ("title", "note"),
     "move": ("first", "last", "before", "after"),
-    "defer": (),
+    INBOX_PROPOSE: (),
     "solve": ("outcome",),
     "drop": ("reason",),
     "reopen": (),
     "delete": (),
     INBOX_ENTRY: ("kind", "body"),
     INBOX_ACCEPT: (),
+    **{kind: ("entries",) for kind in INBOX_ITEM_KINDS},
+    INBOX_SPLIT: ("entries", "title"),
 }
 assert set(_KIND_FIELDS) | {INBOX_ADD} == set(INBOX_KINDS)
+#: The kinds that take exactly one agenda, and those whose entry carries the server's
+#: ``author`` (``person:<handle>``, never the client's).
+_ONE_AGENDA = ("edit", "move", INBOX_ENTRY, *INBOX_ITEM_KINDS, INBOX_SPLIT)
+_AUTHORED = (INBOX_ENTRY, INBOX_PROPOSE, *INBOX_ITEM_KINDS, INBOX_SPLIT)
+#: The kinds an older web sent that the engine now refuses unrun (``CLOUD_INBOX_RETIRED``).
+_RETIRED = {"defer": "Deferred is gone: propose the agenda back instead (kind propose)"}
 _ENTRY_AUTHOR = re.compile(ENTRY_AUTHOR_PATTERN, re.DOTALL)
 _ENTRY_SOURCE = re.compile(ENTRY_SOURCE_PATTERN)
+_ENTRY_NAME = re.compile(ENTRY_NAME_PATTERN)
 #: What a handle keeps: no whitespace or line break of any kind, no ``@``.
 _HANDLE_DROP = re.compile(r"[\s@\x00-\x1f\x7f\x85\u2028\u2029]")
 assert _ENTRY_AUTHOR.fullmatch(WEB_AUTHOR) and _ENTRY_SOURCE.fullmatch(WEB_NOTE_SOURCE)
@@ -354,8 +376,24 @@ def _items(raw: Any) -> list[str]:
     if not isinstance(raw, list) or not raw:
         raise _field_error("items must list one or more agenda ids")
     if len(raw) > _MAX_ITEMS:
-        raise _field_error(f"a change takes at most {_MAX_ITEMS} items")
+        raise _field_error(f"a change takes at most {_MAX_ITEMS} agendas")
     return list(dict.fromkeys(_full_id(aid) for aid in raw))
+
+
+def _entry_names(raw: Any) -> list[str]:
+    """An item change's or a split's ``fields.entries``: one or more items' full file
+    names (the engine's ``ENTRY_NAME_RE``, never a brief tail), each once, in order."""
+
+    if not isinstance(raw, list) or not raw:
+        raise _field_error("entries must list one or more items' full file names")
+    if len(raw) > _MAX_ITEMS:
+        raise _field_error(f"a change takes at most {_MAX_ITEMS} items")
+    for name in raw:
+        if not isinstance(name, str) or not _ENTRY_NAME.fullmatch(name):
+            shown = name if isinstance(name, str) and len(name) <= 60 else "that value"
+            raise _field_error(f"{shown} is not an item's full file name "
+                               "(like 20261125T010203.000004Z-hnj0.json)")
+    return list(dict.fromkeys(raw))
 
 
 def _fields(kind: str, items: list[str], raw: Any) -> dict[str, Any]:
@@ -369,10 +407,14 @@ def _fields(kind: str, items: list[str], raw: Any) -> dict[str, Any]:
     for name in raw:
         if name not in allowed:
             raise _field_error(f"{kind} takes no {name}")
-    if kind in ("edit", "move", INBOX_ENTRY) and len(items) != 1:
-        raise _field_error(f"{kind} takes exactly one item")
+    if kind in _ONE_AGENDA and len(items) != 1:
+        raise _field_error(f"{kind} takes exactly one agenda")
     fields: dict[str, Any] = {}
-    if kind == INBOX_ENTRY:
+    if "entries" in allowed:
+        fields["entries"] = _entry_names(raw.get("entries"))
+        if kind == INBOX_SPLIT:
+            fields["title"] = _title(raw.get("title"))
+    elif kind == INBOX_ENTRY:
         if raw.get("kind") not in ENTRY_KINDS:
             raise _field_error(f"an entry's kind must be one of {', '.join(ENTRY_KINDS)}")
         fields["kind"] = raw["kind"]
@@ -475,7 +517,39 @@ async def _proposed(reader: WorkspaceReader, ids: list[str]) -> None:
         state = states.get(aid, "open")  # a pending add is Open
         if state != "proposed":
             word = AGENDA_WORDS.get(state, state)
-            raise _field_error(f"{aid} is {word}: only a Proposed item is accepted")
+            raise _field_error(f"{aid} is {word}: only a Proposed agenda is accepted")
+
+
+async def _proposable(reader: WorkspaceReader, ids: list[str]) -> None:
+    """A 422 in the engine's own words (``agenda-propose``) for the first agenda that is
+    not Open or In progress, as the overlay predicts it."""
+
+    try:
+        states = {row["id"]: row["state"] for row in await reader.agenda()}
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    for aid in ids:
+        state = states.get(aid, "open")
+        if state == "proposed":
+            raise _field_error(f"{aid} is Proposed already")
+        if state not in ("open", "in_progress"):
+            raise _field_error(f"{aid} is {AGENDA_WORDS.get(state, state)}: reopen it first")
+
+
+async def _held_items(reader: WorkspaceReader, kind: str, aid: str, names: list[str]) -> None:
+    """A 422 in the engine's own words for the first name agenda ``aid`` does not hold (its
+    stored items, or a pending split's, as the overlay predicts them), and for a split
+    that would take every item."""
+
+    try:
+        held = await reader.item_files(aid)
+    except WorkspaceReadError as exc:
+        raise _unavailable() from exc
+    for name in names:
+        if name not in held:
+            raise _field_error(f"{aid}/{name} names no item of {aid}")
+    if kind == INBOX_SPLIT and len(names) >= len(held):
+        raise _field_error(f"agenda-split would take every item of {aid}: leave one on it")
 
 
 async def _held(reader: WorkspaceReader, ids: list[str]) -> None:
@@ -487,7 +561,7 @@ async def _held(reader: WorkspaceReader, ids: list[str]) -> None:
         raise _unavailable() from exc
     for aid in ids:
         if aid not in held:
-            raise _field_error(f"{aid} names no agenda item")
+            raise _field_error(f"{aid} names no agenda")
 
 
 def _body(raw: Any) -> dict[str, Any]:
@@ -522,6 +596,8 @@ async def change_agenda_items(
     reader = await _linked(project_id, ctx)
     body = _body(payload)
     kind = body.get("kind")
+    if isinstance(kind, str) and kind in _RETIRED:
+        raise _field_error(f"kind {kind} is retired: {_RETIRED[kind]}")
     if kind not in _KIND_FIELDS:
         raise _field_error(
             f"kind must be one of {', '.join(_KIND_FIELDS)} (an add has its own route)"
@@ -531,8 +607,19 @@ async def change_agenda_items(
     await _held(reader, [*items, *(fields[p] for p in ("before", "after") if p in fields)])
     if kind == INBOX_ACCEPT:
         await _proposed(reader, items)
+    if kind == INBOX_PROPOSE:
+        await _proposable(reader, items)
+    if "entries" in fields:
+        await _held_items(reader, kind, items[0], fields["entries"])
+    if kind in _AUTHORED:
+        fields = {**fields, "author": person_author(ctx.user.email)}
     if kind == INBOX_ENTRY:
-        fields = {**fields, "author": person_author(ctx.user.email), "source": WEB_NOTE_SOURCE}
+        fields["source"] = WEB_NOTE_SOURCE
+    if kind == INBOX_SPLIT:
+        minted = await _mint(reader)
+        entry = await _write(reader.project_id, ctx, kind=kind, items=items, fields=fields,
+                             minted_id=minted)
+        return {"entry": _serialize(entry), "agenda": minted}
     entry = await _write(reader.project_id, ctx, kind=kind, items=items, fields=fields)
     return {"entry": _serialize(entry)}
 
@@ -577,8 +664,13 @@ async def retry_inbox_entry(
     if entry.kind == INBOX_ADD:
         return await _add(reader, ctx, dict(entry.fields), replaces=entry.id)
     fields = dict(entry.fields)
-    if entry.kind == INBOX_ENTRY:  # whoever tries again writes it
+    if entry.kind in _AUTHORED:  # whoever tries again writes it
         fields["author"] = person_author(ctx.user.email)
+    if entry.kind == INBOX_SPLIT:  # its new agenda re-minted, as an add's is
+        minted = await _mint(reader)
+        again = await _write(reader.project_id, ctx, kind=entry.kind, items=list(entry.items),
+                             fields=fields, minted_id=minted, replaces=entry.id)
+        return {"entry": _serialize(again), "agenda": minted}
     again = await _write(reader.project_id, ctx, kind=entry.kind, items=list(entry.items),
                          fields=fields, replaces=entry.id)
     return {"entry": _serialize(again)}

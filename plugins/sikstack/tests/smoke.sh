@@ -18,7 +18,8 @@
 #   (sign-in and feedback against the fake server), Test 33 (the design publish verbs against it) and
 #   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
 #   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release) and
-#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll).
+#   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll) and
+#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -526,20 +527,21 @@ names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).s
 bad = [n for n in names if subprocess.run([sys.executable, __import__("os").environ["ENG"], n, "--help"], capture_output=True).returncode != 0]
 assert len(names) > 20 and not bad, bad
 ' ) && ok "every subcommand's --help exits 0 (the list read from the engine's own top-level help)" || bad "a subcommand's --help fails"
-# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 41 in all, and no
+# W1: the engine's --help lists the eleven verbs and the named parts' own commands, 44 in all, and no
 # command of the Claude Code adapter (route, sync-agents, meter, compact-resume, nor their old names).
 ( printf '%s\n' "$cg_help" | python3 -c '
 import re, sys
 names = re.search(r"\{([^}]+)\}", " ".join(sys.stdin.read().split())).group(1).split(",")
 verbs = {"init", "next", "phase", "slice", "section", "review", "gate", "pr", "worktree", "repo", "close", "check"}
 design = {"design-sign", "design-publish", "design-builds", "design-delete"}  # 2.0.0 retired the ten canvas commands; 2.1.0 publishes
-agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-entry", "agenda-show", "agenda-merge", "agenda-fold", "agenda-edit",
-          "agenda-move", "agenda-defer", "agenda-solve", "agenda-drop", "agenda-reopen", "agenda-delete", "agenda-link",
-          "agenda-unlink"}  # 0.3.0: the four deferred-job verbs retired
+agenda = {"agenda", "agenda-add", "agenda-accept", "agenda-propose", "agenda-item", "agenda-entry", "agenda-show",
+          "agenda-split", "agenda-merge", "agenda-fold", "agenda-edit", "agenda-move", "agenda-solve", "agenda-drop",
+          "agenda-reopen", "agenda-delete", "agenda-link", "agenda-unlink",
+          "agenda-feedback"}  # 0.3.0: the four deferred-job verbs retired; 0.6.0: agenda-defer retired, agenda-feedback added
 cloud = {"link", "sign-in", "unlink", "sync", "mark-committed", "cold"}
 machine = {"setup", "feedback", "migrate"}  # beside init, run before any workspace is found
-assert len(names) == 41 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
-' ) && ok "the engine's --help lists 41 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
+assert len(names) == 44 and set(names) == verbs | design | agenda | cloud | machine, sorted(set(names) ^ (verbs | design | agenda | cloud | machine))
+' ) && ok "the engine's --help lists 44 commands: init and the eleven verbs, setup, feedback and migrate, plus design-sign, the three publish verbs and the agenda, cloud and cold parts' own, no adapter command" \
   || bad "the engine's command list moved -- $(printf '%s\n' "$cg_help" | sed -n 2p)"
 card_ok() { # card_ok <text>: at most 2,048 bytes, no re-read, the pointer, the next action and the file paths
   [ "$(printf '%s' "$1" | wc -c | tr -d ' ')" -le 2048 ] && ! printf '%s\n' "$1" | grep -qi 're-read' \
@@ -630,14 +632,14 @@ printf '%s\n' "$out" | grep -q '^phase.md: .* bytes (budget 40960 bytes)' && pri
   && ok "slice finish prints the notebook size and flags it over budget" || bad "slice finish notebook size print missing -- $out"
 printf '%s\n' "$out" | grep -q 'biggest sections: ## Filler ' && printf '%s\n' "$out" | grep -q 'topics/<slug>.md' \
   && ok "slice finish names the biggest sections and suggests topics/ when over budget" || bad "over-budget size line does not name the largest section -- $out"
-grep -q 'Rebuilt at' "$F/backlog.md" "$F/works/agenda.md" \
+grep -q 'Rebuilt at' "$F/backlog.md" "$F/agenda.md" \
   && bad "a markdown dashboard still carries a Rebuilt at timestamp" || ok "no Rebuilt at timestamp in any markdown dashboard (backlog, agenda)"
 # The churn this removes: repeated `next` calls must not dirty the three dashboards.
 ( cd "$F" && git init -q . >/dev/null 2>&1 && git add -A >/dev/null 2>&1 \
     && git -c user.email=smoke@example.invalid -c user.name=smoke commit -qm "smoke baseline" >/dev/null 2>&1 )
 ( cd "$F" && python3 "$ENG" next >/dev/null 2>&1; python3 "$ENG" next >/dev/null 2>&1 )
-tracked=$( cd "$F" && git ls-files backlog.md works/agenda.md | wc -l | tr -d ' ' )
-dirty=$( cd "$F" && git status --short -- backlog.md works/agenda.md )
+tracked=$( cd "$F" && git ls-files backlog.md agenda.md | wc -l | tr -d ' ' )
+dirty=$( cd "$F" && git status --short -- backlog.md agenda.md )
 [ "$tracked" = "2" ] && [ -z "$dirty" ] && [ ! -e "$F/works/deferred.md" ] && [ ! -e "$F/works/deferred" ] \
   && ok "two next calls leave the dashboards byte-identical (no timestamp churn), and no works/deferred.md or works/deferred/ is written" || bad "next dirtied the dashboards (tracked=$tracked) or wrote the deferred dashboard -- $dirty"
 
@@ -937,7 +939,7 @@ if [ -d "$TW/works/phases/active/$tb_p1" ]; then
 fi
 ( tg add -A && tg commit -qm two ) >/dev/null 2>&1 || bad "two-branch probe: branch two did not commit"
 tg merge -q --no-edit one >/dev/null 2>&1; conflicted=$(tg diff --name-only --diff-filter=U | tr '\n' ' ')
-outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
+outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
 ( for f in $conflicted; do tg checkout --theirs -- "$f" || exit 1; done; tw check && tg add -A && tg commit -qm merge ) >/dev/null 2>&1
 tb_val=$(tw check --no-rebuild 2>&1); tb_rc=$?; tb_run=$(tw gate 1 2>&1); tb_run_rc=$?
 [ -z "$outside" ] && [ "$(ls "$TW/works/phases/active" | grep -cE "^P1-$tail_re$")" = 2 ] \
@@ -970,9 +972,9 @@ printf '%s\n' "$bn_t" | grep -qxE "P13-$tail_re" && printf '%s\n' "$bn_agt" | gr
   || bad "the number lookup is wrong -- $bn_t / $bn_agt / $bn_ag / $bn_sl / $bn_amb / $bn_full"
 
 # ---------------------------------------------------------------------------
-echo "== Test 10i: agenda -- items, ids, transitions, order, links, the generated page, validate, two branches (the gate's exemption for an added item: Test 12) =="
-# A fresh --at-root install. Items live in works/agenda/<AID>/agenda.json; works/agenda.md, index.json's
-# agenda keys and the backlog's count are generated from them; an item never moves `next`.
+echo "== Test 10i: agenda -- agendas, ids, transitions, order, links, the generated page, validate, two branches (the gate's exemption for an added agenda: Test 12) =="
+# A fresh install. Agendas live in works/agenda/<AID>/agenda.json; agenda.md (beside backlog.md, 0.6.0), index.json's
+# agenda keys and the backlog's count are generated from them; an agenda never moves `next`.
 newtmp AGW; AG="$AGW/ws"
 mkws AG >/dev/null 2>&1 || bad "agenda probe: fresh install failed"
 ag() { ( cd "$AG" && python3 "$ENG" "$@" ); }
@@ -982,11 +984,11 @@ ag_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(s
 ag_order() { ag agenda --json | python3 -c 'import json,sys; print(" ".join(i["id"] for i in json.load(sys.stdin)))'; }
 tail_re='([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]|[0-9][a-hjkmnp-tv-z])'
 # (a) the generated page and the index, before any item and after: stable bytes, the keys, the backlog line.
-pg0=$(sha "$AG/works/agenda.md" 2>/dev/null); rm -f "$AG/works/agenda.md"; sleep 1  # a stamp would move with the clock
-ag check >/dev/null 2>&1; pg1=$(sha "$AG/works/agenda.md" 2>/dev/null)
+pg0=$(sha "$AG/agenda.md" 2>/dev/null); rm -f "$AG/agenda.md"; sleep 1  # a stamp would move with the clock
+ag check >/dev/null 2>&1; pg1=$(sha "$AG/agenda.md" 2>/dev/null)
 ag_idx() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(not ("agenda_counts" in d and "agenda" in d))' "$AG/works/index.json"; }
-[ -n "$pg0" ] && [ "$pg0" = "$pg1" ] && ag_idx && grep -qxF -e '- Open agenda items: `0`' "$AG/backlog.md" \
-  && ok "a fresh install has works/agenda.md with no item, byte-identical across rebuilds; index.json has agenda_counts and agenda; backlog.md says Open agenda items: 0" \
+[ -n "$pg0" ] && [ "$pg0" = "$pg1" ] && [ ! -e "$AG/works/agenda.md" ] && ag_idx && grep -qxF -e '- Open agendas: `0`' "$AG/backlog.md" \
+  && ok "a fresh install has agenda.md beside backlog.md (no works/agenda.md) with no agenda, byte-identical across rebuilds; index.json has agenda_counts and agenda; backlog.md says Open agendas: 0" \
   || bad "the empty agenda page or index keys missing -- [$pg0] [$pg1] $(grep -F 'agenda' "$AG/backlog.md")"
 # (b) ids: A1-<tail> first, its own number sequence, an explicit tailed id once, brief forms.
 a1=$(ag agenda-add --title "first" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
@@ -1000,20 +1002,23 @@ printf '%s\n' "$a1" | grep -qxE "A1-$tail_re" && printf '%s\n' "$a2" | grep -qxE
   && [ "$(ag_key "$a1" title)" = "first, by 1" ] && [ "$(ag_key "$a2" title)" = "second, by A2" ] \
   && ok "agenda-add mints A1-<tail> then A2-<tail> and spends no phase number (P1- next); --id A13-n1 is taken once and refused in one line after; 1 and A2 name their items" \
   || bad "agenda ids wrong -- $a1 / $a2 / $p1 / $ex1 / $ex2"
-# (c) transitions: defer, solve with an outcome, reopen, drop with a reason, reopen (both cleared);
-# a refused transition is one line and non-zero; a bulk call with one bad id writes nothing.
+# (c) transitions: propose (Open -> Proposed, the stored shape `open` + `proposed`), accept, solve with an outcome,
+# reopen, drop with a reason, reopen (both cleared); a refused transition is one line and non-zero; a bulk call with
+# one bad id writes nothing; agenda-defer is gone (an unknown command, exit 2).
 st=""
-for step in "agenda-defer $a2" "agenda-solve $a2 --outcome shipped" "agenda-reopen $a2" "agenda-drop $a2 --reason dup" "agenda-reopen $a2"; do
+for step in "agenda-propose $a2 --author person:smoke" "agenda-accept $a2" "agenda-solve $a2 --outcome shipped" "agenda-reopen $a2" "agenda-drop $a2 --reason dup" "agenda-reopen $a2"; do
   ag $step >/dev/null 2>&1 || st="$st [refused: $step]"
-  st="$st $(ag_key "$a2" status)/$(ag_key "$a2" outcome)/$(ag_key "$a2" reason)"
+  st="$st $(ag_key "$a2" status)/$(ag_key "$a2" outcome)/$(ag_key "$a2" reason)/$([ "$(ag_key "$a2" proposed)" = "<absent>" ] && echo - || echo P)"
 done
 rf=$(ag agenda-reopen "$a1" 2>&1); rf_rc=$?
-tr0=$(ag_tree); bk=$(ag agenda-defer A13 A99-zz 2>&1); bk_rc=$?; tr1=$(ag_tree)
-[ "$st" = " deferred/None/None solved/shipped/None open/None/None dropped/None/dup open/None/None" ] \
+tr0=$(ag_tree); bk=$(ag agenda-propose A13 A99-zz --author person:smoke 2>&1); bk_rc=$?; tr1=$(ag_tree)
+df=$(ag agenda-defer A13 2>&1); df_rc=$?; tr2=$(ag_tree)
+[ "$st" = " open/None/None/P open/None/None/- solved/shipped/None/- open/None/None/- dropped/None/dup/- open/None/None/-" ] \
   && [ "$rf_rc" -ne 0 ] && [ "$(printf '%s\n' "$rf" | wc -l | tr -d ' ')" = 1 ] \
   && [ "$bk_rc" -ne 0 ] && [ "$tr0" = "$tr1" ] && [ "$(ag_key A13-n1 status)" = open ] \
-  && ok "defer, solve --outcome, reopen, drop --reason, reopen (outcome and reason cleared); reopening an Open item is refused in one line; agenda-defer A13 A99-zz changes nothing" \
-  || bad "agenda transitions wrong -- $st / $rf / $bk"
+  && [ "$df_rc" -eq 2 ] && printf '%s\n' "$df" | grep -q "invalid choice: 'agenda-defer'" && [ "$tr1" = "$tr2" ] \
+  && ok "propose (stored open + proposed), accept, solve --outcome, reopen, drop --reason, reopen (outcome and reason cleared); reopening an Open agenda is refused in one line; agenda-propose A13 A99-zz changes nothing; agenda-defer is an unknown command" \
+  || bad "agenda transitions wrong -- $st / $rf / $bk / rc=$df_rc $(printf '%s\n' "$df" | tail -1)"
 uo=$(ag agenda-add --title x --author person:smoke --bogus 2>&1); uo_rc=$?; tr2=$(ag_tree)
 [ "$uo_rc" -eq 2 ] && [ "$(printf '%s\n' "$uo" | wc -l | tr -d ' ')" = 1 ] && [ "$tr1" = "$tr2" ] \
   && ok "an unknown option on an agenda command (agenda-add --bogus) is one line, exit 2, nothing written" \
@@ -1029,7 +1034,7 @@ moved=$(diff <(printf '%s\n' "$it0") <(printf '%s\n' "$it1") | sed -n 's/^> \([^
 p2=$(ag phase new --name "Linked" --objective probe --agenda 1 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
 nx1=$(ag next 2>&1); lk=$(ag agenda-link 2 --phase "$p2" 2>&1); lk_rc=$?
 shown=$(ag agenda 2>&1 | grep "^$a1 ")
-ag agenda-add --title "noise" --author person:smoke >/dev/null 2>&1; ag agenda-defer 14 >/dev/null 2>&1; ag agenda-move A13 --first >/dev/null 2>&1; nx2=$(ag next 2>&1)
+ag agenda-add --title "noise" --author person:smoke >/dev/null 2>&1; ag agenda-propose 14 --author person:smoke >/dev/null 2>&1; ag agenda-move A13 --first >/dev/null 2>&1; nx2=$(ag next 2>&1)
 dl=$(ag agenda-delete "$a1" 2>&1); dl_rc=$?; nx3=$(ag next 2>&1)
 pj="$AG/works/phases/active/$p2/phase.json"
 [ -n "$p2" ] && [ "$lk_rc" -ne 0 ] && printf '%s\n' "$shown" | grep -q 'In progress' \
@@ -1037,8 +1042,8 @@ pj="$AG/works/phases/active/$p2/phase.json"
   && [ "$dl_rc" -eq 0 ] && [ -f "$pj" ] && ! grep -q '"agenda"' "$pj" && [ ! -d "$AG/works/agenda/$a1" ] \
   && ok "phase new --agenda links $p2 and $a1 reads In progress; a second item cannot take it ($lk); agenda commands leave next unchanged; agenda-delete clears the link and the phase stays with no agenda key" \
   || bad "agenda links wrong -- $p2 / $lk / $shown / $dl / next changed: $([ "$nx1" = "$nx2" ] && [ "$nx2" = "$nx3" ] && echo no || echo yes)"
-grep -qxF -e '- Open agenda items: `2`' "$AG/backlog.md" && [ "$(sha "$AG/works/agenda.md")" != "$pg0" ] \
-  && ok "the backlog counts Open and In progress items, never Deferred ones (2), and works/agenda.md follows the items" \
+grep -qxF -e '- Open agendas: `2`' "$AG/backlog.md" && [ "$(sha "$AG/agenda.md")" != "$pg0" ] \
+  && ok "the backlog counts Open and In progress agendas, never a Proposed one (2), and agenda.md follows the agendas" \
   || bad "the backlog count or the agenda page did not follow -- $(grep -F 'agenda' "$AG/backlog.md")"
 # (f) validate: a `Z` stamp (JavaScript's toISOString form) passes on every Python, 3.9 and 3.10 included
 # (the engine reads its own stamp form, never fromisoformat); a dangling link is a warning (validate passes);
@@ -1068,11 +1073,11 @@ ls_rb=$(ag check 2>&1); ls_rb_rc=$?; ls_nx=$(ag next 2>&1); ls_nx_rc=$?; ls_v=$(
   || bad "a list-valued agenda status broke a read or passed validate -- $ls_dir / $ls_rb_rc / $ls_nx_rc / $ls_v_rc -- $(printf '%s\n' "$ls_rb" "$ls_nx" "$ls_v" | grep -iE 'agenda|Traceback|Error' | tail -3)"
 # The same item is refused as unusable, in one line naming its file and agenda-delete, never "reopen it first" (which
 # would be refused too); nothing is written. A13-n1 goes first: every agenda command reads every item.
-rm -rf "$AG/works/agenda/A13-n1"; ls_t0=$(ag_tree); ls_df=$(ag agenda-defer "$ls_dir" 2>&1); ls_df_rc=$?
+rm -rf "$AG/works/agenda/A13-n1"; ls_t0=$(ag_tree); ls_df=$(ag agenda-propose "$ls_dir" --author person:smoke 2>&1); ls_df_rc=$?
 [ -n "$ls_dir" ] && [ "$ls_df_rc" -eq 1 ] && [ "$(printf '%s\n' "$ls_df" | wc -l | tr -d ' ')" = 1 ] \
   && printf '%s\n' "$ls_df" | grep -qF "works/agenda/$ls_dir/agenda.json" && printf '%s\n' "$ls_df" | grep -qF "agenda-delete $ls_dir" \
   && ! printf '%s\n' "$ls_df" | grep -q reopen && [ "$(ag_tree)" = "$ls_t0" ] \
-  && ok "agenda-defer of an item with a list-valued status is refused in one line naming works/agenda/$ls_dir/agenda.json and agenda-delete, not reopen; nothing written" \
+  && ok "agenda-propose of an agenda with a list-valued status is refused in one line naming works/agenda/$ls_dir/agenda.json and agenda-delete, not reopen; nothing written" \
   || bad "an unusable agenda status is refused without its file or way out -- rc=$ls_df_rc -- $(printf '%s\n' "$ls_df" | head -2 | cut -c1-240)"
 # (g) two branches each add an item: the merge conflicts in generated files only, and either side + rebuild lists both.
 newtmp AGB; AB="$AGB/ws"; mkws AB >/dev/null 2>&1 || bad "agenda probe: second install failed"
@@ -1083,11 +1088,11 @@ abg() { git -C "$AB" -c user.email=smoke@example.invalid -c user.name=smoke "$@"
   && abg checkout -q - && abg checkout -q -b two && ab agenda-add --id A1-ac --title two --author person:smoke && abg add -A && abg commit -qm two ) >/dev/null 2>&1 \
   || bad "agenda two-branch probe: setup failed"
 abg merge -q --no-edit one >/dev/null 2>&1; ab_conf=$(abg diff --name-only --diff-filter=U | tr '\n' ' ')
-ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
+ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
 ( for f in $ab_conf; do abg checkout --theirs -- "$f" || exit 1; done; ab check && abg add -A && abg commit -qm merge ) >/dev/null 2>&1
 ab_val=$(ab check --no-rebuild 2>&1); ab_rc=$?
 [ -n "$ab_conf" ] && [ -z "$ab_out" ] && [ "$ab_rc" -eq 0 ] && [ -z "$(abg status --porcelain)" ] \
-  && [ "$(ab agenda 2>&1 | grep -cE '^A1-a[bc] ')" = 2 ] && grep -q 'A1-ab' "$AB/works/agenda.md" && grep -q 'A1-ac' "$AB/works/agenda.md" \
+  && [ "$(ab agenda 2>&1 | grep -cE '^A1-a[bc] ')" = 2 ] && grep -q 'A1-ab' "$AB/agenda.md" && grep -q 'A1-ac' "$AB/agenda.md" \
   && ok "two branches each add an item (A1-ab, A1-ac) and merge with conflicts only in generated files ($ab_conf); either side + rebuild lists both, valid and clean" \
   || bad "agenda two-branch merge wrong -- conflicted: $ab_conf / outside: $ab_out / $ab_val"
 
@@ -1104,13 +1109,13 @@ ta_sha=$(sha "$TH/works/agenda/$ta/agenda.json")
 te1=$(th agenda-entry 1 --kind note --author person:smoke --source phase:P1 --body "a person's note" 2>&1); te1_n=$(ls "$TH/works/agenda/$ta/entries" 2>/dev/null | wc -l | tr -d ' ')
 te2=$(th agenda-entry "$ta" --kind issue --author agent:claude-opus-5-5 --source slice:P1.S1 --body "an agent's issue" 2>&1); te2_n=$(ls "$TH/works/agenda/$ta/entries" 2>/dev/null | wc -l | tr -d ' ')
 tshow=$(th agenda-show 1 2>&1)
-tlines=$(printf '%s\n' "$tshow" | grep -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2} ' | sed 's/ \[.*//')
+tlines=$(printf '%s\n' "$tshow" | grep -E "^- $ta/[0-9a-z]{4}  " | sed -E 's/^- [^ ]+  //; s/  [0-9]{4}-[0-9]{2}-[0-9]{2}  / /')
 [ -n "$ta" ] && [ "$te1_n" = 1 ] && [ "$te2_n" = 2 ] && [ "$(sha "$TH/works/agenda/$ta/agenda.json")" = "$ta_sha" ] \
-  && printf '%s\n' "$te1" | grep -qE "^added entry $ta/[0-9]{8}T[0-9]{6}\.[0-9]{6}Z-[0-9a-z]{4}\.json: note by person:smoke \(phase:P1\)$" \
-  && printf '%s\n' "$te2" | grep -qE "^added entry $ta/.*: issue by agent:claude-opus-5-5 \(slice:P1\.S1\)$" \
-  && [ "$(printf '%s\n' "$tlines" | sed 's/^- [0-9-]* //')" = "$(printf 'note by person:smoke (phase:P1)\nissue by agent:claude-opus-5-5 (slice:P1.S1)')" ] \
-  && printf '%s\n' "$tshow" | grep -qx "$ta  Open  threaded" && printf '%s\n' "$tshow" | grep -qx 'entries: 2' \
-  && ok "agenda-entry writes exactly one new file under works/agenda/$ta/entries/ per entry and leaves agenda.json byte-identical; agenda-show prints both in time order with date, kind, author and source; the item stays Open" \
+  && printf '%s\n' "$te1" | grep -qE "^added item $ta/([0-9a-z]{4}) \([0-9]{8}T[0-9]{6}\.[0-9]{6}Z-\1\.json\): note by person:smoke \(phase:P1\)$" \
+  && printf '%s\n' "$te2" | grep -qE "^added item $ta/.*: issue by agent:claude-opus-5-5 \(slice:P1\.S1\)$" \
+  && [ "$tlines" = "$(printf 'open  note  by person:smoke (phase:P1)\nopen  issue  by agent:claude-opus-5-5 (slice:P1.S1)')" ] \
+  && printf '%s\n' "$tshow" | grep -qx "$ta  Open  threaded" && printf '%s\n' "$tshow" | grep -qx 'items: 2 (2 open, 0 done, 0 dismissed)' \
+  && ok "agenda-entry (agenda-item add's older name) writes exactly one new file under works/agenda/$ta/entries/ per item and leaves agenda.json byte-identical; agenda-show prints both in time order with their reference, state, kind, author, date and source; the agenda stays Open" \
   || bad "agenda entries wrong -- $te1 / $te2 / n=$te1_n,$te2_n / $tshow"
 th_bad=""; for tb in "--kind memo --author person:x --source phase:P1 --body b" "--kind note --author someone --source phase:P1 --body b" \
     "--kind note --author person:x --source P1 --body b" "--kind note --author person:x --source phase:P1 --body ' '"; do
@@ -1123,9 +1128,9 @@ tp1=$(th phase new --name "First" --objective probe 2>&1 | sed -n 's/^created ph
 tp2=$(th phase new --name "Second" --objective probe 2>&1 | sed -n 's/^created phase \(P[^:]*\):.*/\1/p')
 th agenda-link 1 --phase "$tp1" >/dev/null 2>&1; th agenda-link "$ta" --phase "$tp2" >/dev/null 2>&1
 tl=$(th agenda 2>&1 | grep "^$ta "); ts=$(th agenda-show 1 2>&1 | grep '^phases: ')
-printf '%s\n' "$tl" | grep -q 'In progress' && printf '%s\n' "$tl" | grep -qF '(0 of 2 phases done, 2 entries)' \
+printf '%s\n' "$tl" | grep -q 'In progress' && printf '%s\n' "$tl" | grep -qF '(0 of 2 phases done, 2 items, 2 open)' \
   && printf '%s\n' "$ts" | grep -q "$tp1" && printf '%s\n' "$ts" | grep -q "$tp2" \
-  && ok "agenda-link takes two phases onto one item: agenda shows 0 of 2 phases done (and its 2 entries), agenda-show names both" \
+  && ok "agenda-link takes two phases onto one agenda: agenda shows 0 of 2 phases done (and its 2 items, 2 open), agenda-show names both" \
   || bad "two phases on one item wrong -- $tl / $ts"
 # (c) who opens an item: no --author is refused; an agent's item is Proposed, outside the open order, shown apart in
 # agenda, works/agenda.md, index.json and backlog.md; it does not move; agenda-accept makes it Open, first.
@@ -1133,24 +1138,24 @@ tn=$(th agenda-add --title "anonymous" 2>&1); tn_rc=$?
 tq=$(th agenda-add --title "an agent's idea" --author agent:claude-opus-5-5 2>&1); tq_id=$(printf '%s\n' "$tq" | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 tq2=$(th agenda-add --title "a stale idea" --author agent:claude-opus-5-5 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 tlist=$(th agenda 2>&1); tmv=$(th agenda-move "$tq_id" --first 2>&1); tmv_rc=$?
-tmd=$(sed -n '/^## Proposed/,/^## Open/p' "$TH/works/agenda.md"); tmd_open=$(sed -n '/^## Open/,/^## Deferred/p' "$TH/works/agenda.md")
+tmd=$(sed -n '/^## Proposed/,/^## Open/p' "$TH/agenda.md"); tmd_open=$(sed -n '/^## Open/,/^## Solved and dropped/p' "$TH/agenda.md")
 tix=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r={x["id"]: x for x in d["agenda"]}; a=r[sys.argv[2]]; t=r[sys.argv[3]]; print(d["agenda_counts"]["proposed"], a["shown_status"], a["proposed"]["by"], t["entries"], t["latest_entry"] is not None)' "$TH/works/index.json" "$tq_id" "$ta")
 [ "$tn_rc" -eq 2 ] && [ "$(printf '%s\n' "$tn" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$tn" | grep -q -- '--author' \
   && printf '%s\n' "$tq" | grep -qx "added $tq_id: an agent's idea (Proposed: agenda-accept or agenda-drop it)" \
   && [ "$(printf '%s\n' "$tlist" | head -2 | awk '{print $2}' | tr '\n' ' ')" = "Proposed Proposed " ] \
   && [ "$tmv_rc" -ne 0 ] && printf '%s\n' "$tmv" | grep -q "is Proposed" \
   && printf '%s\n' "$tmd" | grep -qF "| \`$tq_id\` | an agent's idea | agent:claude-opus-5-5 | - |" && ! printf '%s\n' "$tmd_open" | grep -qF "$tq_id" \
-  && printf '%s\n' "$tmd_open" | grep -qE "\| \`$ta\` \| In progress \| threaded \| 0 of 2 phases done \| 2 \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|" \
-  && [ "$tix" = "2 Proposed agent:claude-opus-5-5 2 True" ] && grep -qxF -e '- Proposed agenda items: `2`' "$TH/backlog.md" \
-  && ! grep -q 'deferred' "$TH/backlog.md" \
-  && ok "agenda-add without --author is refused in one line; an agent's item is Proposed: first in agenda, under ## Proposed in works/agenda.md (not in the open order), shown_status Proposed in index.json, counted in backlog.md; it does not move; the threaded item's row shows its entry count and latest date" \
-  || bad "Proposed wrong -- $tn / $tq / $(printf '%s\n' "$tlist" | head -3) / $tmv / $tix / $(grep -F 'agenda items' "$TH/backlog.md")"
+  && printf '%s\n' "$tmd_open" | grep -qE "\| \`$ta\` \| In progress \| threaded \| 0 of 2 phases done \| 2 of 2 open \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|" \
+  && [ "$tix" = "2 Proposed agent:claude-opus-5-5 2 True" ] && grep -qxF -e '- Proposed agendas: `2`' "$TH/backlog.md" \
+  && ! grep -qi 'deferred' "$TH/backlog.md" "$TH/agenda.md" \
+  && ok "agenda-add without --author is refused in one line; an agent's agenda is Proposed: first in agenda, under ## Proposed in agenda.md (not in the open order), shown_status Proposed in index.json, counted in backlog.md; it does not move; the agenda's row shows how many of its items are open and the newest one's date" \
+  || bad "Proposed wrong -- $tn / $tq / $(printf '%s\n' "$tlist" | head -3) / $tmv / $tix / $(grep -F 'agendas' "$TH/backlog.md")"
 tac=$(th agenda-accept "$tq_id" 2>&1); tac_rc=$?; tdr=$(th agenda-drop "$tq2" --reason "a duplicate" 2>&1)
 tac2=$(th agenda-accept "$ta" 2>&1); tac2_rc=$?
 [ "$tac_rc" -eq 0 ] && printf '%s\n' "$tac" | grep -qx "accepted $tq_id: Open, 1 in the open order" && [ "$(th_key "$tq_id" proposed)" = "<absent>" ] \
   && th agenda 2>&1 | grep -qE "^$tq_id +Open " && [ "$(th agenda --json | python3 -c 'import json,sys; print([i["id"] for i in json.load(sys.stdin) if i["shown_status"] in ("Open", "In progress")][0])')" = "$tq_id" ] \
   && [ "$(th_key "$tq2" status)" = dropped ] && [ "$(th_key "$tq2" reason)" = "a duplicate" ] && [ "$(th_key "$tq2" proposed)" = "<absent>" ] \
-  && [ "$tac2_rc" -ne 0 ] && printf '%s\n' "$tac2" | grep -q "only a Proposed item is accepted" \
+  && [ "$tac2_rc" -ne 0 ] && printf '%s\n' "$tac2" | grep -q "only a Proposed agenda is accepted" \
   && ok "agenda-accept makes a Proposed item Open, first in the open order; agenda-drop --reason drops another; accepting an Open item is refused" \
   || bad "accept or drop of a Proposed item wrong -- $tac / $tdr / $tac2"
 # (d) merge: every entry and phase link moves onto the target, each from-item Dropped `merged into`; a bad id changes nothing.
@@ -1161,7 +1166,7 @@ tmn=$(ls "$TH/works/agenda/$tm/entries" 2>/dev/null | wc -l | tr -d ' ')
 [ "$tmb_rc" -ne 0 ] && [ "$tt0" = "$tt1" ] && [ "$tmg_rc" -eq 0 ] && [ "$tmn" = 2 ] && [ ! -e "$TH/works/agenda/$ta/entries" ] \
   && [ "$(th_key "$ta" status)" = dropped ] && [ "$(th_key "$ta" reason)" = "merged into $tm" ] && [ "$(th_key "$tq_id" reason)" = "merged into $tm" ] \
   && grep -q "\"agenda\": \"$tm\"" "$TH/works/phases/active/$tp1/phase.json" && grep -q "\"agenda\": \"$tm\"" "$TH/works/phases/active/$tp2/phase.json" \
-  && printf '%s\n' "$tmg" | grep -qx "merged $ta into $tm: 2 entries and 2 phase links moved; $ta is Dropped (merged into $tm)" \
+  && printf '%s\n' "$tmg" | grep -qx "merged $ta into $tm: 2 items and 2 phase links moved; $ta is Dropped (merged into $tm)" \
   && th check >/dev/null 2>&1 \
   && ok "agenda-merge moves every entry and phase link onto the target and drops each from-item (merged into $tm); with a bad id it changes nothing" \
   || bad "agenda-merge wrong -- rc=$tmb_rc/$tmg_rc n=$tmn / $tmb / $tmg"
@@ -1180,14 +1185,14 @@ put(second + ".000004Z-aaa4.json", created_at="2026-11-24 10:00")
 put("entry-five.json")
 put(second + ".000006Z-aaa6.json", body="   ")
 PY
-tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: entry ")
+tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: item ")
 for f in "$tvd"/*aaa* "$tvd/entry-five.json"; do rm -f "$f"; done; tvc2=$(th check --no-rebuild 2>&1); tvc2_rc=$?
 [ "$tvc_rc" -ne 0 ] && [ "$tvl" = 6 ] && printf '%s\n' "$tvc" | grep -q "aaa1.json: kind 'memo' is not one of" && printf '%s\n' "$tvc" | grep -q "aaa2.json: author must be" \
   && printf '%s\n' "$tvc" | grep -q "aaa3.json: source must be" && printf '%s\n' "$tvc" | grep -q "aaa4.json: created_at must be" \
   && printf '%s\n' "$tvc" | grep -q "entry-five.json: its file name is not" && printf '%s\n' "$tvc" | grep -q "aaa6.json: body must be" \
   && [ "$tvc2_rc" -eq 0 ] \
   && ok "check fails on a malformed entry with one line each (kind, author, source, stamp, file name, empty body) and passes on valid ones" \
-  || bad "entry validation wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl -- $(printf '%s\n' "$tvc" | grep 'entry ' | head -6)"
+  || bad "entry validation wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl -- $(printf '%s\n' "$tvc" | grep 'item ' | head -6)"
 # (e2) every entry input check names a bad value in one line and never raises: a created_at whose UTC second falls
 # outside the years 0001-9999, an author past 120 characters, an author or source holding a line break by
 # splitlines() (\x0b, \x0c, \x85, U+2028), a Proposed item's `by` holding one; an author of exactly 120 passes. The
@@ -1205,7 +1210,7 @@ put(13, author="person:" + "x" * 113)
 i = json.load(open(item)); i["status"], i["proposed"] = "open", {"by": "agent:a\x0bb", "at": "2026-11-24T00:00:00Z"}
 open(item, "w").write(json.dumps(i) + "\n")
 PY
-tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: entry .*-bb[0-9]*\.json: ")
+tvc=$(th check --no-rebuild 2>&1); tvc_rc=$?; tvl=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tm: item .*-bb[0-9]*\.json: ")
 tvn=""; for n in 01 02 03 04 05 06 07 08 09 10 11 12; do [ "$(printf '%s\n' "$tvc" | grep -c "0000${n}Z-bb$n\.json: ")" = 1 ] || tvn="$tvn $n"; done
 tvp=$(printf '%s\n' "$tvc" | grep -c "works/agenda/$tq_id.*proposed must be")
 python3 - "$TH/works/agenda/$tq_id/agenda.json" <<'PY'
@@ -1217,7 +1222,7 @@ for f in "$tvd"/*-bb0[1-9].json "$tvd"/*-bb1[0-2].json; do rm -f "$f"; done; tvc
   && printf '%s\n' "$tvc" | grep -q "bb01.json: created_at .* outside the years 0001-9999" && ! printf '%s\n' "$tvc" | grep -q "bb13.json" \
   && [ "$tvc2_rc" -eq 0 ] \
   && ok "check names each entry stamp outside the years 0001-9999 in UTC, each author past 120 characters and each author, source or proposed-by holding a splitlines() break in one line, never raising; a 120-character author passes" \
-  || bad "entry input checks wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl missing:$tvn proposed=$tvp -- $(printf '%s\n' "$tvc" | grep -E 'Error|entry |proposed' | head -8)"
+  || bad "entry input checks wrong -- rc=$tvc_rc/$tvc2_rc lines=$tvl missing:$tvn proposed=$tvp -- $(printf '%s\n' "$tvc" | grep -E 'Error|item |proposed' | head -8)"
 tvx=$(printf 'x%.0s' $(seq 113)); tl2028=$(printf 'phase:a\342\200\250b')
 th_bad=""; for tb in "agenda-entry $tm --kind note --author person:xx$tvx --source phase:P1 --body b" \
     "agenda-entry $tm --kind note --author \$'person:a\\vb' --source phase:P1 --body b" \
@@ -1278,20 +1283,22 @@ print("ok" if ok else f"bad: {sorted(entries)} {[(e['deferred'], e['end']) for e
 PY
 )
 [ "$fc_rc" -eq 1 ] && [ "$(printf '%s\n' "$fc" | grep -c 'agenda-fold')" = 1 ] && printf '%s\n' "$fc" | grep -q 'works/deferred/ holds 3 open deferred jobs' \
-  && [ "$ff_rc" -eq 0 ] && printf '%s\n' "$ff" | head -1 | grep -qx 'folded 3 open jobs into the agenda (2 new Proposed items, 1 entry on linked items); 2 closed jobs left with a deferred_folded event; works/deferred/ removed' \
+  && [ "$ff_rc" -eq 0 ] && printf '%s\n' "$ff" | head -1 | grep -qx 'folded 3 open jobs into the agenda (2 new Proposed agendas, 1 item on linked agendas); 2 closed jobs left with a deferred_folded event; works/deferred/ removed' \
   && [ "$fr" = ok ] && [ ! -e "$FD/works/deferred" ] && [ ! -e "$FD/works/deferred.md" ] \
   && [ "$ff2_rc" -eq 0 ] && [ "$ff2" = "nothing to fold: works/deferred/ is gone" ] && [ "$fc2_rc" -eq 0 ] \
   && [ "$(fd agenda 2>&1 | grep -c ' Proposed ')" = 2 ] \
   && ok "before the fold check fails naming agenda-fold (3 open jobs); agenda-fold makes one Proposed item per open job (the linked one an entry on its item), each first entry carrying the job's id, title, reason, trigger, source, created date and its brief when edited; 5 deferred_folded events; works/deferred/ and deferred.md gone; a second run folds nothing" \
   || bad "agenda-fold wrong -- rc=$fc_rc/$ff_rc/$ff2_rc/$fc2_rc $fr / $(printf '%s\n' "$fc" | grep -i defer) / $(printf '%s\n' "$ff" | head -1) / $ff2"
-# (f2) every open job lands in an active view: a job linked to a Solved or Dropped item (or to no item) becomes a
-# Proposed item whose first entry names the old link; one linked to an Open or a Deferred item is an entry on it,
-# and the Deferred item stays listed by `agenda`; the closed items take no entry.
+# (f2) every open job lands in an active view: a job linked to a Solved or Dropped agenda (or to no agenda) becomes a
+# Proposed agenda whose first item names the old link; one linked to an Open agenda or to an older engine's stored
+# `deferred` one (hand-written here: 0.6.0 writes none, and reads it as Proposed) is an item on it, and `agenda` lists
+# the old record as Proposed; the closed agendas take no item.
 newtmp FSW; FS="$FSW/ws"; mkws FS >/dev/null 2>&1 || bad "fold-status probe: fresh install failed"
 fs() { ( cd "$FS" && python3 "$ENG" "$@" ); }
 fs_add() { fs agenda-add --title "$1" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p'; }
 fso=$(fs_add "open item"); fss=$(fs_add "solved item"); fsd=$(fs_add "dropped item"); fsf=$(fs_add "deferred item")
-{ fs agenda-solve "$fss" && fs agenda-drop "$fsd" --reason stale && fs agenda-defer "$fsf"; } >/dev/null 2>&1 || bad "fold-status probe: could not close the items"
+{ fs agenda-solve "$fss" && fs agenda-drop "$fsd" --reason stale; } >/dev/null 2>&1 || bad "fold-status probe: could not close the agendas"
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.update(status="deferred", order=None); open(p,"w").write(json.dumps(d, indent=2)+"\n")' "$FS/works/agenda/$fsf/agenda.json"
 python3 - "$FS/works" "$fso" "$fss" "$fsd" "$fsf" <<'PY'
 import json, os, sys
 works, links = sys.argv[1], dict(zip(("open", "solved", "dropped", "deferred", "gone"), sys.argv[2:] + ["A9-zz"]))
@@ -1309,12 +1316,12 @@ entries = {}
 for p in glob.glob(os.path.join(works, "agenda", "*", "entries", "*.json")):
     e = json.load(open(p)); entries[e["job"]["id"]] = (os.path.basename(os.path.dirname(os.path.dirname(p))), e)
 item = lambda aid: json.load(open(os.path.join(works, "agenda", aid, "agenda.json")))
-page = open(os.path.join(works, "agenda.md")).read()
+page = open(os.path.join(works, "..", "agenda.md")).read()
 bad = []
 if sorted(entries) != ["D-deferred", "D-dropped", "D-gone", "D-open", "D-solved"]: bad.append(f"jobs {sorted(entries)}")
 for did, want in (("D-open", o), ("D-deferred", f)):
     if entries.get(did, (None,))[0] != want: bad.append(f"{did} not an entry on {want}")
-for did, old, word in (("D-solved", s, "Solved"), ("D-dropped", d, "Dropped"), ("D-gone", "A9-zz", "no such item")):
+for did, old, word in (("D-solved", s, "Solved"), ("D-dropped", d, "Dropped"), ("D-gone", "A9-zz", "no such agenda")):
     aid, e = entries.get(did, (None, {}))
     if aid in (o, s, d, f) or aid is None or (item(aid).get("proposed") or {}).get("by") != "agent:fold":
         bad.append(f"{did} landed on {aid}, not a new Proposed item")
@@ -1325,14 +1332,14 @@ for closed in (s, d):
 print("; ".join(bad) or "ok")
 PY
 )
-[ "$fsf_rc" -eq 0 ] && printf '%s\n' "$fsf_out" | head -1 | grep -qx 'folded 5 open jobs into the agenda (3 new Proposed items, 2 entries on linked items); 0 closed jobs left with a deferred_folded event; works/deferred/ removed' \
+[ "$fsf_rc" -eq 0 ] && printf '%s\n' "$fsf_out" | head -1 | grep -qx 'folded 5 open jobs into the agenda (3 new Proposed agendas, 2 items on linked agendas); 0 closed jobs left with a deferred_folded event; works/deferred/ removed' \
   && printf '%s\n' "$fsf_out" | grep -qE "^D-solved -> A[^ ]+ \(Proposed; was linked to $fss \(Solved\)\)$" \
   && printf '%s\n' "$fsf_out" | grep -qE "^D-dropped -> A[^ ]+ \(Proposed; was linked to $fsd \(Dropped\)\)$" \
-  && printf '%s\n' "$fsf_out" | grep -qx "D-deferred -> $fsf (its linked item, Deferred)" \
-  && printf '%s\n' "$fsf_out" | grep -qx "D-open -> $fso (its linked item, Open)" \
-  && [ "$fsr" = ok ] && [ "$fsc_rc" -eq 0 ] && printf '%s\n' "$fsl" | grep -qE "^$fsf +Deferred +deferred item +\(1 entry\)$" \
-  && [ "$(printf '%s\n' "$fsl" | grep -c ' Proposed ')" = 3 ] \
-  && ok "agenda-fold lands every open job in an active view: linked to Solved, Dropped or no item it is a new Proposed item naming the old link; linked to Open or Deferred it is an entry there, and agenda lists the Deferred item" \
+  && printf '%s\n' "$fsf_out" | grep -qx "D-deferred -> $fsf (its linked agenda, Proposed)" \
+  && printf '%s\n' "$fsf_out" | grep -qx "D-open -> $fso (its linked agenda, Open)" \
+  && [ "$fsr" = ok ] && [ "$fsc_rc" -eq 0 ] && printf '%s\n' "$fsl" | grep -qE "^$fsf +Proposed +deferred item +\(1 item, 1 open\)$" \
+  && [ "$(printf '%s\n' "$fsl" | grep -c ' Proposed ')" = 4 ] && [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$FS/works/agenda/$fsf/agenda.json")" = deferred ] \
+  && ok "agenda-fold lands every open job in an active view: linked to Solved, Dropped or no agenda it is a new Proposed agenda naming the old link; linked to Open or to an older stored deferred agenda it is an item there, agenda lists that old record as Proposed, check passes and leaves it stored as it was" \
   || bad "agenda-fold left a job outside the active views -- rc=$fsf_rc/$fsc_rc $fsr / $(printf '%s\n' "$fsf_out" | tr '\n' '|') / $(printf '%s\n' "$fsl" | tr '\n' '|')"
 # (f3) the fold runs once, on the default checkout: on another branch, on a parallel stream's branch and in a linked
 # worktree it refuses in one line naming the default checkout and writes nothing, and check there says where to run
@@ -1372,7 +1379,7 @@ git -C "$FWH" worktree add -q --detach "$FWW/hwt" >/dev/null 2>&1 && git -C "$FW
   || bad "fold-stream probe: could not add the linked worktrees"
 fw_refused "a linked worktree" "$FWW/hwt/.sikstack" "this checkout is a linked worktree, not the default checkout"
 fwf=$(fw agenda-fold 2>&1); fwf_rc=$?; fwf2=$(fw agenda-fold 2>&1)
-[ "$fwf_rc" -eq 0 ] && printf '%s\n' "$fwf" | head -1 | grep -q '^folded 1 open job into the agenda (1 new Proposed item, ' \
+[ "$fwf_rc" -eq 0 ] && printf '%s\n' "$fwf" | head -1 | grep -q '^folded 1 open job into the agenda (1 new Proposed agenda, ' \
   && [ "$fwf2" = "nothing to fold: works/deferred/ is gone" ] \
   && ok "on the default checkout agenda-fold folds the job once; a second run has nothing to fold" \
   || bad "agenda-fold on the default checkout wrong -- rc=$fwf_rc $fwf / $fwf2"
@@ -1398,7 +1405,7 @@ rm -f "$FN/works/templates/deferred_brief.md"; fnf=$( cd "$FN" && python3 "$ENG"
   && printf '%s\n' "$fnb" | grep -qE '^agenda-fold refused, nothing was written: .*works/deferred/open/D1-ab/brief\.md is not UTF-8 text' \
   && [ "$fnt_rc" -eq 1 ] && [ "$(printf '%s\n' "$fnt" | grep -c '')" = 1 ] && [ "$fn_t3" = "$fn_t4" ] \
   && printf '%s\n' "$fnt" | grep -qE '^agenda-fold refused, nothing was written: .*works/templates/deferred_brief\.md is not UTF-8 text' \
-  && [ "$fnf_rc" -eq 0 ] && printf '%s\n' "$fnf" | head -1 | grep -q '^folded 3 open jobs into the agenda (3 new Proposed items, ' \
+  && [ "$fnf_rc" -eq 0 ] && printf '%s\n' "$fnf" | head -1 | grep -q '^folded 3 open jobs into the agenda (3 new Proposed agendas, ' \
   && ( cd "$FN" && python3 "$ENG" check >/dev/null 2>&1 ) \
   && ok "agenda-fold refuses a brief.md or a deferred_brief.md template that is not UTF-8 in one line naming it, nothing written; jobs stamped outside the years 0001-9999 in UTC fold, never raising" \
   || bad "the fold's input checks wrong -- rc=$fnb_rc/$fnt_rc/$fnf_rc [$(printf '%s\n' "$fnb" | tail -1)] [$(printf '%s\n' "$fnt" | tail -1)] [$(printf '%s\n' "$fnf" | tail -1)] $( [ "$fn_t1" = "$fn_t2" ] || echo 'brief case wrote'; [ "$fn_t3" = "$fn_t4" ] || echo 'template case wrote')"
@@ -1412,12 +1419,123 @@ tge() { ( cd "$TG" && python3 "$ENG" "$@" ); }
   && tgc checkout -q - && tgc checkout -q -b two && tge agenda-entry A1-k2 --kind issue --author agent:smoke --source phase:P1 --body two && tgc add -A && tgc commit -qm two ) >/dev/null 2>&1 \
   || bad "two-clone probe: setup failed"
 tgc merge -q --no-edit one >/dev/null 2>&1; tg_conf=$(tgc diff --name-only --diff-filter=U | tr '\n' ' ')
-tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json|agenda\.md)|backlog\.md')
+tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
 ( for f in $tg_conf; do tgc checkout --theirs -- "$f" || exit 1; done; tge check && tgc add -A && tgc commit -qm merge ) >/dev/null 2>&1
 [ -z "$tg_truth" ] && [ "$(ls "$TG/works/agenda/A1-k2/entries" | wc -l | tr -d ' ')" = 2 ] && tge check --no-rebuild >/dev/null 2>&1 \
-  && [ -z "$(tgc status --porcelain)" ] && tge agenda-show A1-k2 | grep -qx 'entries: 2' \
+  && [ -z "$(tgc status --porcelain)" ] && tge agenda-show A1-k2 | grep -qx 'items: 2 (2 open, 0 done, 0 dismissed)' \
   && ok "two clones each add an entry to A1-k2 and merge with no truth-file conflict (only generated files: ${tg_conf:-none}); after check both entries are on the item, valid and clean" \
   || bad "two clones' entries did not merge clean -- conflicted: $tg_conf / truth: $tg_truth"
+
+# ---------------------------------------------------------------------------
+echo "== Test 10k: agenda items (0.6.0) -- the dashboard beside backlog.md (a stale works/agenda.md removed), no Deferred anywhere (an old stored deferred reads Proposed), an item's state on its own file (an older file read open and never rewritten), item references, all-or-none item commands, the auto-close, agenda-split =="
+newtmp IKW; IK="$IKW/ws"; mkws IK >/dev/null 2>&1 || bad "items probe: fresh install failed"
+ik() { ( cd "$IK" && python3 "$ENG" "$@" ); }
+ikg() { git -C "$IK" -c user.email=smoke@example.invalid -c user.name=smoke "$@"; }
+ik_tree() { ( cd "$IK" && find works -type f ! -name index.json ! -name state.json ! -name events.jsonl | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$f")"; done ); }
+ik_add() { ik agenda-item add "$1" --kind issue --author agent:smoke --source phase:P1 --body "$2" 2>&1 | sed -n 's/^added item \([^ ]*\) .*/\1/p'; }
+ik_file() { ls "$IK/works/agenda/${1%%/*}/entries" | grep -- "-${1##*/}\.json$"; }   # an item ref's file name
+ik_state() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("state", "<absent>"), d.get("state_by", "-"))' "$IK/works/agenda/${1%%/*}/entries/$(ik_file "$1")"; }
+ik_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], "<absent>"))' "$IK/works/agenda/$1/agenda.json" "$2"; }
+# (a) walkthrough 1: check writes agenda.md beside backlog.md and none under works/; a stale works/agenda.md an older
+# engine left is removed by check.
+ik check >/dev/null 2>&1; ik_a0=$( [ -f "$IK/agenda.md" ] && [ -f "$IK/backlog.md" ] && [ ! -e "$IK/works/agenda.md" ] && echo ok )
+printf '# Agenda\n\nan older engine wrote this\n' > "$IK/works/agenda.md"; ik check >/dev/null 2>&1; ik_a1=$?
+[ "$ik_a0" = ok ] && [ "$ik_a1" -eq 0 ] && [ ! -e "$IK/works/agenda.md" ] && [ -f "$IK/agenda.md" ] && grep -qx '# Agenda' "$IK/agenda.md" \
+  && ok "check writes agenda.md beside backlog.md and no works/agenda.md; a stale works/agenda.md is removed by check" \
+  || bad "the agenda dashboard is not beside backlog.md, or a stale works/agenda.md survived check -- [$ik_a0] rc=$ik_a1 $(ls "$IK" "$IK/works" | tr '\n' ' ')"
+# (b) walkthrough 3: an older engine's item file (no state) lists open; check and agenda-show leave its bytes as they were.
+ik agenda-add --id A1-ab --title "items" --author person:smoke >/dev/null 2>&1
+ik_r1=$(ik_add A1-ab one); ik_r2=$(ik_add 1 two); ik_r3=$(ik_add A1 three)
+ik_old=$(ik_file "$ik_r1")
+( ikg init -q && ikg add -A && ikg commit -qm base ) >/dev/null 2>&1 || bad "items probe: the base commit failed"
+ik check >/dev/null 2>&1; ik_show=$(ik agenda-show A1-ab 2>&1); ik_json=$(ik agenda-show 1 --json 2>&1)
+[ -n "$ik_r3" ] && ! grep -q '"state"' "$IK/works/agenda/A1-ab/entries/$ik_old" && ikg diff --exit-code --quiet -- "works/agenda/A1-ab/entries/$ik_old" \
+  && printf '%s\n' "$ik_show" | grep -qE "^- $ik_r1  open  issue  by agent:smoke  [0-9]{4}-[0-9]{2}-[0-9]{2}  \(phase:P1\)$" \
+  && printf '%s\n' "$ik_show" | grep -qx 'items: 3 (3 open, 0 done, 0 dismissed)' \
+  && [ "$(printf '%s\n' "$ik_json" | python3 -c 'import json,sys; print(" ".join(e["ref"] + ":" + e["state"] for e in json.load(sys.stdin)["entries"]))')" = "$ik_r1:open $ik_r2:open $ik_r3:open" ] \
+  && ok "an item file with no state lists open (agenda-show: reference, state, kind, author, date, source; --json: ref and state), and check and agenda-show leave its bytes unchanged (git diff --exit-code)" \
+  || bad "an item with no state is not read open or was rewritten -- $ik_r1 / $(printf '%s\n' "$ik_show" | head -4 | tr '\n' '|') / $(ikg diff --stat | tail -1)"
+# (c) walkthrough 4: a refused item command is one line and writes nothing -- an unknown tail, an unknown agenda, a ref
+# off the form, a done item done again, a bulk call with one bad ref; a tail two items share (after a merge) is refused
+# naming both, and the full name still works.
+ik_t0=$(ik_tree); ik_bad=""
+for ik_c in "agenda-item done A1-ab/zzzz --author person:smoke" "agenda-item done A9-zz/${ik_r1##*/} --author person:smoke" \
+    "agenda-item dismiss nonsense --author person:smoke" "agenda-item done $ik_r1 A1-ab/zzzz --author person:smoke" \
+    "agenda-item reopen $ik_r2 --author person:smoke" "agenda-item done $ik_r1 --author nobody"; do
+  ik $ik_c > "$IKW/c.txt" 2>&1; ik_rc=$?
+  { [ "$ik_rc" -ne 0 ] && [ "$(grep -c '' "$IKW/c.txt")" = 1 ] && ! grep -q Traceback "$IKW/c.txt" && [ "$(ik_tree)" = "$ik_t0" ]; } || ik_bad="$ik_bad [$ik_c: rc=$ik_rc $(head -2 "$IKW/c.txt")]"
+done
+ik_twin="20200101T000000.000000Z-${ik_r2##*/}.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["created_at"]="2020-01-01T00:00:00Z"; open(sys.argv[2],"w").write(json.dumps(d, indent=2)+"\n")' "$IK/works/agenda/A1-ab/entries/$ik_old" "$IK/works/agenda/A1-ab/entries/$ik_twin"
+ik_t1=$(ik_tree); ik_amb=$(ik agenda-item done "$ik_r2" --author person:smoke 2>&1); ik_amb_rc=$?; ik_t2=$(ik_tree)
+ik_full=$(ik agenda-item delete "A1/$ik_twin" --author person:smoke 2>&1); ik_full_rc=$?
+[ -z "$ik_bad" ] && [ "$ik_amb_rc" -eq 1 ] && [ "$(printf '%s\n' "$ik_amb" | grep -c '')" = 1 ] && [ "$ik_t1" = "$ik_t2" ] \
+  && printf '%s\n' "$ik_amb" | grep -qF "names 2 items of A1-ab: $ik_twin, $(ik_file "$ik_r2" | grep -v '^2020')" \
+  && [ "$ik_full_rc" -eq 0 ] && [ ! -e "$IK/works/agenda/A1-ab/entries/$ik_twin" ] && [ "$(ik_tree | grep -c 'entries/')" = 3 ] \
+  && ok "agenda-item refuses an unknown tail or agenda, a ref off the form, a wrong transition, a bad author and a bulk call with one bad ref in one line, nothing written; a tail two items share is refused naming both, and the full name deletes one" \
+  || bad "an item reference or a refusal is wrong --$ik_bad / amb rc=$ik_amb_rc $ik_amb / full rc=$ik_full_rc $ik_full"
+# (d) walkthrough 4: done and dismiss (brief agenda forms, a tail in capitals) rewrite only the named items' files, one
+# event each; reopen puts one back; the agenda stays Open while an item is open.
+ik_t3=$(ik_tree); ik_e0=$(grep -c '' "$IK/works/events.jsonl")
+ik_d=$(ik agenda-item done "1/$(printf '%s' "${ik_r1##*/}" | tr '[:lower:]' '[:upper:]')" "A1/${ik_r2##*/}" --author agent:smoke 2>&1); ik_d_rc=$?
+ik_changed=$(diff <(printf '%s\n' "$ik_t3") <(ik_tree) | sed -n 's/^> works\/agenda\/A1-ab\/entries\/\([^ ]*\) .*/\1/p' | LC_ALL=C sort | tr '\n' ' ')
+ik_events=$(tail -n +"$((ik_e0 + 1))" "$IK/works/events.jsonl" | python3 -c 'import json,sys; print(" ".join(json.loads(l)["type"] for l in sys.stdin))')
+ik_ro=$(ik agenda-item reopen "$ik_r2" --author person:smoke 2>&1)
+[ "$ik_d_rc" -eq 0 ] && [ "$ik_d" = "$(printf 'done %s\ndone %s' "$ik_r1" "$ik_r2")" ] \
+  && [ "$ik_changed" = "$(printf '%s\n' "$(ik_file "$ik_r1")" "$(ik_file "$ik_r2")" | LC_ALL=C sort | tr '\n' ' ')" ] \
+  && [ "$ik_events" = "agenda_item_done agenda_item_done" ] && [ "$(ik_state "$ik_r1")" = "done agent:smoke" ] \
+  && [ "$ik_ro" = "reopened $ik_r2" ] && [ "$(ik_state "$ik_r2")" = "open person:smoke" ] && [ "$(ik_key A1-ab status)" = open ] \
+  && ik check >/dev/null 2>&1 \
+  && ok "agenda-item done (1/<TAIL>, A1/<tail>) rewrites only the two named items' files (state, state_by), one agenda_item_done event each; reopen puts one back open; the agenda stays Open; check passes" \
+  || bad "agenda-item done or reopen wrong -- rc=$ik_d_rc $ik_d / changed: $ik_changed / events: $ik_events / $ik_ro / $(ik_state "$ik_r2")"
+# (e) walkthrough 5: the last open item done closes the agenda Solved, naming the counts; adding an item never reopens
+# it (the listing shows its open item); an agenda whose items are all dismissed or deleted closes Dropped; an agenda
+# with no items never closes by itself.
+ik_s=$(ik agenda-item dismiss "$ik_r2" "$ik_r3" --author person:smoke 2>&1)
+ik_sj=$(ik agenda --json | python3 -c 'import json,sys; r={x["id"]: x for x in json.load(sys.stdin)}["A1-ab"]; print(r["shown_status"], r["outcome"], r["items_open"])')
+ik_ra=$(ik_add A1-ab four); ik_sl=$(ik agenda 2>&1 | grep '^A1-ab ')
+ik agenda-add --id A2-cd --title "to drop" --author person:smoke >/dev/null 2>&1; ik_q1=$(ik_add A2-cd x); ik_q2=$(ik_add A2-cd y)
+ik_dr=$(ik agenda-item dismiss "$ik_q1" --author person:smoke 2>&1; ik agenda-item delete "$ik_q2" --author person:smoke 2>&1)
+ik agenda-add --id A3-ef --title "no items" --author person:smoke >/dev/null 2>&1; ik check >/dev/null 2>&1
+ik_ev=$(grep -cE '"agenda_(solved|dropped)"' "$IK/works/events.jsonl")
+[ "$ik_s" = "$(printf 'dismissed %s\ndismissed %s\nA1-ab is Solved: all items dealt with: 1 done, 2 dismissed' "$ik_r2" "$ik_r3")" ] \
+  && [ "$ik_sj" = "Solved all items dealt with: 1 done, 2 dismissed 0" ] \
+  && [ -n "$ik_ra" ] && printf '%s\n' "$ik_sl" | grep -qE '^A1-ab +Solved +items +\(4 items, 1 open\)$' && [ "$(ik_key A1-ab status)" = solved ] \
+  && printf '%s\n' "$ik_dr" | grep -qx 'A2-cd is Dropped: every item dismissed or deleted' && [ "$(ik_key A2-cd status)" = dropped ] \
+  && [ "$(ik_key A2-cd reason)" = "every item dismissed or deleted" ] && [ "$(ik_key A3-ef status)" = open ] && [ "$ik_ev" = 2 ] \
+  && ok "the last open item dismissed after one done closes A1-ab Solved (all items dealt with: 1 done, 2 dismissed; agenda --json says so); a new item leaves it Solved with 1 open; dismiss then delete closes A2-cd Dropped (every item dismissed or deleted); A3-ef with no items stays Open; one event per close" \
+  || bad "the auto-close is wrong -- $ik_s / $ik_sj / $ik_sl / $ik_dr / $(ik_key A3-ef status) events=$ik_ev"
+# (f) walkthrough 6: agenda-split moves exactly the named items, files whole with their state, into a new agenda (Open
+# for a person); refused for every item and for none; the agenda split from keeps the rest.
+ik agenda-add --id A4-gh --title "to split" --author person:smoke >/dev/null 2>&1
+ik_p1=$(ik_add A4-gh p); ik_p2=$(ik_add A4-gh q); ik_p3=$(ik_add A4-gh r)
+ik agenda-item done "$ik_p2" --author agent:smoke >/dev/null 2>&1
+ik_f2=$(ik_file "$ik_p2"); ik_f3=$(ik_file "$ik_p3"); ik_sha2=$(sha "$IK/works/agenda/A4-gh/entries/$ik_f2")
+ik_t4=$(ik_tree); ik_all=$(ik agenda-split A4-gh "${ik_p1##*/}" "${ik_p2##*/}" "${ik_p3##*/}" --title all --author person:smoke 2>&1); ik_all_rc=$?
+ik_none=$(ik agenda-split A4-gh zzzz --title none --author person:smoke 2>&1); ik_none_rc=$?; ik_t5=$(ik_tree); ik_n5=$(ls "$IK/works/agenda" | tr '\n' ' ')
+ik_sp=$(ik agenda-split 4 "${ik_p2##*/}" "$ik_f3" --title "split out" --author person:smoke --id A5-jk 2>&1); ik_sp_rc=$?
+[ "$ik_all_rc" -eq 1 ] && [ "$(printf '%s\n' "$ik_all" | grep -c '')" = 1 ] && printf '%s\n' "$ik_all" | grep -q 'would take every item of A4-gh' \
+  && [ "$ik_none_rc" -eq 1 ] && [ "$ik_t4" = "$ik_t5" ] && [ "$ik_n5" = "A1-ab A2-cd A3-ef A4-gh " ] || ik_split_bad=1
+[ -z "${ik_split_bad:-}" ] && [ "$ik_sp_rc" -eq 0 ] && [ "$ik_sp" = "split 2 items of A4-gh into A5-jk: split out" ] \
+  && [ "$(ls "$IK/works/agenda/A5-jk/entries" | tr '\n' ' ')" = "$ik_f2 $ik_f3 " ] && [ "$(ls "$IK/works/agenda/A4-gh/entries")" = "$(ik_file "$ik_p1")" ] \
+  && [ "$(sha "$IK/works/agenda/A5-jk/entries/$ik_f2")" = "$ik_sha2" ] && [ "$(ik_key A5-jk status)" = open ] && [ "$(ik_key A5-jk proposed)" = "<absent>" ] \
+  && [ "$(ik_key A4-gh status)" = open ] && ik check >/dev/null 2>&1 \
+  && ok "agenda-split moves exactly the named items (a tail and a full name) into A5-jk, Open for a person, each file whole with its state (byte-equal); A4-gh keeps the rest and stays Open; a split of every item or of none is refused in one line, nothing written" \
+  || bad "agenda-split wrong -- all rc=$ik_all_rc $ik_all / none rc=$ik_none_rc $ik_none / rc=$ik_sp_rc $ik_sp / $(ls "$IK/works/agenda/A5-jk/entries" 2>&1 | tr '\n' ' ')"
+# (g) walkthrough 2: an Open agenda proposed back reads Proposed (stored open + proposed, out of the open order) and
+# accept returns it; an older engine's stored `deferred` lists as Proposed and check passes, leaving it stored; no
+# generated file and no listing names Deferred.
+ik_pr=$(ik agenda-propose A4 --author person:smoke 2>&1); ik_pk=$(ik_key A4-gh status)/$(ik_key A4-gh proposed)
+ik_po=$(ik agenda --json | python3 -c 'import json,sys; print([x["id"] for x in json.load(sys.stdin) if x["shown_status"] in ("Open", "In progress")])')
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.update(status="deferred", order=None); open(p,"w").write(json.dumps(d, indent=2)+"\n")' "$IK/works/agenda/A3-ef/agenda.json"
+ik_c=$(ik check 2>&1); ik_c_rc=$?; ik_l=$(ik agenda 2>&1); ik_lj=$(ik agenda --json 2>&1); ik_sh=$(ik agenda-show A3-ef 2>&1)
+ik_dg=$(cd "$IK" && /usr/bin/grep -ril deferred agenda.md backlog.md works/index.json works/state.json); ik_dl=$(printf '%s\n' "$ik_l" "$ik_lj" "$ik_sh" | grep -ci deferred)
+ik_ac=$(ik agenda-accept A3-ef A4-gh 2>&1); ik_ac_rc=$?
+[ "$ik_pr" = "proposed A4-gh: Proposed, out of the open order (sikstack agenda-accept A4-gh puts it back)" ] && printf '%s\n' "$ik_pk" | grep -q "^open/{'by': 'person:smoke', 'at': " \
+  && ! printf '%s\n' "$ik_po" | grep -q A4-gh && [ "$ik_c_rc" -eq 0 ] && printf '%s\n' "$ik_l" | grep -qE '^A3-ef +Proposed +no items$' \
+  && [ -z "$ik_dg" ] && [ "$ik_dl" = 0 ] && [ "$ik_ac_rc" -eq 0 ] && [ "$(ik_key A3-ef status)" = open ] && [ "$(ik_key A4-gh proposed)" = "<absent>" ] \
+  && ok "agenda-propose moves an Open agenda back to Proposed (stored open + proposed, out of the open order); an older stored deferred lists as Proposed and passes check; no generated file and no listing names Deferred; agenda-accept returns both" \
+  || bad "propose or the old deferred record wrong -- $ik_pr / $ik_pk / $ik_po / rc=$ik_c_rc / $(printf '%s\n' "$ik_l" | grep A3-ef) / grep: $ik_dg $ik_dl / $ik_ac"
 
 # ---------------------------------------------------------------------------
 echo "== Test 10h: v74 a read leaves the tree clean -- next, rebuild and validate on a committed install change no tracked file; a real change still moves the stamps =="
@@ -4481,7 +4599,8 @@ if check == "applied":  # extra: the entry ids, oldest first; each applied, alon
         need(paths and all(p.startswith("works/agenda/") or p == "works/events.jsonl" for p in paths), f"{eid}: unrelated files ride its batch: {paths}")
         need(c["batch"]["command"].startswith("agenda-"), f"{eid}: the batch names {c['batch']['command']!r}")
     need(json.loads((root / "works/agenda/A3-x2/agenda.json").read_text())["title"] == "from the web", "A3-x2 is not on disk")
-    need(json.loads((root / "works/agenda/A2-m3/agenda.json").read_text())["status"] == "deferred", "A2-m3 is not deferred")
+    a2 = json.loads((root / "works/agenda/A2-m3/agenda.json").read_text())
+    need(a2["status"] == "open" and a2.get("proposed", {}).get("by") == "person:web", f"A2-m3 is not Proposed by the web: {a2}")
     synced()
 elif check == "thread":  # extra: the entry ids, oldest first: a web entry on A3-x2 and the web's accept of A5-p1
     for eid, c in zip(extra, [c for c in C if c["batch"]["inbox"]]):
@@ -4490,6 +4609,20 @@ elif check == "thread":  # extra: the entry ids, oldest first: a web entry on A3
     web = [json.loads(p.read_text()) for p in (root / "works/agenda/A3-x2/entries").glob("*.json")]
     need(any(e["author"] == "person:web" and e["source"] == "web:inbox" and e["kind"] == "note" for e in web), f"no web entry: {web}")
     need("proposed" not in json.loads((root / "works/agenda/A5-p1/agenda.json").read_text()), "A5-p1 is still Proposed")
+    synced()
+elif check == "items":  # extra: <refused entry id> then the applied entry ids, oldest first; each alone in its batch
+    refused, ids = extra[0], extra[1:]
+    batches = [c for c in C if c["batch"]["inbox"]]
+    landed = [c for c in batches if c["batch"]["inbox"][0]["id"] in ids]
+    need([c["batch"]["inbox"][0]["id"] for c in landed] == ids, f"batches in the wrong order or count: {[c['batch']['inbox'] for c in batches]}")
+    for eid, c in zip(ids, landed):
+        need(c["status"] == 200 and c["batch"]["inbox"] == [{"id": eid, "state": "applied", "exit": 0, "reason": None}], f"{eid}: {c['status']} {c['batch']['inbox']}")
+        need(I[eid]["state"] == "applied", f"{eid}: sikstack holds {I[eid]['state']}")
+        paths = [p for op in c["batch"]["ops"] for p in (op.get("path"), op.get("from"), op.get("to")) if p]  # a split's items go as moves
+        need(paths and all(p.startswith("works/agenda/") or p == "works/events.jsonl" for p in paths), f"{eid}: {c['batch']['ops']}")
+    r = with_result(refused)
+    need(len(r) == 1 and not r[0]["batch"]["ops"] and r[0]["batch"]["inbox"][0]["state"] == "refused" and r[0]["batch"]["inbox"][0]["exit"] == 2,
+         f"{refused}: {[(x['status'], x['batch']['inbox'], x['batch']['ops']) for x in r]}")
     synced()
 elif check == "refused":  # extra: <entry id> <exit> <reason>; the result alone in a batch with no file
     eid, code, reason = extra[0], int(extra[1]), extra[2]
@@ -4540,10 +4673,10 @@ PY
 }
 # (a) next applies two web changes, oldest first, each alone in its batch, and still prints its pointer.
 ib_e1=$(ib_web '{"kind": "add", "minted_id": "A3-x2", "items": ["A3-x2"], "fields": {"title": "from the web"}}')
-ib_e2=$(ib_web '{"kind": "defer", "items": ["A2-m3"]}')
+ib_e2=$(ib_web '{"kind": "propose", "items": ["A2-m3"]}')
 ib_m=$(ib_mark); ib "$IBA" next > "$IBW/a.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m" applied "$ib_e1" "$ib_e2")
 [ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && grep -qx "inbox $ib_e1: applied (agenda-add A3-x2): added A3-x2: from the web" "$IBW/a.txt" \
-  && grep -qx "inbox $ib_e2: applied (agenda-defer A2-m3): deferred A2-m3" "$IBW/a.txt" && grep -q '^store=cloud ' "$IBW/a.txt" \
+  && grep -qx "inbox $ib_e2: applied (agenda-propose A2-m3): proposed A2-m3: Proposed, out of the open order (sikstack agenda-accept A2-m3 puts it back)" "$IBW/a.txt" && grep -q '^store=cloud ' "$IBW/a.txt" \
   && [ "$(ib_lockfree)" = free ] \
   && ok "next applies the web's agenda changes oldest first, each alone in a landed batch with exactly its own files, then runs as always (no deadlock on .hi2vi/lock, the lock free after)" \
   || bad "next did not apply the inbox -- rc=$ib_rc $ib_r $(head -3 "$IBW/a.txt")"
@@ -4557,8 +4690,8 @@ ib_r=$(ib_check "$ib_m" refused "$ib_e3" 2 "$ib_line")
   || bad "a brief id was not refused unrun -- rc=$ib_rc $ib_r $(head -3 "$IBW/b.txt") $(diff <(echo "$ib_t1") <(echo "$ib_t2") | head -3)"
 # (c) a refusal (exit 1) and a usage error (exit 2) reach the entry verbatim: the same line the engine prints.
 ib_e4=$(ib_web '{"kind": "reopen", "items": ["A4-n5"]}')
-ib_e5=$(ib_web '{"kind": "defer", "items": []}')
-ib_l5=$(cd "$IBL" && python3 "$ENG" agenda-defer 2>&1); ib_rc5=$?
+ib_e5=$(ib_web '{"kind": "propose", "items": []}')
+ib_l5=$(cd "$IBL" && python3 "$ENG" agenda-propose --author=person:web 2>&1); ib_rc5=$?
 ib_l4="A4-n5 is Open already"
 ib_m=$(ib_mark); ib "$IBA" sync > "$IBW/c.txt"; ib_rc=$?
 ib_r=$(ib_check "$ib_m" refused "$ib_e4" 1 "$ib_l4"); ib_r2=$(ib_check "$ib_m" refused "$ib_e5" 2 "$ib_l5")
@@ -4593,9 +4726,9 @@ ib_m=$(ib_mark); ib "$IBA" next > "$IBW/f.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m
 ib_e8=$(ib_web '{"kind": "entry", "items": ["A3-x2"], "fields": {"kind": "note", "body": "a note from the web"}}')
 ib_e9=$(ib_web '{"kind": "accept", "items": ["A5-p1"]}')
 ib_m=$(ib_mark); ib "$IBA" next > "$IBW/g.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m" thread "$ib_e8" "$ib_e9")
-[ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && grep -qE "^inbox $ib_e8: applied \(agenda-entry A3-x2\): added entry A3-x2/.*: note by person:web \(web:inbox\)$" "$IBW/g.txt" \
+[ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && grep -qE "^inbox $ib_e8: applied \(agenda-item add A3-x2\): added item A3-x2/[0-9a-z]{4} \(.*\.json\): note by person:web \(web:inbox\)$" "$IBW/g.txt" \
   && grep -qx "inbox $ib_e9: applied (agenda-accept A5-p1): accepted A5-p1: Open, 1 in the open order" "$IBW/g.txt" \
-  && ok "next applies the web's entry (agenda-entry as person:web) and accept (agenda-accept), each alone in its landed batch" \
+  && ok "next applies the web's entry (agenda-item add as person:web) and accept (agenda-accept), each alone in its landed batch" \
   || bad "the web's entry or accept was not applied -- rc=$ib_rc $ib_r $(head -3 "$IBW/g.txt")"
 # (h) two writers on one item: another writer's entry lands in sikstack just before this checkout's own entry is
 # committed; both land, and the next sync pulls the other's with no differs line.
@@ -4608,6 +4741,41 @@ ib_n=$(ls "$IBA/.sikstack/works/agenda/A3-x2/entries" | wc -l | tr -d ' ')
   && ls "$IBA/.sikstack/works/agenda/A3-x2/entries" | grep -q 'wb2k' && ib "$IBA" check --no-rebuild >/dev/null 2>&1 \
   && ok "another writer's entry and this checkout's entry on one item both land: the command and the next sync exit 0 with no differs line, all three entries on disk" \
   || bad "two writers' entries conflicted -- rc=$ib_rc/$ib_rc2 n=$ib_n $(tail -2 "$IBW/h.txt") / $(tail -2 "$IBW/h2.txt")"
+# (i) 0.6.0's item kinds and split, and an old pending defer: three web items on A4-n5, then item-done, item-dismiss,
+# a split of the third into A6-q7 (A4-n5, left with no open item, closes Solved), item-reopen of the first (A4-n5 stays
+# Solved) and item-delete of A6-q7's one item (it closes Dropped), each its agenda-item or agenda-split command, each
+# alone in its landed batch; the old defer is refused with one line (exit 2), never run, nothing written for it.
+for ib_b in one two three; do ib_web "{\"kind\": \"entry\", \"items\": [\"A4-n5\"], \"fields\": {\"kind\": \"issue\", \"body\": \"$ib_b\"}}" > /dev/null; done
+ib "$IBA" next > "$IBW/i0.txt"
+ib_n1=$(ls "$IBA/.sikstack/works/agenda/A4-n5/entries" | sed -n 1p); ib_n2=$(ls "$IBA/.sikstack/works/agenda/A4-n5/entries" | sed -n 2p); ib_n3=$(ls "$IBA/.sikstack/works/agenda/A4-n5/entries" | sed -n 3p)
+ib_ent() { printf '{"kind": "%s", "items": ["%s"], "fields": {"entries": ["%s"]%s}%s}' "$1" "$2" "$3" "${4:-}" "${5:-}"; }
+ib_e10=$(ib_web '{"kind": "defer", "items": ["A4-n5"]}')
+ib_e11=$(ib_web "$(ib_ent item-done A4-n5 "$ib_n1")"); ib_e12=$(ib_web "$(ib_ent item-dismiss A4-n5 "$ib_n2")")
+ib_e13=$(ib_web "$(ib_ent split A4-n5 "$ib_n3" ', "title": "split on the web"' ', "minted_id": "A6-q7"')")
+ib_e14=$(ib_web "$(ib_ent item-reopen A4-n5 "$ib_n1")"); ib_e15=$(ib_web "$(ib_ent item-delete A6-q7 "$ib_n3")")
+ib_m=$(ib_mark); ib "$IBA" next > "$IBW/i.txt"; ib_rc=$?; ib_r=$(ib_check "$ib_m" items "$ib_e10" "$ib_e11" "$ib_e12" "$ib_e13" "$ib_e14" "$ib_e15")
+ib_d=$(python3 - "$IBA/.sikstack/works/agenda" "$ib_n1" "$ib_n2" "$ib_n3" <<'PY'
+import json, sys
+from pathlib import Path
+root, n1, n2, n3 = Path(sys.argv[1]), *sys.argv[2:]
+a4, a6 = (json.loads((root / a / "agenda.json").read_text()) for a in ("A4-n5", "A6-q7"))
+e1, e2 = (json.loads((root / "A4-n5/entries" / n).read_text()) for n in (n1, n2))
+bad = []
+if (a4["status"], a4["outcome"]) != ("solved", "all items dealt with: 1 done, 1 dismissed"): bad.append(f"A4-n5 {a4['status']} {a4['outcome']}")
+if (a6["status"], a6["reason"], a6["title"]) != ("dropped", "every item dismissed or deleted", "split on the web"): bad.append(f"A6-q7 {a6}")
+if (e1.get("state"), e1.get("state_by")) != ("open", "person:web") or (e2.get("state"), e2.get("state_by")) != ("dismissed", "person:web"): bad.append(f"states {e1.get('state')} {e2.get('state')}")
+if (root / "A4-n5/entries" / n3).exists() or (root / "A6-q7/entries" / n3).exists(): bad.append("the split item is still on disk")
+print("; ".join(bad) or "ok")
+PY
+)
+ib_l10="sikstack: error: the inbox entry's kind defer is retired: Deferred is gone since 0.6.0, so propose the agenda back instead (kind propose); nothing ran"
+[ "$ib_rc" = 0 ] && [ "$ib_r" = ok ] && [ "$ib_d" = ok ] && [ -n "$ib_n3" ] \
+  && grep -qxF "inbox $ib_e10: refused, exit 2 (agenda A4-n5): $ib_l10" "$IBW/i.txt" \
+  && grep -qE "^inbox $ib_e11: applied \(agenda-item done A4-n5\): done A4-n5/[0-9a-z]{4}$" "$IBW/i.txt" \
+  && grep -qE "^inbox $ib_e13: applied \(agenda-split A4-n5 A6-q7\): split 1 item of A4-n5 into A6-q7: split on the web$" "$IBW/i.txt" \
+  && grep -qE "^inbox $ib_e15: applied \(agenda-item delete A6-q7\): deleted A6-q7/[0-9a-z]{4}$" "$IBW/i.txt" \
+  && ok "next applies the web's item-done, item-dismiss, split (A4-n5 then closes Solved), item-reopen (A4-n5 stays Solved) and item-delete (A6-q7 closes Dropped) as their commands, each alone in its landed batch; an old pending defer is refused with one line, exit 2, never run" \
+  || bad "the web's item kinds or split were not applied, or the old defer ran -- rc=$ib_rc $ib_r / $ib_d / $(grep '^inbox' "$IBW/i.txt" | head -7 | tr '\n' '|')"
 if grep -rqF "$IBK" "$IBA" "$IBW"/*.txt "$IBW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"; fi
 kill "$IB_PID" 2>/dev/null; wait "$IB_PID" 2>/dev/null
 echo "inbox test runtime: $(( $(date +%s) - ib_t0 ))s"
@@ -5888,6 +6056,120 @@ if grep -rqF "$BKK" "$BKW"/*.txt "$BKW/fake" "$BKW/repo" "$BKW/si" 2>/dev/null |
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$BK_PID" 2>/dev/null; wait "$BK_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 38: agenda-feedback against the local fake sikstack -- an unlinked checkout is refused with the sign-in line and nothing is written; list prints the untriaged feedback newest first, one line each led by its id, outside the cloud boundary; file --agenda writes a feedback item (source feedback:<id>, the message and its URL) then records filed; file --new opens a new agenda by agenda-add's rule (an agent's is Proposed) holding it; a failed record leaves the item, lands it in sikstack and prints one line saying to run it again, and the rerun records without a second item; dismiss records with its reason and writes nothing here; a filed or dismissed piece never lists again, on this checkout or another; the key appears nowhere =="
+newtmp AFW; AFX="$AFW/xdg"; AFH="$AFW/prod"; AFU="$AFW/unlinked"; AFO="$AFW/other"
+af() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$AFX" python3 "$ENG" "$@" ) 2>&1; }
+{ mkhost "$AFH" && mkhost "$AFU" && mkhost "$AFO"; } > "$AFW/setup.txt" 2>&1 || bad "agenda-feedback probe: the installs failed -- $(tail -3 "$AFW/setup.txt")"
+AFK="feedback-smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s\n' "$AFK" > "$AFW/key"; chmod 600 "$AFW/key"
+python3 "$REPO_ROOT/tests/fake_sikstack.py" --dir "$AFW/fake" --port-file "$AFW/port" --key-file "$AFW/key" \
+  --project proj-1 --org org-1 --lifetime 900 > "$AFW/fake.txt" 2>&1 &
+AF_PID=$!
+for _ in $(seq 1 100); do [ -s "$AFW/port" ] && break; sleep 0.1; done
+AFS="http://127.0.0.1:$(cat "$AFW/port" 2>/dev/null)"
+for _h in "$AFH" "$AFO"; do
+  printf '%s\n' "$AFK" | ( cd "$_h" && XDG_CONFIG_HOME="$AFX" python3 "$ENG" link "$AFS/projects/proj-1" ) >> "$AFW/link.txt" 2>&1 \
+    || bad "agenda-feedback probe: the link failed -- $(tail -2 "$AFW/link.txt")"
+done
+AFL="$AFW/fake/requests.jsonl"
+af_add() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$AFS/_fake/feedback" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
+af_ctl() { curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$AFS/_fake/control" >/dev/null; }
+af_ws() { grep -c '"path": "/api/workspace/' "$AFL" 2>/dev/null || true; }
+af_items() { find "$1/.sikstack/works/agenda" -path '*/entries/*.json' 2>/dev/null | wc -l | tr -d ' '; }
+AF_A=$(af_add '{"message": "Export hangs at 99%\nOn a 2 GB file", "channel": "web", "value": 2, "comment": "every time"}')
+AF_B=$(af_add '{"message": "Search is slow"}')
+AF_C=$(af_add '{"message": "Love the pager"}')
+AF_D=$(af_add '{"message": "spam spam"}')
+af_aid=$(af "$AFH" agenda-add --title "Export" --author person:op | sed -n 's/^added \(A[0-9]*-[a-z0-9]*\): .*/\1/p')
+mkdir -p "$AFU/.sikstack/works/agenda" && cp -R "$AFH/.sikstack/works/agenda/$af_aid" "$AFU/.sikstack/works/agenda/"
+# (a) unlinked: the sign-in line, nothing written, nothing sent.
+af_u0=$(af_items "$AFU"); af_n0=$(grep -c '"route": "triage"' "$AFL" 2>/dev/null || true)
+af_o1=$(af "$AFU" agenda-feedback list); af_rc1=$?
+af_o2=$(af "$AFU" agenda-feedback file "$AF_A" --agenda "$af_aid" --author person:op); af_rc2=$?
+af_o3=$(af "$AFU" agenda-feedback dismiss "$AF_A" --author person:op); af_rc3=$?
+[ "$af_rc1$af_rc2$af_rc3" = 111 ] && [ -n "$af_aid" ] \
+  && printf '%s\n' "$af_o1" | grep -q '^agenda-feedback list: this checkout is not linked to sikstack .*run /sikstack:sign-in .*(nothing was read)$' \
+  && printf '%s\n' "$af_o2" | grep -q '^agenda-feedback file: this checkout is not linked to sikstack .*(nothing was filed)$' \
+  && printf '%s\n' "$af_o3" | grep -q '^agenda-feedback dismiss: this checkout is not linked to sikstack .*(nothing was dismissed)$' \
+  && [ "$(printf '%s\n' "$af_o2" | grep -c '^agenda-feedback')" = 1 ] && [ "$(af_items "$AFU")" = "$af_u0" ] \
+  && [ "$(grep -c '"route": "triage"' "$AFL" 2>/dev/null || true)" = "$af_n0" ] \
+  && ok "an unlinked checkout is refused with the one sign-in line by list, file and dismiss; nothing is written or sent" \
+  || bad "the unlinked refusal is wrong -- aid=$af_aid rc=$af_rc1$af_rc2$af_rc3 [$af_o1] [$af_o2] [$af_o3]"
+# (b) list: newest first, one line each led by its id; outside the cloud boundary.
+af_ws0=$(af_ws)
+af_o4=$(af "$AFH" agenda-feedback list); af_rc4=$?
+[ "$af_rc4" = 0 ] && [ "$(printf '%s\n' "$af_o4" | sed -n 1p)" = "untriaged=4 more=no project=proj-1" ] \
+  && printf '%s\n' "$af_o4" | sed -n 2p | grep -q "^$AF_D at=" && printf '%s\n' "$af_o4" | sed -n 4p | grep -q "^$AF_B at=" \
+  && printf '%s\n' "$af_o4" | sed -n 5p | grep -qxF "$AF_A at=2026-11-25T01:00:00Z channel=web value=2 url=http://fake.localhost/feedback/$AF_A -- Export hangs at 99% On a 2 GB file | comment: every time" \
+  && [ "$(af_ws)" = "$af_ws0" ] \
+  && ok "agenda-feedback list prints the untriaged feedback newest first, one line each led by its id (when, channel, value, url, the message and its comment), with no workspace request around it" \
+  || bad "the list is wrong -- rc=$af_rc4 ws=$af_ws0/$(af_ws) [$af_o4]"
+# (c) file --agenda: the item, then the mark; file --new: an agent's new agenda is Proposed, holding it.
+af_o5=$(af "$AFH" agenda-feedback file "$AF_A" --agenda "$af_aid" --author person:op); af_rc5=$?
+af_o6=$(af "$AFH" agenda-feedback file "$AF_B" --new --title "Search speed" --author agent:claude-opus-5-5); af_rc6=$?
+af_new=$(printf '%s\n' "$af_o6" | sed -n 's/^added \(A[0-9]*-[a-z0-9]*\): Search speed (Proposed: agenda-accept or agenda-drop it)$/\1/p')
+af_item=$(find "$AFH/.sikstack/works/agenda/$af_aid/entries" -name '*.json' | head -1)
+af_post=$(grep '"route": "triage"' "$AFL" | grep '"method": "POST"' | head -1)
+af_body=$(python3 - "$af_item" "$AF_A" <<'PY2' 2>&1
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["kind"] == "feedback" and d["source"] == "feedback:" + sys.argv[2] and d["author"] == "person:op", d
+assert d["body"] == "Export hangs at 99%\nOn a 2 GB file\n\nhttp://fake.localhost/feedback/" + sys.argv[2], d
+print("ok")
+PY2
+)
+af_shown=$(af "$AFH" agenda --json | python3 -c 'import json,sys; print([a["shown_status"] for a in json.load(sys.stdin) if a["id"] == sys.argv[1]][0])' "$af_new" 2>&1)
+[ "$af_rc5" = 0 ] && [ "$af_rc6" = 0 ] && [ -n "$af_new" ] && [ "$af_body" = ok ] && [ "$af_shown" = Proposed ] \
+  && printf '%s\n' "$af_o5" | sed -n 1p | grep -q "^added item $af_aid/[0-9a-z]\{4\} (.*): feedback by person:op (feedback:$AF_A)\$" \
+  && [ "$(printf '%s\n' "$af_o5" | sed -n 2p)" = "filed=$AF_A agenda=$af_aid" ] \
+  && [ "$(printf '%s\n' "$af_o6" | tail -1)" = "filed=$AF_B agenda=$af_new" ] \
+  && printf '%s\n' "$af_post" | grep -qF "\"body\": {\"state\": \"filed\", \"agenda\": \"$af_aid\", \"by\": \"person:op\"}" \
+  && ok "file --agenda writes a feedback item (source feedback:<id>, the message and its URL) then records filed on that agenda; file --new opens an agent's Proposed agenda holding it and records filed there" \
+  || bad "file is wrong -- rc=$af_rc5/$af_rc6 new=$af_new shown=$af_shown body=[$af_body] post=[$af_post] [$af_o5] [$af_o6]"
+# (d) a failed record: the item stays (and lands in sikstack), one line says to run it again; the rerun only records.
+af_ctl '{"triage_answer": {"status": 503, "detail": "the store is unavailable", "method": "POST"}}'
+af_i7=$(af_items "$AFH")
+af_o7=$(af "$AFH" agenda-feedback file "$AF_C" --agenda "$af_aid" --author person:op); af_rc7=$?
+af_i8=$(af_items "$AFH")
+af_o8=$(af "$AFH" agenda-feedback file "$AF_C" --agenda "$af_aid" --author person:op); af_rc8=$?
+af_landed=$(curl -s "$AFS/_fake/state" | python3 -c 'import json,sys; print(sum(1 for p, r in json.load(sys.stdin)["files"].items() if "/entries/" in p and not r["deleted"]))')
+[ "$af_rc7" = 1 ] && [ "$af_rc8" = 0 ] && [ "$af_i8" = "$((af_i7 + 1))" ] && [ "$(af_items "$AFH")" = "$af_i8" ] \
+  && printf '%s\n' "$af_o7" | grep -q "^added item $af_aid/" \
+  && printf '%s\n' "$af_o7" | grep -qxF "agenda-feedback file: sikstack refused (HTTP 503): the store is unavailable (not recorded); the item stays on $af_aid: run sikstack agenda-feedback file $AF_C --agenda $af_aid --author person:op again to record it" \
+  && [ "$af_landed" = 3 ] \
+  && [ "$af_o8" = "$(printf '%s\n%s' "already on $af_aid: an item there holds feedback:$AF_C, so only the mark is recorded" "filed=$AF_C agenda=$af_aid")" ] \
+  && ok "a failed record leaves the item (it still lands in sikstack) and one line saying to run file again; the rerun records the mark without a second item" \
+  || bad "the failed record is wrong -- rc=$af_rc7/$af_rc8 items=$af_i7/$af_i8/$(af_items "$AFH") landed=$af_landed [$af_o7] [$af_o8]"
+# (e) dismiss: the mark with its reason, nothing written here; then nothing lists, on this checkout or another.
+af_i9=$(af_items "$AFH"); af_ws9=$(af_ws)
+af_o9=$(af "$AFH" agenda-feedback dismiss "$AF_D" --reason "spam" --author person:op); af_rc9=$?
+af_o10=$(af "$AFO" agenda-feedback list); af_rc10=$?
+af_o11=$(af "$AFH" agenda-feedback list --json)
+[ "$af_rc9" = 0 ] && [ "$af_o9" = "dismissed=$AF_D reason=spam" ] && [ "$(af_items "$AFH")" = "$af_i9" ] && [ "$(af_ws)" = "$af_ws9" ] \
+  && grep '"route": "triage"' "$AFL" | grep -qF "\"body\": {\"state\": \"dismissed\", \"reason\": \"spam\", \"by\": \"person:op\"}" \
+  && [ "$af_rc10" = 0 ] && [ "$af_o10" = "untriaged=0 more=no project=proj-1" ] \
+  && printf '%s\n' "$af_o11" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d == {"project": "proj-1", "feedback": [], "more": False}, d' \
+  && ok "dismiss records the mark with its reason and writes nothing here; a filed or dismissed piece never lists again, on this checkout or another linked one (--json alike)" \
+  || bad "dismiss or the second list is wrong -- rc=$af_rc9/$af_rc10 [$af_o9] [$af_o10] [$af_o11]"
+# (f) refusals before any request: a bad id, an unknown agenda, --new without --title, --title without --new.
+af_n12=$(grep -c '"route": "triage"' "$AFL"); af_i12=$(af_items "$AFH")
+af_o12=$(af "$AFH" agenda-feedback file nope --agenda "$af_aid" --author person:op); af_rc12=$?
+af_o13=$(af "$AFH" agenda-feedback file "$AF_A" --agenda A99-zz --author person:op); af_rc13=$?
+af_o14=$(af "$AFH" agenda-feedback file "$AF_A" --new --author person:op); af_rc14=$?
+af_o15=$(af "$AFH" agenda-feedback file "$AF_A" --agenda "$af_aid" --title x --author person:op); af_rc15=$?
+[ "$af_rc12$af_rc13$af_rc14$af_rc15" = 1111 ] && [ "$(grep -c '"route": "triage"' "$AFL")" = "$af_n12" ] && [ "$(af_items "$AFH")" = "$af_i12" ] \
+  && printf '%s\n' "$af_o12" | grep -q "^agenda-feedback file: 'nope' is not a feedback id" \
+  && printf '%s\n' "$af_o13" | grep -qx 'A99-zz names no agenda' \
+  && printf '%s\n' "$af_o14" | grep -q '^agenda-feedback file: --new needs --title' \
+  && printf '%s\n' "$af_o15" | grep -q '^agenda-feedback file: --title goes with --new only' \
+  && ok "a bad feedback id, an unknown agenda, --new without --title and --title without --new are refused in one line before any request" \
+  || bad "a refusal is wrong -- rc=$af_rc12$af_rc13$af_rc14$af_rc15 [$af_o12] [$af_o13] [$af_o14] [$af_o15]"
+if grep -rqF "$AFK" "$AFH" "$AFO" "$AFW"/*.txt "$AFW/fake" 2>/dev/null || printf '%s\n' "$af_o4$af_o5$af_o7$af_o9" | grep -qF "$AFK"; then
+  bad "the workspace key leaked into the tree, the output or the request log"
+fi
+kill "$AF_PID" 2>/dev/null; wait "$AF_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo

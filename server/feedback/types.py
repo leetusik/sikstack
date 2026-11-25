@@ -250,3 +250,22 @@ class FeedbackMetrics:
 
     totals: FeedbackMetricCounts
     daily_counts: tuple[FeedbackDailyMetricCount, ...]
+
+
+#: The two marks a piece of feedback takes from the engine (``feedback_triage``).
+TRIAGE_FILED = "filed"
+TRIAGE_DISMISSED = "dismissed"
+TRIAGE_STATES = (TRIAGE_FILED, TRIAGE_DISMISSED)
+
+
+@dataclass(slots=True, kw_only=True)
+class FeedbackTriageRecord:
+    """What became of one piece of feedback: ``filed`` on ``agenda``, or ``dismissed``
+    (``reason`` optional), by whom and when. The latest mark only."""
+
+    feedback_id: UUID
+    state: str
+    agenda: str | None
+    reason: str | None
+    by: str
+    at: datetime

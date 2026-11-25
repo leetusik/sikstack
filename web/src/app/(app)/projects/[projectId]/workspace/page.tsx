@@ -7,7 +7,6 @@ import { WS_HEAD } from "@/content/workspace/frame";
 import {
   AgendaFailed,
   AgendaList,
-  deferredPageFrom,
   workspaceHrefs,
 } from "@/sikstack/workspace/agenda";
 import { NO_LINE, WsNav, wsSyncLine } from "@/sikstack/workspace/frame";
@@ -28,13 +27,10 @@ export const metadata: Metadata = { title: WS_HEAD.title };
 
 export default async function AgendaPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { projectId } = await params;
-  const query = await searchParams;
   const { token } = await requireIdentity();
   const timeZone = viewerTimeZone(await cookies());
   const hrefs = workspaceHrefs(projectId);
@@ -86,7 +82,6 @@ export default async function AgendaPage({
           status: p.status,
         }))}
         timeZone={timeZone}
-        deferredPage={deferredPageFrom(query.deferred)}
       />
     </div>
   );

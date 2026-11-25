@@ -19,17 +19,19 @@ import { StateBlock, type StateModel } from "@/sikstack/states";
 import { Button, Swap } from "@/sikstack/ui";
 import {
   acceptAgendaItems,
-  deferAgendaItems,
+  changeAgendaEntries,
   deleteAgendaItems,
   discardChange,
   dropAgendaItems,
   editAgendaItem,
   noteAgendaItem,
+  proposeAgendaItems,
   reopenAgendaItems,
   retryChange,
   solveAgendaItems,
+  splitAgenda,
 } from "@/lib/workspace/actions";
-import type { WorkspaceList } from "@/lib/workspace/address";
+import { agendaItemHref, type WorkspaceList } from "@/lib/workspace/address";
 import { dates } from "@/lib/workspace/model";
 import type { WriteAnswer } from "@/lib/workspace/types";
 
@@ -57,7 +59,7 @@ import {
   type Busy,
 } from "./state";
 import { Thread } from "./thread";
-import { threadView } from "./thread-model";
+import { ITEM_KIND, threadView } from "./thread-model";
 
 export type { ItemPageRead } from "./model";
 
@@ -68,15 +70,18 @@ export type { ItemPageRead } from "./model";
  * 2. the head: the id and the title, the status and Waiting for sync as one group, the actions; the facts;
  * 3. the form slot (Edit, Solve or Drop, one at a time);
  * 4. a change the workspace refused: its line, then **Discard** and **Try again** at the notice's right end;
- * 5. **Thread** (P61-e9): every entry oldest first, then the note composer;
+ * 5. **Items** (P61-e9's thread): every item oldest first with its state and Done, Dismiss, Reopen, Delete; the
+ *    Split; then the note composer;
  * 6. **Phases**.
  *
  * On a Proposed item the head offers **Accept** (P61-e9, the head's primary): it becomes Open, first in the open
  * order, and waits for the sync; the read then says so (`accepting`), so a reload offers no second Accept.
  *
  * Every write is one inbox entry through the Workspace's actions; it is laid over the read until a read shows
- * it applied or refused, and the page reads again after each one. After its own Delete the page says **Item
- * deleted** and the Agenda opens. An item the read does not hold is Not found, under the back row. A change
+ * it applied or refused, and the page reads again after each one. An item change is the read's to show: it
+ * predicts the item's state and the agenda's (its last open item gone, the agenda reads Solved or Dropped), marked
+ * Waiting for sync. A Split opens the new agenda (the id the route minted), which reads its items while the split
+ * waits. After its own Delete the page says **Agenda deleted** and the Agenda opens. An item the read does not hold is Not found, under the back row. A change
  * that takes the item from under the page lands on a drawn state (`state.ts`): Try again on a refused add opens
  * the id it was re-sent under.
  */
@@ -245,7 +250,8 @@ export function AgendaItemPage({
     edit: open("edit"),
     solve: open("solve"),
     drop: open("drop"),
-    defer: () => void sendHead("defer", () => deferAgendaItems(project, [id])),
+    propose: () =>
+      void sendHead("propose", () => proposeAgendaItems(project, [id])),
     reopen: () =>
       void sendHead("reopen", () => reopenAgendaItems(project, [id])),
     delete: () => dispatch({ type: "ask" }),
@@ -391,6 +397,26 @@ export function AgendaItemPage({
         onAdd={async (body) => {
           const answer = await noteAgendaItem(project, id, body);
           router.refresh();
+          return answer;
+        }}
+        onItem={async (action, entry) => {
+          const answer = await changeAgendaEntries(
+            project,
+            ITEM_KIND[action],
+            id,
+            [entry.file as string],
+          );
+          if (answer.ok) dispatch({ type: "written", entry: answer.entry, timeZone });
+          router.refresh();
+          return answer;
+        }}
+        onSplit={async (files, splitTitle) => {
+          const answer = await splitAgenda(project, id, files, splitTitle);
+          const minted = answer.ok
+            ? (answer.item ?? answer.entry.minted_id)
+            : null;
+          if (minted) router.push(agendaItemHref(project, minted, from));
+          else router.refresh();
           return answer;
         }}
       />

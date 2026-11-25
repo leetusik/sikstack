@@ -54,7 +54,7 @@ export const ITEM_STATES = pageStates("Agenda item", [
   { key: "open", label: "Open", from: "agenda-item/item-page.tsx (ready) · item.state open", data: true },
   { key: "proposed", label: "Proposed", from: "agenda-item/model.ts headActions, head.tsx HeadMarks · item.state proposed (recorded: A8-sf, A9-hb; made on another item from A9-hb's proposed)", data: true },
   { key: "note-waiting", label: "Note waiting for sync", from: "agenda-item/thread.tsx WaitingBadge · entry.sync waiting (made: states/web-waiting.json's pending note, put on this item)", data: true },
-  { key: "deferred", label: "Deferred", from: "agenda-item/item-page.tsx (ready) · item.state deferred", data: true },
+  { key: "items", label: "Items done and dismissed", from: "agenda-item/thread.tsx items · entry.state done, dismissed (made: the agenda's first item done, its second dismissed)", data: true },
   { key: "solved", label: "Solved", from: "agenda-item/item-page.tsx (ready) · item.state solved, its outcome", data: true },
   { key: "dropped", label: "Dropped", from: "agenda-item/item-page.tsx (ready) · item.state dropped, its reason", data: true },
   { key: "waiting", label: "Waiting for sync", from: "frame/waiting.tsx WaitingBadge · item.sync waiting (states/waiting.json)", data: true },

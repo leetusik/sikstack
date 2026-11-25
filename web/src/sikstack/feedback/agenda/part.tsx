@@ -50,7 +50,6 @@ export function AgendaPart({ state }: { state: AgendaPartState }) {
 const KNOWN: readonly string[] = [
   "open",
   "in_progress",
-  "deferred",
   "solved",
   "dropped",
 ];

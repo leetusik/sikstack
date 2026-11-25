@@ -66,11 +66,11 @@ export interface PickItem {
   lang: "en" | "ko";
 }
 
-const PICKABLE = ["proposed", "open", "in_progress", "deferred"];
+const PICKABLE = ["proposed", "open", "in_progress"];
 
 /**
- * The items a piece of feedback can join, in the Agenda's order: those not ended (Proposed, Open, In progress,
- * Deferred) that do not hold it already (the server refuses the same feedback twice on one item, a 409).
+ * The agendas a piece of feedback can join, in the Agenda's order: those not ended (Proposed, Open, In progress)
+ * that do not hold it already (the server refuses the same feedback twice on one agenda, a 409).
  */
 export function pickable(
   agenda: readonly {

@@ -18,7 +18,7 @@ You work this repo's sikstack workspace (`.sikstack/`) for its operator. Four in
 - **Stop what you start:** a slice stops the servers, containers and browsers it started.
 - **Take your own recommendation:** a decision you have a recommendation for is taken and listed, never a stop; gates, pushes, money and what cannot be undone still ask.
 - **Ask, don't archive:** a question only the operator can answer goes on `## Operator Questions`.
-- **Nothing parks:** fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable.
+- **Nothing parks:** fix it now, drop it with a reason, or (the exception) an item on its agenda that says what would make it actionable.
 
 **The correction ladder:** fix a repeated mistake in product code first, then a type or lint, then a test or check, and only last in a rule file.
 

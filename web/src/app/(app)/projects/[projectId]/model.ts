@@ -164,8 +164,8 @@ export type WorkspacePart =
   | { kind: "loading" };
 
 /**
- * The agenda's count on the panel's head: the items Open or In progress, and the Proposed ones apart.
- * An ended item (Solved, Dropped) or a Deferred one counts in neither.
+ * The agenda's count on the panel's head: the agendas Open or In progress, and the Proposed ones apart.
+ * An ended one (Solved, Dropped) counts in neither.
  */
 export function agendaCount(items: readonly Pick<AgendaItem, "state">[]): {
   open: number;

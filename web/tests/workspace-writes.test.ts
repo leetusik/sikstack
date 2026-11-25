@@ -3,16 +3,18 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   acceptAgendaItems,
   addAgendaItem,
-  deferAgendaItems,
+  changeAgendaEntries,
   deleteAgendaItems,
   discardChange,
   dropAgendaItems,
   editAgendaItem,
   moveAgendaItem,
   noteAgendaItem,
+  proposeAgendaItems,
   reopenAgendaItems,
   retryChange,
   solveAgendaItems,
+  splitAgenda,
 } from "@/lib/workspace/actions";
 import {
   begin,
@@ -78,7 +80,7 @@ function entry(patch: Partial<InboxEntry>): InboxEntry {
   entries += 1;
   return {
     id: `7c1e4b2a-0d3f-4a5b-8c6d-${String(entries).padStart(12, "0")}`,
-    kind: "defer",
+    kind: "propose",
     items: ["A2-k5"],
     fields: {},
     minted_id: null,
@@ -150,8 +152,8 @@ describe("the write actions post the route's exact payload", () => {
         { kind: "move", items: ["A2-k5"], fields: { after: "A1-h7" } },
       ],
       [
-        () => deferAgendaItems(PROJECT, ["A2-k5", "A11-f4"]),
-        { kind: "defer", items: ["A2-k5", "A11-f4"], fields: {} },
+        () => proposeAgendaItems(PROJECT, ["A2-k5", "A11-f4"]),
+        { kind: "propose", items: ["A2-k5", "A11-f4"], fields: {} },
       ],
       [
         () => solveAgendaItems(PROJECT, ["A2-k5"]),
@@ -200,6 +202,41 @@ describe("the write actions post the route's exact payload", () => {
           fields: { kind: "note", body: "Seen on the **2 GB** export too." },
         },
       ],
+      // the agenda items phase: an item change names one agenda and its items by their full file names (repeats
+      // sent once); the server adds the author
+      [
+        () => changeAgendaEntries(PROJECT, "item-done", "A2-k5", ["20261120T000000.000001Z-xa01.json"]),
+        { kind: "item-done", items: ["A2-k5"], fields: { entries: ["20261120T000000.000001Z-xa01.json"] } },
+      ],
+      [
+        () =>
+          changeAgendaEntries(PROJECT, "item-dismiss", "A2-k5", [
+            "20261120T000000.000001Z-xa01.json",
+            "20261121T093000.000002Z-hnj0.json",
+            "20261120T000000.000001Z-xa01.json",
+          ]),
+        {
+          kind: "item-dismiss",
+          items: ["A2-k5"],
+          fields: { entries: ["20261120T000000.000001Z-xa01.json", "20261121T093000.000002Z-hnj0.json"] },
+        },
+      ],
+      [
+        () => changeAgendaEntries(PROJECT, "item-reopen", "A2-k5", ["20261121T093000.000002Z-hnj0.json"]),
+        { kind: "item-reopen", items: ["A2-k5"], fields: { entries: ["20261121T093000.000002Z-hnj0.json"] } },
+      ],
+      [
+        () => changeAgendaEntries(PROJECT, "item-delete", "A2-k5", ["20261121T093000.000002Z-hnj0.json"]),
+        { kind: "item-delete", items: ["A2-k5"], fields: { entries: ["20261121T093000.000002Z-hnj0.json"] } },
+      ],
+      [
+        () => splitAgenda(PROJECT, "A2-k5", ["20261121T093000.000002Z-hnj0.json"], "  Retry on slow networks "),
+        {
+          kind: "split",
+          items: ["A2-k5"],
+          fields: { entries: ["20261121T093000.000002Z-hnj0.json"], title: "Retry on slow networks" },
+        },
+      ],
     ];
     for (const [act, body] of cases) {
       const calls = api(201, { entry: entry({}) });
@@ -240,6 +277,26 @@ describe("the write actions post the route's exact payload", () => {
     expect(calls[0].url).toBe(`${BASE}/inbox/${closed.id}/retry`);
   });
 
+  it("answers a split's new agenda (`{entry, agenda}`) as `item`, on Try again too", async () => {
+    const split = entry({
+      kind: "split",
+      items: ["A2-k5"],
+      fields: { entries: ["20261121T093000.000002Z-hnj0.json"], title: "Retry", author: "person:sg" },
+      minted_id: "A16-b4",
+    });
+    api(201, { entry: split, agenda: "A16-b4" });
+    expect(await splitAgenda(PROJECT, "A2-k5", ["20261121T093000.000002Z-hnj0.json"], "Retry")).toEqual({
+      ok: true,
+      entry: split,
+      item: "A16-b4",
+    });
+    api(201, { entry: { ...split, minted_id: "A17-c5" }, agenda: "A17-c5" });
+    expect((await retryChange(PROJECT, split.id)) as { item: string }).toMatchObject({
+      ok: true,
+      item: "A17-c5",
+    });
+  });
+
   it("sends nothing for a change the route would refuse, and says the route's words", async () => {
     const refusals: [() => Promise<unknown>, unknown][] = [
       [
@@ -271,7 +328,7 @@ describe("the write actions post the route's exact payload", () => {
         },
       ],
       [
-        () => deferAgendaItems(PROJECT, []),
+        () => proposeAgendaItems(PROJECT, []),
         {
           ok: false,
           reason: "refused",
@@ -279,7 +336,29 @@ describe("the write actions post the route's exact payload", () => {
         },
       ],
       [
-        () => deferAgendaItems(PROJECT, ["A51-05"]),
+        () => changeAgendaEntries(PROJECT, "item-done", "A2-k5", []),
+        {
+          ok: false,
+          reason: "refused",
+          message: "entries must list one or more items' full file names",
+        },
+      ],
+      [
+        // a tail or a ref is refused: send the item's file
+        () => changeAgendaEntries(PROJECT, "item-done", "A2-k5", ["A2-k5/xa01"]),
+        {
+          ok: false,
+          reason: "refused",
+          message:
+            "A2-k5/xa01 is not an item's full file name (like 20261125T010203.000004Z-hnj0.json)",
+        },
+      ],
+      [
+        () => splitAgenda(PROJECT, "A2-k5", ["20261121T093000.000002Z-hnj0.json"], " "),
+        { ok: false, reason: "title", message: TITLE_REFUSAL },
+      ],
+      [
+        () => proposeAgendaItems(PROJECT, ["A51-05"]),
         {
           ok: false,
           reason: "refused",
@@ -307,7 +386,7 @@ describe("the write actions post the route's exact payload", () => {
         { ok: false, reason: "not-found", message: null },
       ],
       [
-        () => deferAgendaItems("../keys", ["A2-k5"]),
+        () => proposeAgendaItems("../keys", ["A2-k5"]),
         { ok: false, reason: "not-found", message: null },
       ],
     ];
@@ -337,7 +416,14 @@ describe("the write actions post the route's exact payload", () => {
         items: ["A3-1z", "A2-k5"],
         fields: { kind: "note", body: "x" },
       }),
-    ).toEqual({ ok: false, error: "entry takes exactly one item" });
+    ).toEqual({ ok: false, error: "entry takes exactly one agenda" });
+    expect(
+      changeBody({
+        kind: "split",
+        items: ["A3-1z", "A2-k5"],
+        fields: { entries: ["20261120T000000.000001Z-xa01.json"], title: "x" },
+      }),
+    ).toEqual({ ok: false, error: "split takes exactly one agenda" });
     expect(
       changeBody({
         kind: "entry",
@@ -371,11 +457,11 @@ describe("the write actions post the route's exact payload", () => {
   });
 
   it("answers the route's refusals verbatim", async () => {
-    api(422, { detail: "A9-zz names no agenda item" });
-    expect(await deferAgendaItems(PROJECT, ["A9-zz"])).toEqual({
+    api(422, { detail: "A9-zz names no agenda" });
+    expect(await proposeAgendaItems(PROJECT, ["A9-zz"])).toEqual({
       ok: false,
       reason: "refused",
-      message: "A9-zz names no agenda item",
+      message: "A9-zz names no agenda",
     });
     api(422, { detail: TITLE_REFUSAL });
     expect(
@@ -392,13 +478,13 @@ describe("the write actions post the route's exact payload", () => {
       message: "this change is applied, not open",
     });
     api(404, { detail: "workspace not found" });
-    expect(await deferAgendaItems(PROJECT, ["A2-k5"])).toEqual({
+    expect(await proposeAgendaItems(PROJECT, ["A2-k5"])).toEqual({
       ok: false,
       reason: "not-found",
       message: "workspace not found",
     });
     api(503, { detail: "the workspace store is unavailable" });
-    expect(await deferAgendaItems(PROJECT, ["A2-k5"])).toEqual({
+    expect(await proposeAgendaItems(PROJECT, ["A2-k5"])).toEqual({
       ok: false,
       reason: "failed",
     });
@@ -408,7 +494,7 @@ describe("the write actions post the route's exact payload", () => {
         throw new TypeError("fetch failed");
       }),
     );
-    expect(await deferAgendaItems(PROJECT, ["A2-k5"])).toEqual({
+    expect(await proposeAgendaItems(PROJECT, ["A2-k5"])).toEqual({
       ok: false,
       reason: "failed",
     });
@@ -471,17 +557,70 @@ function shown(read: AgendaRead, overlay: Overlay) {
 
 describe("the optimistic model", () => {
   it("marks a written change Waiting for sync and shows its result", () => {
-    const defer = entry({ kind: "defer", items: ["A11-f4"] });
-    const overlay = write(EMPTY_OVERLAY, defer);
+    const propose = entry({ kind: "propose", items: ["A11-f4"] });
+    const overlay = write(EMPTY_OVERLAY, propose);
     const { agenda } = view({ agenda: STORED }, overlay);
     expect(agenda.find((r) => r.id === "A11-f4")).toMatchObject({
-      state: "deferred",
+      state: "proposed",
+      proposed: { by: null, at: null },
       sync: "waiting",
       changed: "2026-11-18",
     });
     expect(agenda.filter((r) => r.sync === "waiting").map((r) => r.id)).toEqual(
       ["A11-f4"],
     );
+  });
+
+  it("lays only the mark over an item change and a split: the read predicts the items, counts and status", () => {
+    // the server's read while item-done on the last open item waits: the agenda closes itself (predicted)
+    const predicted = row("A11-f4", "A weekly mail of what changed in each project", {
+      state: "solved",
+      outcome: "all items dealt with: 1 done, 0 dismissed",
+      itemsOpen: 0,
+      entryCount: 1,
+      sync: "waiting",
+      entries: [
+        {
+          id: "20261120T000000.000001Z-xa01",
+          file: "20261120T000000.000001Z-xa01.json",
+          ref: "A11-f4/xa01",
+          state: "done",
+          stateBy: "person:sg",
+          stateAt: "2026-11-18T09:00:00Z",
+          deleting: false,
+          kind: "note",
+          author: "person:sg",
+          by: "person",
+          name: "sg",
+          source: "web:agenda",
+          created: "2026-11-17T09:00:00Z",
+          body: "Send it on Mondays.",
+          job: null,
+          sync: "waiting",
+        },
+      ],
+    });
+    for (const kind of ["item-done", "item-dismiss", "item-reopen", "item-delete", "split"] as const) {
+      const change = entry({
+        kind,
+        items: ["A11-f4"],
+        fields: { entries: ["20261120T000000.000001Z-xa01.json"] },
+      });
+      let overlay = write(EMPTY_OVERLAY, change);
+      const read: AgendaRead = { agenda: [STORED[0], predicted] };
+      overlay = reconcile(overlay, read);
+      const shownRow = view(read, overlay).agenda.find((r) => r.id === "A11-f4");
+      // the read's prediction stands: nothing of the change's own is laid over it but the mark
+      expect(shownRow).toEqual({ ...predicted, sync: "waiting" });
+      // marked waiting by the read: the change stays until a read without the mark, after a sync
+      expect(overlay.changes).toHaveLength(1);
+      const applied = { ...predicted, sync: null, entries: [{ ...predicted.entries![0], sync: null }] };
+      overlay = reconcile(overlay, {
+        agenda: [STORED[0], applied],
+        synced: "2026-11-18T09:05:00Z",
+      });
+      expect(overlay.changes).toEqual([]);
+    }
   });
 
   it("keeps a pending change through a read that does not project it, and clears on one that applies it", () => {
@@ -737,8 +876,8 @@ describe("the optimistic model", () => {
       "A1-h7",
     ]);
     overlay = write(EMPTY_OVERLAY, entry({ kind: "reopen", items: ["A1-h7"] }));
-    const deferredFirst = [STORED[3], ...STORED.slice(0, 3)];
-    const reopened = view({ agenda: deferredFirst }, overlay).agenda;
+    const solvedFirst = [STORED[3], ...STORED.slice(0, 3)];
+    const reopened = view({ agenda: solvedFirst }, overlay).agenda;
     expect(reopened.map((r) => r.id)).toEqual([
       "A2-k5",
       "A11-f4",
@@ -833,21 +972,21 @@ describe("the optimistic model", () => {
 
   it("tries again: the old refusal goes and the new change waits, once", () => {
     const refusedEntry = entry({
-      kind: "defer",
+      kind: "propose",
       items: ["A11-f4"],
       state: "refused",
-      reason: "agenda-defer: locked",
+      reason: "agenda-propose: locked",
     });
-    const again = entry({ kind: "defer", items: ["A11-f4"] });
+    const again = entry({ kind: "propose", items: ["A11-f4"] });
     const read: AgendaRead = {
       agenda: mark(STORED, {
-        "A11-f4": { refused: "agenda-defer: locked", entry: refusedEntry.id },
+        "A11-f4": { refused: "agenda-propose: locked", entry: refusedEntry.id },
       }),
     };
     const overlay = retried(EMPTY_OVERLAY, refusedEntry.id, again, ZONE, NOW);
     const { agenda } = shown(read, overlay);
     expect(agenda.find((r) => r.id === "A11-f4")).toMatchObject({
-      state: "deferred",
+      state: "proposed",
       sync: "waiting",
     });
   });

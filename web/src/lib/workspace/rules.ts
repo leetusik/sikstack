@@ -77,15 +77,65 @@ export type MovePlace = { before: string } | { after: string };
 export type ChangeFields = {
   edit: { title?: string; note?: string };
   move: MovePlace;
-  defer: Record<string, never>;
+  propose: Record<string, never>;
   solve: { outcome?: string };
   drop: { reason?: string };
   reopen: Record<string, never>;
   delete: Record<string, never>;
-  /** One entry on the item's thread; the server adds its author and source. */
+  /** One item on the agenda; the server adds its author and source. */
   entry: { kind: EntryKind; body: string };
   accept: Record<string, never>;
+  /** The items' full file names (`ThreadEntry.file`); the server adds the author. */
+  "item-done": { entries: string[] };
+  "item-dismiss": { entries: string[] };
+  "item-reopen": { entries: string[] };
+  "item-delete": { entries: string[] };
+  /** The items the new agenda takes, and its title. */
+  split: { entries: string[]; title: string };
 };
+
+/**
+ * An item's full file name, the engine's `ENTRY_NAME_PATTERN` (`20261125T010203.000004Z-hnj0.json`): an item
+ * change sends these, never a tail or a ref.
+ */
+export const ENTRY_FILE =
+  /^[0-9]{8}T[0-9]{6}\.[0-9]{6}Z-[0-9a-hjkmnp-tv-z]{4}\.json$/;
+
+/** The kinds that change items of one agenda by their files. */
+const ITEM_KINDS: readonly string[] = [
+  "item-done",
+  "item-dismiss",
+  "item-reopen",
+  "item-delete",
+  "split",
+];
+
+/** The kinds that take exactly one agenda. */
+const ONE_AGENDA: readonly string[] = ["edit", "move", "entry", ...ITEM_KINDS];
+
+/** `fields.entries` as the route takes it (each once, in order), or its error line. */
+function entryNames(
+  raw: unknown,
+): { ok: true; entries: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw) || raw.length === 0)
+    return {
+      ok: false,
+      error: "entries must list one or more items' full file names",
+    };
+  if (raw.length > ITEMS_MAX)
+    return { ok: false, error: `a change takes at most ${ITEMS_MAX} items` };
+  for (const name of raw) {
+    if (typeof name !== "string" || !ENTRY_FILE.test(name)) {
+      const shown =
+        typeof name === "string" && name.length <= 60 ? name : "that value";
+      return {
+        ok: false,
+        error: `${shown} is not an item's full file name (like 20261125T010203.000004Z-hnj0.json)`,
+      };
+    }
+  }
+  return { ok: true, entries: Array.from(new Set(raw as string[])) };
+}
 
 /** The entry kinds the server takes (the engine's `ENTRY_KINDS`). */
 export const ENTRY_KINDS: readonly EntryKind[] = [
@@ -144,22 +194,46 @@ export function changeBody(
     return { ok: false, error: "items must list one or more agenda ids" };
   }
   if (items.length > ITEMS_MAX) {
-    return { ok: false, error: `a change takes at most ${ITEMS_MAX} items` };
+    return { ok: false, error: `a change takes at most ${ITEMS_MAX} agendas` };
   }
   for (const id of items) {
     const error = idError(id);
     if (error) return { ok: false, error };
   }
   const ids = Array.from(new Set(items));
-  if (
-    (change.kind === "edit" ||
-      change.kind === "move" ||
-      change.kind === "entry") &&
-    ids.length !== 1
-  ) {
-    return { ok: false, error: `${change.kind} takes exactly one item` };
+  if (ONE_AGENDA.includes(change.kind) && ids.length !== 1) {
+    return { ok: false, error: `${change.kind} takes exactly one agenda` };
   }
   switch (change.kind) {
+    case "item-done":
+    case "item-dismiss":
+    case "item-reopen":
+    case "item-delete": {
+      const named = entryNames(change.fields?.entries);
+      if (!named.ok) return named;
+      return {
+        ok: true,
+        body: {
+          kind: change.kind,
+          items: ids,
+          fields: { entries: named.entries },
+        },
+      };
+    }
+    case "split": {
+      const named = entryNames(change.fields?.entries);
+      if (!named.ok) return named;
+      const title = cleanTitle(change.fields?.title);
+      if (title === null) return { ok: false, error: TITLE_REFUSAL };
+      return {
+        ok: true,
+        body: {
+          kind: "split",
+          items: ids,
+          fields: { entries: named.entries, title },
+        },
+      };
+    }
     case "edit": {
       const fields: { title?: string; note?: string } = {};
       const raw = change.fields ?? {};
@@ -248,7 +322,7 @@ export function changeBody(
         },
       };
     }
-    case "defer":
+    case "propose":
     case "reopen":
     case "delete":
     case "accept":
@@ -257,7 +331,7 @@ export function changeBody(
       return {
         ok: false,
         error:
-          "kind must be one of edit, move, defer, solve, drop, reopen, delete, entry, accept (an add has its own route)",
+          "kind must be one of edit, move, propose, solve, drop, reopen, delete, entry, accept, item-done, item-dismiss, item-reopen, item-delete, split (an add has its own route)",
       };
   }
 }

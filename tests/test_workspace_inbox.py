@@ -445,7 +445,7 @@ def test_a_change_whose_item_is_gone_stays_listed_until_discarded(store):
     assert row["created"] == edit["created_at"]
 
     # the engine refuses it: the line shows, with the entry Discard and Try again name
-    line = "refused, exit 1 (agenda-edit A1-h7): A1-h7 names no agenda item"
+    line = "refused, exit 1 (agenda-edit A1-h7): A1-h7 names no agenda"
     res = _commit(client, project_id, key, inbox=[
         {"id": edit["id"], "state": "refused", "reason": line, "exit": 1}])
     assert res.status_code == 200, res.text
@@ -507,7 +507,7 @@ def test_a_change_naming_an_id_the_workspace_lacks_is_refused_at_once(store):
     ):
         res = _change(client, owner, project_id, kind, items, fields)
         assert res.status_code == 422, (kind, items, res.text)
-        assert res.json()["detail"] == "A99-zz names no agenda item"
+        assert res.json()["detail"] == "A99-zz names no agenda"
     assert _inbox_count(client, project_id, key) == 0
 
     # a pending add's id is the workspace's to come: a change may name it
@@ -527,7 +527,7 @@ def test_a_batch_naming_an_applied_entry_is_409_and_applies_nothing(store):
     owner, project_id, key, answer = _linked(client)
     other = {**key, "X-Sikstack-Checkout": "another-checkout"}
 
-    entry = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    entry = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
     result = {"id": entry["id"], "state": "applied", "exit": 0}
     path = "works/agenda/A2-k5/agenda.json"
     first = _commit(client, project_id, key, ops=[_put(path, '{"id": "A2-k5"}\n',
@@ -562,7 +562,7 @@ def test_a_batch_naming_an_applied_entry_is_409_and_applies_nothing(store):
 def test_an_engine_result_is_checked(store):
     client, _engine = store
     owner, project_id, key, _ = _linked(client)
-    entry = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    entry = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
 
     for bad in (
         {"id": entry["id"], "state": "refused", "exit": 1},  # a refusal names its line
@@ -582,14 +582,14 @@ def test_discard_closes_only_an_open_entry(store):
     owner, project_id, key, _ = _linked(client)
     base = _base(project_id)
 
-    entry = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    entry = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
     res = client.post(f"{base}/inbox/{entry['id']}/discard", headers=_session(owner))
     assert res.status_code == 200 and res.json()["entry"]["state"] == "discarded"
     assert _inbox_count(client, project_id, key) == 0
     again = client.post(f"{base}/inbox/{entry['id']}/discard", headers=_session(owner))
     assert again.status_code == 409, again.text
 
-    applied = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    applied = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
     _commit(client, project_id, key, inbox=[{"id": applied["id"], "state": "applied", "exit": 0}])
     assert client.post(f"{base}/inbox/{applied['id']}/discard",
                        headers=_session(owner)).status_code == 409
@@ -602,7 +602,7 @@ def test_discard_closes_only_an_open_entry(store):
 def test_writes_are_404_outside_the_tenant_and_when_unlinked(store):
     client, _engine = store
     owner, project_id, key, _ = _linked(client)
-    entry = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    entry = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
     stranger = _signup(client)
     base = _base(project_id)
 
@@ -629,7 +629,7 @@ def test_writes_are_404_outside_the_tenant_and_when_unlinked(store):
 def test_the_engine_reads_only_pending_entries_oldest_first(store):
     client, _engine = store
     owner, project_id, key, _ = _linked(client)
-    a = _change(client, owner, project_id, "defer", ["A2-k5"]).json()["entry"]
+    a = _change(client, owner, project_id, "propose", ["A2-k5"]).json()["entry"]
     b = _change(client, owner, project_id, "move", ["A2-k5"], {"first": True}).json()["entry"]
     c = _add(client, owner, project_id, "Export is slow").json()["entry"]
     client.post(f"{_base(project_id)}/inbox/{b['id']}/discard", headers=_session(owner))
@@ -710,10 +710,12 @@ def test_a_note_is_one_entry_with_the_sessions_author_and_the_webs_source(store)
     item = client.get(f"{base}/agenda/A2-k5", headers=_session(owner)).json()
     assert item["sync"] == "waiting"
     [shown] = item["entries"]
-    assert shown == {"id": entry["id"], "kind": "note", "author": _author(owner),
+    assert shown == {"id": entry["id"], "file": None, "ref": None, "kind": "note",
+                     "author": _author(owner),
                      "by": "person", "name": _author(owner).split(":", 1)[1],
                      "source": "web:agenda", "created": entry["created_at"],
-                     "body": "Seen twice on 3G.", "job": None, "sync": "waiting"}
+                     "body": "Seen twice on 3G.", "job": None, "state": "open",
+                     "stateBy": None, "stateAt": None, "deleting": False, "sync": "waiting"}
 
 
 def test_an_entry_refuses_a_bad_kind_an_empty_body_and_a_long_one(store):
@@ -764,14 +766,14 @@ def test_accept_is_one_entry_for_a_proposed_item_and_refused_otherwise(store):
     # not Proposed: refused up front in the engine's own words (agenda-accept)
     res = _change(client, owner, project_id, "accept", ["A2-k5"])
     assert res.status_code == 422
-    assert res.json()["detail"] == "A2-k5 is In progress: only a Proposed item is accepted"
+    assert res.json()["detail"] == "A2-k5 is In progress: only a Proposed agenda is accepted"
     res = _change(client, owner, project_id, "accept", ["A3-p7", "A1-h7"])
-    assert res.json()["detail"] == "A1-h7 is Solved: only a Proposed item is accepted"
+    assert res.json()["detail"] == "A1-h7 is Solved: only a Proposed agenda is accepted"
     minted = _add(client, owner, project_id, "A web add is Open").json()["item"]
     res = _change(client, owner, project_id, "accept", [minted])
-    assert res.json()["detail"] == f"{minted} is Open: only a Proposed item is accepted"
+    assert res.json()["detail"] == f"{minted} is Open: only a Proposed agenda is accepted"
     assert _change(client, owner, project_id, "accept", ["A99-zz"]).json()["detail"] == (
-        "A99-zz names no agenda item")
+        "A99-zz names no agenda")
     assert _change(client, owner, project_id, "accept", ["A3-p7"],
                    {"first": True}).status_code == 422
     assert _inbox_count(client, project_id, key) == 2  # the accept and the add
@@ -828,8 +830,29 @@ def test_the_inbox_kinds_are_pinned_to_the_routes_fields():
     from server.workspace_web_api import _KIND_FIELDS
 
     assert set(INBOX_KINDS) == set(_KIND_FIELDS) | {"add"}
-    assert {"entry", "accept"} <= set(INBOX_KINDS)
+    assert {"entry", "accept", "propose", "split"} <= set(INBOX_KINDS)
+    assert "defer" not in INBOX_KINDS
     assert _KIND_FIELDS["entry"] == ("kind", "body") and _KIND_FIELDS["accept"] == ()
+    assert _KIND_FIELDS["propose"] == ()
+    for kind in ("item-done", "item-dismiss", "item-reopen", "item-delete"):
+        assert _KIND_FIELDS[kind] == ("entries",)
+    assert _KIND_FIELDS["split"] == ("entries", "title")
+
+
+def test_the_inbox_kinds_are_the_engines():
+    """The server's kinds are exactly the engine's ``CLOUD_INBOX_COMMANDS`` keys
+    (``wf_cloud.py``), and the one it retired, ``defer``, is the engine's retired one."""
+
+    source = Path(__file__).resolve().parent.parent / "plugins/sikstack/scripts/wf_cloud.py"
+    if not source.is_file():
+        pytest.skip("the sikstack engine's source is not in this tree")
+    text = source.read_text(encoding="utf-8")
+    from server.workspace.types import INBOX_KINDS
+
+    block = text[text.index("CLOUD_INBOX_COMMANDS = {"):]
+    block = block[: block.index("}") + 1]
+    assert set(re.findall(r'"([a-z-]+)": "agenda-', block)) == set(INBOX_KINDS)
+    assert 'CLOUD_INBOX_RETIRED = {"defer": ' in text
 
 
 def test_the_author_is_the_accounts_handle_and_never_its_email():
@@ -879,6 +902,17 @@ def test_the_entry_rules_are_the_engines_word_for_word():
         r"(?=.{1,120}\Z)(?:person|agent):[^\s:]" + types.ENTRY_ONE_LINE + "*")
     assert types.ENTRY_SOURCE_PATTERN == (
         r"[a-z][a-z0-9-]{0,19}:[^\s]" + types.ENTRY_ONE_LINE + "{0,298}")
+    # an item's file name, its states and the auto-close's words (0.6.0)
+    assert ('ENTRY_NAME_RE = re.compile(rf"([0-9]{{8}}T[0-9]{{6}})\\.[0-9]{{6}}Z-'
+            '{ID_TOKEN_PATTERN}\\.json")') in text
+    assert types.ENTRY_NAME_PATTERN == (
+        r"([0-9]{8}T[0-9]{6})\.[0-9]{6}Z-" + types.ID_TOKEN_PATTERN + r"\.json")
+    store = (source.parent / "wf_store.py").read_text(encoding="utf-8")
+    assert f'ID_TOKEN_PATTERN = "{types.ID_TOKEN_PATTERN}"' in store
+    states = ", ".join(f'"{state}"' for state in types.ENTRY_STATES)
+    assert f"ENTRY_STATES = ({states})" in text
+    assert f'ITEM_SOLVED_OUTCOME = "{types.ITEM_SOLVED_OUTCOME}"' in text
+    assert f'ITEM_DROPPED_REASON = "{types.ITEM_DROPPED_REASON}"' in text
 
 
 def _feedback(client, owner, message: str) -> str:
@@ -933,7 +967,7 @@ def test_feedback_files_onto_a_new_item_or_an_existing_one(store):
     assert len(_agenda(client, owner, project_id)) == 3  # the two stored and the one add
     assert _file(client, owner, second, item=minted).status_code == 409  # already on it
     assert _file(client, owner, second, item="A99-zz").json()["detail"] == (
-        "A99-zz names no agenda item")
+        "A99-zz names no agenda")
     assert _file(client, owner, second, item="A2-k5", note="x").status_code == 422
     assert _inbox_count(client, project_id, key) == 3
 
@@ -983,3 +1017,293 @@ def test_what_a_piece_of_feedback_became_reads_from_the_entries(store):
     thread = client.get(f"{_base(project_id)}/agenda/{minted}", headers=_session(owner)).json()
     assert [(e["kind"], e["source"], e["sync"]) for e in thread["entries"]] == [
         ("feedback", f"feedback:{first}", None)]
+
+
+# -- an agenda's items: propose, the item kinds and split (0.6.0) -------------------------
+
+_X = "20261120T000000.000001Z-xa01.json"
+_Y = "20261121T000000.000001Z-yb02.json"
+_Z = "20261122T000000.000001Z-zc03.json"
+
+
+def _put_items(client, project_id, key, aid="A2-k5", **states) -> None:
+    """One item file on ``aid`` per name in ``states`` (``X``, ``Y``, ``Z``): ``open``
+    writes no state (an older engine's file), any other its state, who and when."""
+
+    names = {"X": _X, "Y": _Y, "Z": _Z}
+    ops = []
+    for name, state in states.items():
+        data = {"kind": "issue", "author": "agent:claude-opus-5-5", "source": "slice:P8-q4.S1",
+                "created_at": "2026-11-20T09:00:00+09:00", "body": f"Item {name}."}
+        if state != "open":
+            data.update(state=state, state_by="agent:claude-opus-5-5",
+                        state_at="2026-11-21T09:00:00+09:00")
+        ops.append(_put(f"works/agenda/{aid}/entries/{names[name]}",
+                        json.dumps(data, indent=2) + "\n"))
+    res = _commit(client, project_id, key, ops)
+    assert res.status_code == 200, res.text
+
+
+def _read(client, owner, project_id, aid) -> dict:
+    res = client.get(f"{_base(project_id)}/agenda/{aid}", headers=_session(owner))
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+def _row(client, owner, project_id, aid) -> dict:
+    return next(r for r in _agenda(client, owner, project_id) if r["id"] == aid)
+
+
+def test_a_defer_is_refused_and_propose_takes_its_place(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+
+    res = _change(client, owner, project_id, "defer", ["A2-k5"])
+    assert res.status_code == 422, res.text
+    assert res.json()["detail"].startswith("kind defer is retired:")
+    assert "propose" in res.json()["detail"]
+    assert _inbox_count(client, project_id, key) == 0
+
+    res = _change(client, owner, project_id, "propose", ["A2-k5"])
+    assert res.status_code == 201, res.text
+    entry = res.json()["entry"]
+    assert entry["kind"] == "propose" and entry["items"] == ["A2-k5"]
+    assert entry["fields"] == {"author": _author(owner)}
+    [pending] = _pending(client, project_id, key)
+    assert pending["kind"] == "propose" and pending["fields"] == {"author": _author(owner)}
+
+    # the overlay predicts it: Proposed, first, by this account, waiting
+    rows = _agenda(client, owner, project_id)
+    assert rows[0]["id"] == "A2-k5" and rows[0]["state"] == "proposed"
+    assert rows[0]["proposed"] == {"by": _author(owner), "at": entry["created_at"]}
+    assert rows[0]["sync"] == "waiting"
+
+    # refused up front in the engine's own words (agenda-propose); an author is the server's
+    for items, fields, line in (
+        (["A2-k5"], None, "A2-k5 is Proposed already"),
+        (["A1-h7"], None, "A1-h7 is Solved: reopen it first"),
+        (["A99-zz"], None, "A99-zz names no agenda"),
+    ):
+        res = _change(client, owner, project_id, "propose", items, fields)
+        assert res.status_code == 422 and res.json()["detail"] == line, res.text
+    res = _change(client, owner, project_id, "propose", ["A1-h7"], {"author": "person:x"})
+    assert res.status_code == 422
+    assert _inbox_count(client, project_id, key) == 1
+
+
+def test_each_item_kind_takes_one_agenda_and_its_items_full_names(store):
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    _put_items(client, project_id, key, X="open", Y="open", Z="dismissed")
+
+    for kind, names in (("item-done", [_X]), ("item-dismiss", [_Y, _Y]),
+                        ("item-reopen", [_Z]), ("item-delete", [_X])):
+        res = _change(client, owner, project_id, kind, ["A2-k5"], {"entries": names})
+        assert res.status_code == 201, (kind, res.text)
+        entry = res.json()["entry"]
+        assert entry["kind"] == kind and entry["items"] == ["A2-k5"]
+        assert entry["fields"] == {"entries": list(dict.fromkeys(names)), "author": _author(owner)}
+    assert _inbox_count(client, project_id, key) == 4
+
+    shown = "A1-h7/" + _X
+    for kind, items, fields, line in (
+        ("item-done", ["A2-k5"], None, "entries must list one or more items' full file names"),
+        ("item-done", ["A2-k5"], {"entries": []}, None),
+        ("item-done", ["A2-k5"], {"entries": "xa01"}, None),
+        ("item-done", ["A2-k5"], {"entries": ["xa01"]},
+         "xa01 is not an item's full file name (like 20261125T010203.000004Z-hnj0.json)"),
+        ("item-done", ["A2-k5"], {"entries": ["A2-k5/xa01"]}, None),
+        ("item-done", ["A2-k5"], {"entries": [_Y], "author": "person:x"},
+         "item-done takes no author"),
+        ("item-done", ["A2-k5", "A1-h7"], {"entries": [_Y]}, "item-done takes exactly one agenda"),
+        ("item-done", ["A99-zz"], {"entries": [_Y]}, "A99-zz names no agenda"),
+        ("item-done", ["A1-h7"], {"entries": [_X]}, f"{shown} names no item of A1-h7"),
+        # a pending item-delete took X: nothing may name it now
+        ("item-reopen", ["A2-k5"], {"entries": [_X]}, f"A2-k5/{_X} names no item of A2-k5"),
+        ("item-dismiss", ["A2-k5"], {"title": "x", "entries": [_Y]}, "item-dismiss takes no title"),
+    ):
+        res = _change(client, owner, project_id, kind, items, fields)
+        assert res.status_code == 422, (kind, items, fields, res.text)
+        if line is not None:
+            assert res.json()["detail"] == line, res.text
+    assert _inbox_count(client, project_id, key) == 4
+
+    # an item of another agenda is named on its own agenda
+    res = _change(client, owner, project_id, "item-done", ["A1-h7"],
+                  {"entries": ["20261021T000000.000002Z-p3q9.json"]})
+    assert res.status_code == 201, res.text
+
+
+def test_the_overlay_shows_item_states_and_the_auto_close_until_the_engine_applies_them(store):
+    """The prediction is the engine's own rule (``wf_agenda.py`` ``agenda_item_change``,
+    lines 1185-1246, and ``_agenda_auto_close``, lines 1159-1178): done on the last open
+    item of an In progress agenda reads Solved, its outcome naming the done and dismissed
+    items; each item reads its predicted state and who set it, marked waiting."""
+
+    client, _engine = store
+    owner, project_id, key, answer = _linked(client)
+    _put_items(client, project_id, key, X="open", Y="open", Z="dismissed")
+    row = _row(client, owner, project_id, "A2-k5")
+    assert (row["entryCount"], row["itemsOpen"], row["state"]) == (3, 2, "in_progress")
+
+    done = _change(client, owner, project_id, "item-done", ["A2-k5"], {"entries": [_X]})
+    done = done.json()["entry"]
+    row = _row(client, owner, project_id, "A2-k5")
+    assert (row["entryCount"], row["itemsOpen"], row["state"]) == (3, 1, "in_progress")
+    assert row["sync"] == "waiting"
+    items = {e["file"]: e for e in _read(client, owner, project_id, "A2-k5")["entries"]}
+    assert items[_X]["state"] == "done" and items[_X]["stateBy"] == _author(owner)
+    assert items[_X]["stateAt"] == done["created_at"] and items[_X]["sync"] == "waiting"
+    assert items[_Y]["state"] == "open" and items[_Y]["sync"] is None
+    assert items[_Z]["state"] == "dismissed" and items[_Z]["stateBy"] == "agent:claude-opus-5-5"
+    assert items[_X]["ref"] == "A2-k5/xa01"
+
+    # the last open item done: the agenda reads Solved, among the Solved and Dropped
+    _change(client, owner, project_id, "item-done", ["A2-k5"], {"entries": [_Y]})
+    rows = _agenda(client, owner, project_id)
+    assert [(r["id"], r["state"]) for r in rows] == [("A2-k5", "solved"), ("A1-h7", "solved")]
+    assert rows[0]["outcome"] == "all items dealt with: 2 done, 1 dismissed"
+    assert rows[0]["itemsOpen"] == 0 and rows[0]["sync"] == "waiting"
+    assert _read(client, owner, project_id, "A2-k5")["state"] == "solved"
+
+    # the engine refuses the second: its line shows, and the prediction falls back
+    second = _pending(client, project_id, key)[1]
+    line = f"refused, exit 1 (agenda-item done): A2-k5/{_Y} is done already"
+    res = _commit(client, project_id, key, inbox=[
+        {"id": second["id"], "state": "refused", "reason": line, "exit": 1}])
+    assert res.status_code == 200, res.text
+    row = _row(client, owner, project_id, "A2-k5")
+    assert row["state"] == "in_progress" and row["itemsOpen"] == 1
+    assert row["sync"] == {"refused": line, "entry": second["id"], "kind": "item-done"}
+    items = {e["file"]: e for e in _read(client, owner, project_id, "A2-k5")["entries"]}
+    assert items[_Y]["state"] == "open" and items[_Y]["sync"]["refused"] == line
+
+    # the engine applies the first: the stored file now says so, nothing waits on it
+    path = f"works/agenda/A2-k5/entries/{_X}"
+    data = {"kind": "issue", "author": "agent:claude-opus-5-5", "source": "slice:P8-q4.S1",
+            "created_at": "2026-11-20T09:00:00+09:00", "body": "Item X.", "state": "done",
+            "state_by": _author(owner), "state_at": "2026-11-25T01:00:00+09:00"}
+    revs = client.get(f"/api/workspace/{project_id}/manifest?since=0", headers=key).json()
+    rev = next(c["rev"] for c in revs["changes"] if c["path"] == path)
+    res = _commit(client, project_id, key, ops=[_put(path, json.dumps(data) + "\n", rev)],
+                  inbox=[{"id": done["id"], "state": "applied", "exit": 0}])
+    assert res.status_code == 200, res.text
+    items = {e["file"]: e for e in _read(client, owner, project_id, "A2-k5")["entries"]}
+    assert items[_X]["state"] == "done" and items[_X]["sync"] is None
+    assert items[_X]["stateAt"] == "2026-11-25T01:00:00+09:00"
+
+
+def test_split_mints_a_new_agenda_and_takes_neither_none_nor_every_item(store):
+    """``agenda_split`` (``wf_agenda.py`` lines 1249-1297): the named items move whole to a
+    new agenda, never none and never every one; the new agenda is Open (a person's)."""
+
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    _put_items(client, project_id, key, X="open", Y="done", Z="open")
+
+    for fields, line in (
+        ({"entries": [_X, _Y, _Z], "title": "All of it"},
+         "agenda-split would take every item of A2-k5: leave one on it"),
+        ({"entries": [], "title": "None"}, None),
+        ({"entries": [_X]}, "Enter a title of 1–200 characters."),
+        ({"entries": [_X], "title": "x" * 201}, "Enter a title of 1–200 characters."),
+        ({"entries": [_X], "title": "T", "author": "person:x"}, "split takes no author"),
+        ({"entries": ["20261120T000000.000001Z-qq99.json"], "title": "T"},
+         "A2-k5/20261120T000000.000001Z-qq99.json names no item of A2-k5"),
+    ):
+        res = _change(client, owner, project_id, "split", ["A2-k5"], fields)
+        assert res.status_code == 422, (fields, res.text)
+        if line is not None:
+            assert res.json()["detail"] == line
+    assert _change(client, owner, project_id, "split", ["A2-k5", "A1-h7"],
+                   {"entries": [_X], "title": "T"}).status_code == 422
+    assert _inbox_count(client, project_id, key) == 0
+
+    res = _change(client, owner, project_id, "split", ["A2-k5"],
+                  {"entries": [_Z, _X], "title": "  Retry storms  "})
+    assert res.status_code == 201, res.text
+    new, entry = res.json()["agenda"], res.json()["entry"]
+    assert _AGENDA_ID.fullmatch(new) and new.startswith("A3-")
+    assert entry["kind"] == "split" and entry["items"] == ["A2-k5"]
+    assert entry["minted_id"] == new
+    assert entry["fields"] == {"entries": [_Z, _X], "title": "Retry storms",
+                               "author": _author(owner)}
+    [pending] = _pending(client, project_id, key)
+    assert pending["minted_id"] == new and pending["fields"] == entry["fields"]
+
+    # the new agenda is its own row, waiting, holding the items it takes; the source the rest
+    rows = _agenda(client, owner, project_id)
+    assert [r["id"] for r in rows] == [new, "A2-k5", "A1-h7"]
+    assert rows[0]["state"] == "open" and rows[0]["title"] == "Retry storms"
+    assert (rows[0]["entryCount"], rows[0]["itemsOpen"], rows[0]["sync"]) == (2, 2, "waiting")
+    # the source keeps only a done item: it closes itself, Solved, as the engine will
+    assert (rows[1]["state"], rows[1]["entryCount"], rows[1]["itemsOpen"]) == ("solved", 1, 0)
+    moved = _read(client, owner, project_id, new)["entries"]
+    assert [(e["file"], e["ref"], e["sync"]) for e in moved] == [
+        (_X, f"{new}/xa01", "waiting"), (_Z, f"{new}/zc03", "waiting")]
+    assert [e["file"] for e in _read(client, owner, project_id, "A2-k5")["entries"]] == [_Y]
+
+    # a change may name the new agenda and its items before the engine applies the split
+    res = _change(client, owner, project_id, "item-done", [new], {"entries": [_X]})
+    assert res.status_code == 201, res.text
+    # a second split of A2-k5 would take its every item now
+    res = _change(client, owner, project_id, "split", ["A2-k5"], {"entries": [_Y], "title": "T"})
+    assert res.json()["detail"] == "agenda-split would take every item of A2-k5: leave one on it"
+
+    # Try again on a refused split re-mints its new agenda
+    _commit(client, project_id, key, inbox=[
+        {"id": entry["id"], "state": "refused", "reason": f"{new} exists", "exit": 1}])
+    res = client.post(f"{_base(project_id)}/inbox/{entry['id']}/retry", headers=_session(owner))
+    assert res.status_code == 201, res.text
+    again = res.json()
+    assert again["agenda"] != new and _AGENDA_ID.fullmatch(again["agenda"])
+    assert again["entry"]["minted_id"] == again["agenda"]
+    assert again["entry"]["fields"] == entry["fields"]
+
+
+def test_every_new_kind_is_an_entry_the_engine_turns_into_its_command(store, tmp_path):
+    """The contract with the engine (``wf_cloud.py`` ``cloud_inbox_tokens``, run as the
+    engine runs it): each pending entry the web writes for propose, the item kinds and
+    split is the engine's command line, never its refusal."""
+
+    scripts = Path(__file__).resolve().parent.parent / "plugins/sikstack/scripts"
+    if not (scripts / "wf_cloud.py").is_file():
+        pytest.skip("the sikstack engine's source is not in this tree")
+    client, _engine = store
+    owner, project_id, key, _ = _linked(client)
+    _put_items(client, project_id, key, X="open", Y="open", Z="dismissed")
+    for kind, items, fields in (
+        ("propose", ["A2-k5"], None),
+        ("item-done", ["A2-k5"], {"entries": [_X]}),
+        ("item-dismiss", ["A2-k5"], {"entries": [_Y]}),
+        ("item-reopen", ["A2-k5"], {"entries": [_Z]}),
+        ("item-delete", ["A2-k5"], {"entries": [_Z]}),
+        ("split", ["A2-k5"], {"entries": [_X], "title": "Retry storms"}),
+    ):
+        res = _change(client, owner, project_id, kind, items, fields)
+        assert res.status_code == 201, (kind, res.text)
+    entries = _pending(client, project_id, key)
+
+    import subprocess
+    import sys
+
+    (tmp_path / "ws" / ".sikstack").mkdir(parents=True)
+    code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import wf_cloud; "
+            "print(json.dumps([wf_cloud.cloud_inbox_tokens(e, 'sikstack') "
+            "for e in json.load(sys.stdin)]))")
+    # -B: no __pycache__ beside the engine's source (the plugin ships none; smoke checks it)
+    run = subprocess.run([sys.executable, "-B", "-c", code, str(scripts)], input=json.dumps(entries),
+                         capture_output=True, text=True, check=True,
+                         env={**os.environ, "SIKSTACK_ROOT": str(tmp_path / "ws")})
+    tokens = json.loads(run.stdout)
+    author = f"--author={_author(owner)}"
+    split = entries[5]
+    assert tokens == [
+        [["agenda-propose", "A2-k5", author], None],
+        [["agenda-item", "done", f"A2-k5/{_X}", author], None],
+        [["agenda-item", "dismiss", f"A2-k5/{_Y}", author], None],
+        [["agenda-item", "reopen", f"A2-k5/{_Z}", author], None],
+        [["agenda-item", "delete", f"A2-k5/{_Z}", author], None],
+        [["agenda-split", "A2-k5", _X, author, "--title=Retry storms",
+          f"--id={split['minted_id']}"], None],
+    ]

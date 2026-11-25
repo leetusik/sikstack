@@ -37,16 +37,28 @@ INBOX_RESULT_STATES = (INBOX_APPLIED, INBOX_REFUSED)
 #: An entry still open on the web: waiting for an engine, or refused and not yet discarded.
 INBOX_OPEN_STATES = (INBOX_PENDING, INBOX_REFUSED)
 
-#: The changes an inbox entry carries, each one engine agenda command
-#: (``agenda-add``, ``agenda-edit``, ``agenda-move``, ``agenda-defer`` …; ``entry`` is
-#: ``agenda-entry``, one entry on an item's thread, and ``accept`` is ``agenda-accept``,
-#: a Proposed item made Open: the engine's ``CLOUD_INBOX_COMMANDS``).
+#: The changes an inbox entry carries, each one engine agenda command, the engine's
+#: ``CLOUD_INBOX_COMMANDS`` (``agenda-add``, ``agenda-edit``, ``agenda-move`` …): ``entry``
+#: is ``agenda-item add``, one item added to an agenda; ``accept`` is ``agenda-accept``, a
+#: Proposed agenda made Open; ``propose`` is ``agenda-propose``, an Open one proposed back
+#: (0.6.0: it took the retired ``defer``'s place, which the engine refuses unrun). The
+#: item kinds (``agenda-item done|dismiss|reopen|delete``) name the one agenda in
+#: ``items`` and its items' full file names in ``fields.entries``; ``split``
+#: (``agenda-split``) names the agenda it splits in ``items``, the items it moves in
+#: ``fields.entries``, the new agenda's ``title`` and its id in ``minted_id``.
 INBOX_ADD = "add"
 INBOX_DELETE = "delete"
 INBOX_ENTRY = "entry"
 INBOX_ACCEPT = "accept"
-INBOX_KINDS = (INBOX_ADD, "edit", "move", "defer", "solve", "drop", "reopen", INBOX_DELETE,
-               INBOX_ENTRY, INBOX_ACCEPT)
+INBOX_PROPOSE = "propose"
+INBOX_SPLIT = "split"
+INBOX_ITEM_DONE = "item-done"
+INBOX_ITEM_DISMISS = "item-dismiss"
+INBOX_ITEM_REOPEN = "item-reopen"
+INBOX_ITEM_DELETE = "item-delete"
+INBOX_ITEM_KINDS = (INBOX_ITEM_DONE, INBOX_ITEM_DISMISS, INBOX_ITEM_REOPEN, INBOX_ITEM_DELETE)
+INBOX_KINDS = (INBOX_ADD, "edit", "move", INBOX_PROPOSE, "solve", "drop", "reopen",
+               INBOX_DELETE, INBOX_ENTRY, INBOX_ACCEPT, *INBOX_ITEM_KINDS, INBOX_SPLIT)
 
 #: An item's thread entry, by the engine's rules word for word (``wf_agenda.py``:
 #: ``ENTRY_KINDS``, ``ENTRY_ONE_LINE``, ``ENTRY_AUTHOR_RE``, ``ENTRY_SOURCE_RE``): an
@@ -61,6 +73,16 @@ ENTRY_SOURCE_PATTERN = rf"[a-z][a-z0-9-]{{0,19}}:[^\s]{ENTRY_ONE_LINE}{{0,298}}"
 #: source every note written on the web carries.
 WEB_AUTHOR = "person:web"
 WEB_NOTE_SOURCE = "web:agenda"
+#: An item's file name and its states, by the engine's rules word for word
+#: (``wf_agenda.py``: ``ENTRY_NAME_RE``, ``ENTRY_STATES``, ``ITEM_SOLVED_OUTCOME``,
+#: ``ITEM_DROPPED_REASON``; ``wf_store.py``: ``ID_TOKEN_PATTERN``): the UTC second of its
+#: ``created_at``, the microsecond, and a 4-symbol tail no other item of its agenda holds.
+#: A file with no ``state`` (or one the engine does not read) is open.
+ID_TOKEN_PATTERN = "[0-9a-hjkmnp-tv-z]{4}"
+ENTRY_NAME_PATTERN = rf"([0-9]{{8}}T[0-9]{{6}})\.[0-9]{{6}}Z-{ID_TOKEN_PATTERN}\.json"
+ENTRY_STATES = ("open", "done", "dismissed")
+ITEM_SOLVED_OUTCOME = "all items dealt with: {done} done, {dismissed} dismissed"
+ITEM_DROPPED_REASON = "every item dismissed or deleted"
 
 #: The engine's agenda id rule, word for word (``AGENDA_ID_PATTERN``): a number and a
 #: two-symbol tail of lowercase Crockford base32 without ``i l o u``, at least one
@@ -149,8 +171,9 @@ class InboxEntry:
     """One web agenda change: ``items`` are full agenda ids (an add's is its minted id).
 
     ``fields`` hold the change's words (``title``, ``note``, ``outcome``, ``reason``,
-    ``before`` / ``after`` / ``first`` / ``last``); ``reason`` and ``exit_code`` are
-    the engine's, once it refused the entry.
+    ``before`` / ``after`` / ``first`` / ``last``, an item kind's or a split's
+    ``entries``, the server's ``author``); ``minted_id`` is an add's or a split's new
+    agenda; ``reason`` and ``exit_code`` are the engine's, once it refused the entry.
     """
 
     id: UUID
