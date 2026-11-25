@@ -191,11 +191,26 @@ describe("the project address's layout", () => {
     });
   });
 
-  it("lets a visitor through with no read of its own", async () => {
+  it("lets a visitor through to a public project, by the page's own read", async () => {
     guards.optionalIdentity.mockResolvedValue(null);
+    app.getOrgLibrary.mockResolvedValue(listing(false));
     await expect(run("/@june/platform")).resolves.toBe("page");
-    expect(app.getOrgLibrary).not.toHaveBeenCalled();
-    expect(app.listProjects).not.toHaveBeenCalled();
+  });
+
+  it("refuses a project this reader cannot see, and an address with no @, with a real 404 (P78, F13)", async () => {
+    const notFoundThrow = {
+      digest: expect.stringMatching(/^NEXT_HTTP_ERROR_FALLBACK;404/),
+    };
+    guards.optionalIdentity.mockResolvedValue(null);
+    app.getOrgLibrary.mockResolvedValue({ ...listing(false), projects: [] });
+    await expect(run("/@june/platform")).rejects.toMatchObject(notFoundThrow);
+    path.value = "/june/platform";
+    await expect(
+      Layout({
+        children: "page",
+        params: Promise.resolve({ org: "june", project: "platform" }),
+      }),
+    ).rejects.toMatchObject(notFoundThrow);
   });
 
   it("lets a signed-in reader of another org through", async () => {

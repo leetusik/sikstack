@@ -1,0 +1,41 @@
+/*
+ * The canvas (P78, F4): `html` and `body` take the page's own surface, so the gap a browser shows past the
+ * page's top or bottom (an overscroll, a page shorter than the window) is the page's colour, never the old
+ * paper the body used to carry (`bg-canvas`, the knowledge `--kb-paper`).
+ *
+ * The surface is the page root's: a `.ui` root's ground (`--bg`, light or dark by its `data-scheme`), and for
+ * the Library's reader (`.app.reader`) its own `--surface`, in the reader's own scheme when it sets one (light,
+ * dark, sepia), else its root's. The values are `src/sikstack/styles/tokens.css`'s, which this file cannot
+ * read (they are scoped to `.ui`); `tests/canvas.test.ts` holds them equal. Plain CSS outside Tailwind and
+ * outside the system's scope, imported by the root layout (and the design build's) after the system's sheets.
+ * A page with no `.ui` root (the old html reader alone, `reader.css`) paints its own and is left alone.
+ */
+html {
+  --page-canvas: #f2f4f7;
+  background-color: var(--page-canvas);
+}
+body {
+  background-color: var(--page-canvas);
+}
+
+html:has(.ui[data-scheme="dark"]) {
+  --page-canvas: #14171c;
+}
+
+/* The reader: its surface, by its own scheme; with none (the system setting), by its root's. */
+html:has(.ui .app.reader) {
+  --page-canvas: #ffffff;
+  /* outranks the old reader's own html paint (`reader.css`, `html:has(.rd-root[…])`), which the reader's
+     document body still carries inside the system's reader */
+  background-color: var(--page-canvas);
+}
+html:has(.ui[data-scheme="dark"] .app.reader:not([data-scheme])),
+html:has(.ui .app.reader[data-scheme="dark"]) {
+  --page-canvas: #1c2027;
+}
+html:has(.ui .app.reader[data-scheme="light"]) {
+  --page-canvas: #ffffff;
+}
+html:has(.ui .app.reader[data-scheme="sepia"]) {
+  --page-canvas: #f7f0e2;
+}

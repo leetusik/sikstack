@@ -253,7 +253,10 @@ describe("Project home's reads", () => {
     const store = { get: () => undefined };
     vi.mocked(headers.cookies).mockResolvedValue(store as never);
     vi.mocked(headers.headers).mockResolvedValue(
-      new Headers({ host: "sikstack.com", "x-forwarded-proto": "https" }) as never,
+      new Headers({
+        host: "sikstack.com",
+        "x-forwarded-proto": "https",
+      }) as never,
     );
     const guards = await import("@/lib/auth-guards");
     vi.mocked(guards.requireIdentity).mockResolvedValue({
@@ -567,5 +570,37 @@ describe("Keys: mint answer", () => {
       ok: false,
       reason: "failed",
     });
+  });
+});
+
+describe("Workspace panel: the items its head counts (P78, F16)", () => {
+  it("lists Open and In progress first, then Proposed, at most five, each a link to its page", () => {
+    const part = workspacePart({ state: "ready", value: WORKSPACE }, PROJECT);
+    if (part.kind !== "phases") throw new Error(part.kind);
+    expect(part.items.map((i) => [i.id, i.state])).toEqual([
+      ["A7-m3", "in_progress"],
+      ["A3-x0", "open"],
+      ["A4-x1", "open"],
+      ["A5-x2", "open"],
+      ["A9-k2", "proposed"],
+    ]);
+    const html = panel(part);
+    expect(html).toContain(
+      `href="/projects/${PROJECT}/workspace/agenda/A7-m3"`,
+    );
+    expect(html).not.toContain("A2-d1");
+  });
+
+  it("an empty workspace says so in one line, never an empty card", () => {
+    const empty = { ...WORKSPACE, phases: [], agenda: [] } as Workspace;
+    const part = workspacePart({ state: "ready", value: empty }, PROJECT);
+    if (part.kind !== "phases") throw new Error(part.kind);
+    expect(part.items).toEqual([]);
+    expect(panel(part)).toContain(
+      "Nothing open on the agenda, and no phases yet.",
+    );
+    expect(
+      panel(workspacePart({ state: "ready", value: WORKSPACE }, PROJECT)),
+    ).not.toContain("Nothing open on the agenda");
   });
 });

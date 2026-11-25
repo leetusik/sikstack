@@ -104,8 +104,8 @@ beforeEach(() => {
   app.listProjects.mockResolvedValue([{ id: "p2", name: "vocky" }]);
 });
 
-describe("an address with no @ (/nope) reads Library not found before any read", () => {
-  it("the guard refuses it above the Loading boundary, and lets a public address through", async () => {
+describe("an address with no @ (/nope) is Page not found, and a library this reader cannot see Library not found, both a real 404", () => {
+  it("the guard refuses /nope above the Loading boundary before any read, and lets a public address through", async () => {
     expect(
       await miss(() =>
         PublicLibraryGuard({
@@ -122,17 +122,56 @@ describe("an address with no @ (/nope) reads Library not found before any read",
         }),
       ),
     ).toBe(true);
+    expect(auth.optionalIdentity).not.toHaveBeenCalled();
+    expect(app.getOrgLibrary).not.toHaveBeenCalled();
+    app.getOrgLibrary.mockResolvedValue(listing(false));
     expect(
       await PublicLibraryGuard({
         params: Promise.resolve({ org: "@june" }),
         children: "page",
       }),
     ).toBe("page");
-    expect(auth.optionalIdentity).not.toHaveBeenCalled();
-    expect(app.getOrgLibrary).not.toHaveBeenCalled();
   });
 
-  it("the not-found is the new block: the visitor's words and Sign in, else the member's and Back to Library", async () => {
+  it("the guard refuses an unknown org, and one with nothing public to this reader, before the page streams (P78, F13)", async () => {
+    app.getOrgLibrary.mockRejectedValue(new ApiError(404, "not found"));
+    const guard = () =>
+      PublicLibraryGuard({
+        params: Promise.resolve({ org: "@nobody" }),
+        children: "page",
+      });
+    expect(await miss(guard)).toBe(true);
+    app.getOrgLibrary.mockReset();
+    app.getOrgLibrary.mockResolvedValue(listing(false, []));
+    expect(await miss(guard)).toBe(true);
+    // a fault is the page's to draw, not a miss
+    app.getOrgLibrary.mockReset();
+    app.getOrgLibrary.mockRejectedValue(new ApiError(503, "down"));
+    expect(await guard()).toBe("page");
+  });
+
+  it("/nope's not-found is Page not found: Go to sikstack signed out, Back to the org signed in (P78, F12)", async () => {
+    const visitor = renderToStaticMarkup(
+      (await PublicLibraryNotFound()) as ReactElement,
+    );
+    expect(visitor).toContain("Page not found");
+    expect(visitor).not.toContain("Library not found");
+    expect(visitor).toContain('href="/"');
+    auth.optionalIdentity.mockResolvedValue({
+      token: "tok",
+      identity: { tenant: { name: "Personal" }, tenants: [] },
+    });
+    const member = renderToStaticMarkup(
+      (await PublicLibraryNotFound()) as ReactElement,
+    );
+    expect(member).toContain("Page not found");
+    expect(member).toContain("Back to Personal");
+  });
+
+  it("an @ address's not-found is the new block: the visitor's words and Sign in, else the member's and Back to Library", async () => {
+    const { headers } = await import("next/headers");
+    const at = () => new Headers({ "x-kb-request-path": "/@nobody" }) as never;
+    vi.mocked(headers).mockResolvedValueOnce(at()).mockResolvedValueOnce(at());
     const visitor = renderToStaticMarkup(
       (await PublicLibraryNotFound()) as ReactElement,
     );
@@ -141,7 +180,7 @@ describe("an address with no @ (/nope) reads Library not found before any read",
     expect(visitor).toContain(
       "This link doesn’t point at a public library. It may have moved, been made private, or never existed.",
     );
-    expect(visitor).toContain('href="/login"');
+    expect(visitor).toContain('href="/login');
     auth.optionalIdentity.mockResolvedValue(signedIn);
     const member = renderToStaticMarkup(
       (await PublicLibraryNotFound()) as ReactElement,

@@ -17,6 +17,12 @@ export const metadata: Metadata = {
     siteName: LANDING.meta.siteName,
     type: "website",
   },
+  // P78, F9: a shared link carries the large picture (`app/opengraph-image.tsx`, `app/twitter-image.tsx`).
+  twitter: {
+    card: "summary_large_image",
+    title: LANDING.meta.title,
+    description: LANDING.meta.description,
+  },
 };
 
 export default function MarketingLayout({

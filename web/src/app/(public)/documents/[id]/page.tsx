@@ -16,7 +16,6 @@ import {
   withDocumentPhases,
 } from "@/sikstack/reader/document/with-phases";
 import { optionalIdentity } from "@/lib/auth-guards";
-import { getDocument } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
 import { FROM_PARAM } from "@/lib/library/from";
 import { loginHref } from "@/lib/next-path";
@@ -25,6 +24,8 @@ import { chapterRedirectHref } from "@/lib/reader-href";
 import { loadLooseReader, type ReaderLoad } from "@/lib/reader/load";
 import { viewerTimeZone } from "@/lib/time-zone";
 import type { KbDocument } from "@/lib/knowledge/types";
+
+import { getDocumentOnce } from "./read";
 
 // P19 — one document in full, on the OPTIONAL-IDENTITY public route group (the URL
 // `/documents/{id}` is unchanged). It branches on `optionalIdentity()`:
@@ -53,10 +54,9 @@ import type { KbDocument } from "@/lib/knowledge/types";
 // P64-3y.S6 — job 07 draws Listen on a document: a member on the newest version of a Markdown or native
 // document reads its Listen state once after the load (`documentListen`, by the document's write key), and the
 // reader mounts it in its head. A visitor, an older version and the html original read none.
-const getDocumentOnce = cache(
-  (token: string | undefined, id: number): Promise<KbDocument> =>
-    getDocument(token, id),
-);
+//
+// P78, F13: the document's read (`getDocumentOnce`) is `./read.ts`'s, shared with the layout, which refuses an id no
+// document can have and a member's miss with a real 404 before this page streams.
 
 export async function generateMetadata({
   params,

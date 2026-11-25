@@ -106,7 +106,9 @@ export const INVITE = {
     },
     expired: {
       title: "This invite no longer works",
-      text: (org: string) => `It expired, was revoked or was used already. Ask an owner of ${org} for a new one.`,
+      /** `org` is empty for a code the API does not know, or none (P78, OQ3): the same words, no name. */
+      text: (org: string) =>
+        `It expired, was revoked or was used already. Ask an owner of ${org || "the org"} for a new one.`,
     },
   },
 } as const;

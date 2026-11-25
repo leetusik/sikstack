@@ -1,8 +1,6 @@
-import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { PROJECT } from "@/content";
 import { Trend, Usage } from "@/sikstack/frame";
 import { Grid } from "@/sikstack/ui";
 import { requireIdentity } from "@/lib/auth-guards";
@@ -57,8 +55,7 @@ import "./project-home.css";
 //   project not linked or never synced, the link command from the request's origin (`headers()`).
 // Every date is in the viewer's zone (the `kb_tz` cookie), UTC until it is known (decision 5).
 //
-// The <title> stays the static `PROJECT.title`: a `generateMetadata` title would cost a second uncached read.
-export const metadata: Metadata = { title: PROJECT.title };
+// The <title> is the project's name (P78, F17), the folder's `layout.tsx`'s default: this page sets none.
 
 /** The project read; a missing or another org's id renders Not found (404-never-403). */
 async function loadProject(

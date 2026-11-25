@@ -3,6 +3,7 @@
 import { useId, useReducer, useRef } from "react";
 
 import { KEYS, type KeysScope } from "@/content/sikstack-frame";
+import { StackLabel, StackTable } from "@/sikstack/feedback/stack-table";
 import { date, when, type FormatOptions } from "@/lib/format";
 import {
   Button,
@@ -249,46 +250,52 @@ export function Keys({
       ) : null}
 
       {list.length > 0 ? (
-        <div className="table-scroll">
-          <table className="is-keys table">
-            <KeysHead />
-            <tbody>
-              {list.map((r) => {
-                const label = keyLabel(r);
-                return (
-                  <tr key={r.id}>
-                    <td className={r.name ? "strong" : "dim"}>
-                      {r.name || KEYS.unnamed}
-                    </td>
-                    <td className="mono nowrap">{r.prefix}…</td>
-                    <td className="nowrap">{accessWord(r.access)}</td>
-                    <td>
-                      <Status state={STATUS_STATE[r.status]}>
-                        {KEYS.status[r.status]}
-                      </Status>
-                    </td>
-                    <td className="nowrap">{date(r.created, format)}</td>
-                    <td className="nowrap">{when(r.lastUsed, format)}</td>
-                    <td className="at-end">
-                      {r.status !== "revoked" && !readOnly ? (
-                        <Button
-                          variant="quiet"
-                          aria-label={KEYS.revokeLabel(label)}
-                          onClick={(e) => {
-                            revokeOpener.current = e.currentTarget;
-                            dispatch({ type: "ask-revoke", id: r.id });
-                          }}
-                        >
-                          {KEYS.revoke}
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        // P78, F14: the table stacks under 48em of its width (`StackTable`, as Members does): a row is its name,
+        // then the other cells on one line, the dates with their column's name, Revoke at the line's end.
+        <StackTable className="is-keys">
+          <KeysHead />
+          <tbody>
+            {list.map((r) => {
+              const label = keyLabel(r);
+              return (
+                <tr key={r.id}>
+                  <td className={r.name ? "strong is-main" : "dim is-main"}>
+                    {r.name || KEYS.unnamed}
+                  </td>
+                  <td className="mono nowrap">{r.prefix}…</td>
+                  <td className="nowrap">{accessWord(r.access)}</td>
+                  <td>
+                    <Status state={STATUS_STATE[r.status]}>
+                      {KEYS.status[r.status]}
+                    </Status>
+                  </td>
+                  <td className="nowrap">
+                    <StackLabel>{KEYS.columns.created}</StackLabel>
+                    {date(r.created, format)}
+                  </td>
+                  <td className="nowrap">
+                    <StackLabel>{KEYS.columns.lastUsed}</StackLabel>
+                    {when(r.lastUsed, format)}
+                  </td>
+                  <td className="at-end">
+                    {r.status !== "revoked" && !readOnly ? (
+                      <Button
+                        variant="quiet"
+                        aria-label={KEYS.revokeLabel(label)}
+                        onClick={(e) => {
+                          revokeOpener.current = e.currentTarget;
+                          dispatch({ type: "ask-revoke", id: r.id });
+                        }}
+                      >
+                        {KEYS.revoke}
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </StackTable>
       ) : (
         <div className="panel-body has-rule block">
           <p className="block-text">{KEYS.empty[scope]}</p>

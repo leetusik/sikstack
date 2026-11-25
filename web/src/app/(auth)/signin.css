@@ -11,6 +11,12 @@
     max-width: 26em;
     margin-inline: auto;
   }
+  /* P78, F11: a column's title takes the focus by script when the column changes (an outcome, a page that
+     opens on one: Connect's expired code) so a screen reader reads it; it is no control, so no focus ring
+     is drawn on it. A keyboard's Tab never lands there (tabindex -1). */
+  .signin-col h1[tabindex="-1"]:focus-visible {
+    outline: none;
+  }
   .signin-submit {
     width: 100%;
   }

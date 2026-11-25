@@ -133,6 +133,9 @@ const FEEDBACK_MARKUP = [
   "/sikstack/design/",
   // Members (P78-s2.S2's signed design): its two tables are Feedback's table that stacks (`StackTable`, `td.is-main`).
   "/sikstack/org/members.tsx",
+  // P78, F14: org home's Projects table and the keys table stack the same way (`StackTable`, `td.is-main`).
+  "/app/(app)/dashboard/projects-panel.tsx",
+  "/sikstack/frame/keys.tsx",
 ];
 
 describe("the Feedback frame's sheets", () => {

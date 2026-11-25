@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound, unstable_rethrow } from "next/navigation";
 
+import { SITE } from "@/content";
+import { LIBRARY_PAGE } from "@/content/library-page";
 import { PROJECT_LIBRARY } from "@/content/project-library";
 import { requireIdentity } from "@/lib/auth-guards";
 import type { FormatOptions } from "@/lib/format";
@@ -38,8 +40,16 @@ export async function generateMetadata({
   try {
     const { token, identity } = await requireIdentity();
     const read = await loadMemberProjectOnce(token, identity, projectId);
+    // P78, F17: `Library · <project>` through the project's template (the folder above names the project).
     return {
-      title: read ? read.project : PROJECT_LIBRARY.notFound.title,
+      title: read
+        ? LIBRARY_PAGE.title
+        : {
+            absolute: SITE.titleTemplate.replace(
+              "%s",
+              PROJECT_LIBRARY.notFound.title,
+            ),
+          },
       robots: { index: false },
     };
   } catch (error) {

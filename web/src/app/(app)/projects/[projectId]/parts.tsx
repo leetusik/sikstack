@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
 import { PROJECT_HOME } from "@/content/project";
+import { PROPOSED } from "@/content/workspace/agenda-thread";
 import {
   Badge,
   Block,
@@ -40,7 +41,9 @@ export function WaitRows({ tail }: { tail: string }) {
 
 /**
  * Workspace (`ProjectHomeWorkspace.dc.html`, on the Workspace's own frame parts): `Workspace` and the
- * agenda's count (`4 open · 1 proposed`), a link to the Agenda, in the head; one row a phase, at most five, newest first: the id,
+ * agenda's count (`4 open · 1 proposed`), a link to the Agenda, in the head; then (P78, F16) the items that count
+ * counts, one row each (the id, the title as a link to the item, its status), at most five, so the body lists what
+ * the head counts, and with no item and no phase one line that says so; one row a phase, at most five, newest first: the id,
  * the name as a link to the phase with its current slice under it, the status (F37), the count and
  * the steps (F39); the foot **See all in Workspace**. Not linked or never synced: the signed sentence,
  * `No workspace linked yet. Run <link command> in the project’s repo.`, the command built from the
@@ -74,10 +77,32 @@ export function WorkspacePanel({
       </PanelHead>
       {part.kind === "phases" ? (
         <>
+          {part.items.length === 0 && part.phases.length === 0 ? (
+            <Block className="panel-body has-rule">
+              <BlockText>{PROJECT_HOME.workspace.nothing}</BlockText>
+            </Block>
+          ) : null}
           <ul
             className="ph-list"
             style={{ "--steps-n": part.longest } as CSSProperties}
           >
+            {part.items.map((it) => (
+              <li key={it.key} className="row ph-phase">
+                <span className="dim ph-id">{it.id}</span>
+                <Link href={it.href} className="link-strong ph-open ph-name">
+                  <span className="ph-name-text" lang={it.lang}>
+                    {it.title}
+                  </span>
+                </Link>
+                {it.state === "proposed" ? (
+                  <span className={`${PROPOSED.cls} ph-state`}>
+                    {PROPOSED.word}
+                  </span>
+                ) : (
+                  <WsStatus kind="item" value={it.state} className="ph-state" />
+                )}
+              </li>
+            ))}
             {part.phases.map((ph) => (
               <li key={ph.key} className="row ph-phase">
                 <span className="dim ph-id">{ph.id}</span>

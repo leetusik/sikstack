@@ -43,7 +43,8 @@ export async function generateMetadata({
   params: Promise<Params>;
 }): Promise<Metadata> {
   const org = publicOrgOf((await params).org);
-  if (org === null) return { title: PUBLIC_LIBRARY.notFound.title };
+  // No `@`: no public library, a page that does not exist (P78, F12).
+  if (org === null) return { title: SIKSTACK_STATES.notFound.title };
   try {
     const ctx = await optionalIdentity();
     const read = await loadPublicLibraryOnce(ctx?.token, org);
