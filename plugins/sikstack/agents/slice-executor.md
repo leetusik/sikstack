@@ -24,7 +24,7 @@ Verify your work by a run in the real runtime, each claim seen failing first, th
 
 ## Record
 
-Write `phase.md` only through `section` (`--append`, `--entry K --replace|--remove`): settled points to `## Decisions`, operator questions to `## Operator Questions`, notes tagged `**(from <slice>, for <slice>)**`, then rewrite `## Now`. Long material goes to `topics/<slug>.md` behind a gist line. Never edit the generated `## Slices`.
+Write `phase.md` only through `section` (`--append`, `--entry K --replace|--remove`): settled points to `## Decisions`, operator questions to `## Operator Questions`, notes tagged `**(from <slice>, for <slice>)**`, then rewrite `## Now`. Long material goes to `topics/<slug>.md` behind a gist line. Never edit the generated `## Slices`. A loose end you cannot fix: an item for its agenda (the phase's first) in `## Now`, never a deferral.
 
 ## Verdict
 

@@ -588,11 +588,16 @@ assert "In a linked checkout, changes made on the web arrive as inbox entries" i
 # 0.3.0: deferred jobs are retired, so nothing is filed: every loose end is fixed now, dropped with a reason, or
 # (the exception) an agenda entry that says what would make it actionable. The line, word for word, in each place
 # that routes one; no shipped text but the CHANGELOG and the old installer's manifest names defer-job.
-FILING = "fix it now, drop it with a reason, or (the exception) an entry on an item that says what would make it actionable"
+# 0.6.0: the exception is an item on the agenda the loose end belongs to (items first), never a new agenda for it.
+FILING = "fix it now, drop it with a reason, or (the exception) an item on its agenda that says what would make it actionable"
 for rel in ("contract.md", "skills/review-phase/SKILL.md", "skills/do-whole-phase/playbooks/review.md",
-            "skills/do-whole-phase/reference/review.md", "skills/create-phase/SKILL.md", "skills/agenda/SKILL.md",
-            "templates/works/phase.md"):
+            "skills/do-whole-phase/reference/review.md", "skills/create-phase/SKILL.md", "skills/agenda/SKILL.md"):
     assert FILING in (root / rel).read_text(encoding="utf-8"), rel
+# 0.6.0: phases from the Open agendas -- one per agenda, linked, Proposed skipped, the confirmation the gate.
+_oa = (root / "skills/create-phase/SKILL.md").read_text(encoding="utf-8").split("## The open-agendas route", 1)[1].split("\n## ", 1)[0]
+for _r in ("`/create-phase open agendas`", "`items_open`", "skip Proposed ones", "**Propose one phase per agenda**",
+           "only with a stated reason", "(the gate)", "`phase new ... --agenda <AID>`"):
+    assert _r in _oa, _r
 for k, v in LIVE.items():
     for gone in ("defer-job", "promote-deferred", "drop-deferred", "deferred-job"):
         assert gone not in v or (k == "scripts/workflow.py" and gone != "deferred-job"), (k, gone)  # the refusal table

@@ -39,6 +39,20 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
 - **Words.** Commands, their help, their output and the dashboards call the record under `works/agenda/<AID>/` an
   agenda and a file under its `entries/` an item. `index.json`'s agenda rows gain `items_open`; `agenda_counts`
   loses `deferred`; `backlog.md` says `Proposed agendas` and `Open agendas`.
+- **`/agenda` handles the agendas, on the operator's word.** Still started only by the operator, it shows the
+  agendas and their items, proposes a triage with a reason each (per agenda: open, propose, solve, drop, merge,
+  split; per item: done, dismiss, delete) and runs only what the operator says yes to.
+- **Items first for loose ends.** The contract's "Nothing parks" exception is now an item on its agenda, and every
+  rule that files one (`create-phase`'s "Not now", the review's playbook and reference, `review-phase`, `read-code`,
+  the slice executor) says: closely related to an existing agenda (the phase's linked one first) means an item on it
+  (`agenda-item add`), never a new agenda and never a deferral; only unrelated work opens a new Proposed agenda. A
+  review lists the linked agenda's items the phase fixed (`agenda_items`), and the orchestrator marks them done
+  (`agenda-item done <A>/<tail> --author agent:<model>`). A phase linked to an agenda takes its open items as the
+  scope its `DECOMP` cuts.
+- **`/create-phase open agendas`** (or bare, with no request) lists the Open agendas with open items and no live
+  phase, proposes one phase per agenda (two together only with a stated reason), each objective drawn from its open
+  items and each made by `phase new --agenda <A>` after the operator confirms its name and objective; Proposed
+  agendas are skipped until accepted.
 - **Migration notes.** None by hand: the first rebuild writes `.sikstack/agenda.md` and removes `works/agenda.md`;
   commit both. A checkout still on 0.5.x reads a `state` key it does not know as nothing and keeps it.
 
