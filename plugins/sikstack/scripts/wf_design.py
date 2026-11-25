@@ -141,6 +141,7 @@ def _design_call(link, prog: str, nothing: str, method: str, suffix: str = "", b
     import urllib.request
     from urllib.parse import quote
     import wf_cloud
+    import wf_setup
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *a, **k):
@@ -148,16 +149,20 @@ def _design_call(link, prog: str, nothing: str, method: str, suffix: str = "", b
 
     url = f"{link.server}/api/design/{quote(link.project, safe='')}/builds{suffix}"
     headers = {"Authorization": "Bearer " + link._key, "Accept": "application/json",
-               "X-Sikstack-Checkout": link.checkout, "X-Sikstack-Engine": link.engine}
+               "X-Sikstack-Checkout": link.checkout, "X-Sikstack-Engine": link.engine,
+               "User-Agent": wf_setup.user_agent()}
     if body is not None:
         headers["Content-Type"] = "application/gzip"
     wire = wf_cloud._CloudWire()
     handlers = [NoRedirect()] + wf_cloud._cloud_handlers(wire) + ([urllib.request.ProxyHandler({})] if link.local else [])
     request = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
-        status, raw = link._exchange(urllib.request.build_opener(*handlers), request, wire)
+        status, raw, kind = link._exchange(urllib.request.build_opener(*handlers), request, wire)
     except wf_cloud.CloudUnreachable as exc:
         raise SystemExit(f"{prog}: sikstack is not reachable at {link.server} ({exc}): {nothing}")
+    blocked = wf_setup.block_line(status, raw, kind, link._key)
+    if blocked:
+        raise SystemExit(f"{prog}: the request to {link.server} was {blocked}, by something in front of it ({nothing})")
     try:
         payload = json.loads(raw.decode("utf-8")) if raw else {}
     except (UnicodeDecodeError, ValueError):

@@ -670,3 +670,29 @@ for texts, required, gone in checks:
             assert r in t, r
         for g in gone:
             assert g not in t, g
+# 0.5.1: every request the engine makes carries User-Agent: sikstack/<version> (urllib's own is blocked by the network
+# in front of sikstack): each urllib.request.Request( in scripts/ sits in a function that sets the header from
+# wf_setup's one helper, and nothing opens a URL another way.
+import ast as _ast
+_ua_sites = []
+for _f in sorted((root / "scripts").glob("*.py")):
+    _src = _f.read_text(encoding="utf-8")
+    assert "urlopen(" not in _src and "import Request" not in _src, _f.name
+    _calls = []
+    def _visit(_node, _fn):
+        for _child in _ast.iter_child_nodes(_node):
+            _inner = _child if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)) else _fn
+            _fn_ = getattr(_child, "func", None)
+            if isinstance(_child, _ast.Call) and isinstance(_fn_, _ast.Attribute) and _fn_.attr == "Request" \
+                    and isinstance(_fn_.value, _ast.Attribute) and _fn_.value.attr == "request" \
+                    and isinstance(_fn_.value.value, _ast.Name) and _fn_.value.value.id == "urllib":
+                _calls.append((_child.lineno, _fn))
+            _visit(_child, _inner)
+    _visit(_ast.parse(_src), None)
+    assert _src.count("urllib.request.Request(") == len(_calls), (_f.name, len(_calls))
+    for _line, _fn in _calls:
+        _body = _ast.get_source_segment(_src, _fn) if _fn is not None else ""
+        assert '"User-Agent": ' in _body and ("user_agent()" in _body), f"{_f.name}:{_line} sends no sikstack User-Agent"
+        _ua_sites.append(f"{_f.name}:{_fn.name}")
+assert sorted(_ua_sites) == ["wf_cloud.py:call", "wf_design.py:_design_call", "wf_setup.py:post_json", "wf_setup.py:register"], _ua_sites
+assert 'return f"sikstack/{plugin_version()}"' in (root / "scripts/wf_setup.py").read_text(encoding="utf-8")

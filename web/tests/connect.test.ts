@@ -157,10 +157,23 @@ describe("ConnectColumn: each designed state, its words and markup", () => {
     );
     expect(html).toContain('<span class="strong">platform</span>');
     expect(html).toContain('<span class="strong">Personal</span>');
-    expect(text(html)).toContain("Signed in as you @example.com");
     expect(html).not.toContain("<fieldset");
     expect(html).toMatch(/<div class="sk-actions"><button type="button" class="btn">Don’t connect<\/button><button type="button" class="btn btn-primary" data-busy="false"><span class="swap"><span>Connect<\/span><span>Connecting…<\/span><\/span><\/button><\/div>/);
     expect(html).toContain('aria-busy="false"');
+  });
+
+  it("ready: the account shows once, right under Connect, with Use another account as a link-styled button", () => {
+    const html = render(view(ready()));
+    // The facts panel no longer carries it: the install's four rows, then the action pair.
+    expect(text(html)).toContain("Install 3f2a…7f3a Plugin sikstack 1.0.0 Set up Nov 20 Setup email you @example.com Don’t connect");
+    expect(text(html).match(/Signed in as/g)).toHaveLength(1);
+    expect(html.indexOf("Signed in as")).toBeGreaterThan(html.indexOf('class="sk-actions"'));
+    expect(text(html)).toMatch(/Connect Connecting… Signed in as you @example\.com Use another account$/);
+    // The address splits before its @ as the facts rows do.
+    expect(html).toContain('<span class="connect-addr strong"><span>you</span><wbr/><span>@example.com</span></span>');
+    expect(html).toContain('<button type="button" class="link link-row">Use another account</button>');
+    // Signed out there is no account line.
+    expect(render(view(out))).not.toContain("Use another account");
   });
 
   it("ready with two orgs: an Org fieldset of radios, the first picked", () => {
@@ -205,7 +218,8 @@ describe("ConnectColumn: each designed state, its words and markup", () => {
 
   it("a different setup email: both rows, no mark", () => {
     const html = render(view(ready([ORG_A], "me@example.org")));
-    expect(text(html)).toContain("Setup email you @example.com Signed in as me @example.org");
+    expect(text(html)).toContain("Setup email you @example.com Don’t connect");
+    expect(text(html)).toContain("Signed in as me @example.org Use another account");
     expect(html).not.toContain("notice");
   });
 
@@ -230,11 +244,12 @@ describe("ConnectColumn: each designed state, its words and markup", () => {
     expect(html).toContain('<p class="cluster gap-1"><a class="link link-row" href="/projects/p-1/workspace">Open platform on the web</a></p>');
   });
 
-  it("another account: its sentence and Sign out as a link-styled button", () => {
+  it("another account: its sentence names the release command, and Sign out as a link-styled button", () => {
     const html = render(view({ state: "other", code: CODE }));
     expect(text(html)).toContain(
-      "Connected to another account This install is connected to another account, so this one can’t connect it. To see its work, sign in with that account. Sign out",
+      "Connected to another account This install is connected to another account. To connect it to this one, run /sikstack:sign-in release in Claude Code on the install’s machine, then Connect the new code. Sign out",
     );
+    expect(html).toContain('<span class="cmd-inline">/sikstack:sign-in release</span>');
     expect(html).toContain('<button type="button" class="link link-row">Sign out</button>');
   });
 
