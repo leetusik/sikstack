@@ -15,6 +15,7 @@ import { DesignBuildView } from "./viewer";
  */
 export function DesignViewer({
   project,
+  scope,
   build,
   manifest,
   origin,
@@ -22,6 +23,7 @@ export function DesignViewer({
   now,
 }: {
   project: string;
+  scope?: "round" | "all";
   build: DesignBuild;
   manifest: DesignManifest;
   origin: string | null;
@@ -52,6 +54,7 @@ export function DesignViewer({
   return (
     <DesignBuildView
       project={project}
+      scope={scope}
       build={build}
       manifest={manifest}
       share={share}

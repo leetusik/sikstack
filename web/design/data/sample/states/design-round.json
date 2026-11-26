@@ -1,0 +1,393 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "design-round",
+  "now": "2026-11-26T09:00:00Z",
+  "design": {
+    "manifest": {
+      "pages": [
+        {
+          "name": "All pages",
+          "route": "/",
+          "entry": "/"
+        },
+        {
+          "name": "Workspace · Agenda",
+          "route": "/projects/[projectId]/workspace",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/workspace/",
+          "states": [
+            {
+              "key": "recorded",
+              "label": "Recorded"
+            },
+            {
+              "key": "many",
+              "label": "Many items"
+            },
+            {
+              "key": "empty",
+              "label": "Empty agenda"
+            },
+            {
+              "key": "waiting",
+              "label": "Waiting for sync"
+            },
+            {
+              "key": "web-waiting",
+              "label": "Note, feedback and accept waiting"
+            },
+            {
+              "key": "behind",
+              "label": "Synced long ago"
+            },
+            {
+              "key": "loading",
+              "label": "Loading"
+            },
+            {
+              "key": "unlinked",
+              "label": "Not linked"
+            },
+            {
+              "key": "never",
+              "label": "Never synced"
+            },
+            {
+              "key": "failed",
+              "label": "Read failed"
+            },
+            {
+              "key": "not-found",
+              "label": "Not found"
+            },
+            {
+              "key": "error",
+              "label": "Page error"
+            }
+          ]
+        },
+        {
+          "name": "Agenda item",
+          "route": "/projects/[projectId]/workspace/agenda/[item]",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/workspace/agenda/A3-1z/",
+          "states": [
+            {
+              "key": "open",
+              "label": "Open"
+            },
+            {
+              "key": "proposed",
+              "label": "Proposed"
+            },
+            {
+              "key": "note-waiting",
+              "label": "Note waiting for sync"
+            },
+            {
+              "key": "items",
+              "label": "Items done and dismissed"
+            },
+            {
+              "key": "solved",
+              "label": "Solved"
+            },
+            {
+              "key": "dropped",
+              "label": "Dropped"
+            },
+            {
+              "key": "waiting",
+              "label": "Waiting for sync"
+            },
+            {
+              "key": "loading",
+              "label": "Loading"
+            },
+            {
+              "key": "not-found",
+              "label": "Not found"
+            },
+            {
+              "key": "project-not-found",
+              "label": "Project not found"
+            },
+            {
+              "key": "failed",
+              "label": "Read failed"
+            },
+            {
+              "key": "error",
+              "label": "Page error"
+            }
+          ]
+        },
+        {
+          "name": "Feedback item",
+          "route": "/projects/[projectId]/feedback/[feedbackId]",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/feedback/00000000-0000-4000-8000-0000000000f3/",
+          "states": [
+            {
+              "key": "offered",
+              "label": "Add to agenda"
+            },
+            {
+              "key": "no-workspace",
+              "label": "No workspace linked"
+            },
+            {
+              "key": "confirm-new",
+              "label": "Confirm: a new item"
+            },
+            {
+              "key": "confirm-existing",
+              "label": "Confirm: an existing item"
+            },
+            {
+              "key": "adding",
+              "label": "Adding"
+            },
+            {
+              "key": "failed",
+              "label": "Add failed"
+            },
+            {
+              "key": "waiting",
+              "label": "Added, waiting for sync"
+            },
+            {
+              "key": "no-project",
+              "label": "No project"
+            },
+            {
+              "key": "loading",
+              "label": "Loading"
+            },
+            {
+              "key": "not-found",
+              "label": "Not found"
+            },
+            {
+              "key": "error",
+              "label": "Page error"
+            }
+          ]
+        },
+        {
+          "name": "Feedback item on the agenda",
+          "route": "/projects/[projectId]/feedback/[feedbackId]",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/feedback/00000000-0000-4000-8000-0000000000f1/",
+          "states": [
+            {
+              "key": "filed",
+              "label": "On the agenda"
+            },
+            {
+              "key": "no-workspace",
+              "label": "No workspace linked"
+            }
+          ]
+        },
+        {
+          "name": "Design",
+          "route": "/projects/[projectId]/design",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/design/",
+          "states": [
+            {
+              "key": "many",
+              "label": "Many builds"
+            },
+            {
+              "key": "one",
+              "label": "One build"
+            },
+            {
+              "key": "private",
+              "label": "A private build"
+            },
+            {
+              "key": "shared",
+              "label": "A shared build"
+            },
+            {
+              "key": "empty",
+              "label": "No builds yet"
+            }
+          ]
+        },
+        {
+          "name": "Design build",
+          "route": "/projects/[projectId]/design/[build]",
+          "entry": "/projects/00000000-0000-4000-8000-000000000001/design/bnhcguslmzykt6ybjmxehh3nzo/",
+          "states": [
+            {
+              "key": "no-options",
+              "label": "No options"
+            },
+            {
+              "key": "options",
+              "label": "Options"
+            },
+            {
+              "key": "shared",
+              "label": "Shared"
+            },
+            {
+              "key": "private",
+              "label": "Private"
+            },
+            {
+              "key": "round",
+              "label": "A round's build"
+            },
+            {
+              "key": "every-page",
+              "label": "Every page"
+            },
+            {
+              "key": "gone",
+              "label": "Gone"
+            }
+          ]
+        },
+        {
+          "name": "Org switcher",
+          "route": "/dashboard (the top bar of every app page)",
+          "entry": "/dashboard/",
+          "states": [
+            {
+              "key": "several",
+              "label": "Several orgs, menu open"
+            },
+            {
+              "key": "one",
+              "label": "One org, menu open"
+            },
+            {
+              "key": "closed",
+              "label": "Menu closed"
+            }
+          ]
+        },
+        {
+          "name": "New org",
+          "route": "/orgs/new",
+          "entry": "/orgs/new/",
+          "states": [
+            {
+              "key": "ready",
+              "label": "Ready"
+            },
+            {
+              "key": "empty",
+              "label": "No name"
+            },
+            {
+              "key": "taken",
+              "label": "Name taken"
+            },
+            {
+              "key": "creating",
+              "label": "Creating"
+            },
+            {
+              "key": "failed",
+              "label": "Create failed"
+            }
+          ]
+        },
+        {
+          "name": "Members",
+          "route": "/members",
+          "entry": "/members/",
+          "states": [
+            {
+              "key": "members",
+              "label": "Members and invites"
+            },
+            {
+              "key": "owner-only",
+              "label": "Only the owner"
+            },
+            {
+              "key": "open",
+              "label": "Invite form open"
+            },
+            {
+              "key": "sending",
+              "label": "Sending"
+            },
+            {
+              "key": "sent",
+              "label": "Invite sent"
+            },
+            {
+              "key": "not-address",
+              "label": "Not an address"
+            },
+            {
+              "key": "already-member",
+              "label": "Already a member"
+            },
+            {
+              "key": "already-invited",
+              "label": "Already invited"
+            },
+            {
+              "key": "send-failed",
+              "label": "Send failed"
+            },
+            {
+              "key": "member-view",
+              "label": "A member's view"
+            }
+          ]
+        },
+        {
+          "name": "Invite",
+          "route": "/invite?code=…",
+          "entry": "/invite/",
+          "states": [
+            {
+              "key": "out",
+              "label": "Signed out"
+            },
+            {
+              "key": "ready",
+              "label": "Signed in, invited address"
+            },
+            {
+              "key": "joining",
+              "label": "Joining"
+            },
+            {
+              "key": "failed",
+              "label": "Join failed"
+            },
+            {
+              "key": "other",
+              "label": "Another account"
+            },
+            {
+              "key": "member",
+              "label": "Already a member"
+            },
+            {
+              "key": "expired",
+              "label": "Expired, revoked or used"
+            }
+          ]
+        },
+        {
+          "name": "System",
+          "route": "/system",
+          "entry": "/system/"
+        }
+      ],
+      "round": {
+        "pages": [
+          "/projects/00000000-0000-4000-8000-000000000001/feedback/00000000-0000-4000-8000-0000000000f3/",
+          "/projects/00000000-0000-4000-8000-000000000001/design/bnhcguslmzykt6ybjmxehh3nzo/"
+        ]
+      }
+    }
+  }
+}

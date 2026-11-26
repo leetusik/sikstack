@@ -57,7 +57,16 @@ export const DESIGN = {
   },
   pages: {
     title: "Pages",
+    /** A build published with a round (`design-publish --page`): its list holds only the pages the round made. */
+    round: "This round",
     count: (n: number) => (n === 1 ? "1 page" : `${n} pages`),
+    statesLabel: (page: string) => `States of ${page}`,
+  },
+  /** The whole design: every page of a round's build, one link from the round's list. */
+  whole: {
+    title: "Every page",
+    link: (n: number) => `The whole design · ${n === 1 ? "1 page" : `${n} pages`}`,
+    back: "This round",
   },
   /** A page's or a direction's name, its link: it opens the build on its own host, in a new tab. */
   opensLabel: (name: string) => `${name}, opens in a new tab`,

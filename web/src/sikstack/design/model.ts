@@ -46,12 +46,38 @@ export interface DesignOptions {
 export interface DesignManifest {
   pages?: DesignManifestPage[];
   options?: DesignOptions;
+  /**
+   * The pages the round made (`sikstack design-publish --page`): their entries. With one, the build's viewer lists
+   * only those pages and links to every page (`designPagesHref`); a build published without one has none.
+   */
+  round?: { pages: string[] };
 }
 
 /** A build's address in the app: its viewer. */
 export function designHref(project: string, build?: string): string {
   const list = `/projects/${encodeURIComponent(project)}/design`;
   return build ? `${list}/${encodeURIComponent(build)}` : list;
+}
+
+/** A build's every-page list: `/projects/<id>/design/<build>/pages`, every manifest page whatever its round. */
+export function designPagesHref(project: string, build: string): string {
+  return `${designHref(project, build)}/pages`;
+}
+
+/**
+ * The round's pages: the manifest pages whose entry its `round` names, in the manifest's order (an entry the
+ * manifest lacks is ignored), or null when the build has no round (none, an empty or invalid one, or one naming no
+ * page the manifest holds): then the viewer lists every page, as before rounds.
+ */
+export function roundPages(manifest: DesignManifest): DesignManifestPage[] | null {
+  const round = (manifest as { round?: unknown }).round;
+  const named =
+    round !== null && typeof round === "object" ? (round as { pages?: unknown }).pages : undefined;
+  if (!Array.isArray(named)) return null;
+  const set = new Set(named.filter((e): e is string => typeof e === "string"));
+  if (set.size === 0) return null;
+  const pages = (manifest.pages ?? []).filter((p) => set.has(p.entry));
+  return pages.length > 0 ? pages : null;
 }
 
 /**

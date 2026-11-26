@@ -15,11 +15,14 @@ import {
   buildTitle,
   designHref,
   designOpenHref,
+  designPagesHref,
   framedHeight,
   pageShareUrl,
   recordingWord,
+  roundPages,
   type DesignBuild,
   type DesignManifest,
+  type DesignManifestPage,
   type DesignOptions,
 } from "./model";
 
@@ -34,9 +37,16 @@ import {
  * the share link that lands on that page (`pageShareUrl`). A build made from a private recording says, in one
  * line, that it cannot be shared (also when the API refuses the change with its 409); any other failed change
  * says so in one line under the control. No comment, pick, sign-off, edit or delete.
+ *
+ * A build published with a round (`manifest.round`, `design-publish --page`) lists only the round's pages, with
+ * their count and one link to every page (`designPagesHref`, `scope="all"`); that list shows every manifest page,
+ * without the options page's directions, and its way back is the round's list. A build without a round lists every
+ * page, with no such link. Each page row lists its states, each opening the page in that state.
  */
 export interface DesignBuildViewProps {
   project: string;
+  /** The round's list (the build's viewer, the default) or the every-page list (`…/<build>/pages`). */
+  scope?: "round" | "all";
   build: DesignBuild;
   manifest: DesignManifest;
   /** The share link as it is now (the build's, until a change answers). */
@@ -120,18 +130,50 @@ function CopyPageLink({ text, page }: { text: string; page: string }) {
   );
 }
 
-function BackRow({ project }: { project: string }) {
+function BackRow({ project, build }: { project: string; build?: string }) {
   return (
     <div className="design-top">
-      <Link className="back" href={designHref(project)}>
-        {DESIGN.back}
-      </Link>
+      {build ? (
+        // A full page load: the viewer's CSP, which lets it frame the build, is the document's.
+        <a className="back" href={designHref(project, build)}>
+          {DESIGN.whole.back}
+        </a>
+      ) : (
+        <Link className="back" href={designHref(project)}>
+          {DESIGN.back}
+        </Link>
+      )}
     </div>
+  );
+}
+
+/** A page's states, each opening the page in that state (`<entry>?state=<key>`) on the build's host. */
+function PageStates({ page, open }: { page: DesignManifestPage; open: (path: string) => string }) {
+  const states = page.states ?? [];
+  if (states.length === 0) return null;
+  const sep = page.entry.includes("?") ? "&" : "?";
+  return (
+    <ul className="design-page-states" aria-label={DESIGN.pages.statesLabel(page.name)}>
+      {states.map((st) => (
+        <li key={st.key}>
+          <a
+            className="link"
+            href={open(`${page.entry}${sep}state=${encodeURIComponent(st.key)}`)}
+            target="_blank"
+            rel="noopener"
+            aria-label={DESIGN.opensLabel(`${page.name}, ${st.label}`)}
+          >
+            {st.label}
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 export function DesignBuildView({
   project,
+  scope = "round",
   build,
   manifest,
   share,
@@ -145,8 +187,11 @@ export function DesignBuildView({
   now,
 }: DesignBuildViewProps) {
   const f = DESIGN.facts;
-  const pages = manifest.pages ?? [];
-  const options = manifest.options;
+  const all = manifest.pages ?? [];
+  const round = roundPages(manifest);
+  const whole = scope === "all";
+  const pages = whole ? all : (round ?? all);
+  const options = whole ? undefined : manifest.options;
   const open = (path: string) => designOpenHref(project, build.id, path);
   const frame =
     frameOf ??
@@ -160,7 +205,7 @@ export function DesignBuildView({
   return (
     <div className="column">
       <header className="page-top">
-        <BackRow project={project} />
+        <BackRow project={project} build={whole ? build.id : undefined} />
         <div className="page-head">
           <h1>{buildTitle(build)}</h1>
         </div>
@@ -262,7 +307,9 @@ export function DesignBuildView({
 
       <Section aria-labelledby="design-pages">
         <SectionHead>
-          <h2 id="design-pages">{DESIGN.pages.title}</h2>
+          <h2 id="design-pages">
+            {whole ? DESIGN.whole.title : round ? DESIGN.pages.round : DESIGN.pages.title}
+          </h2>
           <p className="meta">{DESIGN.pages.count(pages.length)}</p>
         </SectionHead>
         <Panel>
@@ -280,10 +327,18 @@ export function DesignBuildView({
                 </a>
                 {p.route ? <span className="mono meta">{p.route}</span> : null}
                 {shareUrl ? <CopyPageLink text={pageShareUrl(shareUrl, p.entry)} page={p.name} /> : null}
+                <PageStates page={p} open={open} />
               </li>
             ))}
           </ul>
         </Panel>
+        {round && !whole ? (
+          <p className="design-whole">
+            <a className="link-strong" href={designPagesHref(project, build.id)}>
+              {DESIGN.whole.link(all.length)}
+            </a>
+          </p>
+        ) : null}
       </Section>
     </div>
   );

@@ -64,7 +64,7 @@ manifest.json at its root, else 400; a recording under design/data/local/ is pri
 (viewer: the build's viewer on this server, http://<Host>/projects/<project>/design/<id>; url: its own host);
 GET .../builds -> {builds}, newest first; DELETE .../builds/<id> -> {deleted}, an unknown id 404; a wrong key 401,
 another project 404. Each request is logged (route "design": method, bytes, Content-Type, the tar's names, the
-status; never the key). control design_answer: {status, detail, method?} answers the next design request (of that
+status, and the uploaded manifest's round, "absent" without one; never the key). control design_answer: {status, detail, method?} answers the next design request (of that
 method) with that one line (a 403, a 413, ...); one-shot. A refused key is answered before the body is read, and the
 connection closed, as the server does (a big upload then sees its pipe broken).
 
@@ -636,6 +636,8 @@ def make_handler(store: Store, key: str, log_path: str):
                 except (tarfile.TarError, OSError, ValueError):
                     manifest, members, names = None, [], []
                 entry["names"] = sorted(names)
+                # the uploaded manifest's round, as packed ("absent" when it has none)
+                entry["round"] = manifest.get("round", "absent") if isinstance(manifest, dict) else None
                 if not isinstance(manifest, dict) or manifest.get("$design") != "sikstack-design-build":
                     status, payload = 400, {"detail": "the build has no marked manifest.json at its root"}
                 else:

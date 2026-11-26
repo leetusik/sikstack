@@ -10,6 +10,21 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.9.0 — 2026-11-26
+
+- **A published build lists the round's pages: `design-publish --page`.** Name each page the round made, by its
+  entry or its route (a route selects every page that has it); repeat the flag for more pages.
+  - The uploaded `manifest.json` gains `round: {"pages": [...]}`, the matched entries in the manifest's order.
+    `out/manifest.json` on disk is not changed.
+  - The build's viewer on sikstack then lists only those pages, each with its states, and links once to the whole
+    design (`…/design/<build>/pages`, every page of the build).
+  - A value that names no page is refused before anything is sent. Without `--page` nothing changes: no round, and
+    the viewer lists every page.
+- **A stale build is caught at publish.** When the manifest names its source commit and the design folder sits in a
+  git repo, a build made from another commit than that repo's `HEAD` is refused: build the folder again after the
+  commit. A build made from uncommitted changes still publishes, with one `stale:` line saying so.
+- **Migration notes:** nothing to run. A build made before the commit it should show is now refused; rebuild it.
+
 ## 0.8.0 — 2026-11-26
 
 - **The two dashboards live in `works/`.** `backlog.md` and `agenda.md` are written to `.sikstack/works/`, beside

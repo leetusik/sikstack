@@ -5795,19 +5795,28 @@ printf '%s\n' "$si_f1" | grep -q '^sent: ' && [ "$(printf '%s\n' "$si_f1" | tail
   || bad "feedback -- f1=[$si_f1] f2=[$si_f2] f3=[$si_f3] f4=[$si_f4] f5=[$si_f5] reports=[$si_rep]"
 
 # ---------------------------------------------------------------------------
-echo "== Test 33: the design publish verbs against the local fake sikstack -- design-publish refuses an unlinked checkout with the sign-in line, a folder with no manifest or an unmarked one, and a build over a cap (files, unpacked, compressed) naming the size and the cap, each before any request; it uploads out/ as one tar.gz (manifest.json at its root) with the workspace key as a Bearer, outside the cloud boundary, and prints the build's viewer on sikstack first (url=, as the server answers it), private= and the build's host last (host=); a second publish is a second row listed first; a local/ recording is private; design-delete removes one (a second delete is the server's 404 line); a wrong key and the server's 403 and 413 are one line each; the key appears nowhere =="
+echo "== Test 33: the design publish verbs against the local fake sikstack -- design-publish refuses an unlinked checkout with the sign-in line, a folder with no manifest or an unmarked one, and a build over a cap (files, unpacked, compressed) naming the size and the cap, each before any request; it uploads out/ as one tar.gz (manifest.json at its root) with the workspace key as a Bearer, outside the cloud boundary, and prints the build's viewer on sikstack first (url=, as the server answers it), private= and the build's host last (host=); a second publish is a second row listed first; a local/ recording is private; design-delete removes one (a second delete is the server's 404 line); a wrong key and the server's 403 and 413 are one line each; --page names the round's pages (an entry or a route) into the packed manifest's round, a value no page has refused unsent; a build from another commit than its repo's HEAD is refused unsent, a dirty one publishes with a stale: line; the key appears nowhere =="
 newtmp DPW; DPX="$DPW/xdg"; DPH="$DPW/prod"; DPU="$DPW/unlinked"
 dp() { _h=$1; shift; ( cd "$_h" && XDG_CONFIG_HOME="$DPX" python3 "$ENG" "$@" ) 2>&1; }
 { mkhost "$DPH" && git -C "$DPH/.sikstack" add -A && git -C "$DPH/.sikstack" commit -q --allow-empty -m install && mkhost "$DPU"; } > "$DPW/setup.txt" 2>&1 \
   || bad "design publish probe: the installs failed -- $(tail -3 "$DPW/setup.txt")"
-# dp_build <folder> <recording file> [no-mark]: a small design build at <folder>/out.
+# dp_build <folder> <recording file> [no-mark] [commit] [dirty]: a small design build at <folder>/out. Its source
+# commit is the folder's repo HEAD when it sits in one (as build.mjs stamps it), else a fixed one; [commit] overrides
+# it (none: no source at all), [dirty] marks the tree dirty. Two pages share a route, as the real build's do.
 dp_build() { mkdir -p "$1/out/_next/static" "$1/out/system" && printf '<html>%s</html>\n' "$1" > "$1/out/index.html" \
   && printf 'x' > "$1/out/_next/static/a.js" && printf '<html>system</html>\n' > "$1/out/system/index.html" \
-  && python3 - "$1/out/manifest.json" "$2" "${3:-}" <<'PY2'
+  && python3 - "$1/out/manifest.json" "$2" "${3:-}" "${4:-$(git -C "$1" rev-parse HEAD 2>/dev/null || echo 0123456789abcdef0123)}" "${5:-}" <<'PY2'
 import json, sys
-path, rec, nomark = sys.argv[1:]
-m = {"source": {"repo": "prod", "commit": "0123456789abcdef0123", "branch": "main", "dirty": False},
-     "recording": {"file": rec, "name": "x"}, "pages": [{"path": "/"}]}
+path, rec, nomark, commit, dirty = sys.argv[1:]
+m = {"source": {"repo": "prod", "commit": commit, "branch": "main", "dirty": bool(dirty)},
+     "recording": {"file": rec, "name": "x"},
+     "pages": [{"name": "All pages", "route": "/", "entry": "/"},
+               {"name": "Feedback item", "route": "/f/[id]", "entry": "/f/1/", "states": [{"key": "a", "label": "A"}]},
+               {"name": "Feedback item on the agenda", "route": "/f/[id]", "entry": "/f/2/"},
+               {"name": "Design", "route": "/d", "entry": "/d/"},
+               {"name": "System", "route": "/system", "entry": "/system/"}]}
+if commit == "none":
+    del m["source"]
 if not nomark:
     m = {"$design": "sikstack-design-build", **m}
 open(path, "w").write(json.dumps(m))
@@ -5843,7 +5852,7 @@ dp_id2=$(printf '%s\n' "$dp_o2" | sed -n 's/^published=\([^ ]*\) .*/\1/p'); dp_i
 dp_o4=$(dp "$DPH" design-builds); dp_rc4=$?
 dp_post=$(grep '"route": "design"' "$DPL" | grep '"method": "POST"' | head -1)
 [ "$dp_rc2" = 0 ] && [ "$dp_rc3" = 0 ] && [ -n "$dp_id2" ] && [ -n "$dp_id3" ] && [ "$dp_id2" != "$dp_id3" ] \
-  && printf '%s\n' "$dp_o2" | grep -q "^published=$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 private=no commit=0123456789ab branch=main size=[0-9]* files=[0-9]* compressed=[0-9]* host=http://$dp_id2.design.fake.localhost/\$" \
+  && printf '%s\n' "$dp_o2" | grep -q "^published=$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 private=no commit=$(git -C "$DPH" rev-parse HEAD | cut -c1-12) branch=main size=[0-9]* files=[0-9]* compressed=[0-9]* host=http://$dp_id2.design.fake.localhost/\$" \
   && [ "$dp_rc4" = 0 ] && [ "$(printf '%s\n' "$dp_o4" | sed -n 1p)" = "builds=2 project=proj-1" ] \
   && printf '%s\n' "$dp_o4" | sed -n 2p | grep -q "^$dp_id3 " && printf '%s\n' "$dp_o4" | sed -n 3p | grep -q "^$dp_id2 url=$DPS/projects/proj-1/design/$dp_id2 published_at=.* private=no share=off host=http://$dp_id2.design.fake.localhost/\$" \
   && printf '%s\n' "$dp_post" | grep -q '"auth": "ok"' && printf '%s\n' "$dp_post" | grep -q '"content_type": "application/gzip"' \
@@ -5924,6 +5933,43 @@ cp "$DPW/keys.saved" "$DPX/sikstack/workspace-keys.json"; chmod 600 "$DPX/siksta
   && [ "$dp_o17" = "design-publish: sikstack refused (HTTP 413): the build is 52,428,801 bytes (50.0 MB) unpacked: the cap is 50 MB (nothing was published)" ] \
   && ok "a wrong key's 401, the server's 403 and its 413 each end the verb in one line naming the status and the server's words; a wrong key on a 4 MB publish is refused by one small request before the upload" \
   || bad "the server's refusals are wrong -- rc=$dp_rc15$dp_rc16$dp_rc17$dp_rc18 [$dp_o15] [$dp_o16] [$dp_o17] [$dp_o18]"
+# (g) the round (--page): entries and routes (a route selects every page with it) give round.pages, unique, in the
+# manifest's order, in the packed manifest only (out/manifest.json unchanged); no --page, no round key; a value no
+# page has is refused in one line before any request.
+dp_round() { python3 - "$DPL" "$1" <<'PY2'
+import json, sys
+posts = [json.loads(l) for l in open(sys.argv[1]) if '"route": "design"' in l and '"method": "POST"' in l]
+print(json.dumps(posts[int(sys.argv[2])].get("round", "unlogged")))
+PY2
+}
+dp_sum0=$(sha_stdin < "$DPH/web/design/out/manifest.json")
+dp_o19=$(dp "$DPH" design-publish --folder web/design --page /d/ --page '/f/[id]' --page /f/2/); dp_rc19=$?
+dp_r19=$(dp_round -1); dp_r2=$(dp_round 0)
+dp_n20=$(dp_n); dp_o20=$(dp "$DPH" design-publish --folder web/design --page /d/ --page /nope/); dp_rc20=$?
+[ "$dp_rc19" = 0 ] && printf '%s\n' "$dp_o19" | grep -q '^published=b' && [ "$dp_r19" = '{"pages": ["/f/1/", "/f/2/", "/d/"]}' ] \
+  && [ "$dp_r2" = '"absent"' ] && [ "$(sha_stdin < "$DPH/web/design/out/manifest.json")" = "$dp_sum0" ] \
+  && [ "$dp_rc20" = 1 ] && [ "$(dp_n)" = "$dp_n20" ] && [ "$(printf '%s\n' "$dp_o20" | grep -c '')" = 1 ] \
+  && printf '%s\n' "$dp_o20" | grep -q "^design-publish: refused -- --page '/nope/' is no page of the build.*(nothing was published)\$" \
+  && ok "design-publish --page takes a page's entry or route (a route selects both pages that share it): the packed manifest's round.pages are the matched entries, unique, in the manifest's order, and out/manifest.json is unchanged; a publish with no --page uploads no round; --page /nope/ is refused in one line naming it, before any request" \
+  || bad "the round's publish is wrong -- rc=$dp_rc19/$dp_rc20 round=[$dp_r19] plain=[$dp_r2] sent=$dp_n20/$(dp_n) [$dp_o19] [$dp_o20]"
+# (h) the stale-commit check, in a repo of its own: a build from another commit than HEAD is refused (both commits
+# named, no request); one from a dirty tree publishes with one stale: line; one with no source is not checked.
+DPR="$DPW/stalerepo"; mkdir -p "$DPR" && git -C "$DPR" init -q && git -C "$DPR" commit -q --allow-empty -m one \
+  && git -C "$DPR" commit -q --allow-empty -m two
+dp_old=$(git -C "$DPR" rev-parse HEAD~1); dp_head=$(git -C "$DPR" rev-parse HEAD)
+dp_build "$DPR/old" design/data/sample/recording.json "" "$dp_old"
+dp_build "$DPR/dirty" design/data/sample/recording.json "" "$dp_head" dirty
+dp_build "$DPR/nosource" design/data/sample/recording.json "" none
+dp_n21=$(dp_n); dp_o21=$(dp "$DPH" design-publish --folder "$DPR/old"); dp_rc21=$?; dp_n21b=$(dp_n)
+dp_o22=$(dp "$DPH" design-publish --folder "$DPR/dirty"); dp_rc22=$?
+dp_o23=$(dp "$DPH" design-publish --folder "$DPR/nosource"); dp_rc23=$?
+[ "$dp_rc21" = 1 ] && [ "$dp_n21b" = "$dp_n21" ] && [ "$(printf '%s\n' "$dp_o21" | grep -c '')" = 1 ] \
+  && printf '%s\n' "$dp_o21" | grep -q "^design-publish: refused -- the build was made from commit ${dp_old:0:7}, but its repo is at ${dp_head:0:7}: build the design folder again after the commit, then publish (nothing was published)\$" \
+  && [ "$dp_rc22" = 0 ] && [ "$(printf '%s\n' "$dp_o22" | grep -c '')" = 2 ] && printf '%s\n' "$dp_o22" | sed -n 1p | grep -q '^published=b' \
+  && printf '%s\n' "$dp_o22" | sed -n 2p | grep -q "^stale: the build was made from uncommitted changes on ${dp_head:0:7}" \
+  && [ "$dp_rc23" = 0 ] && [ "$(printf '%s\n' "$dp_o23" | grep -c '')" = 1 ] && printf '%s\n' "$dp_o23" | grep -q '^published=b.* commit=none ' \
+  && ok "the stale-commit check: a build made from a commit that is not its repo's HEAD is refused in one line naming both, before any request; a dirty tree's build publishes with one stale: line; a manifest with no source publishes with no line" \
+  || bad "the stale-commit check is wrong -- rc=$dp_rc21/$dp_rc22/$dp_rc23 sent=$dp_n21/$dp_n21b [$dp_o21] [$dp_o22] [$dp_o23]"
 if grep -rqF "$DPK" "$DPH" "$DPW"/*.txt "$DPW/fake" 2>/dev/null || printf '%s\n' "$dp_o2$dp_o4$dp_o5$dp_o13$dp_o15" | grep -qF "$DPK"; then
   bad "the workspace key leaked into the tree, the output or the request log"
 fi

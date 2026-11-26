@@ -4,7 +4,7 @@
 
 `run.sh workspace <dir>` makes that checkout: a scratch repo with a `sikstack init` workspace (the branch's engine), linked to the test account's project `sikstack` by a workspace key it mints through the API and hands to `link` on stdin. The key stays in the home's XDG folder (0700, its file 0600), which `down` removes. `run.sh signin other` signs a second account (its own org, a member of nothing here) into `$SESSION-other`; `run.sh api <method> <path> [json]` calls the API as the test account. Every build is made in a scratch copy of `web/` (deleted when the block ends), never in the design folder itself.
 
-**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the printed URL (the build's viewer) and the bare build host (a 403 linking to it); the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 390.
+**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the printed URL (the build's viewer) and the bare build host (a 403 linking to it); the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 390; a round's build (`--page` twice): its viewer's two rows and count, its link to every page and back.
 
 ```bash drive
 OTHER="$SESSION-other"; GUEST="$SESSION-guest"
@@ -174,7 +174,7 @@ must "each frame is as tall as its page (no scroll inside)" "$frames" 'all(abs(f
 js '() => { window.scrollTo(0, 0); return true; }' >/dev/null
 shot 02-options --full-page
 noerrors
-links=$(js '() => JSON.stringify([...document.querySelectorAll(".design-pages a")].map(a => [a.textContent, a.getAttribute("href")]))' \
+links=$(js '() => JSON.stringify([...document.querySelectorAll(".design-pages > .design-page > a")].map(a => [a.textContent, a.getAttribute("href")]))' \
   | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()))')
 manifest=$("$RUN" api GET "/app/projects/$PROJECT/design/builds/$OPT" | sed 1d)
 python3 - "$manifest" "$links" <<'PY' >"$EV/pages.tsv"
@@ -378,10 +378,59 @@ for size in "1440 900" "390 844"; do
   fi
   noerrors
 done
+
+# 9. A round's build (design-publish --page, two values): its viewer lists only those two pages, each with its
+#    states, says 2 pages and links once to the whole design; that link lands on the build's every-page list (every
+#    manifest page, its way back the round's list). A round row and a row only the every-page list holds each open
+#    their page on the build's host. Screenshots at 1440 and 390.
+WS_ROUTE='/projects/[projectId]/workspace'; DB_ROUTE='/projects/[projectId]/design/[build]'
+out=$(sk design-publish --folder "$SCR/options" --page "$WS_ROUTE" --page "$DB_ROUTE"); printf '%s\n' "$out" >>"$EV/publish.log"
+RND=$(printf '%s\n' "$out" | sed -n 's/^published=\([a-z0-9]*\) .*/\1/p')
+[ -n "$RND" ] || { echo "the round's publish failed: $out"; exit 1; }
+printf '%s\n' "$out" | grep -q "^published=$RND url=$VIEW/$RND " || { echo "the round's publish did not print its viewer"; exit 1; }
+rm=$("$RUN" api GET "/app/projects/$PROJECT/design/builds/$RND" | sed 1d)
+must "the round's manifest names the two pages' entries, in the manifest's order" "$rm" \
+  '[p["route"] for p in d["manifest"]["pages"] if p["entry"] in d["manifest"]["round"]["pages"]] == ["'"$WS_ROUTE"'", "'"$DB_ROUTE"'"] and len(d["manifest"]["round"]["pages"]) == 2'
+ALL=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])["manifest"]["pages"]))' "$rm")
+rows() { js '() => JSON.stringify([...document.querySelectorAll(".design-pages > .design-page > a")].map(a => a.textContent))' | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()))'; }
+for size in "1440 900" "390 844"; do
+  pw resize $size
+  pw goto "$VIEW/$RND"
+  see "$(shows "This round")" "$(shows "2 pages")" "$(shows "The whole design · $ALL pages")" \
+    'document.querySelectorAll(".design-pages > .design-page").length === 2' \
+    'document.querySelectorAll(".design-pages .design-page-states a").length > 0' \
+    "document.querySelectorAll('a[href=\"/projects/$PROJECT/design/$RND/pages\"]').length === 1"
+  must "the round's list holds exactly its two pages" "$(rows)" 'd == ["Workspace · Agenda", "Design build"]'
+  shot "09-round-${size%% *}" --full-page
+  noerrors
+done
+pw resize 1440 900
+pw goto "$VIEW/$RND"
+pw click "a[href=\"/projects/$PROJECT/design/$RND/pages\"]"
+see "location.pathname === '/projects/$PROJECT/design/$RND/pages'" "$(shows "Every page")" "$(shows "$ALL pages")" \
+  "document.querySelectorAll('.design-pages > .design-page').length === $ALL" \
+  "document.querySelector('a.back')?.getAttribute('href') === '/projects/$PROJECT/design/$RND'" '!document.querySelector("iframe")'
+noerrors
+for size in "1440 900" "390 844"; do
+  pw resize $size
+  shot "09-every-page-${size%% *}" --full-page
+done
+pw resize 1440 900
+system=$(js '() => document.querySelector(".design-pages > .design-page > a[aria-label^=\"System,\"]").getAttribute("href")' | tr -d '"')
+page=$(visit "$SESSION" "$WEB$system")
+must "a row only the every-page list holds (System) opens on the build's host" "$page" 'd["status"] == 200 and d["url"] == "'"$(host "$RND")"'/system/"'
+pw goto "$VIEW/$RND/pages"
+pw click 'a.back'
+see "location.pathname === '/projects/$PROJECT/design/$RND'" "$(shows "This round")"
+wsrow=$(js '() => document.querySelector(".design-pages > .design-page > a").getAttribute("href")' | tr -d '"')
+page=$(visit "$SESSION" "$WEB$wsrow")
+must "a round row (Workspace · Agenda) opens on the build's host" "$page" 'd["status"] == 200 and d["url"].startswith("'"$(host "$RND")"'/projects/")'
+echo "round: the viewer lists the round's 2 pages, one link to all $ALL, and back"
+
 pw resize 1440 900
 pw goto "$VIEW"
 pw screenshot --filename="$EV/design-service.png"
 echo "design-service: PASS"
 ```
 
-**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-01-printed-url.png` (the URL `design-publish` printed, opened by the member: the viewer), `design-service-01-bare-host.png` (the build's own host without a ticket: a 403 whose one link is the viewer), `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|390>.png`, `design-service-08-viewer-<1440|390>.png` and `design-service-08-viewer-shared-390.png`; `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.
+**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-01-printed-url.png` (the URL `design-publish` printed, opened by the member: the viewer), `design-service-01-bare-host.png` (the build's own host without a ticket: a 403 whose one link is the viewer), `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|390>.png`, `design-service-08-viewer-<1440|390>.png` and `design-service-08-viewer-shared-390.png`; `design-service-09-round-<1440|390>.png` (a `--page` build's viewer: the round's two pages with their states and the link to the whole design) and `design-service-09-every-page-<1440|390>.png` (that build's every-page list); `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.

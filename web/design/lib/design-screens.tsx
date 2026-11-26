@@ -13,6 +13,7 @@ import {
   detailFor,
   kindOf,
   madeShareUrl,
+  ROUND_MANIFEST,
   type BuildKind,
   type DesignDetail,
 } from "./design-data";
@@ -61,13 +62,14 @@ function shotOf(d: { key: string; label: string }) {
   );
 }
 
-function Viewer({ detail }: { detail: DesignDetail }) {
+function Viewer({ detail, scope }: { detail: DesignDetail; scope?: "round" | "all" }) {
   const { build, manifest } = detail;
   // Production posts `…/share {on}` and draws the answer; the design keeps the change in this page.
   const [share, setShare] = useState({ on: build.share.on, url: build.share.url ?? null });
   return (
     <DesignBuildView
       project={PROJECT}
+      scope={scope}
       build={build}
       manifest={manifest}
       share={share}
@@ -88,6 +90,13 @@ export function DesignBuildRoute({ id }: { id: string }) {
         <Frame>
           {state === "gone" ? (
             <DesignBuildGone project={PROJECT} projectName={RECORDING.shell.project.name} />
+          ) : state === "round" || state === "every-page" ? (
+            // A round's build (P84): a recorded build drawn with the round's manifest, its list or every page.
+            <Viewer
+              key={`${state}:${id}`}
+              detail={{ build: detailFor("no-options", id).build, manifest: ROUND_MANIFEST }}
+              scope={state === "every-page" ? "all" : "round"}
+            />
           ) : (
             <Viewer key={`${state}:${id}`} detail={detailFor(state as BuildKind, id)} />
           )}
