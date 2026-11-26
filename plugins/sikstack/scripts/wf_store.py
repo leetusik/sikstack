@@ -522,7 +522,7 @@ PINNED_MODE = "default"
 WORKTREES_DIR = ".claude/worktrees"
 # What the stamp commit carries besides the phase folder: the generated works/ files that
 # `rebuild_index_and_state` rewrites, plus the event log. Nothing else on the tree enters it.
-STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "backlog.md", "agenda.md", "works/events.jsonl")
+STAMP_WORKS_FILES = ("works/state.json", "works/index.json", "works/backlog.md", "works/agenda.md", "works/events.jsonl")
 # A default-stream phase in any of these states means main is mid-flight, so a phase
 # branch may not be merged into it yet (the quiet-point gate, `worktree gate`).
 BUSY_PHASE_STATUSES = ("in_progress", "in_review", "pending", "blocked")
@@ -546,11 +546,11 @@ EXPLAIN_UNITS = ("document", "book", "chapter")
 EXPLAIN_UNIT_DEFAULT = "book"
 # Regenerated from works/phases/** by `worktree merge-finish`; never merged by hand (see .gitattributes).
 # docs/current/*.md are plain files agents edit, so they are not among them.
-GENERATED_FILES = ("works/state.json", "works/index.json", "backlog.md", "agenda.md")
-# Generated files an older engine wrote where this one writes none: the rebuild removes each one it finds (the
-# agenda dashboard moved beside backlog.md in 0.6.0), the sync never takes one for truth, and the quiet-point gate
-# reads a branch that removes one like a change to a generated file.
-RETIRED_GENERATED_FILES = ("works/agenda.md",)
+GENERATED_FILES = ("works/state.json", "works/index.json", "works/backlog.md", "works/agenda.md")
+# Generated files an older engine wrote where this one writes none: the rebuild removes each one it finds (0.8.0 moved
+# both dashboards from the workspace root into works/; 0.6.0 to 0.7.0 wrote them at the root), the sync never takes
+# one for truth, and the quiet-point gate reads a branch that removes one like a change to a generated file.
+RETIRED_GENERATED_FILES = ("backlog.md", "agenda.md")
 
 
 def _main_host_checkout(host: Path) -> Path:
@@ -2942,7 +2942,7 @@ def rebuild_backlog(phases: list, state: dict, index: dict) -> None:
             rows.append(f"| [{checkbox}] `{s['id']}` | `{s['status']}` | {name} | `{clean_cell(s.get('kind', ''))}` | `{path}` |")
         lines.extend(rows)
     lines.append("")
-    write_text(ROOT / "backlog.md", "\n".join(lines))  # .sikstack/backlog.md: the rendered view
+    write_text(WORKS / "backlog.md", "\n".join(lines))  # .sikstack/works/backlog.md: the rendered view
 
 
 def validate() -> int:

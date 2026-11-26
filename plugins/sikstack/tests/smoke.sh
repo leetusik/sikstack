@@ -633,14 +633,14 @@ printf '%s\n' "$out" | grep -q '^phase.md: .* bytes (budget 40960 bytes)' && pri
   && ok "slice finish prints the notebook size and flags it over budget" || bad "slice finish notebook size print missing -- $out"
 printf '%s\n' "$out" | grep -q 'biggest sections: ## Filler ' && printf '%s\n' "$out" | grep -q 'topics/<slug>.md' \
   && ok "slice finish names the biggest sections and suggests topics/ when over budget" || bad "over-budget size line does not name the largest section -- $out"
-grep -q 'Rebuilt at' "$F/backlog.md" "$F/agenda.md" \
+grep -q 'Rebuilt at' "$F/works/backlog.md" "$F/works/agenda.md" \
   && bad "a markdown dashboard still carries a Rebuilt at timestamp" || ok "no Rebuilt at timestamp in any markdown dashboard (backlog, agenda)"
 # The churn this removes: repeated `next` calls must not dirty the three dashboards.
 ( cd "$F" && git init -q . >/dev/null 2>&1 && git add -A >/dev/null 2>&1 \
     && git -c user.email=smoke@example.invalid -c user.name=smoke commit -qm "smoke baseline" >/dev/null 2>&1 )
 ( cd "$F" && python3 "$ENG" next >/dev/null 2>&1; python3 "$ENG" next >/dev/null 2>&1 )
-tracked=$( cd "$F" && git ls-files backlog.md agenda.md | wc -l | tr -d ' ' )
-dirty=$( cd "$F" && git status --short -- backlog.md agenda.md )
+tracked=$( cd "$F" && git ls-files works/backlog.md works/agenda.md | wc -l | tr -d ' ' )
+dirty=$( cd "$F" && git status --short -- works/backlog.md works/agenda.md )
 [ "$tracked" = "2" ] && [ -z "$dirty" ] && [ ! -e "$F/works/deferred.md" ] && [ ! -e "$F/works/deferred" ] \
   && ok "two next calls leave the dashboards byte-identical (no timestamp churn), and no works/deferred.md or works/deferred/ is written" || bad "next dirtied the dashboards (tracked=$tracked) or wrote the deferred dashboard -- $dirty"
 
@@ -940,7 +940,7 @@ if [ -d "$TW/works/phases/active/$tb_p1" ]; then
 fi
 ( tg add -A && tg commit -qm two ) >/dev/null 2>&1 || bad "two-branch probe: branch two did not commit"
 tg merge -q --no-edit one >/dev/null 2>&1; conflicted=$(tg diff --name-only --diff-filter=U | tr '\n' ' ')
-outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
+outside=$(printf '%s\n' $conflicted | grep -vxE 'works/(state\.json|index\.json|backlog\.md|agenda\.md)')
 ( for f in $conflicted; do tg checkout --theirs -- "$f" || exit 1; done; tw check && tg add -A && tg commit -qm merge ) >/dev/null 2>&1
 tb_val=$(tw check --no-rebuild 2>&1); tb_rc=$?; tb_run=$(tw gate 1 2>&1); tb_run_rc=$?
 [ -z "$outside" ] && [ "$(ls "$TW/works/phases/active" | grep -cE "^P1-$tail_re$")" = 2 ] \
@@ -974,7 +974,7 @@ printf '%s\n' "$bn_t" | grep -qxE "P13-$tail_re" && printf '%s\n' "$bn_agt" | gr
 
 # ---------------------------------------------------------------------------
 echo "== Test 10i: agenda -- agendas, ids, transitions, order, links, the generated page, validate, two branches (the gate's exemption for an added agenda: Test 12) =="
-# A fresh install. Agendas live in works/agenda/<AID>/agenda.json; agenda.md (beside backlog.md, 0.6.0), index.json's
+# A fresh install. Agendas live in works/agenda/<AID>/agenda.json; works/agenda.md (beside works/backlog.md, 0.8.0), index.json's
 # agenda keys and the backlog's count are generated from them; an agenda never moves `next`.
 newtmp AGW; AG="$AGW/ws"
 mkws AG >/dev/null 2>&1 || bad "agenda probe: fresh install failed"
@@ -985,12 +985,12 @@ ag_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(s
 ag_order() { ag agenda --json | python3 -c 'import json,sys; print(" ".join(i["id"] for i in json.load(sys.stdin)))'; }
 tail_re='([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]|[0-9][a-hjkmnp-tv-z])'
 # (a) the generated page and the index, before any item and after: stable bytes, the keys, the backlog line.
-pg0=$(sha "$AG/agenda.md" 2>/dev/null); rm -f "$AG/agenda.md"; sleep 1  # a stamp would move with the clock
-ag check >/dev/null 2>&1; pg1=$(sha "$AG/agenda.md" 2>/dev/null)
+pg0=$(sha "$AG/works/agenda.md" 2>/dev/null); rm -f "$AG/works/agenda.md"; sleep 1  # a stamp would move with the clock
+ag check >/dev/null 2>&1; pg1=$(sha "$AG/works/agenda.md" 2>/dev/null)
 ag_idx() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(not ("agenda_counts" in d and "agenda" in d))' "$AG/works/index.json"; }
-[ -n "$pg0" ] && [ "$pg0" = "$pg1" ] && [ ! -e "$AG/works/agenda.md" ] && ag_idx && grep -qxF -e '- Open agendas: `0`' "$AG/backlog.md" \
-  && ok "a fresh install has agenda.md beside backlog.md (no works/agenda.md) with no agenda, byte-identical across rebuilds; index.json has agenda_counts and agenda; backlog.md says Open agendas: 0" \
-  || bad "the empty agenda page or index keys missing -- [$pg0] [$pg1] $(grep -F 'agenda' "$AG/backlog.md")"
+[ -n "$pg0" ] && [ "$pg0" = "$pg1" ] && [ ! -e "$AG/agenda.md" ] && [ ! -e "$AG/backlog.md" ] && ag_idx && grep -qxF -e '- Open agendas: `0`' "$AG/works/backlog.md" \
+  && ok "a fresh install has works/agenda.md beside works/backlog.md (neither at the root) with no agenda, byte-identical across rebuilds; index.json has agenda_counts and agenda; backlog.md says Open agendas: 0" \
+  || bad "the empty agenda page or index keys missing -- [$pg0] [$pg1] $(grep -F 'agenda' "$AG/works/backlog.md")"
 # (b) ids: A1-<tail> first, its own number sequence, an explicit tailed id once, brief forms.
 a1=$(ag agenda-add --title "first" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 a2=$(ag agenda-add --title "second" --author person:smoke 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
@@ -1043,9 +1043,9 @@ pj="$AG/works/phases/active/$p2/phase.json"
   && [ "$dl_rc" -eq 0 ] && [ -f "$pj" ] && ! grep -q '"agenda"' "$pj" && [ ! -d "$AG/works/agenda/$a1" ] \
   && ok "phase new --agenda links $p2 and $a1 reads In progress; a second item cannot take it ($lk); agenda commands leave next unchanged; agenda-delete clears the link and the phase stays with no agenda key" \
   || bad "agenda links wrong -- $p2 / $lk / $shown / $dl / next changed: $([ "$nx1" = "$nx2" ] && [ "$nx2" = "$nx3" ] && echo no || echo yes)"
-grep -qxF -e '- Open agendas: `2`' "$AG/backlog.md" && [ "$(sha "$AG/agenda.md")" != "$pg0" ] \
+grep -qxF -e '- Open agendas: `2`' "$AG/works/backlog.md" && [ "$(sha "$AG/works/agenda.md")" != "$pg0" ] \
   && ok "the backlog counts Open and In progress agendas, never a Proposed one (2), and agenda.md follows the agendas" \
-  || bad "the backlog count or the agenda page did not follow -- $(grep -F 'agenda' "$AG/backlog.md")"
+  || bad "the backlog count or the agenda page did not follow -- $(grep -F 'agenda' "$AG/works/backlog.md")"
 # (f) validate: a `Z` stamp (JavaScript's toISOString form) passes on every Python, 3.9 and 3.10 included
 # (the engine reads its own stamp form, never fromisoformat); a dangling link is a warning (validate passes);
 # a corrupt agenda.json still rebuilds (check, exit 1) and fails validate, naming the folder.
@@ -1089,11 +1089,11 @@ abg() { git -C "$AB" -c user.email=smoke@example.invalid -c user.name=smoke "$@"
   && abg checkout -q - && abg checkout -q -b two && ab agenda-add --id A1-ac --title two --author person:smoke && abg add -A && abg commit -qm two ) >/dev/null 2>&1 \
   || bad "agenda two-branch probe: setup failed"
 abg merge -q --no-edit one >/dev/null 2>&1; ab_conf=$(abg diff --name-only --diff-filter=U | tr '\n' ' ')
-ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
+ab_out=$(printf '%s\n' $ab_conf | grep -vxE 'works/(state\.json|index\.json|backlog\.md|agenda\.md)')
 ( for f in $ab_conf; do abg checkout --theirs -- "$f" || exit 1; done; ab check && abg add -A && abg commit -qm merge ) >/dev/null 2>&1
 ab_val=$(ab check --no-rebuild 2>&1); ab_rc=$?
 [ -n "$ab_conf" ] && [ -z "$ab_out" ] && [ "$ab_rc" -eq 0 ] && [ -z "$(abg status --porcelain)" ] \
-  && [ "$(ab agenda 2>&1 | grep -cE '^A1-a[bc] ')" = 2 ] && grep -q 'A1-ab' "$AB/agenda.md" && grep -q 'A1-ac' "$AB/agenda.md" \
+  && [ "$(ab agenda 2>&1 | grep -cE '^A1-a[bc] ')" = 2 ] && grep -q 'A1-ab' "$AB/works/agenda.md" && grep -q 'A1-ac' "$AB/works/agenda.md" \
   && ok "two branches each add an item (A1-ab, A1-ac) and merge with conflicts only in generated files ($ab_conf); either side + rebuild lists both, valid and clean" \
   || bad "agenda two-branch merge wrong -- conflicted: $ab_conf / outside: $ab_out / $ab_val"
 
@@ -1139,7 +1139,7 @@ tn=$(th agenda-add --title "anonymous" 2>&1); tn_rc=$?
 tq=$(th agenda-add --title "an agent's idea" --author agent:claude-opus-5-5 2>&1); tq_id=$(printf '%s\n' "$tq" | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 tq2=$(th agenda-add --title "a stale idea" --author agent:claude-opus-5-5 2>&1 | sed -n 's/^added \(A[^:]*\):.*/\1/p')
 tlist=$(th agenda 2>&1); tmv=$(th agenda-move "$tq_id" --first 2>&1); tmv_rc=$?
-tmd=$(sed -n '/^## Proposed/,/^## Open/p' "$TH/agenda.md"); tmd_open=$(sed -n '/^## Open/,/^## Solved and dropped/p' "$TH/agenda.md")
+tmd=$(sed -n '/^## Proposed/,/^## Open/p' "$TH/works/agenda.md"); tmd_open=$(sed -n '/^## Open/,/^## Solved and dropped/p' "$TH/works/agenda.md")
 tix=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r={x["id"]: x for x in d["agenda"]}; a=r[sys.argv[2]]; t=r[sys.argv[3]]; print(d["agenda_counts"]["proposed"], a["shown_status"], a["proposed"]["by"], t["entries"], t["latest_entry"] is not None)' "$TH/works/index.json" "$tq_id" "$ta")
 [ "$tn_rc" -eq 2 ] && [ "$(printf '%s\n' "$tn" | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$tn" | grep -q -- '--author' \
   && printf '%s\n' "$tq" | grep -qx "added $tq_id: an agent's idea (Proposed: agenda-accept or agenda-drop it)" \
@@ -1147,10 +1147,10 @@ tix=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r={x["id"]: x
   && [ "$tmv_rc" -ne 0 ] && printf '%s\n' "$tmv" | grep -q "is Proposed" \
   && printf '%s\n' "$tmd" | grep -qF "| \`$tq_id\` | an agent's idea | agent:claude-opus-5-5 | - |" && ! printf '%s\n' "$tmd_open" | grep -qF "$tq_id" \
   && printf '%s\n' "$tmd_open" | grep -qE "\| \`$ta\` \| In progress \| threaded \| 0 of 2 phases done \| 2 of 2 open \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|" \
-  && [ "$tix" = "2 Proposed agent:claude-opus-5-5 2 True" ] && grep -qxF -e '- Proposed agendas: `2`' "$TH/backlog.md" \
-  && ! grep -qi 'deferred' "$TH/backlog.md" "$TH/agenda.md" \
+  && [ "$tix" = "2 Proposed agent:claude-opus-5-5 2 True" ] && grep -qxF -e '- Proposed agendas: `2`' "$TH/works/backlog.md" \
+  && ! grep -qi 'deferred' "$TH/works/backlog.md" "$TH/works/agenda.md" \
   && ok "agenda-add without --author is refused in one line; an agent's agenda is Proposed: first in agenda, under ## Proposed in agenda.md (not in the open order), shown_status Proposed in index.json, counted in backlog.md; it does not move; the agenda's row shows how many of its items are open and the newest one's date" \
-  || bad "Proposed wrong -- $tn / $tq / $(printf '%s\n' "$tlist" | head -3) / $tmv / $tix / $(grep -F 'agendas' "$TH/backlog.md")"
+  || bad "Proposed wrong -- $tn / $tq / $(printf '%s\n' "$tlist" | head -3) / $tmv / $tix / $(grep -F 'agendas' "$TH/works/backlog.md")"
 tac=$(th agenda-accept "$tq_id" 2>&1); tac_rc=$?; tdr=$(th agenda-drop "$tq2" --reason "a duplicate" 2>&1)
 tac2=$(th agenda-accept "$ta" 2>&1); tac2_rc=$?
 [ "$tac_rc" -eq 0 ] && printf '%s\n' "$tac" | grep -qx "accepted $tq_id: Open, 1 in the open order" && [ "$(th_key "$tq_id" proposed)" = "<absent>" ] \
@@ -1317,7 +1317,7 @@ entries = {}
 for p in glob.glob(os.path.join(works, "agenda", "*", "entries", "*.json")):
     e = json.load(open(p)); entries[e["job"]["id"]] = (os.path.basename(os.path.dirname(os.path.dirname(p))), e)
 item = lambda aid: json.load(open(os.path.join(works, "agenda", aid, "agenda.json")))
-page = open(os.path.join(works, "..", "agenda.md")).read()
+page = open(os.path.join(works, "agenda.md")).read()
 bad = []
 if sorted(entries) != ["D-deferred", "D-dropped", "D-gone", "D-open", "D-solved"]: bad.append(f"jobs {sorted(entries)}")
 for did, want in (("D-open", o), ("D-deferred", f)):
@@ -1420,7 +1420,7 @@ tge() { ( cd "$TG" && python3 "$ENG" "$@" ); }
   && tgc checkout -q - && tgc checkout -q -b two && tge agenda-entry A1-k2 --kind issue --author agent:smoke --source phase:P1 --body two && tgc add -A && tgc commit -qm two ) >/dev/null 2>&1 \
   || bad "two-clone probe: setup failed"
 tgc merge -q --no-edit one >/dev/null 2>&1; tg_conf=$(tgc diff --name-only --diff-filter=U | tr '\n' ' ')
-tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json)|backlog\.md|agenda\.md')
+tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json|backlog\.md|agenda\.md)')
 ( for f in $tg_conf; do tgc checkout --theirs -- "$f" || exit 1; done; tge check && tgc add -A && tgc commit -qm merge ) >/dev/null 2>&1
 [ -z "$tg_truth" ] && [ "$(ls "$TG/works/agenda/A1-k2/entries" | wc -l | tr -d ' ')" = 2 ] && tge check --no-rebuild >/dev/null 2>&1 \
   && [ -z "$(tgc status --porcelain)" ] && tge agenda-show A1-k2 | grep -qx 'items: 2 (2 open, 0 done, 0 dismissed)' \
@@ -1428,7 +1428,7 @@ tg_truth=$(printf '%s\n' $tg_conf | grep -vxE 'works/(state\.json|index\.json)|b
   || bad "two clones' entries did not merge clean -- conflicted: $tg_conf / truth: $tg_truth"
 
 # ---------------------------------------------------------------------------
-echo "== Test 10k: agenda items (0.6.0) -- the dashboard beside backlog.md (a stale works/agenda.md removed), no Deferred anywhere (an old stored deferred reads Proposed), an item's state on its own file (an older file read open and never rewritten), item references, all-or-none item commands, the auto-close, agenda-split =="
+echo "== Test 10k: agenda items (0.6.0) -- the dashboard beside backlog.md in works/ (0.8.0; the root copies an older engine left removed), no Deferred anywhere (an old stored deferred reads Proposed), an item's state on its own file (an older file read open and never rewritten), item references, all-or-none item commands, the auto-close, agenda-split =="
 newtmp IKW; IK="$IKW/ws"; mkws IK >/dev/null 2>&1 || bad "items probe: fresh install failed"
 ik() { ( cd "$IK" && python3 "$ENG" "$@" ); }
 ikg() { git -C "$IK" -c user.email=smoke@example.invalid -c user.name=smoke "$@"; }
@@ -1437,13 +1437,15 @@ ik_add() { ik agenda-item add "$1" --kind issue --author agent:smoke --source ph
 ik_file() { ls "$IK/works/agenda/${1%%/*}/entries" | grep -- "-${1##*/}\.json$"; }   # an item ref's file name
 ik_state() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("state", "<absent>"), d.get("state_by", "-"))' "$IK/works/agenda/${1%%/*}/entries/$(ik_file "$1")"; }
 ik_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], "<absent>"))' "$IK/works/agenda/$1/agenda.json" "$2"; }
-# (a) walkthrough 1: check writes agenda.md beside backlog.md and none under works/; a stale works/agenda.md an older
-# engine left is removed by check.
-ik check >/dev/null 2>&1; ik_a0=$( [ -f "$IK/agenda.md" ] && [ -f "$IK/backlog.md" ] && [ ! -e "$IK/works/agenda.md" ] && echo ok )
-printf '# Agenda\n\nan older engine wrote this\n' > "$IK/works/agenda.md"; ik check >/dev/null 2>&1; ik_a1=$?
-[ "$ik_a0" = ok ] && [ "$ik_a1" -eq 0 ] && [ ! -e "$IK/works/agenda.md" ] && [ -f "$IK/agenda.md" ] && grep -qx '# Agenda' "$IK/agenda.md" \
-  && ok "check writes agenda.md beside backlog.md and no works/agenda.md; a stale works/agenda.md is removed by check" \
-  || bad "the agenda dashboard is not beside backlog.md, or a stale works/agenda.md survived check -- [$ik_a0] rc=$ik_a1 $(ls "$IK" "$IK/works" | tr '\n' ' ')"
+# (a) walkthrough 1: check writes agenda.md beside backlog.md, both in works/ and neither at the root; the root copies
+# an older engine (0.6.0 to 0.7.0) left are removed by check.
+ik check >/dev/null 2>&1; ik_a0=$( [ -f "$IK/works/agenda.md" ] && [ -f "$IK/works/backlog.md" ] && [ ! -e "$IK/agenda.md" ] && [ ! -e "$IK/backlog.md" ] && echo ok )
+printf '# Agenda\n\nan older engine wrote this\n' > "$IK/agenda.md"; printf '# Backlog\n\nan older engine wrote this\n' > "$IK/backlog.md"
+ik check >/dev/null 2>&1; ik_a1=$?
+[ "$ik_a0" = ok ] && [ "$ik_a1" -eq 0 ] && [ ! -e "$IK/agenda.md" ] && [ ! -e "$IK/backlog.md" ] && [ -f "$IK/works/agenda.md" ] && grep -qx '# Agenda' "$IK/works/agenda.md" \
+  && grep -qx '# Backlog' "$IK/works/backlog.md" \
+  && ok "check writes agenda.md beside backlog.md in works/ and neither at the root; the root copies an older engine left are removed by check" \
+  || bad "the dashboards are not in works/, or a stale root agenda.md or backlog.md survived check -- [$ik_a0] rc=$ik_a1 $(ls "$IK" "$IK/works" | tr '\n' ' ')"
 # (b) walkthrough 3: an older engine's item file (no state) lists open; check and agenda-show leave its bytes as they were.
 ik agenda-add --id A1-ab --title "items" --author person:smoke >/dev/null 2>&1
 ik_r1=$(ik_add A1-ab one); ik_r2=$(ik_add 1 two); ik_r3=$(ik_add A1 three)
@@ -1530,7 +1532,7 @@ ik_pr=$(ik agenda-propose A4 --author person:smoke 2>&1); ik_pk=$(ik_key A4-gh s
 ik_po=$(ik agenda --json | python3 -c 'import json,sys; print([x["id"] for x in json.load(sys.stdin) if x["shown_status"] in ("Open", "In progress")])')
 python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.update(status="deferred", order=None); open(p,"w").write(json.dumps(d, indent=2)+"\n")' "$IK/works/agenda/A3-ef/agenda.json"
 ik_c=$(ik check 2>&1); ik_c_rc=$?; ik_l=$(ik agenda 2>&1); ik_lj=$(ik agenda --json 2>&1); ik_sh=$(ik agenda-show A3-ef 2>&1)
-ik_dg=$(cd "$IK" && /usr/bin/grep -ril deferred agenda.md backlog.md works/index.json works/state.json); ik_dl=$(printf '%s\n' "$ik_l" "$ik_lj" "$ik_sh" | grep -ci deferred)
+ik_dg=$(cd "$IK" && /usr/bin/grep -ril deferred works/agenda.md works/backlog.md works/index.json works/state.json); ik_dl=$(printf '%s\n' "$ik_l" "$ik_lj" "$ik_sh" | grep -ci deferred)
 ik_ac=$(ik agenda-accept A3-ef A4-gh 2>&1); ik_ac_rc=$?
 [ "$ik_pr" = "proposed A4-gh: Proposed, out of the open order (sikstack agenda-accept A4-gh puts it back)" ] && printf '%s\n' "$ik_pk" | grep -q "^open/{'by': 'person:smoke', 'at': " \
   && ! printf '%s\n' "$ik_po" | grep -q A4-gh && [ "$ik_c_rc" -eq 0 ] && printf '%s\n' "$ik_l" | grep -qE '^A3-ef +Proposed +no items$' \
@@ -1752,14 +1754,14 @@ else bad "paired worktree start (rc=$ps_rc) -- $ps_out -- host status: $(git -C 
 wt_next=$( cd "$HWT" && python3 "$ENG" next 2>&1 ); main_next=$(nw next 2>&1)
 nw check >/dev/null 2>&1
 if printf '%s\n' "$wt_next" | grep -q "^stream=phase/P1-" && ! printf '%s\n' "$main_next" | grep -q "^current_phase=P1" \
-    && grep -A8 '^## Streams' "$NW/backlog.md" | grep -E '^\|' | grep -F 'P1' | grep -qF 'feat/side'; then
+    && grep -A8 '^## Streams' "$NW/works/backlog.md" | grep -E '^\|' | grep -F 'P1' | grep -qF 'feat/side'; then
   ok "the worktree's next prints stream=phase/P1-..., the main checkout skips P1, and backlog.md's ## Streams row carries P1 with feat/side"
-else bad "stream claim or Streams row wrong -- worktree: $wt_next -- main: $main_next -- $(grep -A8 '^## Streams' "$NW/backlog.md")"; fi
+else bad "stream claim or Streams row wrong -- worktree: $wt_next -- main: $main_next -- $(grep -A8 '^## Streams' "$NW/works/backlog.md")"; fi
 # v67: a state change in the worktree refreshes the main checkout's backlog, read from the worktree's files (uncommitted).
 ( cd "$HWT" && python3 "$ENG" slice status P1.DECOMP in_progress >/dev/null 2>&1 )
-grep -F '`P1.DECOMP`' "$NW/backlog.md" | grep -qF '`in_progress`' && grep -qF '_Read live from its worktree `' "$NW/backlog.md" \
+grep -F '`P1.DECOMP`' "$NW/works/backlog.md" | grep -qF '`in_progress`' && grep -qF '_Read live from its worktree `' "$NW/works/backlog.md" \
   && ok "a slice status changed in the worktree shows in the main checkout's backlog, with nothing run there" \
-  || bad "the main backlog did not follow the worktree -- $(grep -F 'P1.' "$NW/backlog.md")"
+  || bad "the main backlog did not follow the worktree -- $(grep -F 'P1.' "$NW/works/backlog.md")"
 hook_out=$(cd "$NS" && printf '{"session_id":"t","source":"compact","cwd":"%s"}' "$HWT" | CLAUDE_PROJECT_DIR="$NH" python3 "$PLUGIN/hooks/session_start.py" 2>&1)
 printf '%s\n' "$hook_out" | grep -q "^stream=phase/P1-" && printf '%s\n' "$hook_out" | grep -q "^pointer: phase P1 " \
   && ok "the plugin's SessionStart hook on a compaction, given the worktree's cwd, answers from the worktree's own .sikstack/ stream" \
@@ -2385,7 +2387,7 @@ if [ "$q_rorc" -eq 0 ] && printf '%s\n' "$q_ro" | grep -qx "reopened=P1 branch=h
     && [ "$q_m0" = "$(qg rev-parse main)" ]; then
   ok "phase reopen on a nested install: one stamp commit, a worktree pair on the PR branch feat/one, the review changes_requested with the team's note; the default stream lists it elsewhere, the worktree's next selects P1.REVIEW and refuses a second reopen there; the fix and the pass land in the worktree, phase scope covers fix.py, and host main is untouched"
 else bad "the nested reopen wrong (rc $q_rorc/$q_wsrc/$q_rprc) -- $q_ro / $(printf '%s\n' "$q_dn" | grep parallel_) / $(printf '%s\n' "$q_wn" | grep current_) / $q_ws / $(tail -3 "$QW/repass.txt") / $q_sc"; fi
-{ qn add -A && qn commit -qm "chore: rebuild"; qn merge -q --no-ff -m "merge(P1): Toy" phase/P1-toy || { qn checkout -q --theirs backlog.md && qn add -A && qn commit -qm "merge(P1): Toy"; }; \
+{ qn add -A && qn commit -qm "chore: rebuild"; qn merge -q --no-ff -m "merge(P1): Toy" phase/P1-toy || { qn checkout -q --theirs works/backlog.md && qn add -A && qn commit -qm "merge(P1): Toy"; }; \
   qw worktree merge-finish && qn add -A && qn commit -qm "chore: integrated"; } > "$QW/merge.txt" 2>&1
 q_st=$(qw phase reopen P1 --note "team-reported: again" 2>&1); q_strc=$?
 { qw worktree teardown P1 && qn add -A && qn commit -qm "chore: teardown" && qn branch phase/P1-toy; } > "$QW/teardown.txt" 2>&1
@@ -2538,7 +2540,7 @@ if check == "first":
     need(all(op["op"] in ("put", "append") and op.get("base_rev") is None for op in ops), "a first sync only adds")
     need(any(op["op"] == "append" and op["path"] == "works/events.jsonl" for op in ops), "events.jsonl not sent as an append")
     need(not any(p.startswith("works/templates/") or p in ("works/state.json", "works/index.json",
-         "backlog.md", "works/.workspace-version.json") for p in live), f"a non-truth file reached the cloud: {sorted(live)}")
+         "works/backlog.md", "works/agenda.md", "works/.workspace-version.json") for p in live), f"a non-truth file reached the cloud: {sorted(live)}")
     need("works/phases/active/P2/phase.json" in live and "docs/current/product.md" in live and "docs/index.json" not in live,
          "a truth file is missing in the cloud (the plain docs/current files are truth since the docs subsystem retired)")
     need(C[0]["batch"]["derived"] == ["works/index.json", "works/state.json"], f"the P9 records: {C[0]['batch']['derived']}")
@@ -2605,10 +2607,10 @@ conn.request("POST", "/_fake/write", json.dumps({"path": "works/phases/active/P2
 assert conn.getresponse().status == 200
 PY
 cl_m=$(cl_mark); cl section P2 Objective >/dev/null; cl_r=$(cl_check "$cl_m" pulled)
-[ "$cl_r" = ok ] && grep -qF 'Two, renamed in sikstack' "$CL/.sikstack/backlog.md" \
+[ "$cl_r" = ok ] && grep -qF 'Two, renamed in sikstack' "$CL/.sikstack/works/backlog.md" \
   && grep -qF 'Two, renamed in sikstack' "$CL/.sikstack/works/index.json" \
   && ok "a cloud-only change is pulled at the next command's begin step (manifest, fetch, base.json at the cloud's head) and backlog.md and index.json are rebuilt from it" \
-  || bad "the cloud-only change was not pulled and rebuilt -- $cl_r / $(grep -F 'Two' "$CL/.sikstack/backlog.md" | head -2)"
+  || bad "the cloud-only change was not pulled and rebuilt -- $cl_r / $(grep -F 'Two' "$CL/.sikstack/works/backlog.md" | head -2)"
 # (g) the key never reaches the tree, the command output or the fake's request log.
 if grep -rqF "$CLK" "$CL" "$CL_OUT" "$CLW/fake" 2>/dev/null; then bad "the workspace key leaked into the tree, the output or the request log"
 else ok "the workspace key appears nowhere in the checkout, the commands' output or the fake's request log"; fi
@@ -3654,7 +3656,7 @@ lk_t2=$(lk_tree "$LKA/.sikstack")
 lk_ctl '{"fetch_page": 4000}'; lk_m=$(lk_mark); printf '%s\n' "$LKK" | lk "$LKB" link "$LKU" > "$LKW/c.txt"; lk_rc=$?; lk_r=$(lk_check "$LKB/.sikstack" "$lk_m" join)
 lk_ctl '{"fetch_page": null}'
 [ "$lk_rc" = 0 ] && [ "$lk_r" = ok ] && grep -q "^linked: joined sikstack's workspace ([0-9]* file(s) taken from sikstack, this unused install's seed files replaced)" "$LKW/c.txt" \
-  && [ -f "$LKB/.sikstack/works/phases/active/P1/topics/big-2.md" ] && grep -qF 'One' "$LKB/.sikstack/backlog.md" \
+  && [ -f "$LKB/.sikstack/works/phases/active/P1/topics/big-2.md" ] && grep -qF 'One' "$LKB/.sikstack/works/backlog.md" \
   && ok "a second checkout joins from an unused install: its seed files give way, every file is taken from sikstack (fetch pages followed through rest) and the generated files are rebuilt" \
   || bad "the unused install did not join -- rc=$lk_rc $lk_r $(tail -3 "$LKW/c.txt")"
 lk_t1=$(lk_tree "$LKC/.sikstack"); lk_m=$(lk_mark); printf '%s\n' "$LKK" | lk "$LKC" link "$LKU" > "$LKW/c2.txt"; lk_rc=$?; lk_t2=$(lk_tree "$LKC/.sikstack")
@@ -5237,7 +5239,7 @@ cwt() {  # <root|nested|multi> <required|waived> <dir>: prints one line, "ok" or
     h0=$(git -C "$WT/$WF" rev-parse HEAD); dry=$(w close P1 --dry-run)
     [ "$(git -C "$WT/$WF" rev-parse HEAD)" = "$h0" ] && printf '%s\n' "$dry" | grep -q '^step=commit-pass state=due -- would commit ' || { echo "dry run: $dry"; exit; }
     c1=$(w close P1); files=$(git -C "$WT/$WF" show --name-only --format= HEAD | LC_ALL=C sort | tr '\n' ' ')
-    want="backlog.md works/events.jsonl works/index.json works/phases/active/P1/phase.json works/phases/active/P1/phase.md works/phases/active/P1/slices/P1.REVIEW/slice.json works/state.json "
+    want="works/backlog.md works/events.jsonl works/index.json works/phases/active/P1/phase.json works/phases/active/P1/phase.md works/phases/active/P1/slices/P1.REVIEW/slice.json works/state.json "
     printf '%s\n' "$c1" | grep -q "^step=commit-pass state=done -- committed [0-9a-f]\{7\} chore(works): record P1's pass on its branch" \
       && printf '%s\n' "$c1" | grep -q "^stop=merge do=the pass is committed on $BR; from this worktree: sikstack worktree gate P1 " \
       && [ "$(git -C "$WT/$WF" rev-parse HEAD^)" = "$h0" ] && [ "$files" = "$want" ] \
@@ -5247,9 +5249,9 @@ cwt() {  # <root|nested|multi> <required|waived> <dir>: prints one line, "ok" or
       || { echo "a second close made another commit"; exit; }
     w worktree gate P1 | grep -qx 'GATE OPEN' || { echo "gate: $(w worktree gate P1 | grep '^GATE')"; exit; }
     git -C "$WT/$WF" add -A && git -C "$WT/$WF" commit -qm "operator: own files"   # the operator settles their own files
-    [ -z "$(git -C "$H/$WF" status --porcelain -- works backlog.md)" ] || { git -C "$H/$WF" add works backlog.md && git -C "$H/$WF" commit -qm "chore(works): refresh"; }
+    [ -z "$(git -C "$H/$WF" status --porcelain -- works)" ] || { git -C "$H/$WF" add works && git -C "$H/$WF" commit -qm "chore(works): refresh"; }
     if ! git -C "$H/$WF" merge --no-ff -q "$BR" -m "merge(P1): Wt" >> "$L" 2>&1; then  # a generated file's conflict: take either side
-      for f in $(git -C "$H/$WF" diff --name-only --diff-filter=U); do case $f in backlog.md|works/index.json|works/state.json) git -C "$H/$WF" checkout --theirs -- "$f" && git -C "$H/$WF" add -- "$f" ;; *) echo "merge conflict in $f"; exit ;; esac; done
+      for f in $(git -C "$H/$WF" diff --name-only --diff-filter=U); do case $f in works/backlog.md|works/agenda.md|works/index.json|works/state.json) git -C "$H/$WF" checkout --theirs -- "$f" && git -C "$H/$WF" add -- "$f" ;; *) echo "merge conflict in $f"; exit ;; esac; done
       git -C "$H/$WF" commit -q --no-edit || { echo "merge commit failed"; exit; }
     fi
     c2=$(m close P1); git -C "$H/$WF" add works && git -C "$H/$WF" commit -qm "chore(works): close P1"; c3=$(m close P1)
@@ -5312,9 +5314,9 @@ in_s1=$(in_sig); in2=$( cd "$INW" && mkdir -p sub && cd sub && python3 "$ENG" in
 [ "$in1_rc" -eq 0 ] && [ "$in2_rc" -eq 0 ] && printf '%s\n' "$in1" | grep -q '^initialized: ' && printf '%s\n' "$in2" | grep -q '^already initialized: ' \
   && [ "$in_s1" = "$in_s2" ] && [ "$(grep -cx '/.sikstack/' "$INW/.git/info/exclude")" = 1 ] && [ -z "$(git -C "$INW" status --porcelain)" ] \
   && [ "$(git -C "$INW/.sikstack" log --oneline | wc -l | tr -d ' ')" = 1 ] && [ -z "$(git -C "$INW/.sikstack" status --porcelain)" ] \
-  && [ -f "$INW/.sikstack/config.toml" ] && [ -f "$INW/.sikstack/backlog.md" ] && [ -f "$INW/.sikstack/docs/current/qa.md" ] \
+  && [ -f "$INW/.sikstack/config.toml" ] && [ -f "$INW/.sikstack/works/backlog.md" ] && [ -f "$INW/.sikstack/docs/current/qa.md" ] \
   && [ ! -e "$INW/.sikstack/works/templates" ] && grep -q '"host_root": ".."' "$INW/.sikstack/.agentic-nested.json" \
-  && ok "sikstack init makes .sikstack/ (its own repo, one commit; config.toml, backlog.md, the five docs, no templates copy), one /.sikstack/ exclude line, a clean product status; run again from a subfolder it changes nothing" \
+  && ok "sikstack init makes .sikstack/ (its own repo, one commit; config.toml, works/backlog.md, the five docs, no templates copy), one /.sikstack/ exclude line, a clean product status; run again from a subfolder it changes nothing" \
   || bad "init or its second run went wrong (rc=$in1_rc/$in2_rc) -- $in1 / $in2 / $(git -C "$INW" status --porcelain)"
 newtmp INX; inx=$( cd "$INX" && python3 "$ENG" init 2>&1 ); inx_rc=$?
 mkdir -p "$INW/nested" && git -C "$INW/nested" init -q
@@ -5415,8 +5417,9 @@ for f in texts + templates:
             continue
         if re.search(r"workflow/scripts|scripts/workflow\.py|adapters/claude_code/adapter\.py|(?<![\w-])adapter\.py\b|sync-agents|executors\.toml", line):
             problems.append(f"{where}: engine path: {line.strip()[:120]}")
-        # the old layout: the old state folder (named only as "an old workflow/ install") and the old dashboard path
-        if re.search(r"(?<!old )(?<![\w./-])workflow/|works/backlog\.md", line):
+        # the old layout: the old state folder (named only as "an old workflow/ install"); works/backlog.md, the old
+        # engine's dashboard path, is the plugin's own again since 0.8.0
+        if re.search(r"(?<!old )(?<![\w./-])workflow/", line):
             problems.append(f"{where}: old layout: {line.strip()[:120]}")
         if f in templates:
             continue
@@ -5588,7 +5591,8 @@ for f in ("scripts/workflow.py", "scripts/wf_store.py", "adapters/claude_code/ad
 put(w / "CLAUDE.workspace.md", "# the old contract\n")
 put(w / "executors.toml", '# routes\n[claude.mid]\nmodel = "sonnet"   # cheaper\neffort = "high"\n')
 put(w / "works/.workspace-version.json", json.dumps({"workspace_version": 102}) + "\n")
-os.replace(w / "backlog.md", w / "works/backlog.md")
+put(w / "works/backlog.md", "# the old engine's backlog\n")
+(w / "works/agenda.md").unlink()
 (w / "config.toml").unlink()
 put(w / "works/templates/intent.md", "shipped intent\n")
 put(w / "works/templates/phase.md", "an edited phase template\n")
@@ -5650,9 +5654,11 @@ mg_problems=""
 [ ! -e "$MGH/workflow" ] && [ -d "$MGS/.git" ] || mg_problems="$mg_problems [moved]"
 [ "$(git -C "$MGS" rev-list --count HEAD)" = $((mg_count + 1)) ] || mg_problems="$mg_problems [history $(git -C "$MGS" rev-list --count HEAD) vs $mg_count+1]"
 [ "$(cat "$MGS/notes/mine.md")" = "mine, untracked" ] || mg_problems="$mg_problems [untracked file]"
-for f in scripts adapters CLAUDE.workspace.md executors.toml works/.workspace-version.json works/backlog.md works/templates/intent.md; do
+for f in scripts adapters CLAUDE.workspace.md executors.toml works/.workspace-version.json works/templates/intent.md backlog.md agenda.md; do
   [ ! -e "$MGS/$f" ] || mg_problems="$mg_problems [left $f]"; done
-[ "$(cat "$MGS/works/templates/phase.md")" = "an edited phase template" ] && [ -f "$MGS/backlog.md" ] || mg_problems="$mg_problems [kept template/backlog]"
+[ "$(cat "$MGS/works/templates/phase.md")" = "an edited phase template" ] && [ -f "$MGS/works/backlog.md" ] && ! grep -q 'the old engine' "$MGS/works/backlog.md" \
+  && [ "$(git -C "$MGS" ls-files works/backlog.md works/agenda.md | wc -l | tr -d ' ')" = 2 ] \
+  || mg_problems="$mg_problems [kept template/rebuilt dashboards]"
 [ -n "$mg_route" ] || mg_problems="$mg_problems [route: no mid override]"
 [ "$(sha "$MGS/.agentic-nested.json")" = "$mg_marker" ] && [ "$mg_phases2" = "$mg_phases" ] || mg_problems="$mg_problems [records changed]"
 [ "$mg_next1" = "$mg_next0" ] && [ -n "$mg_next0" ] || mg_problems="$mg_problems [next: $mg_next1 vs $mg_next0]"
@@ -5693,7 +5699,7 @@ newtmp MGL; newtmp MGX; mkhost "$MGL" >/dev/null 2>&1 && mv "$MGL/.sikstack" "$M
 MGR="$MGW/atroot"; mkhost "$MGW/seed" >/dev/null 2>&1 && ( cd "$MGW/seed" && python3 "$ENG" phase new --phase P3 --name Root --objective o >/dev/null )
 mkdir -p "$MGR" && git -C "$MGR" init -q && cp -R "$MGW/seed/.sikstack/works" "$MGR/works" && mkdir -p "$MGR/docs" && cp -R "$MGW/seed/.sikstack/docs/current" "$MGR/docs/current" \
   && mkdir -p "$MGR/scripts" && printf '# old engine\n' > "$MGR/scripts/workflow.py" && printf '# CLAUDE.md\n' > "$MGR/CLAUDE.md" && printf 'app\n' > "$MGR/app.py" \
-  && printf '{"workspace_version": 102}\n' > "$MGR/works/.workspace-version.json" && cp "$MGW/seed/.sikstack/backlog.md" "$MGR/works/backlog.md" \
+  && printf '{"workspace_version": 102}\n' > "$MGR/works/.workspace-version.json" && printf '# the old engine backlog\n' > "$MGR/works/backlog.md" \
   && printf '[claude.high]\nmodel = "fable"\n' > "$MGR/executors.toml" && git -C "$MGR" add -A && git -C "$MGR" commit -qm "at-root workspace"
 mg_src=$(git -C "$MGR" rev-parse HEAD); mg_ls0=$(git -C "$MGR" ls-files | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(sha "$MGR/$f")"; done)
 ( cd "$MGR" && python3 "$ME" migrate --apply ) > "$MGW/root.txt" 2>&1; mg_rc=$?
@@ -5701,7 +5707,8 @@ mg_ls1=$(git -C "$MGR" ls-files | LC_ALL=C sort | while read -r f; do printf '%s
 mg_rn=$( cd "$MGR" && python3 "$ME" next 2>&1 | grep -x 'current_phase=P3' )
 [ "$mg_rc" = 0 ] && [ "$(git -C "$MGR/.sikstack" rev-list --count HEAD)" = 1 ] && git -C "$MGR/.sikstack" log -1 --format=%s | grep -q "import the workspace from atroot at ${mg_src:0:12}" \
   && [ "$mg_ls0" = "$mg_ls1" ] && [ -z "$(git -C "$MGR" status --porcelain)" ] && [ "$(git -C "$MGR" rev-parse HEAD)" = "$mg_src" ] && [ -n "$mg_rn" ] \
-  && grep -qx 'model = "fable"' "$MGR/.sikstack/config.toml" && [ ! -e "$MGR/.sikstack/works/.workspace-version.json" ] && [ ! -e "$MGR/.sikstack/works/backlog.md" ] \
+  && grep -qx 'model = "fable"' "$MGR/.sikstack/config.toml" && [ ! -e "$MGR/.sikstack/works/.workspace-version.json" ] && [ -f "$MGR/.sikstack/works/backlog.md" ] \
+  && ! grep -q 'the old engine' "$MGR/.sikstack/works/backlog.md" && [ -f "$MGR/.sikstack/works/agenda.md" ] && [ ! -e "$MGR/.sikstack/backlog.md" ] \
   && grep -q '^left for you: the at-root files are still tracked in the repo; when you are ready: git rm -r -q -- .*scripts/workflow.py.*works' "$MGW/root.txt" \
   && [ -z "$(git -C "$MGR/.sikstack" status --porcelain)" ] && grep -q '^migrate=done' "$MGW/root.txt" \
   && ok "migrate --apply on an at-root install seeds .sikstack/ (one import commit naming the source commit, the routes carried), leaves every tracked file and the repo's HEAD as they were, and prints the git rm to run" \
