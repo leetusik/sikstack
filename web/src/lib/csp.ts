@@ -21,7 +21,8 @@
  *   `'strict-dynamic'` (see `readerCsp`); production never does either.
  *
  * - **`designViewerCsp(origin)`, a Design build's viewer only** (P77,
- *   `/projects/<id>/design/<build>`, `src/proxy.ts`, per request): `APP_CSP` with
+ *   `/projects/<id>/design/<build>` and its every-page list `…/<build>/pages`,
+ *   `src/proxy.ts`, per request): `APP_CSP` with
  *   `frame-src 'self' <that build's exact origin>`, the origin formed from
  *   `KB_DESIGN_ORIGIN` (the API's pattern, `{build}` where the id goes) at request
  *   time, so the viewer can frame the build's options directions. The proxy SETS
@@ -77,9 +78,12 @@ export function newNonce(): string {
 /** A design build id: `b` and 25 base32 characters (`server/design/store.py`, `@/lib/design/open`). */
 const DESIGN_BUILD_ID = /^b[a-z2-7]{25}$/;
 
-/** A Design build's viewer: `/projects/<id>/design/<build>` (a trailing slash allowed); its build id, else null. */
+/**
+ * A Design build's viewer, `/projects/<id>/design/<build>`, or its every-page list, `…/<build>/pages` (P84: it frames
+ * the options page's directions too); a trailing slash allowed. Its build id, else null.
+ */
 export function designViewerBuild(pathname: string): string | null {
-  const m = /^\/projects\/[^/]+\/design\/([^/]+)\/?$/.exec(pathname);
+  const m = /^\/projects\/[^/]+\/design\/([^/]+)(?:\/pages)?\/?$/.exec(pathname);
   return m && DESIGN_BUILD_ID.test(m[1]) ? m[1] : null;
 }
 

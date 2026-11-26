@@ -81,6 +81,9 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
   { key: "options", label: "Options", from: `${VIEW}:236 options side by side · recording design.details (manifest options)` },
   { key: "shared", label: "Shared", from: `${VIEW}:202 share on, Copy · recording design.details (share.on)` },
   { key: "private", label: "Private", from: `${VIEW}:198 one line · recording design.shareRefused (409)` },
+  { key: "round", label: "A round's build", from: `${VIEW} roundPages, the options hidden (roundShowsOptions), the whole design's link · data/sample/states/design-round.json (manifest round)` },
+  { key: "options-only", label: "A round of the options", from: `${VIEW} optionsOnly (roundPages []) · data/sample/states/design-options-round.json (round: the options entry)` },
+  { key: "every-page", label: "Every page", from: `${VIEW} scope="all", the options and every page · …/design/[build]/pages/page.tsx · data/sample/states/design-round.json` },
   { key: "gone", label: "Gone", from: `${VIEW}:293 DesignBuildGone · recording design.gone (404)` },
 ]);
 

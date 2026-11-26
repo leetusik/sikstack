@@ -33,7 +33,7 @@ export function proxy(request: NextRequest) {
   );
   if (!isReaderPath(request.nextUrl.pathname)) {
     const response = NextResponse.next({ request: { headers: forwarded } });
-    // P77 — a Design build's viewer frames that build's options directions: its one
+    // P77 — a Design build's viewer (and, P84, its every-page list) frames that build's options directions: its one
     // policy names the build's exact origin in `frame-src`, from `KB_DESIGN_ORIGIN`
     // at request time (`@/lib/csp`). Set, not appended: it replaces `APP_CSP` from
     // next.config's `headers()`, since a second policy would be enforced too. No

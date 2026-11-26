@@ -59,14 +59,19 @@ describe("the Design viewer's CSP", () => {
   const pattern = "http://{build}.design.sikstack.localhost:3061";
   const origin = `http://${build}.design.sikstack.localhost:3061`;
 
-  it("names the viewer route's build, and only that route", () => {
+  it("names the build of its viewer and its every-page list, and only those routes", () => {
     expect(designViewerBuild(`/projects/p1/design/${build}`)).toBe(build);
     expect(designViewerBuild(`/projects/p1/design/${build}/`)).toBe(build);
+    // P84: the every-page list frames the options page's directions too.
+    expect(designViewerBuild(`/projects/p1/design/${build}/pages`)).toBe(build);
+    expect(designViewerBuild(`/projects/p1/design/${build}/pages/`)).toBe(build);
     for (const path of [
       "/projects/p1/design",
       "/projects/p1/design/",
       "/projects/p1/design/not-a-build",
       `/projects/p1/design/${build}/more`,
+      `/projects/p1/design/${build}/pages/more`,
+      "/projects/p1/design/not-a-build/pages",
       `/projects/p1/feedback/${build}`,
       `/design/${build}`,
       "/dashboard",
@@ -119,6 +124,7 @@ describe("the Design viewer's CSP", () => {
     it("sets the viewer's one policy, replacing APP_CSP, and leaves every other route to APP_CSP", () => {
       process.env.KB_DESIGN_ORIGIN = pattern;
       expect(csp(`/projects/p1/design/${build}`)).toBe(designViewerCsp(origin));
+      expect(csp(`/projects/p1/design/${build}/pages`)).toBe(designViewerCsp(origin));
       // other routes: the proxy sets none, so next.config's `headers()` APP_CSP is the one policy
       for (const path of ["/projects/p1/design", "/dashboard", "/projects/p1/feedback"])
         expect(csp(path)).toBeNull();

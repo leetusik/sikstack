@@ -1,0 +1,14 @@
+{
+  "$design": "sikstack-design-build",
+  "name": "design-options-round",
+  "now": "2026-11-26T09:00:00Z",
+  "design": {
+    "manifest": {
+      "round": {
+        "pages": [
+          "/options/"
+        ]
+      }
+    }
+  }
+}

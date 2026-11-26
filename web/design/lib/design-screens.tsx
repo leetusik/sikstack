@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 
 import { DesignListView } from "@/sikstack/design/list";
+import { designHref } from "@/sikstack/design/model";
 import { DesignBuildGone, DesignBuildView } from "@/sikstack/design/viewer";
 
 import {
@@ -13,6 +14,8 @@ import {
   detailFor,
   kindOf,
   madeShareUrl,
+  OPTIONS_ROUND_MANIFEST,
+  ROUND_MANIFEST,
   type BuildKind,
   type DesignDetail,
 } from "./design-data";
@@ -61,18 +64,39 @@ function shotOf(d: { key: string; label: string }) {
   );
 }
 
-function Viewer({ detail }: { detail: DesignDetail }) {
+/**
+ * The links between a round's list and every page, on this build's page: the whole design lands on the
+ * `every-page` state, and its way back on the `round` state (production's routes, `designPagesHref` and
+ * `designHref`, have no page in a static build).
+ */
+function roundLinks(id: string): { whole: string; back: string } {
+  const page = `${designHref(PROJECT, id)}/`;
+  const at = (state: BuildState) => `${page}?state=${state}`;
+  return { whole: at("every-page"), back: at("round") };
+}
+
+function Viewer({
+  detail,
+  scope,
+  links,
+}: {
+  detail: DesignDetail;
+  scope?: "round" | "all";
+  links?: { whole: string; back: string };
+}) {
   const { build, manifest } = detail;
   // Production posts `…/share {on}` and draws the answer; the design keeps the change in this page.
   const [share, setShare] = useState({ on: build.share.on, url: build.share.url ?? null });
   return (
     <DesignBuildView
       project={PROJECT}
+      scope={scope}
       build={build}
       manifest={manifest}
       share={share}
       onShare={(on) => setShare(on ? { on: true, url: madeShareUrl(build) } : { on: false, url: null })}
       frameOf={shotOf}
+      links={links}
       timeZone={TIME_ZONE}
       now={NOW}
     />
@@ -88,6 +112,19 @@ export function DesignBuildRoute({ id }: { id: string }) {
         <Frame>
           {state === "gone" ? (
             <DesignBuildGone project={PROJECT} projectName={RECORDING.shell.project.name} />
+          ) : state === "round" || state === "options-only" || state === "every-page" ? (
+            // A round's build (P84): the recorded options build drawn with a round's manifest, its list or every
+            // page. Production links the two lists by route (`…/<build>/pages` and back); here both are states of
+            // this page, so the links land on them.
+            <Viewer
+              key={`${state}:${id}`}
+              detail={{
+                build: detailFor("options", id).build,
+                manifest: state === "options-only" ? OPTIONS_ROUND_MANIFEST : ROUND_MANIFEST,
+              }}
+              scope={state === "every-page" ? "all" : "round"}
+              links={roundLinks(id)}
+            />
           ) : (
             <Viewer key={`${state}:${id}`} detail={detailFor(state as BuildKind, id)} />
           )}

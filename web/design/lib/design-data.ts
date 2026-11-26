@@ -3,7 +3,9 @@ import type { StaticImageData } from "next/image";
 import emptyRaw from "../data/sample/states/design-empty.json";
 import manyRaw from "../data/sample/states/design-many.json";
 import oneRaw from "../data/sample/states/design-one.json";
+import optionsRoundRaw from "../data/sample/states/design-options-round.json";
 import privateRaw from "../data/sample/states/design-private.json";
+import roundRaw from "../data/sample/states/design-round.json";
 import sharedRaw from "../data/sample/states/design-shared.json";
 import shotA from "../data/sample/design/options-a.png";
 import shotB from "../data/sample/design/options-b.png";
@@ -22,6 +24,12 @@ import { RECORDING } from "./recording";
  *   address answered;
  * - `states/design-*.json`: the list as it was at each step: before any publish (`empty`), after the first
  *   (`one`), with that build shared (`shared`), after the private build (`private`), at the end (`many`).
+ *
+ * - `states/design-round.json`: a round's manifest (P84, `design-publish --page`): the build's pages as this
+ *   folder lists them and the options page as the recorded options build lists it, with a `round` naming two of the
+ *   pages (not the options page), drawn on the recorded options build for the viewer's round and every-page states;
+ * - `states/design-options-round.json`: only a `round`, naming the options page alone (`--page /options/`), over
+ *   design-round.json's pages and options, for the viewer's options-only round.
  *
  * Two things are stand-ins, said here: a direction's frame (production frames the build's own host, which a static
  * build has not) is the recorded screenshot of that direction at 360 px (`data/sample/design/options-<key>.png`,
@@ -56,6 +64,15 @@ export const DESIGN_LISTS = {
   private: listOf(privateRaw),
   empty: listOf(emptyRaw),
 } as const;
+
+/** A round's manifest (`states/design-round.json`): the viewer's `round` and `every-page` states draw it. */
+export const ROUND_MANIFEST: DesignManifest = (roundRaw as unknown as { design: { manifest: DesignManifest } }).design.manifest;
+
+/** An options-only round's manifest: design-round.json's, its round `states/design-options-round.json`'s. */
+export const OPTIONS_ROUND_MANIFEST: DesignManifest = {
+  ...ROUND_MANIFEST,
+  round: (optionsRoundRaw as unknown as { design: { manifest: DesignManifest } }).design.manifest.round,
+};
 
 /** The viewer's states: what kind of build a recorded build is. */
 export type BuildKind = "no-options" | "options" | "shared" | "private";

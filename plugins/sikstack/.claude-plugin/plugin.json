@@ -1,6 +1,6 @@
 {
   "name": "sikstack",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "A phase-and-slice workflow for Claude Code: plan a phase, run each slice on its own executor, review it, and walk it before it lands. State lives in your repo's hidden .sikstack/ folder; run /sikstack:setup once per machine, then /sikstack:sik-mode in any repo.",
   "author": {
     "name": "leetusik"

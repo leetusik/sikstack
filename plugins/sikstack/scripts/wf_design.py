@@ -328,11 +328,62 @@ def _measure(out: Path, prog: str) -> tuple:
     return total, files
 
 
+def _round_pages(manifest: dict, values: list, prog: str, nothing: str) -> list:
+    """The round's pages (`--page`, repeatable): each value is a manifest page's `entry` (exact) or `route` (a route
+    selects every page with it), or the options page's entry (`options.entry`, exact); the matched entries, unique,
+    in the manifest's page order, the options entry last. A round may name only the options page. A value that
+    matches nothing is refused before anything is sent. No value: no round."""
+    if not values:
+        return []
+    pages = [p for p in manifest.get("pages") or [] if isinstance(p, dict) and isinstance(p.get("entry"), str)]
+    options = manifest.get("options") if isinstance(manifest.get("options"), dict) else {}
+    options_entry = options.get("entry") if isinstance(options.get("entry"), str) and options.get("entry") else None
+    chosen = set()
+    for value in values:
+        hits = [p["entry"] for p in pages if p["entry"] == value or (p.get("route") is not None and p.get("route") == value)]
+        if value == options_entry:
+            hits.append(options_entry)
+        if not hits:
+            raise SystemExit(f"{prog}: refused -- --page {value!r} is no page of the build: name a page's entry or route "
+                             f"from its manifest.json, or its options page's entry ({nothing})")
+        chosen.update(hits)
+    order = []
+    for p in pages:
+        if p["entry"] in chosen and p["entry"] not in order:
+            order.append(p["entry"])
+    if options_entry in chosen and options_entry not in order:
+        order.append(options_entry)
+    return order
+
+
+def _stale_line(manifest: dict, folder: Path, prog: str, nothing: str):
+    """The stale-commit check, when the manifest names its source commit and the folder sits in a git repo: a build
+    made from another commit than the repo's HEAD is refused before anything is sent (rebuild after the commit); a
+    build made from uncommitted changes publishes, and this returns its one `stale:` line. Else None."""
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    commit = source.get("commit")
+    if not isinstance(commit, str) or not commit.strip():
+        return None
+    proc = subprocess.run(["git", "-C", str(folder), "rev-parse", "HEAD"], capture_output=True, text=True)
+    head = proc.stdout.strip() if proc.returncode == 0 else ""
+    if not head:
+        return None
+    commit = commit.strip().lower()
+    if not (head.startswith(commit) or commit.startswith(head)):
+        raise SystemExit(f"{prog}: refused -- the build was made from commit {commit[:7]}, but its repo is at {head[:7]}: "
+                         f"build the design folder again after the commit, then publish ({nothing})")
+    if source.get("dirty") is True:
+        return (f"stale: the build was made from uncommitted changes on {commit[:7]}; the published build is not that "
+                "commit's design")
+    return None
+
+
 def design_publish(args: argparse.Namespace) -> None:
     """Publish the design folder's build (out/, manifest.json at its root) to the linked project: refused unmarked,
     over a cap or unlinked before anything is sent; prints the build's URL to open (`url=`, its viewer on sikstack, as
     the server names it: the build's own host admits only a ticket or a share link, so it is `host=`, last) and
     whether it is private."""
+    import io
     import tarfile
     import tempfile
     prog, nothing = "design-publish", "nothing was published"
@@ -349,6 +400,8 @@ def design_publish(args: argparse.Namespace) -> None:
     if not isinstance(manifest, dict) or manifest.get("$design") != MANIFEST_MARK:
         raise SystemExit(f"{prog}: refused -- {manifest_path} is not a design build's manifest (no "
                          f"\"$design\": \"{MANIFEST_MARK}\") ({nothing})")
+    round_pages = _round_pages(manifest, getattr(args, "page", None) or [], prog, nothing)
+    stale = _stale_line(manifest, folder, prog, nothing)
     size, files = _measure(out, prog)
     if files > CAP_FILES:
         raise SystemExit(f"{prog}: refused -- the build holds {files:,} files: the cap is {CAP_FILES:,} files ({nothing})")
@@ -359,7 +412,14 @@ def design_publish(args: argparse.Namespace) -> None:
     with tempfile.TemporaryFile(prefix="sikstack-design-") as tmp:
         with tarfile.open(fileobj=tmp, mode="w:gz", compresslevel=6) as tar:
             for child in sorted(out.iterdir()):
-                tar.add(str(child), arcname=child.name)
+                if child.name == "manifest.json" and round_pages:
+                    # The round goes into the packed manifest only: out/manifest.json on disk stays as built.
+                    data = json.dumps({**manifest, "round": {"pages": round_pages}}, ensure_ascii=False).encode("utf-8")
+                    info = tar.gettarinfo(str(child), arcname=child.name)
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+                else:
+                    tar.add(str(child), arcname=child.name)
         packed = tmp.tell()
         if packed > CAP_COMPRESSED:
             raise SystemExit(f"{prog}: refused -- the build is {packed:,} bytes ({_mb(packed)}) compressed: the cap is "
@@ -376,6 +436,8 @@ def design_publish(args: argparse.Namespace) -> None:
           f"commit={str(build.get('commit') or 'none')[:12]} branch={build.get('branch') or 'none'} "
           f"size={build.get('size')} files={build.get('files')} compressed={packed} "
           f"host={answer.get('url') or build.get('url')}")
+    if stale:
+        print(stale)
     if private:
         print(f"private: made from a private recording ({build.get('recording') or 'design/data/local/'}), so its "
               "share link cannot be turned on")
@@ -436,10 +498,21 @@ def add_design_parsers(sub) -> None:
                        f"unmarked or over a cap ({_mb(CAP_UNPACKED)} unpacked, {CAP_FILES:,} files, {_mb(CAP_COMPRESSED)} "
                        "compressed); prints the URL to open the build at (its viewer on sikstack; the build's own host is host=) "
                        "and whether it is private (a --data local/<name> recording)",
-                       description="Run only when the operator's words ask to publish; publishing is never a sign-off. "
-                       "Every publish is a new build, kept beside the earlier ones.")
+                       description="Run at every design stop (design-cowork's Show step); publishing is never a sign-off. "
+                       "Every publish is a new build, kept beside the earlier ones. When the manifest names its source "
+                       "commit and the folder sits in a git repo, a build made from another commit than that repo's HEAD "
+                       "is refused (build again after the commit), and one made from uncommitted changes publishes with "
+                       "one stale: line; a manifest with no source commit, or a folder outside a repo, is not checked.")
     p.add_argument("--folder", required=True, help="the design folder: its path inside the product repo (e.g. web/design) or an absolute path")
     p.add_argument("--repo", default=None, help="the product repo's registered name (a multi-repo host with more than one repo)")
+    p.add_argument("--page", action="append", default=None, metavar="ENTRY_OR_ROUTE",
+                   help="a page the round made (repeatable): a manifest page's entry (exact) or route (a route selects "
+                   "every page with it), or the options page's entry (options.entry, exact) when the round made the "
+                   "options; quote each value (a bracketed route is a shell glob). The packed manifest.json (never out/ "
+                   "on disk) gains round: {pages: [entries]}, the options entry last, and the build's viewer lists only "
+                   "those pages, the options only when named, with one link to every page; a round may name only the "
+                   "options page. A value no page has is refused before anything is sent. No --page: no round, every "
+                   "page and the options listed")
     p.set_defaults(func=design_publish)
     p = sub.add_parser("design-builds", help="List the linked (or design-linked) project's design builds, newest first: id, the URL to "
                        "open (its viewer on sikstack), when, commit, branch, size, files, private, share and its host")
