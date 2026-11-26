@@ -14,6 +14,7 @@ import { requestNonce } from "@/sikstack/shell/data";
 import {
   documentPhaseRows,
   withDocumentPhases,
+  withDocumentShare,
 } from "@/sikstack/reader/document/with-phases";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { resolveDocument } from "@/lib/knowledge/app";
@@ -222,15 +223,19 @@ export default async function PrettyDocumentPage({
   ]);
   const listen = await documentListen(loaded, ctx?.token);
   // P61-e9: a member's way back to the phases the document was explained from, under its end.
-  return withDocumentPhases(
-    renderDocument(loaded, {
-      from: firstOf(query[FROM_PARAM]),
-      org: orgSlug,
-      nonce,
-      timeZone: viewerTimeZone(jar),
-      listen,
-    }),
-    phases,
+  // P75: a member's sharing switch for the document, under its end.
+  return withDocumentShare(
+    withDocumentPhases(
+      renderDocument(loaded, {
+        from: firstOf(query[FROM_PARAM]),
+        org: orgSlug,
+        nonce,
+        timeZone: viewerTimeZone(jar),
+        listen,
+      }),
+      phases,
+    ),
+    doc,
   );
 }
 

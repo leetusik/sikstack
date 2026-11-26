@@ -134,7 +134,7 @@ def test_each_endpoint_lists_only_its_own_tools():
     feedback_tools = {t.name for t in asyncio.run(server.feedback_mcp.list_tools())}
     library_tools = {t.name for t in asyncio.run(server.mcp.list_tools())}
     assert feedback_tools == {"capture_feedback"}
-    assert library_tools == {"search", "fetch_document"}
+    assert library_tools == {"search", "fetch", "fetch_document", "list_library"}
 
 
 _INIT = {

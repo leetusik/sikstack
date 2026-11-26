@@ -6,6 +6,16 @@ site/
 # never git-published, never served by mkdocs. NOTE: this means non-#1 tenant
 # content has no git backup — see the deferred per-tenant backup job.
 /tenants/
+# Tenant #1's library content: the box writes its projects under docs/<project>/,
+# docs/.versions/ and docs/.books/, and none of it is ever committed (item sharing,
+# server/sharing.py, replaced the git publish). This one rule keeps every project's
+# folder, private or public, out of `git status`, where gitops.mark_private's
+# info/exclude block used to list the private ones. Only the MkDocs site sources'
+# folders stay tracked.
+/docs/*/
+!/docs/assets/
+!/docs/javascripts/
+!/docs/stylesheets/
 # Chapter images (P30.S4, decision A2): <root>/.assets/ under EVERY tenant root,
 # tenant #1's docs/ included, lives on the box disk only and is never committed.
 # server/assets.py also drops a self-ignoring .assets/.gitignore, and gitops.add

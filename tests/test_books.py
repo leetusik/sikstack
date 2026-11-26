@@ -91,11 +91,10 @@ def test_chapter_publish_places_variant_and_index_agrees(client):
     assert (en["book"], en["chapter_key"], en["lang"]) == ("phases", "p8", "en")
     assert en["book_created"] is True and en["chapter_created"] is True
     assert en["manifest_path"] == ".books/knowledge/phases.json"
-    # The manifest travels in the chapter's own scoped commit.
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").stdout.split()
-    )
-    assert f"docs/{en['manifest_path']}" in names and f"docs/{en['rel_path']}" in names
+    # Written on disk, never committed (no git publish).
+    assert (root / "docs" / en["manifest_path"]).is_file()
+    assert en["committed"] is False
+    assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"
 
     # A second language joins the same chapter as its own document.
     r = tc.post(
@@ -227,7 +226,7 @@ def test_put_refuses_missing_or_foreign_documents(client):
 
 
 def test_loose_publish_without_new_fields_is_unchanged(client):
-    """The regression pin: no book field -> the pre-P30 file, commit and response."""
+    """The regression pin: no book field -> the pre-P30 file and response, no commit."""
     tc, root = client
     r = tc.post("/api/documents", json=_payload(slug="plain"))
     assert r.status_code == 201, r.text
@@ -235,7 +234,7 @@ def test_loose_publish_without_new_fields_is_unchanged(client):
     assert set(body) == {
         "id", "rel_path", "url", "title", "project", "slug", "date", "tags", "related",
         "format", "version", "previous_version", "archived_path", "recent_updated",
-        "landing_created", "committed", "commit_sha", "pushed", "push_pending",
+        "landing_created", "committed", "commit_sha", "pushed", "push_pending", "share",
     }
     assert (root / "docs" / body["rel_path"]).read_text(encoding="utf-8") == (
         "---\n"
@@ -247,16 +246,16 @@ def test_loose_publish_without_new_fields_is_unchanged(client):
         "---\n\n"
         "# P8: The reader\n\nZebracorn chapter body.\n"
     )
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").stdout.split()
-    )
-    assert names == {f"docs/{body['rel_path']}", "docs/index.md", "docs/knowledge/index.md"}
+    assert body["committed"] is False and body["share"] is None  # legacy: no sharing
+    assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"
+    assert not (root / "docs" / "knowledge" / "index.md").exists()  # no landing
     assert not (root / "docs" / ".books").exists()
 
 
 # --- the public book route (Postgres-gated, like every /app/orgs read) ----------
 
 from tests.test_documents_api import _project, _signup, documents_client  # noqa: E402,F401
+from tests.test_public_read import _fill  # noqa: E402
 
 
 def _seed_books(tenant: str) -> None:
@@ -287,6 +286,7 @@ def _tenant_with_books(client) -> tuple[dict[str, str], str]:
         f"/app/projects/{pub}", json={"visibility": "public"}, headers=headers
     ).status_code == 200
     _seed_books(tenant)
+    _fill(client)  # day one: the public project's existing items read Public
     return headers, tenant
 
 
@@ -378,6 +378,7 @@ def test_org_library_shows_a_stranger_only_public_projects(documents_client):
     headers, tenant = _tenant_with_books(client)
     _seed_loose(tenant, "shelf", "open-note", subject="Law")
     _seed_loose(tenant, "secret", "closed-note")
+    _fill(client)
     org = f"org-{uuid4().hex[:10]}"
     assert client.patch("/app/tenant", json={"slug": org}, headers=headers).status_code == 200
 

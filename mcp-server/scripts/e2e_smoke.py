@@ -16,10 +16,13 @@ path-agnostic verifier (not a unit test; the terse behavioral tests live in
 
 What it checks:
   1. initialize()                 -> handshake OK, serverInfo captured (SDK version).
-  2. list_tools()                 -> both `search` and `fetch_document` are advertised.
-  3. call_tool("search", ...)     -> >= 1 grounded hit, each shaped
-                                     {title, snippet, url, id, rel_path}.
-  4. call_tool("fetch_document")  -> the first hit's `id` returns full `markdown`.
+  2. list_tools()                 -> `search`, `fetch`, `list_library` (and the
+                                     deprecated `fetch_document`) are advertised.
+  3. call_tool("search", ...)     -> >= 1 grounded section hit, each shaped
+                                     {title, heading, anchor, snippet, url, id, rel_path, ...}.
+  4. call_tool("fetch")           -> the first hit's `id` + `anchor` returns that
+                                     section's `markdown`; call_tool("list_library")
+                                     lists books and documents (contract v2).
   5. the Feedback endpoint (`--feedback-url`, default: `--url` with `/mcp` replaced
      by `/feedback/mcp`): initialize() and list_tools() with no key, the tool list
      exactly `capture_feedback`. Only with `--capture` (it WRITES one event, marked
@@ -52,8 +55,8 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
 
-# The five agent-facing fields every `search` hit carries (CONTRACT.md §Tools).
-SEARCH_HIT_KEYS = {"title", "snippet", "url", "id", "rel_path"}
+# The agent-facing fields every `search` hit carries (CONTRACT.md §Tools, v2).
+SEARCH_HIT_KEYS = {"title", "heading", "anchor", "snippet", "url", "id", "rel_path"}
 
 
 def _bearer_factory(key: str | None) -> McpHttpClientFactory:
@@ -110,9 +113,9 @@ async def run(url: str, key: str, query: str, failures: list[str]) -> str:
             server_info = init.serverInfo
             sdk_version = getattr(server_info, "version", "?")
 
-            # 2. Tool discovery — both tools must be advertised.
+            # 2. Tool discovery — every Library tool must be advertised.
             tools = {t.name for t in (await session.list_tools()).tools}
-            for expected in ("search", "fetch_document"):
+            for expected in ("search", "fetch", "list_library", "fetch_document"):
                 if expected not in tools:
                     failures.append(f"list_tools: `{expected}` missing (advertised: {sorted(tools)})")
             if failures:
@@ -140,19 +143,29 @@ async def run(url: str, key: str, query: str, failures: list[str]) -> str:
                 failures.append(f"search hit has no `id` to fetch: {first}")
                 return "search hit unusable for fetch"
 
-            # 4. fetch_document by the first hit's id -> full markdown.
-            fetch_res = await session.call_tool("fetch_document", {"id": hit_id})
+            # 4. fetch the first hit's section by id + anchor -> that section's text.
+            anchor = first.get("anchor") or None
+            fetch_res = await session.call_tool("fetch", {"id": hit_id, "anchor": anchor})
             if fetch_res.isError:
-                failures.append(f"call_tool fetch_document id={hit_id}: tool error: {_error_text(fetch_res)}")
-                return "fetch_document call errored"
+                failures.append(f"call_tool fetch id={hit_id} anchor={anchor!r}: tool error: {_error_text(fetch_res)}")
+                return "fetch call errored"
             doc = _result_payload(fetch_res)
             if not doc.get("markdown"):
-                failures.append(f"fetch_document id={hit_id}: empty/absent `markdown`: {doc}")
+                failures.append(f"fetch id={hit_id}: empty/absent `markdown`: {doc}")
+            lib_res = await session.call_tool("list_library", {})
+            if lib_res.isError:
+                failures.append(f"call_tool list_library: tool error: {_error_text(lib_res)}")
+                return "list_library call errored"
+            library = _result_payload(lib_res)
+            if not (library.get("books") or library.get("documents")):
+                failures.append(f"list_library: empty library: {library}")
 
     return (
         f"MCP E2E ok against {url} (SDK serverInfo {server_info.name} {sdk_version}); "
         f"search -> {len(hits)} hit(s), first id={hit_id} title={first.get('title')!r}; "
-        f"fetch_document -> {doc.get('total_chars')} chars (truncated={doc.get('truncated')})"
+        f"fetch(anchor={first.get('anchor')!r}) -> {doc.get('total_chars')} chars; "
+        f"list_library -> {len(library.get('books', []))} book(s), "
+        f"{len(library.get('documents', []))} document(s)"
     )
 
 

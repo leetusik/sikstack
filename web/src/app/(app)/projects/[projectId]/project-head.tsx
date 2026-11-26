@@ -127,6 +127,7 @@ export function ProjectHead({
             </button>
           ) : null}
         </div>
+        {owner ? <p className="meta ph-default-note">{W.defaultNote}</p> : null}
       </header>
       {state.phase === "failed" ? (
         <Notice danger role="alert">

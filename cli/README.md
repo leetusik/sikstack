@@ -3,8 +3,8 @@
 A standalone command-line client for a personal knowledge base on the hosted
 service at <https://sikstack.com> — sign up, configure credentials, and
 save and search knowledge from a terminal, without ever visiting the website. It
-is a separate install from the `/explain:explain` Claude Code plugin, but writes
-the same config the plugin reads, so the two share one hosted knowledge base.
+is a separate install from the sikstack Claude Code plugin; its `/sikstack:explain`
+skill publishes through this CLI, so the two share one hosted knowledge base.
 
 ## Install
 

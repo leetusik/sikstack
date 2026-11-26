@@ -1,5 +1,6 @@
-"""Thin async httpx proxy over the frozen read endpoints (``GET /api/search`` and
-the single-document reads ``GET /api/documents/{id}`` / ``.../by-path/{rel_path}``),
+"""Thin async httpx proxy over the read endpoints (``GET /api/sections/search``,
+``GET /api/library`` and the single-document reads ``GET /api/documents/{id}`` /
+``.../by-path/{rel_path}``, optionally one section by ``anchor``),
 plus the one write the Feedback endpoint proxies, ``POST /api/feedback``.
 
 This is the whole "proxy-and-forward-bearer" architecture in a couple of functions: the
@@ -32,7 +33,7 @@ USER_AGENT = f"knowledge-mcp/{__version__}"
 
 
 class UpstreamError(Exception):
-    """A non-2xx response from ``/api/search``.
+    """A non-2xx response from an ``/api/*`` read (or the Feedback write).
 
     ``detail`` is FastAPI's own ``{"detail": …}`` when present (safe to surface —
     a generic 401, a 400 that names the bad FTS query), or ``""``. Raw bodies are
@@ -68,7 +69,37 @@ def _params(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
-async def search(
+async def _get(
+    path: str,
+    *,
+    base_url: str,
+    authorization: str | None,
+    params: dict[str, Any] | None = None,
+    timeout: float = 15.0,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """One ``GET`` with the inbound bearer forwarded verbatim (the conventions above)."""
+
+    headers = {"User-Agent": USER_AGENT}
+    if authorization:
+        headers["Authorization"] = authorization
+    async with httpx.AsyncClient(
+        base_url=base_url.rstrip("/"),
+        timeout=timeout,
+        follow_redirects=False,
+        headers=headers,
+        transport=transport,
+    ) as client:
+        response = await client.get(path, params=params or None)
+    if response.status_code >= 400:
+        raise UpstreamError(response.status_code, _detail(response))
+    try:
+        return response.json()
+    except ValueError:
+        raise UpstreamError(response.status_code, "upstream response was not JSON") from None
+
+
+async def search_sections(
     *,
     base_url: str,
     authorization: str | None,
@@ -78,35 +109,28 @@ async def search(
     timeout: float = 15.0,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
-    """``GET {base_url}/api/search`` with the inbound bearer forwarded verbatim.
+    """``GET {base_url}/api/sections/search`` (contract v2's ``search``): the caller's
+    sections that match ``q``, each with its document, anchor and reader URL."""
 
-    Returns the parsed JSON envelope (``{query, mode, total, limit, offset,
-    results[]}``). Raises :class:`UpstreamError` on any non-2xx (401 for a
-    missing/invalid bearer, 400 for a malformed FTS query, etc.).
-    """
+    return await _get(
+        "/api/sections/search", base_url=base_url, authorization=authorization,
+        params=_params(q=q, project=project, limit=limit), timeout=timeout, transport=transport,
+    )
 
-    headers = {"User-Agent": USER_AGENT}
-    if authorization:
-        # Forward exactly what the caller sent (scheme + token), unmodified —
-        # the frozen /api/* plane only accepts `Authorization: Bearer`, and the
-        # resolver reads this header to scope the corpus.
-        headers["Authorization"] = authorization
 
-    async with httpx.AsyncClient(
-        base_url=base_url.rstrip("/"),
-        timeout=timeout,
-        follow_redirects=False,
-        headers=headers,
-        transport=transport,
-    ) as client:
-        response = await client.get("/api/search", params=_params(q=q, project=project, limit=limit))
+async def library(
+    *,
+    base_url: str,
+    authorization: str | None,
+    timeout: float = 15.0,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """``GET {base_url}/api/library``: the caller's books with chapters, plus loose documents."""
 
-    if response.status_code >= 400:
-        raise UpstreamError(response.status_code, _detail(response))
-    try:
-        return response.json()
-    except ValueError:
-        raise UpstreamError(response.status_code, "upstream response was not JSON") from None
+    return await _get(
+        "/api/library", base_url=base_url, authorization=authorization,
+        timeout=timeout, transport=transport,
+    )
 
 
 async def fetch_document(
@@ -115,6 +139,7 @@ async def fetch_document(
     authorization: str | None,
     id: int | None = None,
     rel_path: str | None = None,
+    anchor: str | None = None,
     timeout: float = 15.0,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -124,11 +149,12 @@ async def fetch_document(
     (str) → ``GET /api/documents/by-path/{rel_path}``. The path is built by direct
     concatenation like ``cli/knowledge_cli/client.py:document_get_by_path`` — httpx
     keeps the ``/`` separators, which the upstream ``{rel_path:path}`` converter
-    expects. Returns the parsed doc JSON (``markdown`` **included**).
+    expects. Returns the parsed doc JSON (``markdown`` **included**); with ``anchor``
+    (contract v2) the upstream returns that one section (``section``) and no body.
 
     Exactly one of ``id``/``rel_path`` must be given; the caller
     (``server.run_fetch_document``) enforces that XOR before this is reached. Same
-    proxy conventions as :func:`search`: forwarded header, ``follow_redirects=
+    proxy conventions as :func:`_get`: forwarded header, ``follow_redirects=
     False``, non-2xx → :class:`UpstreamError`. Upstream returns **404** for a
     missing id/path **and** a cross-tenant one (existence never leaks), **401** for
     a missing/invalid bearer.
@@ -152,7 +178,7 @@ async def fetch_document(
         headers=headers,
         transport=transport,
     ) as client:
-        response = await client.get(path)
+        response = await client.get(path, params=_params(anchor=anchor) or None)
 
     if response.status_code >= 400:
         raise UpstreamError(response.status_code, _detail(response))
@@ -174,7 +200,7 @@ async def capture_feedback(
 
     ``body`` is sent as JSON exactly as given (the caller drops the unset fields).
     Returns the parsed 202 receipt (``{request_id, accepted_at, status}``). Same
-    proxy conventions as :func:`search`; non-2xx → :class:`UpstreamError` (400 with
+    proxy conventions as :func:`_get`; non-2xx → :class:`UpstreamError` (400 with
     the API's ``detail``, 401 with no valid bearer, 403 for a key that may not
     capture, 413 for a body over the API's cap, 429 past the limit). Transport
     errors and timeouts propagate as ``httpx`` exceptions, as for the read calls.

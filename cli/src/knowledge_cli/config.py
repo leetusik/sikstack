@@ -1,23 +1,18 @@
-"""The `knowledge-kb` config seam — the first *code* implementation of it.
+"""The `knowledge-kb` config seam.
 
 `$XDG_CONFIG_HOME/knowledge-kb/config.json` (default
-`~/.config/knowledge-kb/config.json`) is the file the `/explain:explain` plugin
-skill reads to find a knowledge base. Until this module, that seam existed
-**only as prose**: an inline `python3 -c` heredoc in
-`plugins/explain/skills/explain/SKILL.md:31-78` (the resolver) and hand-written JSON in
-`plugins/explain/skills/setup/SKILL.md:185-224` (the writer).
+`~/.config/knowledge-kb/config.json`) is the file this CLI reads to find a
+knowledge base. `/sikstack:explain` publishes through the CLI (`knowledge save`),
+so it reads the same file.
 
-`resolve()` is a faithful port of that heredoc — same precedence, same defaults,
-same statuses, same vocabulary.
+The seam began as prose in the old `explain` plugin, deleted with sikstack plugin
+0.10.0 (the git history holds it): its skill carried the resolver as an inline
+`python3 -c` heredoc and its `/explain:setup` wrote the JSON by hand. "The skill"
+below means that old resolver. `resolve()` is a faithful port of it — same
+precedence, same defaults, same statuses, same vocabulary — and is now its only
+implementation; `tests/test_config.py` pins the behavior.
 
-**Two implementations of one contract.** The skill must keep working with this
-CLI uninstalled (it is the self-host, open-core path), and the CLI must work
-without the plugin — so these cannot be merged, and they can drift. The only
-thing holding them in agreement is `tests/test_config.py`, which pins the
-documented behavior. **Change neither side without the other.**
-
-The schema is **nested** and must match the skill exactly — a flat shape will not
-be read (`setup/SKILL.md:189-201`)::
+The schema is **nested** — a flat shape will not be read::
 
     {
       "kb_root": "<absolute path>",          # may be absent: a remote-only config
@@ -25,12 +20,9 @@ be read (`setup/SKILL.md:189-201`)::
       "site": {"base_url": "..."}
     }
 
-`save()` has no counterpart in the skill: `/explain:setup` writes this file by
-hand and "never writes a bearer token" (`setup/SKILL.md:203`), leaving
-`api.token` as JSON `null`. Writing a real `vk_` key there is what lights up the
-hosted SaaS for `/explain:explain` with zero code change — so `save()` is also
-the first place `chmod 600` is *enforced* rather than merely instructed
-(`setup/SKILL.md:223` is prose nothing checks).
+`save()` writes it. The old setup never wrote a bearer token, leaving `api.token`
+as JSON `null`; writing a real `vk_` key there is what lights up the hosted
+service, so `save()` *enforces* `chmod 600`.
 """
 
 from __future__ import annotations
@@ -44,16 +36,16 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-# Defaults, straight from the resolver (explain/SKILL.md:67,69).
+# Defaults, straight from the skill's resolver.
 DEFAULT_API_BASE_URL = "http://localhost:8766"
 DEFAULT_SITE_BASE_URL = "http://localhost:8765"
 
-# The pre-/explain:setup convention (explain/SKILL.md:50-51,105-108): keeps
-# machines that predate the config file working.
+# The convention from before the config file existed: keeps machines that
+# predate it working.
 LEGACY_ROOT_PARTS = ("projects", "personal", "knowledge")
 
 # Env overrides. Each overrides ONLY its own key. There is deliberately no
-# KB_SITE_BASE_URL: site.base_url has no env override (explain/SKILL.md:69).
+# KB_SITE_BASE_URL: site.base_url has no env override (as in the skill).
 ENV_KB_ROOT = "KB_ROOT"
 ENV_API_BASE_URL = "KB_API_BASE_URL"
 ENV_API_TOKEN = "KB_API_TOKEN"
@@ -114,7 +106,7 @@ def config_path() -> str:
 
 
 def _env(key: str) -> str | None:
-    """An env var's value, treating the empty string as unset (SKILL.md:34-36)."""
+    """An env var's value, treating the empty string as unset (as the skill did)."""
 
     value = os.environ.get(key)
     return value if value else None
@@ -155,7 +147,7 @@ def _parse(path: str) -> Mapping[str, Any] | None:
 
 
 def resolve() -> ResolvedConfig:
-    """Resolve the knowledge base — a faithful port of explain/SKILL.md:31-78.
+    """Resolve the knowledge base — a faithful port of the skill's resolver.
 
     Per-key precedence, highest first: env override -> config file -> legacy
     convention -> default. The config file is **authoritative when present**: it
@@ -174,7 +166,7 @@ def resolve() -> ResolvedConfig:
         cfg = _parse(path)
     except ConfigError as exc:
         # STOP: the file exists but is unreadable. Never fall back to another
-        # source (SKILL.md:46-49,85-86) — a typo must not silently repoint a
+        # source (the skill's rule) — a typo must not silently repoint a
         # knowledge base somewhere else.
         return ResolvedConfig(status="error", path=path, error=str(exc))
 
@@ -277,8 +269,8 @@ def save(updates: Mapping[str, Any], path: str | None = None) -> str:
     """Merge `updates` into the config file and write it back. Returns the path.
 
     Read-modify-write, deep-merged: keys this CLI does not own are preserved. A
-    user may have a `/explain:setup`-written config (or hand-added fields), and
-    clobbering them would break the very skill this seam exists to serve.
+    user may have a config the old setup wrote (or hand-added fields), and
+    clobbering them would break whatever else reads them.
 
     `updates` uses the nested schema — a flat shape will not be read::
 

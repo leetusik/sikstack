@@ -26,6 +26,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
+from starlette.concurrency import run_in_threadpool
 
 from server import app_api
 from server import assets as assets_mod
@@ -49,12 +50,12 @@ from server import workspace_api
 from server import workspace_web_api
 from server import documents as documents_mod
 from server import embeddings as embeddings_mod
-from server import gitops
 from server import native_ingest
 from server import publish
-from server import publish_gate
+from server import sharing
 from server import reindex as reindex_mod
 from server import search as search_mod
+from server import sections as sections_mod
 from server import write_lock
 from server.accounts.auth import AuthError, auth_error_handler
 from server.native import NativeFormatError, parse_chapter, search_text
@@ -91,14 +92,33 @@ async def lifespan(app: FastAPI):
         print(
             f"[kb-api] startup reindex: indexed={report['indexed']} "
             f"removed={report['removed']} skipped={len(report['skipped'])} "
-            f"embedded={emb.get('embedded', 0)}",
+            f"embedded={emb.get('embedded', 0)} "
+            f"sections={report.get('sections', {}).get('count', 0)}",
             flush=True,
         )
+    # Item sharing, day one: every existing item of a public project gets a Public row
+    # (server/sharing.py), so nothing reads differently after the deploy that adds it.
+    # Once ever per project: a project the fill saw, or whose owner switched its
+    # visibility, is never filled again. Best-effort; never blocks the boot.
+    if config.database_url() is not None:
+        try:
+            conn = db.connect()
+            try:
+                filled = await sharing.fill_once(conn)
+            finally:
+                conn.close()
+            if filled is not None:
+                print(
+                    f"[kb-api] sharing fill: {filled.projects} public project(s) due, "
+                    f"added {filled.added} Public row(s)",
+                    flush=True,
+                )
+        except Exception:  # noqa: BLE001 - the boot goes on; `python -m server.sharing fill` retries
+            logger.warning("startup sharing fill failed", exc_info=True)
     yield
-    # Give the after-response publish worker a bounded chance to finish its
-    # queued push/embed work before the process goes away (P24.S1). Best-effort:
-    # anything still pending is dropped, and the doc publishes on the next
-    # successful push — docs/ on disk is canonical either way.
+    # Give the after-response worker a bounded chance to finish its queued embed
+    # work before the process goes away (P24.S1). Best-effort: anything still
+    # pending is dropped, and the next reindex catches the embeddings up.
     if not publish.drain(timeout=10.0):
         print(
             f"[kb-api] shutdown: {publish.pending()} publish task(s) still pending",
@@ -136,6 +156,24 @@ async def usage_metering(request: Request, call_next):
         and 200 <= response.status_code < 300
     ):
         await record_usage(hint)  # best-effort; never raises
+    return response
+
+
+@app.middleware("http")
+async def link_reads_stay_private(request: Request, call_next):
+    """A read made with a share link is never kept by a shared cache (RFC 9111 §5.2.2.6).
+
+    A request holding ``X-Share-Token``, or naming a link at ``/app/shared/{token}``, is
+    answered for that link's holder only: a response that set no ``Cache-Control`` gets
+    ``private, no-store``. A route that judged its own scope keeps it (an image of a
+    Public item may stay ``public``; ``documents_api._shared_cache_ok``).
+    """
+
+    response = await call_next(request)
+    if (
+        request.headers.get("x-share-token") or request.url.path.startswith("/app/shared/")
+    ) and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -235,11 +273,10 @@ app.include_router(design_api.router)
 # One process-wide lock serializes the whole write critical section (file → index
 # → DB → git). Load-bearing invariant: the API runs a SINGLE uvicorn worker, so an
 # in-process lock is sufficient; never scale to multiple workers. WAL gives reads
-# concurrency regardless. Since P34-n0.S2 the lock and the after-response push task
-# live in ``server/write_lock.py``, so ``app_api`` (which ``main`` imports) can take
-# the same lock for the visibility toggle; both names are re-exported here unchanged.
+# concurrency regardless. The lock lives in ``server/write_lock.py`` and is
+# re-exported here unchanged. The write path makes no git commit or push: library
+# content is never published to git (item sharing gates reads, ``server/sharing.py``).
 WRITE_LOCK = write_lock.WRITE_LOCK
-_push_task = write_lock.push_task
 
 
 def _embed_task(*, db_file: Path, doc_id: int, title: str, markdown: str):
@@ -267,6 +304,9 @@ def _embed_task(*, db_file: Path, doc_id: int, title: str, markdown: str):
                 dims=len(vec),
                 vector=embeddings_mod.pack_vector(vec),
             )
+            # P75: the document's sections, content-hash cached (an unchanged section
+            # of a new version costs nothing).
+            sections_mod.sync_embeddings(conn, doc_id=doc_id)
         finally:
             conn.close()
 
@@ -391,6 +431,21 @@ def healthz(conn=Depends(get_conn)):
     }
 
 
+def _doc_or_section(conn, doc: dict, anchor: Optional[str]) -> dict:
+    """The single-document read: the whole document, or with ``anchor`` (P75) only that
+    section, as the document's metadata plus ``section: {anchor, heading, level,
+    position, text}`` and no body. An anchor the document does not have is a 404."""
+
+    if anchor is None:
+        return _public_doc(doc, include_markdown=True)
+    found = sections_mod.get_section(conn, int(doc["id"]), anchor)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail=f"no section {anchor!r} in document {doc['rel_path']!r}"
+        )
+    return {**_public_doc(doc, include_markdown=False), "section": found}
+
+
 @app.get("/api/documents")
 def list_documents(
     project: Optional[str] = None,
@@ -491,6 +546,7 @@ def get_document_version(
 @app.get("/api/documents/by-path/{rel_path:path}")
 def get_document_by_path(
     rel_path: str,
+    anchor: Optional[str] = None,
     ctx: ApiAuthContext = Depends(resolve_api_read),
     conn=Depends(get_conn),
 ):
@@ -499,19 +555,20 @@ def get_document_by_path(
     doc = db.get_document_by_path_or_alias(conn, rel_path, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document at rel_path {rel_path!r}")
-    return _public_doc(doc, include_markdown=True)
+    return _doc_or_section(conn, doc, anchor)
 
 
 @app.get("/api/documents/{doc_id}")
 def get_document(
     doc_id: int,
+    anchor: Optional[str] = None,
     ctx: ApiAuthContext = Depends(resolve_api_read),
     conn=Depends(get_conn),
 ):
     doc = db.get_document(conn, doc_id, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
-    return _public_doc(doc, include_markdown=True)
+    return _doc_or_section(conn, doc, anchor)
 
 
 @app.get("/api/search")
@@ -552,6 +609,129 @@ def search(
         "offset": offset,
         "results": out["results"],
     }
+
+
+async def _api_viewer(ctx: ApiAuthContext) -> "sections_mod.Viewer":
+    """A key reads its own org: every item, with reader URLs on the org's label. Legacy
+    mode (no tenant) addresses documents by id."""
+
+    if ctx.tenant_id is None:
+        return sections_mod.Viewer(member=True)
+    return await sections_mod.viewer_for(ctx.tenant_id, member=True)
+
+
+@app.get("/api/sections/search")
+async def search_sections(
+    request: Request,
+    q: str,
+    project: Optional[str] = None,
+    limit: int = Query(10, ge=1, le=50),
+    ctx: ApiAuthContext = Depends(resolve_api_read),
+):
+    """Section search (P75) for a key: the sections of its org that match ``q``, each
+    with its document, anchor, heading, snippet, score and the reader ``url`` that lands
+    on it (``search.search_sections``). Metered as a search."""
+
+    viewer = await _api_viewer(ctx)
+
+    def _run() -> dict:
+        conn = db.connect()
+        try:
+            return search_mod.search_sections(
+                conn, q, tenant=_tenant_filter(ctx), project=project, limit=limit, viewer=viewer
+            )
+        finally:
+            conn.close()
+
+    # The query embed is a blocking HTTP round-trip and the scans are sync SQLite: run
+    # them off the single worker's event loop, as the sync document search runs.
+    out = await run_in_threadpool(_run)
+    request.state.usage = UsageHint(
+        tenant_id=ctx.tenant_id,
+        event_type=EVENT_SEARCH,
+        project_name=project,
+        project_id=ctx.project_id,
+        credential_id=ctx.credential_id,
+    )
+    return {"query": q, "mode": out["mode"], "total": out["total"], "limit": limit,
+            "results": out["results"]}
+
+
+@app.get("/api/library")
+async def library(ctx: ApiAuthContext = Depends(resolve_api_read)):
+    """A key's library (P75): its org's books with their chapters (and each chapter's
+    variants), plus its loose documents, as ``/app/orgs/{org}/library`` lists them for
+    a member. Every item carries its reader ``url``."""
+
+    viewer = await _api_viewer(ctx)
+    tid = _tenant_db_id(ctx)
+
+    def _run() -> dict:
+        conn = db.connect()
+        try:
+            books = []
+            for row in db.list_books(conn, tenant_id=tid):
+                found = db.get_book(conn, project=row["project"], slug=row["slug"], tenant_id=tid)
+                if found is None:
+                    continue
+                books.append({
+                    "project": found["project"],
+                    "slug": found["slug"],
+                    "title": found["title"],
+                    "sub": found["sub"],
+                    "kind": found["kind"],
+                    "subject": found["subject"],
+                    "description": found["description"],
+                    "chapters": [
+                        {
+                            "key": ch["key"],
+                            "position": ch["position"],
+                            "title": ch["title"],
+                            "variants": [
+                                {
+                                    "lang": v["lang"],
+                                    "id": v["doc_id"],
+                                    "rel_path": v["rel_path"],
+                                    "title": v["title"],
+                                    "version": v["version"],
+                                    "format": v["format"],
+                                    "url": sections_mod.reader_url(
+                                        viewer, doc_id=v["doc_id"], project=found["project"],
+                                        slug=v["slug"], anchor="", book=found["slug"],
+                                        chapter_key=ch["key"], lang=v["lang"],
+                                    ),
+                                }
+                                for v in ch["variants"]
+                            ],
+                        }
+                        for ch in found["chapters"]
+                    ],
+                })
+            documents = [
+                {
+                    "id": d["id"],
+                    "rel_path": d["rel_path"],
+                    "project": d["project"],
+                    "slug": d["slug"],
+                    "title": d["title"],
+                    "date": d["date"],
+                    "format": d["format"] or "md",
+                    "lang": d["lang"] or "en",
+                    "version": int(d["version"] or 1),
+                    "subject": d["subject"],
+                    "tags": d["tags"],
+                    "url": sections_mod.reader_url(
+                        viewer, doc_id=d["id"], project=d["project"], slug=d["slug"], anchor=""
+                    ),
+                }
+                for d in db.list_loose_documents(conn, tenant_id=tid)
+            ]
+        finally:
+            conn.close()
+        return {"books": books, "documents": documents}
+
+    # Sync SQLite reads: off the single worker's event loop.
+    return await run_in_threadpool(_run)
 
 
 class ReindexIn(BaseModel):
@@ -662,8 +842,14 @@ class DocumentIn(BaseModel):
     # 404 dance.
     new_version: bool = False
     rel_path: Optional[str] = None
+    # Accepted and ignored: the write path makes no git commit since item sharing
+    # replaced the git publish (kept so older clients' bodies still validate).
     commit: bool = True
     co_authored_by: Optional[str] = None
+    # Item sharing (additive): the state this write sets on its item (the document,
+    # or the book a chapter goes into). Absent: a new item starts at its project's
+    # default and an existing one keeps its state.
+    share: Optional[Literal["members", "link", "public"]] = None
     # Books and chapters (P30.S2, additive — all default to "absent", which is
     # today's loose document exactly). `book` + `chapter` place the document as the
     # `lang` variant of a chapter (P29 *Server placement*); `lang` and
@@ -863,17 +1049,16 @@ def _place_variant(
 
 @dataclass(frozen=True)
 class RegistryProject:
-    """What ``ensure_registry_project`` hands the save handler (P34-n0.S1).
+    """What ``ensure_registry_project`` hands the save handler.
 
     ``id`` is the registry project's id (``None`` in legacy mode, for a name the
-    handler will 422, or when the registry could not be read). ``publish`` is the
-    project-visibility rule's answer for this write (``server/publish_gate.py``),
-    taken from the record the dependency already loaded, so the sync handler never
-    has to reach Postgres itself.
+    handler will 422, or when the registry could not be read). ``default_share`` is
+    the state a new item of the project starts at (``server.sharing.default_for`` of
+    its visibility), taken from the record the dependency already loaded.
     """
 
     id: UUID | None
-    publish: publish_gate.PublishDecision
+    default_share: str = sharing.MEMBERS
 
 
 async def ensure_registry_project(
@@ -897,31 +1082,30 @@ async def ensure_registry_project(
     409s (target already exists) — harmless and idempotent. Returns the registry
     project id, or ``None`` (legacy mode / an invalid name the handler will 422).
 
-    P34-n0.S1: it also returns whether the write publishes, by the one visibility
-    rule (``publish_gate.decide``) applied to the record it just loaded: legacy mode
-    publishes as before; tenant #1 publishes only a ``public`` project (a new one is
-    created ``private``); another tenant never does. For tenant #1 a registry failure
-    no longer fails the write: it is logged and the write lands unpublished, reporting
-    ``publish_gate.VISIBILITY_UNREADABLE`` as its ``commit_error`` (fail closed).
+    It also returns the state a new item starts at: the project's visibility read as
+    the default (``public`` -> Public, else Members; a new project is ``private``).
+    A registry failure fails the write for every tenant but #1, as before; for tenant
+    #1 it is logged and the write lands with no registry id (its item then has no
+    sharing row and reads as Members: fail closed).
     """
 
     if ctx.tenant_id is None:
-        return RegistryProject(id=None, publish=publish_gate.decide(ctx, None))
+        return RegistryProject(id=None)
     try:
         project = documents_mod.validate_project(body.project)
     except documents_mod.ConventionError:
-        return RegistryProject(id=None, publish=publish_gate.PRIVATE)
+        return RegistryProject(id=None)
     try:
         record = await get_accounts_service().get_or_create_project(ctx.tenant_id, project)
-    except Exception:  # noqa: BLE001 - fail closed: saved, never published
+    except Exception:  # noqa: BLE001 - fail closed: saved, reads as Members
         if not ctx.is_public:
-            raise  # another tenant never publishes: its failure stays what it was
+            raise
         logger.warning(
-            "registry project get-or-create failed; the write will not publish",
+            "registry project get-or-create failed; the write has no sharing row",
             exc_info=True,
         )
-        return RegistryProject(id=None, publish=publish_gate.UNREADABLE)
-    return RegistryProject(id=record.id, publish=publish_gate.decide(ctx, record))
+        return RegistryProject(id=None)
+    return RegistryProject(id=record.id, default_share=sharing.default_for(record.visibility))
 
 
 async def resolve_org_slug(
@@ -1386,23 +1570,97 @@ def _check_document(body: DocumentIn, ctx: ApiAuthContext, conn) -> _CheckedWrit
     )
 
 
+def _share_item(conn, *, tid, project: str, rel: str, placement) -> tuple[str, str]:
+    """``(kind, key)`` of the item a write lands in: its book for a chapter, else itself."""
+
+    if placement is not None:
+        return sharing.KIND_BOOK, placement["book"]["slug"]
+    binding = db.find_chapter_binding(conn, rel, tid or "")
+    if binding is not None:
+        return sharing.KIND_BOOK, binding["book"]
+    return sharing.KIND_DOC, reader_state.doc_of(project, rel)
+
+
+async def _apply_share(project_id: UUID, kind: str, key: str, requested, default: str) -> str:
+    if requested is not None:
+        return (await sharing.set_share(project_id, kind, key, requested)).state
+    return (await sharing.ensure_share(project_id, kind, key, default)).state
+
+
+def _record_share(ctx, registry, conn, *, tid, project, rel, placement, requested):
+    """The write's sharing row, from a sync handler's worker thread; ``None`` when none.
+
+    Legacy mode and a write with no registry id have no sharing (the item reads as
+    Members). A failure is logged and answered ``None``: the item then reads as
+    Members too (fail closed), and re-sending the write (or ``knowledge share``) sets it.
+    """
+
+    if ctx.tenant_id is None or registry.id is None:
+        return None
+    kind, key = _share_item(conn, tid=tid, project=project, rel=rel, placement=placement)
+    try:
+        return reader_state.run_from_worker(
+            _apply_share, registry.id, kind, key, requested, registry.default_share
+        )
+    except Exception:  # noqa: BLE001 - fail closed: reads as Members
+        logger.warning("could not record the item's sharing", exc_info=True)
+        return None
+
+
+async def _apply_share_by_name(tenant_id: UUID, project: str, kind: str, key: str, requested):
+    record = await get_accounts_service().get_or_create_project(tenant_id, project)
+    return await _apply_share(record.id, kind, key, requested, sharing.default_for(record.visibility))
+
+
+def _record_share_by_name(ctx, project: str, kind: str, key: str, requested):
+    """``_record_share`` for a write that knows only its project's name (the book PUT)."""
+
+    if ctx.tenant_id is None:
+        return None
+    try:
+        return reader_state.run_from_worker(
+            _apply_share_by_name, ctx.tenant_id, project, kind, key, requested
+        )
+    except Exception:  # noqa: BLE001 - fail closed: reads as Members
+        logger.warning("could not record the book's sharing", exc_info=True)
+        return None
+
+
+async def require_publish_right_document(
+    body: DocumentIn, ctx: ApiAuthContext = Depends(resolve_api_write)
+) -> None:
+    """A write that names ``share: public`` is the owner's act (403 before anything is
+    written, the registry project included); see ``sharing.api_may_publish``."""
+
+    if body.share == sharing.PUBLIC and not await sharing.api_may_publish(ctx):
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+
+
+async def require_publish_right_book(
+    body: BookPutIn, ctx: ApiAuthContext = Depends(resolve_api_write)
+) -> None:
+    """``require_publish_right_document`` for the book manifest PUT's ``share``."""
+
+    if body.share == sharing.PUBLIC and not await sharing.api_may_publish(ctx):
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+
+
 @app.post("/api/documents", status_code=201)
 def create_document(
     body: DocumentIn,
     request: Request,
     ctx: ApiAuthContext = Depends(resolve_api_write),
+    _publish: None = Depends(require_publish_right_document),
     registry: RegistryProject = Depends(ensure_registry_project),
     org_slug: str | None = Depends(resolve_org_slug),
     conn=Depends(get_conn),
 ):
-    """Own the whole write path: convention-exact docs/ file + Recent bullet + DB
-    upsert + scoped LOCAL git commit, all under WRITE_LOCK. docs/ stays canonical — a
-    failed commit never rolls back the file/DB (responds 201, committed:false).
+    """Own the whole write path: convention-exact file + DB upsert under WRITE_LOCK,
+    then the item's sharing row. No git commit or push is made (``committed`` is
+    always false; the keys stay for older clients).
 
-    Nothing in the pre-response path makes a network round-trip (P24.S1): the push
-    to origin/main and the Gemini embed are queued on the publish worker and run
-    after the 201 is written, so a caller's timeout budget only ever covers local
-    work (see step 4b)."""
+    Nothing in the pre-response path makes a network round-trip (P24.S1): the Gemini
+    embed is queued on the after-response worker (see step 4b)."""
     # 1-2c. Validate (P31.S1: the one path the dry run shares, `_check_document`).
     checked = _check_document(body, ctx, conn)
     (
@@ -1457,19 +1715,9 @@ def create_document(
 
     published_at = checked.published
 
-    # P34-n0.S1: whether this write publishes (commit, Recent bullet, landing) is the
-    # project-visibility rule's answer, carried in from the async registry dependency.
-    publish_decision = registry.publish
-
-    # 3. Locked critical section: archive -> file write -> index update -> DB upsert
-    #    -> LOCAL git add/commit. (WRITE_LOCK is NOT reentrant — nothing called in
-    #    here may retake it, which is why the push is queued outside it in 4b.)
+    # 3. Locked critical section: archive -> file write -> DB upsert. (WRITE_LOCK is
+    #    NOT reentrant — nothing called in here may retake it.)
     with WRITE_LOCK:
-        # 3--. P34-n0.S1: a private tenant #1 project is hidden in the checkout's
-        #      info/exclude block BEFORE any of its files land, so its untracked files
-        #      never show in `git status` and gitops refuses its footprint. Logged,
-        #      never fatal.
-        publish_gate.hide_private_project(ctx, publish_decision, project)
         # 3-. Chapter placement (P30.S2): settle the manifest FIRST, before any file
         #     is touched, so a binding conflict (409) or a book that cannot be created
         #     (422) leaves nothing behind. Re-read under the lock: it is the
@@ -1596,29 +1844,11 @@ def create_document(
             else:
                 raw_html = None
                 stored_markdown = stored_body
-        # Public landing + Recent index are mkdocs-publish concerns, so only a write
-        # that publishes gets them. Non-#1 tenants keep a minimal tree (their content
-        # is never served in P10) and, since P34-n0.S1, so does a private tenant #1
-        # project: its title never reaches docs/index.md — skip both and report them
-        # as not created.
-        if publish_decision.publishes:
-            # Auto-create the project landing on a project's first document, so
-            # mkdocs builds site/<project>/index.html and the deploy gate stays
-            # green. Never overwrites an existing (hand-written or auto) landing.
-            landing_created = documents_mod.ensure_project_landing(root, project)
-            if migrated_from is not None:
-                # The migrated document keeps its Recent bullet; only its link moves.
-                documents_mod.replace_recent_link(root, migrated_from, rel)
-            recent_updated = documents_mod.update_recent_index(
-                root,
-                date=date,
-                title=body.title,
-                rel_path=rel,
-                project=project,
-            )
-        else:
-            landing_created = False
-            recent_updated = False
+        # No landing page and no docs/index.md Recent bullet: those were the git
+        # publish's mkdocs concerns, and docs/index.md is a tracked file the box must
+        # never dirty (Production Deploy refuses a dirty tracked tree).
+        landing_created = False
+        recent_updated = False
         doc_id = db.upsert_document(
             conn,
             project=project,
@@ -1665,80 +1895,23 @@ def create_document(
                 | reader_state.book_rel_paths(conn, tid, manifest_project, new_manifest["slug"]),
             )
 
-        # 4. Git only when requested AND enabled. A failed commit is NOT rolled
-        #    back — the file/DB stay written; report committed:false + commit_error.
-        committed = False
-        commit_sha = None
-        commit_error = None
-        # Git publish is a public-root concern only: non-#1 tenants' content lives
-        # under the gitignored tenants/ tree and is never committed/pushed. Since
-        # P34-n0.S1 it is also a public-PROJECT concern: a private tenant #1 project
-        # never commits (committed:false, no error — like commit:false), and a write
-        # whose visibility could not be read reports why in commit_error.
-        if (
-            body.commit
-            and config.git_commit_enabled()
-            and ctx.is_public
-            and not publish_decision.publishes
-        ):
-            commit_error = publish_decision.error
-        elif body.commit and config.git_commit_enabled() and ctx.is_public:
-            try:
-                staged = [f"docs/{rel}", "docs/index.md"]
-                if landing_created:
-                    # Only staged when this write created it — keeps the scoped
-                    # commit to exactly the paths this write touched.
-                    staged.append(f"docs/{project}/index.md")
-                if archive_path is not None:
-                    # The superseded body travels with the repo (public root only),
-                    # so tenant #1's version history is in git too.
-                    staged.append(f"docs/{archive_path}")
-                if manifest_rel is not None:
-                    # The book manifest rides in the chapter's own scoped commit.
-                    staged.append(f"docs/{manifest_rel}")
-                gitops.add(staged, root=config.kb_root())
-                if migrated_from is not None:
-                    # The old .html file is gone from the work tree (P30.S5).
-                    gitops.remove([f"docs/{migrated_from}"], root=config.kb_root())
-                message = (
-                    f"docs({project}): add {slug}"
-                    if doc_version == 1
-                    else f"docs({project}): update {slug} to v{doc_version}"
-                )
-                commit_sha = gitops.commit(
-                    message,
-                    root=config.kb_root(),
-                    co_authored_by=body.co_authored_by,
-                )
-                committed = True
-            except gitops.GitError as exc:
-                commit_error = exc.stderr or str(exc)
-
     # 4a. P30.S8: a binding this write made (placement, or the html -> native
     #     re-point) re-writes the readers' `unit` on the documents it touched —
     #     best-effort, outside WRITE_LOCK; reads derive the unit afresh anyway.
     if reader_rebound is not None:
         reader_state.sync_units_after_manifest(conn, tid, *reader_rebound)
 
-    # 4b. AFTER-RESPONSE publish work (P24.S1). Everything above is durable: the
-    #     file is on disk, the DB transaction is committed, the local commit is
-    #     made. What remains — the push to origin/main (fetch + rebase + push:
-    #     two SSH round-trips) and the Gemini embed — is publish/side-effect work
-    #     whose result never appears in the response, so it must not spend the
-    #     caller's timeout budget. Both are queued on the single publish worker
-    #     (FIFO, serialized) and run after this handler returns; submitting is a
-    #     queue append, and it happens OUTSIDE WRITE_LOCK because the push task
-    #     re-takes that lock (it is not reentrant).
-    #     `pushed` therefore stays false on every path now — it keeps its
-    #     documented "saved, publishes on the next successful push" meaning, and
-    #     `push_pending` says whether that push is already on its way. A failed
-    #     background push is logged (container log), not reported here: the
-    #     response is long gone by then, so `push_error` no longer appears.
-    pushed = False
-    push_pending = False
-    if committed and config.git_push_enabled():
-        push_pending = True
-        publish.submit(f"push {rel}", _push_task(config.kb_root()))
+    # 4b. The item's sharing (Postgres, outside WRITE_LOCK): a new item starts at its
+    #     project's default, a write that names `share` sets it. A chapter's item is
+    #     its book. A failure is logged and the item reads as Members (fail closed).
+    share_state = _record_share(
+        ctx, registry, conn, tid=tid, project=project, rel=rel, placement=placement,
+        requested=body.share,
+    )
+
+    # 4c. AFTER-RESPONSE work (P24.S1): the Gemini embed is a network round-trip
+    #     whose result never appears in the response, so it is queued on the single
+    #     after-response worker and runs after this handler returns.
     if config.embeddings_enabled():
         publish.submit(
             f"embed {rel}",
@@ -1803,20 +1976,16 @@ def create_document(
         "archived_path": archive_path,
         "recent_updated": recent_updated,
         "landing_created": landing_created,
-        "committed": committed,
-        # The LOCAL commit this request made. Since P24 the rebase happens after
-        # the response, so this is no longer necessarily the published (post-
-        # rebase) head — see `push_pending`.
-        "commit_sha": commit_sha,
-        # Unchanged meaning ("saved; publishes on the next successful push"), and
-        # now always false when a push was deferred rather than skipped.
-        "pushed": pushed,
-        # Additive (P24): a push to origin/main was QUEUED and runs right after
-        # this response. The document is already durably saved either way.
-        "push_pending": push_pending,
+        # The git publish is gone: these four keep their shape for older clients and
+        # are always false/null.
+        "committed": False,
+        "commit_sha": None,
+        "pushed": False,
+        "push_pending": False,
+        # The item's sharing after this write (`members|link|public`), or null in
+        # legacy mode / when it could not be recorded (then it reads as Members).
+        "share": share_state,
     }
-    if commit_error is not None:
-        resp["commit_error"] = commit_error
     # P30.S5, additive: only a native publish gets these keys. `assigned_ids` lists the
     # ids the server wrote into the stored file and `warnings` the non-fatal findings
     # (an unresolved chapter:/doc: link, a translation's id drift), both with lines
@@ -1917,25 +2086,17 @@ def _delete_document(
     doc: dict,
     ctx: ApiAuthContext,
     *,
-    commit: bool,
-    co_authored_by: Optional[str],
-    publish_decision: publish_gate.PublishDecision,
+    commit: bool = False,
+    co_authored_by: Optional[str] = None,
 ) -> dict:
-    """Own the whole delete path: the POST write path in reverse (file -> Recent
-    bullet -> DB -> scoped git commit), all under WRITE_LOCK. Routes by tenant like
-    the write path: public callers touch docs/ + Recent + git; non-#1 tenants touch
-    only their namespaced tenants/<uuid>/ file + DB row. docs/ row deletion is
-    missing_ok — a DB row without a file is drift, still cleaned up. A failed
-    commit never rolls back the removal (responds with committed:false). Like the
-    write path, the push runs after the response (P24.S1).
+    """Own the whole delete path: the POST write path in reverse (file -> DB), under
+    WRITE_LOCK. Routes by tenant like the write path. Row deletion is missing_ok — a
+    DB row without a file is drift, still cleaned up. No git commit is made
+    (``committed`` is always false; ``commit``/``co_authored_by`` are ignored).
 
-    P34-n0.S1: every caller passes ``publish_decision``, the project-visibility
-    rule's answer for ``doc["project"]`` (``server/publish_gate.py``). The commit runs
-    only when it publishes; a private tenant #1 project's delete reports
-    ``committed: false`` with no error, an unreadable visibility with
-    ``commit_error``. The Recent bullet is still removed for every public-root
-    caller whatever the visibility: removing a bullet never leaks, and a private
-    bullet already in the index should go."""
+    Before anything is removed, every reader's state and the document's own sharing
+    row go, failing closed (503, nothing deleted): a later document under the same
+    stem must start at its project's default, never inherit a live link."""
     rel = doc["rel_path"]
     root = _tenant_root(ctx)
     # P30.S8: purge every reader's state for this document FIRST, and fail closed —
@@ -1958,6 +2119,17 @@ def _delete_document(
                 status_code=503,
                 detail="could not remove readers' state for this document; nothing was deleted",
             )
+        try:
+            reader_state.run_from_worker(
+                sharing.forget_doc, ctx.tenant_id, doc["project"],
+                reader_state.doc_of(doc["project"], rel),
+            )
+        except Exception:
+            logger.error("sharing purge failed; delete of %s aborted", rel, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="could not remove this document's sharing; nothing was deleted",
+            )
     with WRITE_LOCK:
         (root / rel).unlink(missing_ok=True)
         # Deleting a document deletes its history with it (P23): the whole
@@ -1970,54 +2142,13 @@ def _delete_document(
         # dir, which only this document's versions (all deleted above) reference.
         # Never in git, so nothing to stage.
         assets_removed = assets_mod.remove_asset_dir(root, rel)
-        # Recent index is a public-root concern; non-#1 tenants have none to update.
-        if ctx.is_public:
-            recent_removed = documents_mod.remove_from_recent_index(root, rel)
-        else:
-            recent_removed = False
+        # No docs/index.md Recent bullet is touched: it is a tracked file.
+        recent_removed = False
         # FTS row cleaned by the AFTER DELETE trigger; any embedding cascades
         # via ON DELETE CASCADE (document_embeddings.doc_id -> documents.id). Scoped
         # to this tenant so a delete can never cross tenants.
         db.delete_document_by_path(conn, rel, tenant_id=_tenant_filter(ctx))
 
-        committed = False
-        commit_sha = None
-        commit_error = None
-        # Git publish is a public-root concern only (see create_document), and since
-        # P34-n0.S1 a public-project one: a private project's delete never commits.
-        if (
-            commit
-            and config.git_commit_enabled()
-            and ctx.is_public
-            and not publish_decision.publishes
-        ):
-            commit_error = publish_decision.error
-        elif commit and config.git_commit_enabled() and ctx.is_public:
-            try:
-                staged = [f"docs/{rel}", "docs/index.md"]
-                if versions_removed:
-                    # Stage the removed archive dir so the deletion of the history
-                    # lands in the same scoped commit as the document's.
-                    staged.append(f"docs/{documents_mod.archive_dir_rel_path(rel)}")
-                gitops.add(staged, root=config.kb_root())
-                commit_sha = gitops.commit(
-                    f"docs({doc['project']}): remove {doc['slug']}",
-                    root=config.kb_root(),
-                    co_authored_by=co_authored_by,
-                )
-                committed = True
-            except gitops.GitError as exc:
-                commit_error = exc.stderr or str(exc)
-
-    # After-response publish of the delete commit — same mechanism and semantics
-    # as the POST path (see create_document 4b): KB_GIT_PUSH-gated, off by
-    # default, queued on the publish worker outside WRITE_LOCK (the task retakes
-    # it), never spends the caller's timeout budget.
-    pushed = False
-    push_pending = False
-    if committed and config.git_push_enabled():
-        push_pending = True
-        publish.submit(f"push delete {rel}", _push_task(config.kb_root()))
 
     resp = {
         "deleted": True,
@@ -2033,15 +2164,12 @@ def _delete_document(
         "assets_removed": assets_removed,
         # P30.S8: readers' state rows purged per table (null in legacy mode).
         "reader_state_purged": reader_purged,
-        "committed": committed,
-        # The local delete commit; not necessarily the published head (P24).
-        "commit_sha": commit_sha,
-        "pushed": pushed,
-        # Additive (P24): the push of this delete commit was queued.
-        "push_pending": push_pending,
+        # No git publish: kept false/null for older clients.
+        "committed": False,
+        "commit_sha": None,
+        "pushed": False,
+        "push_pending": False,
     }
-    if commit_error is not None:
-        resp["commit_error"] = commit_error
     return resp
 
 
@@ -2058,12 +2186,7 @@ def delete_document_by_path(
     doc = db.get_document_by_path(conn, rel_path, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document at rel_path {rel_path!r}")
-    # P34-n0.S1: the visibility rule, bridged from this sync handler's worker thread.
-    decision = publish_gate.publish_decision_from_worker(ctx, doc["project"])
-    resp = _delete_document(
-        conn, doc, ctx, commit=commit, co_authored_by=co_authored_by,
-        publish_decision=decision,
-    )
+    resp = _delete_document(conn, doc, ctx, commit=commit, co_authored_by=co_authored_by)
     # Meter the deletion (best-effort, via the middleware) — only reached when the
     # doc was found. Attributed to the deleted doc's project. Inert in legacy mode.
     request.state.usage = UsageHint(
@@ -2088,12 +2211,7 @@ def delete_document(
     doc = db.get_document(conn, doc_id, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
-    # P34-n0.S1: the visibility rule, bridged from this sync handler's worker thread.
-    decision = publish_gate.publish_decision_from_worker(ctx, doc["project"])
-    resp = _delete_document(
-        conn, doc, ctx, commit=commit, co_authored_by=co_authored_by,
-        publish_decision=decision,
-    )
+    resp = _delete_document(conn, doc, ctx, commit=commit, co_authored_by=co_authored_by)
     # Meter the deletion (best-effort, via the middleware) — only reached when the
     # doc was found. Attributed to the deleted doc's project. Inert in legacy mode.
     request.state.usage = UsageHint(
@@ -2165,8 +2283,74 @@ class BookPutIn(BaseModel):
     subject: Optional[str] = None
     description: Optional[str] = None
     chapters: list[dict] = []
+    # Accepted and ignored (no git publish); kept so older bodies still validate.
     commit: bool = True
     co_authored_by: Optional[str] = None
+    # Item sharing: the state this write sets on the book (it covers its chapters).
+    # Absent: a new book starts at its project's default, an existing one keeps its own.
+    share: Optional[Literal["members", "link", "public"]] = None
+
+
+class ShareApiIn(BaseModel):
+    """``POST /api/share``: one document (by ``rel_path``) or one book (by slug)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["members", "link", "public"]
+    document: Optional[str] = None
+    book: Optional[str] = None
+    project: Optional[str] = None
+
+
+@app.post("/api/share")
+async def set_share_by_key(
+    body: ShareApiIn,
+    ctx: ApiAuthContext = Depends(resolve_api_write),
+    conn=Depends(documents_api.get_conn),
+):
+    """Set one item's sharing with a full key (``knowledge share``) -> ``{share, ...}``.
+
+    ``public`` is the owner's act: an org-level key, the master bearer or an owner's
+    session; a project key (any member mints one) or a member's session is a **403**
+    (``sharing.api_may_publish``). ``link`` and ``members`` take any full key.
+    ``document`` is a rel_path (a chapter's sharing is its book's); ``book`` is a slug
+    in ``project`` (else the key's own project). Tenant-scoped: another org's item, or
+    none, is a 404. Legacy mode has no sharing (404). Unmetered.
+    """
+
+    if ctx.tenant_id is None:
+        raise HTTPException(status_code=404, detail="sharing needs the accounts plane")
+    if (body.document is None) == (body.book is None):
+        raise HTTPException(status_code=422, detail="name one document (rel_path) or one book")
+    can = await sharing.api_may_publish(ctx)
+    if body.state == sharing.PUBLIC and not can:
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+    tid = str(ctx.tenant_id)
+    if body.document is not None:
+        doc = db.get_document_by_path_or_alias(conn, body.document, tenant_id=tid)
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"no document at rel_path {body.document!r}")
+        project = doc["project"]
+        kind, key = sharing.item_of_doc(conn, doc)
+    else:
+        project = body.project
+        if project is None and ctx.project_id is not None:
+            bound = await get_accounts_service().get_project(ctx.project_id)
+            project = bound.name if bound is not None else None
+        if not project:
+            raise HTTPException(status_code=422, detail="a book needs its project (--project)")
+        if db.get_book(conn, project=project, slug=body.book, tenant_id=tid) is None:
+            raise HTTPException(status_code=404, detail=f"no book {body.book!r} in {project!r}")
+        kind, key = sharing.KIND_BOOK, body.book
+    record = await get_accounts_service().get_or_create_project(ctx.tenant_id, project)
+    try:
+        share = await sharing.set_share(record.id, kind, key, body.state)
+    except sharing.SharingError:
+        raise HTTPException(status_code=503, detail="could not change the sharing; try again")
+    return {
+        "project": project, "key": key,
+        "share": sharing.share_json(share, kind, can_publish=can),
+    }
 
 
 @app.put("/api/books/{project}/{book}")
@@ -2175,6 +2359,7 @@ def put_book(
     book: str,
     body: BookPutIn,
     ctx: ApiAuthContext = Depends(resolve_api_write),
+    _publish: None = Depends(require_publish_right_book),
     conn=Depends(get_conn),
 ):
     """Replace (or create) a book's manifest: its title, order and bindings.
@@ -2190,10 +2375,9 @@ def put_book(
     * a document another book already binds -> 409 (P29: at most one chapter).
 
     Then, under ``WRITE_LOCK``: the manifest is written atomically, the derived rows
-    rebuilt, and — for the public root, and since P34-n0.S1 only for a project the
-    visibility rule publishes — the manifest committed alone
-    (``docs(<project>): update book <slug>``), pushed after the response like a
-    document write. Bound documents are never rewritten. Unmetered.
+    rebuilt, and the book's sharing recorded (``share``, else a new book starts at its
+    project's default). No git commit is made. Bound documents are never rewritten.
+    Unmetered.
     """
     try:
         documents_mod.validate_project(project)
@@ -2236,9 +2420,6 @@ def put_book(
 
     root = _tenant_root(ctx)
     tid = _tenant_db_id(ctx)
-    # P34-n0.S1: the project-visibility rule, bridged from this sync handler's worker
-    # thread: only a public project's manifest is committed.
-    publish_decision = publish_gate.publish_decision_from_worker(ctx, project)
     with WRITE_LOCK:
         for ch in manifest["chapters"]:
             for lang, rel in ch["variants"].items():
@@ -2256,67 +2437,33 @@ def put_book(
                             "chapter_key": other["chapter_key"],
                         },
                     )
-        # A private tenant #1 project's manifest is hidden in info/exclude before it
-        # is written (logged, never fatal), exactly like a document write's files.
-        publish_gate.hide_private_project(ctx, publish_decision, project)
         manifest_file = root / books_mod.manifest_rel_path(project, book)
         created = not manifest_file.is_file()
-        before = None if created else manifest_file.read_bytes()
         bound_before = reader_state.book_rel_paths(conn, tid, project, book)
         manifest_rel = books_mod.write_manifest(root, project, manifest)
-        changed = before != manifest_file.read_bytes()
         db.replace_book(
             conn, tenant_id=tid, project=project, manifest=manifest, manifest_path=manifest_rel
         )
         rebound = bound_before | reader_state.book_rel_paths(conn, tid, project, book)
 
-        committed = False
-        commit_sha = None
-        commit_error = None
-        # An unchanged manifest has nothing to commit (git would refuse the empty
-        # commit), so a no-op PUT reports committed:false with no error. A private
-        # project's manifest is never committed (P34-n0.S1; no error, like
-        # commit:false), and an unreadable visibility reports why.
-        if (
-            changed
-            and body.commit
-            and config.git_commit_enabled()
-            and ctx.is_public
-            and not publish_decision.publishes
-        ):
-            commit_error = publish_decision.error
-        elif changed and body.commit and config.git_commit_enabled() and ctx.is_public:
-            try:
-                gitops.add([f"docs/{manifest_rel}"], root=config.kb_root())
-                commit_sha = gitops.commit(
-                    f"docs({project}): update book {book}",
-                    root=config.kb_root(),
-                    co_authored_by=body.co_authored_by,
-                )
-                committed = True
-            except gitops.GitError as exc:
-                # Reported, never rolled back, like a document write.
-                commit_error = exc.stderr or str(exc)
 
     # P30.S8: binding or unbinding documents re-writes their readers' `unit`
     # (c:<book>/<key> <-> d:<doc>); best-effort, outside WRITE_LOCK.
     reader_state.sync_units_after_manifest(conn, tid, project, rebound)
 
-    push_pending = False
-    if committed and config.git_push_enabled():
-        push_pending = True
-        publish.submit(f"push book {manifest_rel}", _push_task(config.kb_root()))
+    share_state = _record_share_by_name(
+        ctx, project, sharing.KIND_BOOK, book, body.share
+    )
 
     found = db.get_book(conn, project=project, slug=book, tenant_id=tid)
-    resp = {
+    return {
         **_public_book(found or {}),
         "created": created,
         "manifest_path": manifest_rel,
-        "committed": committed,
-        "commit_sha": commit_sha,
+        # No git publish: kept false/null for older clients.
+        "committed": False,
+        "commit_sha": None,
         "pushed": False,
-        "push_pending": push_pending,
+        "push_pending": False,
+        "share": share_state,
     }
-    if commit_error is not None:
-        resp["commit_error"] = commit_error
-    return resp

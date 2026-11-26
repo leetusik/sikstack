@@ -1,3 +1,4 @@
+import type { ItemShare } from "@/lib/sharing/model";
 /**
  * What the book page draws (sikstack Library, job 03 round 02, `## Build` § Page: book, its *Data shapes*):
  * the plain, serialisable view the loader builds from the reads and the components render. Every href is
@@ -122,4 +123,6 @@ export interface BookView {
   /** Where the wordmark goes. */
   homeHref: string;
   signInHref: string;
+  /** The book's sharing for a member (P75; it covers every chapter), null for anyone else. */
+  share: ItemShare | null;
 }

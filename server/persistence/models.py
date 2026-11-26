@@ -1376,3 +1376,29 @@ class TenantOnePinModel(Base):
     )
     tenant_id: Mapped[UUID] = _uuid_fk("tenants.id")
     created_at: Mapped[datetime] = _ts()
+
+
+# One row per shared Library item (``item_shares``, revision ``0019``): a document (by
+# its stem ``<date>-<slug>``, ``server.reader_state.doc_of``) or a book (by its slug)
+# of one project, never the disposable ``documents.id``. ``state`` is ``members``,
+# ``link`` or ``public`` (app-layer check, the repo's convention); ``share_token`` is
+# the link's token while the state is ``link``, else null. No row reads as
+# ``members`` (``server.sharing``). A book's row covers its chapters.
+
+
+class ItemShareModel(Base):
+    """One Library item's sharing: Members, Anyone with the link, or Public."""
+
+    __tablename__ = "item_shares"
+
+    project_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    item_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    share_token: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _ts()

@@ -1,37 +1,22 @@
-"""After-response publish worker (P24.S1): git push + embed off the request path.
+"""After-response worker (P24.S1): the embed off the request path.
 
-Why this exists. ``POST /api/documents`` used to do two *network* stages between
-the durable save (file + DB commit) and the 201 it writes: ``gitops.push``
-(``git fetch`` → ``git rebase`` → ``git push`` — two SSH round-trips to GitHub,
-and until P24 with no subprocess timeout at all) and the Gemini embed. Both are
-publish/side-effect work whose result never appears in the response, yet both
-spent the caller's timeout budget — so a client with a short deadline (``/explain``
-posts with ``curl --max-time 5``) saw a transport failure for a write that had
-already landed. This module moves that work behind the response.
+``POST /api/documents`` queues its Gemini embed here, so the network round-trip never
+spends the caller's timeout budget (``/explain`` posts with a short ``--max-time``).
+(The git push this worker also ran left with the git publish: item sharing gates
+reads now, ``server/sharing.py``.)
 
 Shape: **one process-wide daemon worker thread + a FIFO queue**, started lazily on
-the first submit. Deliberate properties:
+the first submit:
 
-* **The request thread never waits on it.** ``submit`` only appends to a queue;
-  the handler returns its 201 immediately. (Starlette ``BackgroundTasks`` would
-  also run after the handler, but ordering against the ``BaseHTTPMiddleware``
-  metering in the stack is subtle — a queue makes "the response never waits" a
-  property of the code, not of the ASGI stack.)
-* **Pushes stay serialized.** One worker, FIFO — never two concurrent rebases,
-  and one push per write in submit order (coalescing is a possible future
-  optimization, not needed for correctness).
-* **The worker re-takes ``WRITE_LOCK``** (in the task body, in ``server/main.py``)
-  because a rebase mutates the work tree and must not race a write's file write.
-  ``WRITE_LOCK`` is NOT reentrant, so tasks are always submitted *outside* it.
-  Every git subprocess is bounded by ``KB_GIT_TIMEOUT_S`` (``server/gitops.py``),
-  so a wedged network can never hold that lock forever.
-* **Failures never reach the caller** (the response is long gone): a task's
-  exception is logged to stdout — the container log is the operator's surface —
-  and kept in ``last_error()`` for tests. The write itself is already durable;
-  a failed push republishes on the next successful one.
+* **The request thread never waits on it.** ``submit`` only appends to a queue; the
+  handler returns immediately.
+* **Tasks stay serialized**, one worker, FIFO.
+* **Failures never reach the caller** (the response is long gone): a task's exception
+  is logged to stdout and kept in ``last_error()`` for tests. The write itself is
+  already durable; the next reindex catches embeddings up.
 
-``drain()`` blocks until the queue is empty (tests, and the app's shutdown hook).
-It is the only synchronization point; nothing in a request path may call it.
+``drain()`` blocks until the queue is empty (tests, and the app's shutdown hook). It
+is the only synchronization point; nothing in a request path may call it.
 """
 from __future__ import annotations
 
@@ -106,8 +91,7 @@ def drain(timeout: float = 30.0) -> bool:
     """Block until every submitted task has finished. ``False`` on timeout.
 
     For tests (deterministic assertions on the side effect) and the app's
-    shutdown hook. Never call this from a request path, and never while holding
-    ``WRITE_LOCK`` — a queued push takes that lock.
+    shutdown hook. Never call this from a request path.
     """
     with _COND:
         return _COND.wait_for(lambda: _PENDING == 0, timeout=timeout)

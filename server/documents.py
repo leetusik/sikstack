@@ -982,8 +982,8 @@ def remove_archive_dir(docs_root: Union[str, Path], rel_path: str) -> bool:
 #   published: "2026-11-17T09:30:12Z"                          the server's own stamp
 #   published: {"at": "2026-11-10T08:01:02Z", "best_effort": true}   a one-time fill
 #
-# A real stamp is UTC to the second. A fill (``server/published_fill.py``) is derived
-# from the times the store held before stamps existed and says so; a first version's
+# A real stamp is UTC to the second. A fill (a one-time backfill, since retired) is
+# derived from the times the store held before stamps existed and says so; a first version's
 # fill is the document's ``date`` (a day, ``YYYY-MM-DD``), the only time it ever had.
 # A header without the line reads exactly as before (no publish time known); a
 # server that predates P63 ignores the line (every reader of the header picks the

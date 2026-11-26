@@ -11,7 +11,8 @@ calls:
 * **The gate** (:class:`Gate`). Every read and write re-checks that the caller may
   read ``(tenant, project, doc)`` exactly as ``_resolve_readable_doc`` does: the
   document must exist in the content index, and the caller must be a member of the
-  owner tenant or the project must be public (``_is_publicly_readable``). A miss is
+  owner tenant or the item must be Public (``server.sharing``: the document's own
+  state, or its book's for a chapter; a Link item has no reader state). A miss is
   ``None`` and the route answers the one constant 404. The gate also derives what
   P29 says the server derives on every write — ``unit`` (from the book index),
   ``lang`` and the current ``version`` — so a stored ``unit`` is never trusted for
@@ -183,14 +184,14 @@ class Gate:
     """The per-request readability re-check, with its lookups cached.
 
     ``ctx_tenant_id`` is the caller's tenant (``AuthContext.tenant.id``): a member
-    reads every project of it; anyone else reads a project only when it is public.
+    reads every item of it; anyone else reads an item only when it is Public.
     The rule is ``_resolve_readable_doc``'s, applied to a stem instead of a row id.
     """
 
     conn: sqlite3.Connection
     ctx_tenant_id: UUID
     _tenants: dict[UUID, TenantRecord | None] = field(default_factory=dict)
-    _public: dict[tuple[UUID, str], bool] = field(default_factory=dict)
+    _public: dict[tuple[UUID, str, str, str], bool] = field(default_factory=dict)
     _docs: dict[tuple[UUID, str, str], DocRef | None] = field(default_factory=dict)
 
     async def tenant(self, tenant_id: UUID) -> TenantRecord | None:
@@ -212,14 +213,21 @@ class Gate:
             return tenant
         return await self.tenant(tenant_id)
 
-    async def project_readable(self, tenant_id: UUID, project: str) -> bool:
+    async def item_readable(self, tenant_id: UUID, project: str, kind: str, key: str) -> bool:
+        """A member reads every item; anyone else only a Public one (``server.sharing``).
+
+        A Link item is not readable here: reader state is a signed-in reader's own, and
+        a link reader gets the content with no state (the routes stay ``require_user``).
+        """
+
         if tenant_id == self.ctx_tenant_id:
             return True
-        key = (tenant_id, project)
-        if key not in self._public:
-            registry = await get_accounts_service().get_project_by_name(tenant_id, project)
-            self._public[key] = registry is not None and registry.visibility == "public"
-        return self._public[key]
+        from server import sharing  # deferred: server.sharing imports this module
+
+        cache_key = (tenant_id, project, kind, key)
+        if cache_key not in self._public:
+            self._public[cache_key] = await sharing.readable(tenant_id, project, kind, key)
+        return self._public[cache_key]
 
     async def doc(self, tenant_id: UUID, project: str, doc: str) -> DocRef | None:
         """The readable document ``(tenant, project, doc)``, or ``None`` (⇒ 404 / omitted)."""
@@ -238,13 +246,14 @@ class Gate:
         matches = db.find_documents_by_stem(self.conn, f"{project}/{doc}", tenant_id=tid)
         if len(matches) != 1 or matches[0]["project"] != project:
             return None  # none, or an ambiguous two (S5 forbids it): a miss either way
-        if not await self.project_readable(tenant_id, project):
+        row = matches[0]
+        binding = db.find_chapter_binding(self.conn, row["rel_path"], tid)
+        kind, key = ("book", binding["book"]) if binding is not None else ("doc", doc)
+        if not await self.item_readable(tenant_id, project, kind, key):
             return None
         tenant = await self.tenant(tenant_id)
         if tenant is None:
             return None
-        row = matches[0]
-        binding = db.find_chapter_binding(self.conn, row["rel_path"], tid)
         if binding is not None:
             unit = chapter_unit(binding["book"], binding["chapter_key"])
         else:
@@ -270,7 +279,7 @@ class Gate:
         """A readable book (``db.get_book``'s shape), or ``None``."""
 
         found = db.get_book(self.conn, project=project, slug=book, tenant_id=str(tenant_id))
-        if found is None or not await self.project_readable(tenant_id, project):
+        if found is None or not await self.item_readable(tenant_id, project, "book", book):
             return None
         return found
 

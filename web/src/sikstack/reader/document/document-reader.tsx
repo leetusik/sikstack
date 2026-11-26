@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -32,6 +33,7 @@ import {
 import { UiRoot } from "@/sikstack/ui";
 import { date } from "@/lib/format";
 import { withFrom } from "@/lib/library/from";
+import { readerHomeHref } from "@/lib/library/way-out";
 import { unitOfKey } from "@/lib/listen/book";
 import { useListen } from "@/lib/listen/store";
 import type { ListenSeed } from "@/lib/listen/types";
@@ -41,12 +43,7 @@ import {
   type TextSize,
   type ThemeChoice,
 } from "@/lib/reader-cookie";
-import {
-  LIBRARY_HREF,
-  publicLibraryHref,
-  readerHref,
-  signInToSaveHref,
-} from "@/lib/reader-href";
+import { readerHref, signInToSaveHref } from "@/lib/reader-href";
 import { QUIET_MS, TAP_IGNORE } from "@/lib/reader/chrome";
 import type { ReaderView } from "@/lib/reader/types";
 
@@ -66,8 +63,12 @@ import { OldBodyContext, type OldBodyValue } from "../old-root";
 import { ReaderEnd } from "../reader-end";
 import { ReaderFoot } from "../reader-foot";
 import { ReaderHead } from "../reader-head";
+import { ReaderSegmentContext } from "../reader-states";
 import { slotOf, slotWants } from "../slot";
 import { DocumentBookmarks } from "./document-notes";
+import type { ItemShare, ShareTarget } from "@/lib/sharing/model";
+import { ShareControl } from "@/sikstack/reader/share-control";
+
 import { DocumentPhases } from "./document-phases";
 import {
   documentBack,
@@ -124,6 +125,8 @@ export interface DocumentReaderProps {
   listen?: ListenSeed | null;
   /** The phases the document was explained from (`phaseRows`, `withDocumentPhases`); none: nothing shows. */
   phases?: readonly DocPhaseRow[];
+  /** A member's sharing switch for this document (P75, `withDocumentShare`); absent: nothing shows. */
+  share?: { target: ShareTarget; share: ItemShare } | null;
   // The text (`ChapterBody`).
   children?: ReactNode;
 }
@@ -139,12 +142,16 @@ export function DocumentReader({
   timeZone,
   listen = null,
   phases = [],
+  share = null,
   children,
 }: DocumentReaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const target = view.target;
   const member = view.member;
+  // P75: whether the org's public library reads for this reader (a link reader in an org with nothing Public:
+  // no), from the route's segment; no: the wordmark and the way back lead to the sikstack home.
+  const { orgLibrary } = useContext(ReaderSegmentContext);
 
   const [settings, setSettings] = useState<ReaderSettings>(view.settings);
   const [sheet, setSheet] = useState<SheetName | null>(null);
@@ -317,6 +324,7 @@ export function DocumentReader({
     member,
     from,
     org,
+    orgLibrary,
     names: { project: view.project, org: orgName },
   });
   const origin = back?.origin ?? null;
@@ -412,7 +420,7 @@ export function DocumentReader({
   const sectionOrder = useMemo(() => sections.map((s) => s.id), [sections]);
   const fmt = { timeZone };
   const where = READER_DOCUMENT.where(view.project);
-  const homeHref = member || !org ? LIBRARY_HREF : publicLibraryHref(org);
+  const homeHref = readerHomeHref({ member, org, orgLibrary });
 
   return (
     <UiRoot nonce={nonce}>
@@ -502,6 +510,12 @@ export function DocumentReader({
                         onDismiss={() => setAsking(false)}
                       />
                       <DocumentPhases rows={phases} />
+                      {share ? (
+                        <ShareControl
+                          target={share.target}
+                          share={share.share}
+                        />
+                      ) : null}
                     </article>
                   </main>
                 </div>
