@@ -42,9 +42,11 @@ import {
  * A build published with a round (`manifest.round`, `design-publish --page`) lists only the round's pages, with
  * their count and one link to every page (`designPagesHref`, `scope="all"`), and the options page's directions only
  * when the round names the options page; a round of the options alone shows them, says so in place of a count and
- * lists no page. The every-page list shows every manifest page,
- * without the options page's directions, and its way back is the round's list. A build without a round lists every
- * page, with no such link. Each page row lists its states, each opening the page in that state.
+ * lists no page. The every-page list shows the whole design: the options page's directions (when the manifest lists
+ * one), framed as on a build without a round, and every manifest page; its way back names the list it returns to,
+ * "This round" for a round's build and "Pages" for a build without one (the every-page route serves any build). A
+ * build without a round lists every page, with no such link. Each page row lists its states, each opening the page
+ * in that state.
  */
 export interface DesignBuildViewProps {
   project: string;
@@ -68,6 +70,12 @@ export interface DesignBuildViewProps {
   origin?: string | null;
   /** What a direction's frame holds; production frames the direction on the build's host. */
   frameOf?: (direction: DesignOptions["directions"][number]) => ReactNode;
+  /**
+   * Where the round's list links to every page (`whole`) and where the every-page list goes back (`back`):
+   * production's routes (`designPagesHref`, `designHref`) unless given. The design folder draws both lists as states
+   * of one page, so it gives that page's states.
+   */
+  links?: { whole?: string; back?: string };
   timeZone?: string;
   now?: number;
 }
@@ -133,13 +141,17 @@ function CopyPageLink({ text, page }: { text: string; page: string }) {
   );
 }
 
-function BackRow({ project, build }: { project: string; build?: string }) {
+/**
+ * The way back: to the Design list, or from the every-page list to the build's own list (`build`), named by that
+ * list's heading (`label`).
+ */
+function BackRow({ project, build }: { project: string; build?: { href: string; label: string } }) {
   return (
     <div className="design-top">
       {build ? (
         // A full page load: the viewer's CSP, which lets it frame the build, is the document's.
-        <a className="back" href={designHref(project, build)}>
-          {DESIGN.whole.back}
+        <a className="back" href={build.href}>
+          {build.label}
         </a>
       ) : (
         <Link className="back" href={designHref(project)}>
@@ -186,6 +198,7 @@ export function DesignBuildView({
   failed = false,
   origin = null,
   frameOf,
+  links,
   timeZone,
   now,
 }: DesignBuildViewProps) {
@@ -194,8 +207,9 @@ export function DesignBuildView({
   const round = roundPages(manifest);
   const whole = scope === "all";
   const pages = whole ? all : (round ?? all);
-  // Under a round, the options show only when the round names them (`roundShowsOptions`); without one, as before.
-  const options = whole || (round && !roundShowsOptions(manifest)) ? undefined : manifest.options;
+  // Under a round, the options show only when the round names them (`roundShowsOptions`); on the every-page list and
+  // without a round, always (the whole design holds them).
+  const options = !whole && round && !roundShowsOptions(manifest) ? undefined : manifest.options;
   const optionsOnly = !whole && round !== null && round.length === 0;
   const open = (path: string) => designOpenHref(project, build.id, path);
   const frame =
@@ -210,7 +224,17 @@ export function DesignBuildView({
   return (
     <div className="column">
       <header className="page-top">
-        <BackRow project={project} build={whole ? build.id : undefined} />
+        <BackRow
+          project={project}
+          build={
+            whole
+              ? {
+                  href: links?.back ?? designHref(project, build.id),
+                  label: round ? DESIGN.pages.round : DESIGN.pages.title,
+                }
+              : undefined
+          }
+        />
         <div className="page-head">
           <h1>{buildTitle(build)}</h1>
         </div>
@@ -341,7 +365,7 @@ export function DesignBuildView({
         )}
         {round && !whole ? (
           <p className="design-whole">
-            <a className="link-strong" href={designPagesHref(project, build.id)}>
+            <a className="link-strong" href={links?.whole ?? designPagesHref(project, build.id)}>
               {DESIGN.whole.link(all.length)}
             </a>
           </p>

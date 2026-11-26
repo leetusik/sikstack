@@ -70,7 +70,11 @@ describe("a build's round", () => {
   });
 });
 
-const render = (manifest: DesignManifest, scope?: "round" | "all") =>
+const render = (
+  manifest: DesignManifest,
+  scope?: "round" | "all",
+  more: Partial<Parameters<typeof DesignBuildView>[0]> = {},
+) =>
   renderToStaticMarkup(
     createElement(DesignBuildView, {
       project: "p",
@@ -80,6 +84,7 @@ const render = (manifest: DesignManifest, scope?: "round" | "all") =>
       share: { on: false, url: null },
       timeZone: "UTC",
       now: Date.parse("2026-11-26T01:00:00Z"),
+      ...more,
     }),
   );
 const rows = (html: string) => [...html.matchAll(/<li class="row design-page[^"]*"><a[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
@@ -159,11 +164,24 @@ describe("the viewer with a round, in a build with an options page", () => {
     expect(roundShowsOptions({ pages: PAGES, round: { pages: ["/options/"] } })).toBe(false);
   });
 
-  it("leaves the every-page list as it was: every page, without the options page's directions", () => {
-    for (const pages of [two, [...two, "/options/"], ["/options/"]]) {
-      const html = render({ pages: PAGES, options: OPTIONS, round: { pages } }, "all");
+  it("shows the options on the every-page list, framed as on a no-round build, whatever the round names", () => {
+    const frameOf = (d: { key: string }) => createElement("i", { className: `frame-${d.key}` });
+    const section = (h: string) =>
+      h.slice(h.indexOf('<section aria-labelledby="design-options"'), h.indexOf('<section aria-labelledby="design-pages"'));
+    const plain = render({ pages: PAGES, options: OPTIONS }, undefined, { frameOf });
+    for (const pages of [two, [...two, "/options/"], ["/options/"], undefined]) {
+      const m = { pages: PAGES, options: OPTIONS, ...(pages ? { round: { pages } } : {}) };
+      const html = render(m, "all", { frameOf });
       expect(rows(html)).toEqual(PAGES.map((p) => p.name));
-      expect(html).not.toContain('id="design-options"');
+      expect(html).toContain('id="design-options"');
+      expect(html).toContain("2 directions");
+      expect(html).toContain('class="frame-a"');
+      expect(html).toContain('class="frame-b"');
+      expect(html).toContain("Every page");
+      expect(html).toContain(">5 pages<");
+      expect(html.indexOf('id="design-options"')).toBeLessThan(html.indexOf('id="design-pages"'));
+      // The same section as the build's own viewer without a round.
+      expect(section(html)).toBe(section(plain));
     }
   });
 
@@ -182,5 +200,31 @@ describe("the viewer without a round", () => {
     expect(html).not.toContain("This round");
     expect(html).not.toContain("The whole design");
     expect(html).not.toContain("/pages\"");
+  });
+
+  it("names the build's list, not a round, on the every-page list's way back", () => {
+    for (const round of [undefined, { pages: [] }, { pages: ["/gone/"] }]) {
+      const html = render({ pages: PAGES, ...(round ? { round } : {}) } as DesignManifest, "all");
+      expect(html).toContain('<a class="back" href="/projects/p/design/bxuwwi26kyuptsszqcenbfrwto">Pages</a>');
+      expect(html).not.toContain("This round");
+      expect(rows(html)).toEqual(PAGES.map((p) => p.name));
+    }
+  });
+});
+
+describe("the viewer's links between the round's list and every page", () => {
+  const m: DesignManifest = { pages: PAGES, round: { pages: ["/system/"] } };
+
+  it("are production's routes by default", () => {
+    expect(render(m)).toContain(`<a class="link-strong" href="${whole}">`);
+    expect(render(m, "all")).toContain('<a class="back" href="/projects/p/design/bxuwwi26kyuptsszqcenbfrwto">This round</a>');
+  });
+
+  it("take the addresses a host gives them (the design folder draws both lists as states of one page)", () => {
+    const links = { whole: "/b/?state=every-page", back: "/b/?state=round" };
+    const round = render(m, "round", { links });
+    expect(round).toContain('<a class="link-strong" href="/b/?state=every-page">');
+    expect(round).not.toContain(`href="${whole}"`);
+    expect(render(m, "all", { links })).toContain('<a class="back" href="/b/?state=round">This round</a>');
   });
 });

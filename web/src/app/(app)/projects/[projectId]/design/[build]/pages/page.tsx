@@ -8,6 +8,7 @@ import { buildTitle } from "@/sikstack/design/model";
 import { DesignBuildGone } from "@/sikstack/design/viewer";
 import { DesignViewer } from "@/sikstack/design/viewer-island";
 import { requireIdentity } from "@/lib/auth-guards";
+import { designBuildOrigin } from "@/lib/csp";
 import { getDesignBuild } from "@/lib/design/app";
 import { getProject } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
@@ -17,8 +18,9 @@ import { viewerTimeZone } from "@/lib/time-zone";
  * A design build's every-page list (P84), `/projects/<id>/design/<build>/pages`: every page of the build's
  * manifest, whatever its round, one link from the round's list (the build's viewer, `../page.tsx`) and back. The
  * same reads as the viewer (the project, then the build with its manifest; its 404 is the build gone) and the
- * same component (`scope="all"`). It frames nothing (no options page here), so it needs no build origin and is
- * served under the app's own CSP.
+ * same component (`scope="all"`). It shows the options page's directions too, framed as on the viewer, so it takes
+ * the build's origin from `KB_DESIGN_ORIGIN` and the proxy gives it the viewer's CSP (`@/lib/csp`); it is entered
+ * by a full page load (both lists link each other so).
  */
 const missing = (error: unknown) => error instanceof ApiError && [400, 404, 422].includes(error.status);
 
@@ -73,7 +75,7 @@ export default async function DesignBuildPagesPage({
       scope="all"
       build={read.build}
       manifest={read.manifest}
-      origin={null}
+      origin={designBuildOrigin(process.env.KB_DESIGN_ORIGIN, read.build.id)}
       timeZone={timeZone}
     />
   );

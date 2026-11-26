@@ -239,6 +239,10 @@
               "label": "A round's build"
             },
             {
+              "key": "options-only",
+              "label": "A round of the options"
+            },
+            {
               "key": "every-page",
               "label": "Every page"
             },
@@ -382,6 +386,27 @@
           "entry": "/system/"
         }
       ],
+      "options": {
+        "name": "Options: the product's base look",
+        "entry": "/options/",
+        "directions": [
+          {
+            "key": "a",
+            "entry": "/options/?direction=a",
+            "label": "A · Quiet"
+          },
+          {
+            "key": "b",
+            "entry": "/options/?direction=b",
+            "label": "B · Editorial"
+          },
+          {
+            "key": "c",
+            "entry": "/options/?direction=c",
+            "label": "C · Dense"
+          }
+        ]
+      },
       "round": {
         "pages": [
           "/projects/00000000-0000-4000-8000-000000000001/feedback/00000000-0000-4000-8000-0000000000f3/",
