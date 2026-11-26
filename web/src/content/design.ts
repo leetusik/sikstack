@@ -60,6 +60,8 @@ export const DESIGN = {
     /** A build published with a round (`design-publish --page`): its list holds only the pages the round made. */
     round: "This round",
     count: (n: number) => (n === 1 ? "1 page" : `${n} pages`),
+    /** A round that made only the options page: in place of its count, over no page list. */
+    optionsOnly: "The options above",
     statesLabel: (page: string) => `States of ${page}`,
   },
   /** The whole design: every page of a round's build, one link from the round's list. */

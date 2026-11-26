@@ -54,9 +54,10 @@ apply   a separate slice moves the signed files into production
   2. **Build and serve** with the folder's own commands on a free loopback port, for the layout check only. Run the
      layout check (`reference/folder.md`, *The layout check*), never only the production-exclusion check, and read
      its failures yourself.
-  3. **Publish** to sikstack web: `sikstack design-publish --folder <folder> [--repo <name>] --page <entry or route>`
-     …, one `--page` per page in play in `brief.md` (the brief names each page by its entry or route). It prints
-     `url=`, the build's list page: the round's pages, one link to every page. No link yet, the local fallback and
+  3. **Publish** to sikstack web: `sikstack design-publish --folder <folder> [--repo <name>] --page '<entry or route>'`
+     …, one `--page` per page in play in `brief.md` (the brief names each page by its entry or route), each value
+     quoted (a bracketed route is a shell glob), and the manifest's `options.entry` when the round made the options
+     page. It prints `url=`, the build's list page: the round's pages, one link to every page. No link yet, the local fallback and
      sharing: `reference/publish.md`.
   4. **Stop** `pending --stop-kind wave`. The report leads with `url=`, then the pages and states, the screenshots,
      what the drafter left open.

@@ -20,6 +20,9 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
     design (`…/design/<build>/pages`, every page of the build).
   - A value that names no page is refused before anything is sent. Without `--page` nothing changes: no round, and
     the viewer lists every page.
+  - A round may name the options page by its entry (`options.entry`), recorded last, or name only it; the viewer
+    shows the options only when the round names them. The skills quote each `--page` value, so a bracketed route is
+    no shell glob on zsh.
 - **A stale build is caught at publish.** When the manifest names its source commit and the design folder sits in a
   git repo, a build made from another commit than that repo's `HEAD` is refused: build the folder again after the
   commit. A build made from uncommitted changes still publishes, with one `stale:` line saying so.

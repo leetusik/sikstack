@@ -5952,6 +5952,24 @@ dp_n20=$(dp_n); dp_o20=$(dp "$DPH" design-publish --folder web/design --page /d/
   && printf '%s\n' "$dp_o20" | grep -q "^design-publish: refused -- --page '/nope/' is no page of the build.*(nothing was published)\$" \
   && ok "design-publish --page takes a page's entry or route (a route selects both pages that share it): the packed manifest's round.pages are the matched entries, unique, in the manifest's order, and out/manifest.json is unchanged; a publish with no --page uploads no round; --page /nope/ is refused in one line naming it, before any request" \
   || bad "the round's publish is wrong -- rc=$dp_rc19/$dp_rc20 round=[$dp_r19] plain=[$dp_r2] sent=$dp_n20/$(dp_n) [$dp_o19] [$dp_o20]"
+# (g2) an options round: in a build with an options page, --page <options.entry> is the options page, recorded last
+# in round.pages (after the pages, in the manifest's order); a round may name only the options page; a build with no
+# options page refuses that value, unsent.
+dp_build "$DPW/opts" design/data/sample/recording.json && python3 - "$DPW/opts/out/manifest.json" <<'PY2'
+import json, sys
+m = json.load(open(sys.argv[1]))
+m["options"] = {"name": None, "entry": "/options/", "directions": [{"key": "a", "label": "A", "entry": "/options/?direction=a"}]}
+json.dump(m, open(sys.argv[1], "w"))
+PY2
+dp_o21=$(dp "$DPH" design-publish --folder "$DPW/opts" --page /options/ --page /d/); dp_rc21=$?; dp_r21=$(dp_round -1)
+dp_o22=$(dp "$DPH" design-publish --folder "$DPW/opts" --page /options/); dp_rc22=$?; dp_r22=$(dp_round -1)
+dp_n23=$(dp_n); dp_o23=$(dp "$DPH" design-publish --folder web/design --page /options/); dp_rc23=$?
+[ "$dp_rc21" = 0 ] && printf '%s\n' "$dp_o21" | grep -q '^published=b' && [ "$dp_r21" = '{"pages": ["/d/", "/options/"]}' ] \
+  && [ "$dp_rc22" = 0 ] && printf '%s\n' "$dp_o22" | grep -q '^published=b' && [ "$dp_r22" = '{"pages": ["/options/"]}' ] \
+  && [ "$dp_rc23" = 1 ] && [ "$(dp_n)" = "$dp_n23" ] \
+  && printf '%s\n' "$dp_o23" | grep -q "^design-publish: refused -- --page '/options/' is no page of the build.*(nothing was published)\$" \
+  && ok "design-publish --page takes the options page's entry (manifest options.entry): round.pages records it last, after the pages; a round may name only the options page; a build with no options page refuses it unsent" \
+  || bad "the options round's publish is wrong -- rc=$dp_rc21/$dp_rc22/$dp_rc23 round=[$dp_r21] [$dp_r22] [$dp_o21] [$dp_o22] [$dp_o23]"
 # (h) the stale-commit check, in a repo of its own: a build from another commit than HEAD is refused (both commits
 # named, no request); one from a dirty tree publishes with one stale: line; one with no source is not checked.
 DPR="$DPW/stalerepo"; mkdir -p "$DPR" && git -C "$DPR" init -q && git -C "$DPR" commit -q --allow-empty -m one \

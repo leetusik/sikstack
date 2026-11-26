@@ -287,8 +287,10 @@ for required in (
     "**Show.** Every draft, in this order:", "1. **Commit** the design folder (the draft commit).",
     "The commit comes before the build: `design-publish` refuses a build made from another commit than the repo's HEAD.",
     "2. **Build and serve** with the folder's own commands on a free loopback port, for the layout check only.",
-    "3. **Publish** to sikstack web: `sikstack design-publish --folder <folder> [--repo <name>] --page <entry or route>`",
-    "one `--page` per page in play in `brief.md` (the brief names each page by its entry or route)",
+    "3. **Publish** to sikstack web: `sikstack design-publish --folder <folder> [--repo <name>] --page '<entry or route>'`",
+    "one `--page` per page in play in `brief.md` (the brief names each page by its entry or route), each value quoted (a bracketed route is a shell glob), and the manifest's `options.entry` when the round made the options page.",
+    "[--repo <name>] --page '<entry or route>' …` (each value quoted) uploads",
+    "The options page shows there only when the round names its entry (`options.entry` in `out/manifest.json`); a round that made only the options names only that.",
     "4. **Stop** `pending --stop-kind wave`. The report leads with `url=`",
     "A revise pass follows the same order: a new commit, a new build, a new publish.",
     "Publishing is the default at every stop, for every user; a publish is never a sign-off.",
@@ -336,11 +338,16 @@ for gone in ("Never publish unasked", "Publish only when their words ask to", "p
     assert gone not in design, gone
 _cw = " ".join((root / "skills/do-whole-phase/reference/co-work.md").read_text(encoding="utf-8").split())
 for required in ("commit the design folder (the draft commit), build, serve on loopback, run the layout check, then "
-                 "`sikstack design-publish --folder <design folder> [--repo <name>] --page <entry or route>`",
+                 "`sikstack design-publish --folder <design folder> [--repo <name>] --page '<entry or route>'`",
+                 "each value quoted, and the options page's entry when the round made it",
                  "with `url=` first in your report", "`design-publish` refuses a build made from another commit",
                  "A revise pass adds a commit, a build, a publish and a stop."):
     assert required in _cw, ("co-work.md", required)
 assert "with the URL and the screenshots" not in _cw
+# F1 (0.9.0): an unquoted --page value is a shell glob on zsh for a bracketed route ("no matches found"), so no skill
+# text writes the bare form.
+for _name, _text in (("design-cowork", design), ("co-work.md", _cw)):
+    assert "--page <entry or route>" not in _text, (_name, "unquoted --page")
 _wd = " ".join((root / "scripts/wf_design.py").read_text(encoding="utf-8").split())
 assert "Run at every design stop (design-cowork's Show step); publishing is never a sign-off." in _wd
 assert "Run only when the operator's words ask to publish" not in _wd

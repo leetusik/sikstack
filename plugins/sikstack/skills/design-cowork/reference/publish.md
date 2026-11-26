@@ -1,9 +1,10 @@
 # design-cowork — publishing a build to sikstack web
 
 Every stop publishes (`SKILL.md`, **Show**), for every user. `sikstack design-publish --folder <folder>
-[--repo <name>] --page <entry or route> …` uploads the build to the project's Design service, from the main checkout
+[--repo <name>] --page '<entry or route>' …` (each value quoted) uploads the build to the project's Design service, from the main checkout
 or a worktree; `--folder` needs a built `out/` that this checkout can see. It prints `url=`, the build's list page on
-sikstack: the round's pages, with one link to every page. A build made from another commit than the repo's HEAD is
+sikstack: the round's pages, with one link to every page. The options page shows there only when the round names
+its entry (`options.entry` in `out/manifest.json`); a round that made only the options names only that. A build made from another commit than the repo's HEAD is
 refused: commit, then build again. One made from uncommitted changes publishes with one `stale:` line.
 
 **No link yet.** When `design-publish` refuses naming `design-link`, the first stop offers the connect code:

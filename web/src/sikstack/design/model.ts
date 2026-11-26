@@ -47,8 +47,9 @@ export interface DesignManifest {
   pages?: DesignManifestPage[];
   options?: DesignOptions;
   /**
-   * The pages the round made (`sikstack design-publish --page`): their entries. With one, the build's viewer lists
-   * only those pages and links to every page (`designPagesHref`); a build published without one has none.
+   * The pages the round made (`sikstack design-publish --page`): their entries, and the options page's entry last
+   * when the round made the options. With one, the build's viewer lists only those pages (and the options only when
+   * named) and links to every page (`designPagesHref`); a build published without one has none.
    */
   round?: { pages: string[] };
 }
@@ -64,20 +65,38 @@ export function designPagesHref(project: string, build: string): string {
   return `${designHref(project, build)}/pages`;
 }
 
-/**
- * The round's pages: the manifest pages whose entry its `round` names, in the manifest's order (an entry the
- * manifest lacks is ignored), or null when the build has no round (none, an empty or invalid one, or one naming no
- * page the manifest holds): then the viewer lists every page, as before rounds.
- */
-export function roundPages(manifest: DesignManifest): DesignManifestPage[] | null {
+/** The entries a build's `round` names, or null when it has no valid one (none, not a list, or no string in it). */
+function roundNames(manifest: DesignManifest): Set<string> | null {
   const round = (manifest as { round?: unknown }).round;
   const named =
     round !== null && typeof round === "object" ? (round as { pages?: unknown }).pages : undefined;
   if (!Array.isArray(named)) return null;
   const set = new Set(named.filter((e): e is string => typeof e === "string"));
-  if (set.size === 0) return null;
-  const pages = (manifest.pages ?? []).filter((p) => set.has(p.entry));
-  return pages.length > 0 ? pages : null;
+  return set.size > 0 ? set : null;
+}
+
+/**
+ * Whether the build's round names its options page (`manifest.options.entry`, which `design-publish --page`
+ * records after the pages). Only then does the round's list show the options; a round that does not name them
+ * hides them, and a build with no round shows them, as before rounds.
+ */
+export function roundShowsOptions(manifest: DesignManifest): boolean {
+  const names = roundNames(manifest);
+  const entry = manifest.options?.entry;
+  return names !== null && typeof entry === "string" && names.has(entry);
+}
+
+/**
+ * The round's pages: the manifest pages whose entry its `round` names, in the manifest's order (an entry the
+ * manifest lacks is ignored); an empty list for a round that names only the options page (`roundShowsOptions`).
+ * Null when the build has no round (none, an empty or invalid one, or one naming neither a page the manifest holds
+ * nor its options page): then the viewer lists every page, as before rounds.
+ */
+export function roundPages(manifest: DesignManifest): DesignManifestPage[] | null {
+  const names = roundNames(manifest);
+  if (names === null) return null;
+  const pages = (manifest.pages ?? []).filter((p) => names.has(p.entry));
+  return pages.length > 0 || roundShowsOptions(manifest) ? pages : null;
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   pageShareUrl,
   recordingWord,
   roundPages,
+  roundShowsOptions,
   type DesignBuild,
   type DesignManifest,
   type DesignManifestPage,
@@ -39,7 +40,9 @@ import {
  * says so in one line under the control. No comment, pick, sign-off, edit or delete.
  *
  * A build published with a round (`manifest.round`, `design-publish --page`) lists only the round's pages, with
- * their count and one link to every page (`designPagesHref`, `scope="all"`); that list shows every manifest page,
+ * their count and one link to every page (`designPagesHref`, `scope="all"`), and the options page's directions only
+ * when the round names the options page; a round of the options alone shows them, says so in place of a count and
+ * lists no page. The every-page list shows every manifest page,
  * without the options page's directions, and its way back is the round's list. A build without a round lists every
  * page, with no such link. Each page row lists its states, each opening the page in that state.
  */
@@ -191,7 +194,9 @@ export function DesignBuildView({
   const round = roundPages(manifest);
   const whole = scope === "all";
   const pages = whole ? all : (round ?? all);
-  const options = whole ? undefined : manifest.options;
+  // Under a round, the options show only when the round names them (`roundShowsOptions`); without one, as before.
+  const options = whole || (round && !roundShowsOptions(manifest)) ? undefined : manifest.options;
+  const optionsOnly = !whole && round !== null && round.length === 0;
   const open = (path: string) => designOpenHref(project, build.id, path);
   const frame =
     frameOf ??
@@ -310,8 +315,9 @@ export function DesignBuildView({
           <h2 id="design-pages">
             {whole ? DESIGN.whole.title : round ? DESIGN.pages.round : DESIGN.pages.title}
           </h2>
-          <p className="meta">{DESIGN.pages.count(pages.length)}</p>
+          <p className="meta">{optionsOnly ? DESIGN.pages.optionsOnly : DESIGN.pages.count(pages.length)}</p>
         </SectionHead>
+        {optionsOnly ? null : (
         <Panel>
           <ul className="design-pages">
             {pages.map((p) => (
@@ -332,6 +338,7 @@ export function DesignBuildView({
             ))}
           </ul>
         </Panel>
+        )}
         {round && !whole ? (
           <p className="design-whole">
             <a className="link-strong" href={designPagesHref(project, build.id)}>

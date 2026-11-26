@@ -9,9 +9,10 @@ keeps only what the phase loop adds.
   shares a slice wave.
 - **The stop.** One per draft shown, in this order: commit the design folder (the draft commit), build, serve on
   loopback, run the layout check, then `sikstack design-publish --folder <design folder> [--repo <name>] --page
-  <entry or route>` …, one `--page` per page in the brief; then `sikstack slice status <slice_id> pending
-  --stop-kind wave --on-words "<what their words will do>"`, with `url=` first in your report (the build's list
-  page on sikstack web), then the pages and states and the screenshots. With no design link yet, the first stop
+  '<entry or route>'` …, one `--page` per page in the brief, each value quoted, and the options page's entry when the
+  round made it; then `sikstack slice status <slice_id> pending --stop-kind wave --on-words "<what their words
+  will do>"`, with `url=` first in your report (the build's list page on sikstack web), then the pages and states
+  and the screenshots. With no design link yet, the first stop
   leads with `design-link`'s connect page and code instead (`design-cowork`'s `reference/publish.md`).
 - **The words.** A sign-off: `sikstack design-sign --slice <slice_id> --words "<their literal words>" --folder
   <design folder> [--repo <name>]`, then `slice finish`, commit. Feedback: recorded verbatim in the slice's

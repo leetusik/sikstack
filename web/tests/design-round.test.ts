@@ -6,6 +6,7 @@ import {
   designOpenHref,
   designPagesHref,
   roundPages,
+  roundShowsOptions,
   type DesignBuild,
   type DesignManifest,
 } from "@/sikstack/design/model";
@@ -108,6 +109,68 @@ describe("the viewer with a round", () => {
     expect(html).toContain('<a class="back" href="/projects/p/design/bxuwwi26kyuptsszqcenbfrwto">This round</a>');
     const system = designOpenHref("p", BUILD.id, "/system/").replace(/&/g, "&amp;");
     expect(html).toContain(`href="${system}"`);
+  });
+});
+
+describe("the viewer with a round, in a build with an options page", () => {
+  const OPTIONS = {
+    name: null,
+    entry: "/options/",
+    directions: [
+      { key: "a", label: "Direction A", entry: "/options/?direction=a" },
+      { key: "b", label: "Direction B", entry: "/options/?direction=b" },
+    ],
+  };
+  const two = ["/projects/p/design/", "/projects/p/feedback/f1/"];
+
+  it("hides the options when the round does not name the options page", () => {
+    const html = render({ pages: PAGES, options: OPTIONS, round: { pages: two } });
+    expect(rows(html)).toEqual(["Feedback item", "Design"]);
+    expect(html).not.toContain('id="design-options"');
+    expect(html).not.toContain("Direction A");
+    expect(html).toContain(">2 pages<");
+  });
+
+  it("shows the options when the round names the options page, with the round's pages", () => {
+    const m = { pages: PAGES, options: OPTIONS, round: { pages: [...two, "/options/"] } };
+    expect(roundShowsOptions(m)).toBe(true);
+    const html = render(m);
+    expect(html).toContain('id="design-options"');
+    expect(html).toContain("2 directions");
+    expect(rows(html)).toEqual(["Feedback item", "Design"]);
+    expect(html).toContain(">2 pages<");
+  });
+
+  it("is an options-only round when it names only the options page: the options and the whole-design link", () => {
+    const m = { pages: PAGES, options: OPTIONS, round: { pages: ["/options/"] } };
+    expect(roundPages(m)).toEqual([]);
+    const html = render(m);
+    expect(html).toContain('id="design-options"');
+    expect(html).toContain("Direction B");
+    expect(rows(html)).toEqual([]);
+    expect(html).toContain("This round");
+    expect(html).not.toContain("0 pages");
+    expect(html).toContain(`href="${whole}"`);
+    expect(html).toContain("The whole design · 5 pages");
+  });
+
+  it("names the options entry only when the build has an options page", () => {
+    expect(roundPages({ pages: PAGES, round: { pages: ["/options/"] } })).toBeNull();
+    expect(roundShowsOptions({ pages: PAGES, round: { pages: ["/options/"] } })).toBe(false);
+  });
+
+  it("leaves the every-page list as it was: every page, without the options page's directions", () => {
+    for (const pages of [two, [...two, "/options/"], ["/options/"]]) {
+      const html = render({ pages: PAGES, options: OPTIONS, round: { pages } }, "all");
+      expect(rows(html)).toEqual(PAGES.map((p) => p.name));
+      expect(html).not.toContain('id="design-options"');
+    }
+  });
+
+  it("shows the options with every page when the build has no round", () => {
+    const html = render({ pages: PAGES, options: OPTIONS });
+    expect(rows(html)).toEqual(PAGES.map((p) => p.name));
+    expect(html).toContain('id="design-options"');
   });
 });
 
