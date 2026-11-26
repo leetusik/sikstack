@@ -22,7 +22,9 @@ import wf_cold  # noqa: E402 -- the cache: the eviction keeps an archived phase.
 
 from wf_store import (  # noqa: E402
     _git, _git_available, _git_dir, _meter_ts, _one_line, _one_line_usage_errors, _worktree_entries, AGENDA,
-    AGENDA_ID_RE, all_active_phases, append_event, current_stream, GENERATED_FILES, HOST_ROOT, RETIRED_GENERATED_FILES,
+    AGENDA_ID_RE, all_active_phases, append_event, current_stream, engine_judge_held, engine_refuse_stale,
+    engine_verdict, ENGINE_STAMP_REL, GENERATED_FILES, HOST_ROOT,
+    RETIRED_GENERATED_FILES,
     installed_workspace_version, NESTED, normalize_id_args, now_iso, phase_dirs, phase_in_flight, read_json,
     rebuild_index_and_state, require_slice, ROOT, shown, write_json, write_text,
 )
@@ -1344,7 +1346,12 @@ class CloudSession:
         """Steps 1 to 4: diff, the batches (each under CLOUD_BATCH_MAX as sent), journal `pushing`, P4, the base
         updated per landed batch, the journal cleared. A 409 or a network error keeps the disk as it is.
         Then (`evict`) the cold set is thinned, only once the push landed or there was nothing to push.
-        Returns the number of ops sent."""
+        Returns the number of ops sent. A stale process (an older engine than the stamp, judged after the begin step's
+        pull) sends nothing and thins nothing: the journal its begin step opened is cleared, and a change on disk stays
+        in the base's diff for a current engine's next command."""
+        if engine_verdict()["stale"]:
+            self.clear_journal()
+            return 0
         if self.settle_appends():
             self.save_cache()
         post = cloud_scan(self.cache)
@@ -1559,6 +1566,7 @@ def cloud_fail_open(args: argparse.Namespace, line: str):
     """The hook's way past a cloud stop: the command runs on the disk as it is (its ids read from it), then the
     stop as a note."""
     normalize_id_args(args)
+    engine_verdict()
     wf_cold.LENIENT = True  # an evicted file with no valid cached copy reads as absent: no second wait on the network
     try:
         result = args.func(args)
@@ -1582,6 +1590,7 @@ def cloud_boundary(args: argparse.Namespace, tokens: list, fail_open: bool = Fal
             return cloud_fail_open(args, cloud_stop_line(exc, "begin"))
         raise SystemExit(cloud_stop_line(exc, "begin"))
     try:
+        engine_verdict()  # after the begin step's pull, before the command: the stamp sikstack holds is judged
         normalize_id_args(args)
         result = args.func(args)
     except SystemExit as stop:
@@ -1628,10 +1637,10 @@ CLOUD_KEY_PROMPT = "Paste a workspace key for this project (make one under Keys 
 # phase here, with no worktree streams (and so no reopened pair).
 CLOUD_STREAM_REFUSED = ("worktree start", "worktree add-repo", "worktree gate", "worktree merge-finish",
                         "worktree teardown", "phase reopen")
-# An unused install's truth set: only what a fresh install seeds (the five plain docs; an older install's
-# docs/index.json and v0001 versions). Joining sikstack from one replaces these.
+# An unused install's truth set: only what a fresh install seeds (the five plain docs, the engine stamp; an older
+# install's docs/index.json and v0001 versions). Joining sikstack from one replaces these.
 CLOUD_SEED_RE = re.compile(r"docs/README\.md|docs/current/(?:product|architecture|operations|qa|decisions)\.md|docs/index\.json"
-                           r"|docs/versions/[^/]+/v0001_bootstrap\.md|works/events\.jsonl")
+                           r"|docs/versions/[^/]+/v0001_bootstrap\.md|works/events\.jsonl|works/engine\.json")
 CLOUD_SHOWN_ROWS = 20
 
 
@@ -1721,7 +1730,9 @@ def mark_committed(args: argparse.Namespace) -> None:
 
 
 def cloud_rebuild(rels) -> None:
-    """The generated files after the disk took files from sikstack."""
+    """The generated files after the disk took files from sikstack. The engine stamp's verdict is taken here first,
+    so a stamp the pull just brought is the one judged (an older engine than it rebuilds nothing)."""
+    engine_verdict()
     rebuild_index_and_state()
 
 
@@ -1868,8 +1879,32 @@ def cloud_probe(link: CloudLink, route: str) -> dict:
     raise CloudError(f"{why}: nothing was written")
 
 
+def cloud_probe_file(link: CloudLink, rel: str):
+    """One file's bytes as sikstack holds it, by a P3 fetch before anything is written (None when it holds none); an
+    answer that does not decode or match its sha256 refuses with one line."""
+    import base64
+    try:
+        status, payload = link.call("POST", "fetch", {"paths": [rel]})
+    except CloudUnreachable as exc:
+        raise CloudError(f"sikstack is not reachable at {link.server} ({exc}): nothing was written")
+    if status != 200 or not isinstance(payload, dict):
+        raise CloudError(f"sikstack answered HTTP {status} on fetch: nothing was written")
+    for item in payload.get("files") or []:
+        if isinstance(item, dict) and item.get("path") == rel:
+            try:
+                raw = item.get("content") or ""
+                data = base64.b64decode(raw) if item.get("encoding") == "base64" else str(raw).encode("utf-8")
+            except ValueError:
+                data = None
+            if data is None or _sha(data) != item.get("sha256"):
+                raise CloudError(f"sikstack's {rel} did not decode or match its sha256: nothing was written")
+            return data
+    return None
+
+
 def cloud_link(args: argparse.Namespace) -> int:
     """link <server>/projects/<project-id>: make sikstack the truth for this checkout in one step."""
+    engine_refuse_stale()  # before the key is asked for, and before any request
     try:
         server, project = cloud_parse_address(args.address)
         problem = cloud_link_refusal() or cloud_key_problem(cloud_key_file())
@@ -1884,7 +1919,9 @@ def cloud_link(args: argparse.Namespace) -> int:
 def cloud_link_with(server: str, project: str, key: str, command: str = "link") -> int:
     """The link's every step past its refusals and the key: probe the project, keep the key (cloud_save_key), write
     the [cloud] table (cloud_write_link), commit it alone, then the first sync (an empty project gets this checkout's
-    files). `link` reads the key at a prompt; `sign-in` brings the one its approval handed over."""
+    files). `link` reads the key at a prompt; `sign-in` brings the one its approval handed over. A stale process
+    refuses before anything is kept or written; joining, the stamp sikstack holds is judged too."""
+    engine_refuse_stale()
     try:
         probe = CloudLink({"server": server, "project_id": project}, key=key)
         info = cloud_probe(probe, "head")
@@ -1914,6 +1951,13 @@ def cloud_link_with(server: str, project: str, key: str, command: str = "link") 
             if len(rows) > CLOUD_SHOWN_ROWS:
                 print(f"... and {len(rows) - CLOUD_SHOWN_ROWS} more")
             return 1
+    held = live.get(ENGINE_STAMP_REL)
+    if held is not None and held.get("sha256") != disk.get(ENGINE_STAMP_REL):  # joining: sikstack's stamp, judged now
+        try:
+            engine_judge_held(cloud_probe_file(probe, ENGINE_STAMP_REL), f"{ENGINE_STAMP_REL} in sikstack")
+        except CloudError as exc:
+            raise SystemExit(str(exc))
+    engine_refuse_stale()
     # Past every refusal: the key, the exclude, the link file, then the first sync under the lock.
     try:
         cloud_save_key(server, project, info.get("org_id"), key)
@@ -2001,6 +2045,7 @@ def cloud_sign_in(args: argparse.Namespace) -> int:
     import wf_setup
     prog = "sikstack sign-in"
     data_dir = wf_setup.data_dir_arg(args.data_dir, prog)
+    engine_refuse_stale()  # before any request: no sign-in started, no install claimed
     try:
         problem = cloud_link_refusal() or cloud_key_problem(cloud_key_file())
         if problem:
@@ -2111,18 +2156,27 @@ def cloud_unlink(args: argparse.Namespace) -> int:
         raise SystemExit("this checkout is not linked (no [cloud] table in config.toml): it is in local mode already")
     if args.from_disk:
         return cloud_unlink_from_disk()
-    lock = CloudLock()
+    lock, stale, restored = CloudLock(), False, 0
     try:
         lock.acquire()
         session = CloudSession(["unlink"])
         session.begin()
-        session.commit(evict=False)
-        restored = cloud_restore_cold(session)
+        # The verdict after the pull (sikstack's stamp is judged too), before the push, the cold restore and the rmtree:
+        # a stale process ends here with the link and its bookkeeping as they were.
+        stale = engine_verdict()["stale"]
+        if stale:
+            session.clear_journal()
+        else:
+            session.commit(evict=False)
+            restored = cloud_restore_cold(session)
     except Exception as exc:  # noqa: BLE001 - one line, whatever stopped it
         lock.release()
         line = cloud_stop_line(exc, "unlink")
         offline = " (offline, unlink --from-disk keeps the disk as it is)" if line.startswith("sikstack is not reachable") else ""
         raise SystemExit(f"unlink refused, the checkout is still linked{offline}: {line}")
+    if stale:
+        lock.release()
+        engine_refuse_stale()
     try:
         shutil.rmtree(str(ROOT / CLOUD_DIR))
         cloud_drop_link()
@@ -2142,7 +2196,9 @@ def cloud_unlink_from_disk() -> int:
     holds: every evicted cold file whose cached copy is at the base's bytes goes back to its own path, and an
     archived folder it cannot fill stays by its archive name with wf_cold.HELD_MARKER naming what only sikstack
     holds, so no archived phase id is minted again and an archived phase.json's agenda link still counts. Then it
-    says what it could not bring back, and never names a re-link: a local change after it makes link refuse."""
+    says what it could not bring back, and never names a re-link: a local change after it makes link refuse. A stale
+    process refuses first, with the link and its bookkeeping as they were."""
+    engine_refuse_stale()
     folder = ROOT / CLOUD_DIR
     try:
         base = read_json(folder / "base.json")
@@ -2516,8 +2572,12 @@ def cloud_inbox_step(session: CloudSession) -> None:
     """The web's agenda inbox, applied by a linked engine inside its lock: entries oldest first, each as its
     agenda command, each result in a batch of its own with the files that command wrote; one line printed per
     entry. Skipped while a journal is open (a push to resend, an interrupted command), and when P1 counted
-    nothing pending. After a 409 the inbox is read again, so an entry another checkout took is not tried."""
+    nothing pending. After a 409 the inbox is read again, so an entry another checkout took is not tried. A stale
+    process (judged after the pull) applies and answers nothing: an older engine's refusal is never sikstack's final
+    answer, so every entry stays pending for a current engine."""
     if session.inbox_pending == 0 or session.journal() is not None:
+        return
+    if engine_verdict()["stale"]:
         return
     with CloudLock():
         parser, tried = None, set()
@@ -2708,8 +2768,15 @@ def cloud_keep(session: CloudSession, side: str, paths: list, running) -> None:
 
 
 def cloud_sync_run(session: CloudSession, keep, paths: list) -> int:
+    """sync's run under the lock. A stale process (an older engine than the stamp) refuses --keep before anything is
+    sent or written, judging this disk's stamp and the one sikstack holds; a plain sync pulls, then judges, and then
+    sends nothing and applies no inbox entry: it lists what differs, read-only. The resend of a journaled batch is an
+    earlier command's push, finished as that command composed it."""
     _cloud_sync_head(session)
     if keep:
+        engine_judge_held((session.fetch([ENGINE_STAMP_REL]).get(ENGINE_STAMP_REL) or (None, None))[1],
+                          f"{ENGINE_STAMP_REL} in sikstack")
+        engine_refuse_stale()
         cloud_keep_check(session, paths, keep)
     notes = []
     entry = session.journal()
@@ -2727,7 +2794,9 @@ def cloud_sync_run(session: CloudSession, keep, paths: list) -> int:
         session._pull(cloud_scan(session.cache), strict=False)  # sikstack's clean changes, so the base catches up
     else:
         mismatch = session._pull(cloud_scan(session.cache), strict=False)
-        if running is None:  # an interrupted command's changes wait for the operator's --keep
+        if engine_verdict()["stale"]:  # judged after the pull: read-only, nothing sent and the inbox left pending
+            pass
+        elif running is None:  # an interrupted command's changes wait for the operator's --keep
             session.pre = cloud_scan(session.cache)
             try:
                 session.commit(skip=mismatch)

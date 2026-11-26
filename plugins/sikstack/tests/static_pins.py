@@ -760,3 +760,249 @@ for _f in sorted((root / "scripts").glob("*.py")):
         _ua_sites.append(f"{_f.name}:{_fn.name}")
 assert sorted(_ua_sites) == ["wf_cloud.py:api_call", "wf_cloud.py:call", "wf_setup.py:post_json", "wf_setup.py:register"], _ua_sites
 assert 'return f"sikstack/{plugin_version()}"' in (root / "scripts/wf_setup.py").read_text(encoding="utf-8")
+# The engine stamp's guard (works/engine.json): a process older than the stamp writes nothing, so every raw write to the
+# workspace sits in a function that crosses the guard (engine_mutation or engine_write, in wf_store) or is named below
+# with why it may skip it. A raw write: shutil's move, rmtree and copies; os.replace, rename, remove, unlink, rmdir; a
+# path's unlink, rmdir, write_text, write_bytes, touch; open/fdopen for writing. A git runner that takes its subcommand
+# from a variable is a known one (the workspace's own repo goes through wf_store._git, which guards its mutations), and a
+# literal git mutation outside _git is allowed only where no workspace exists yet.
+_ENGINE_GUARD_FREE_MODULES = {"wf_init.py", "wf_migrate.py", "wf_setup.py"}  # before a workspace exists, or none at all
+_ENGINE_GUARD_ALLOW = {
+    "wf_store.py:_write_text_raw",  # write_text's body, behind engine_write
+    "wf_cloud.py:_cloud_write_bytes", "wf_cloud.py:_cloud_remove",  # sikstack's truth landing in a pull (judged after it)
+    "wf_cloud.py:clear_journal", "wf_cloud.py:_push",  # CLOUD_DIR, the link's local bookkeeping
+    # CLOUD_DIR again, in commands whose stale refusal must come first: each is also in _ENGINE_FIRST below, which pins
+    # the verdict before its first effect, so this entry never hides the order.
+    "wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:cloud_unlink_from_disk",
+    "wf_cloud.py:remove",  # the inbox applier's undo of a crashed entry: the tree put back as the entry found it
+    "wf_cloud.py:cloud_save_key", "wf_cloud.py:cloud_device_sign_in",  # the user's key file and sign-in's data dir
+    "wf_cold.py:keep", "wf_cold.py:_materialize", "wf_cold.py:cmd_cold_clear",  # .sikstack/cache/, the cold reads' cache
+    "wf_git.py:_parallel_start_nested",  # copies the host's CLAUDE.local.md into the host worktree (outside the workspace)
+    "wf_design.py:design_publish",  # packs the build into a temporary file (outside the workspace)
+}
+_ENGINE_GIT_RUNNERS = {  # subprocess git with a variable subcommand
+    "wf_store.py:_git",  # the workspace's runner: its mutations cross engine_mutation
+    "wf_agenda.py:_git_lines_in", "wf_git.py:_pr_generated_paths",  # cat-file and check-attr queries
+    "wf_git.py:_repo_git", "wf_design.py:_design_git",  # a product repo's reads (registry checks, design-sign)
+}
+_ENGINE_GIT_MUTATING = {"add", "am", "apply", "checkout", "cherry-pick", "clean", "commit", "gc", "init", "merge", "mv", "notes",
+                        "pull", "rebase", "reset", "restore", "revert", "rm", "stash", "switch", "tag", "update-ref", "worktree", "branch"}
+def _engine_mode(_args, _keywords):  # an open mode that writes (w, a, x or +)
+    _modes = [a for a in _args if isinstance(a, _ast.Constant)] + [k.value for k in _keywords if k.arg == "mode"]
+    return any(isinstance(m, _ast.Constant) and isinstance(m.value, str) and set(m.value) & set("wax+") for m in _modes)
+def _engine_raw_kind(_call):
+    _f = _call.func
+    if isinstance(_f, _ast.Attribute):
+        _recv = _f.value.id if isinstance(_f.value, _ast.Name) else None
+        if _recv == "shutil" and _f.attr in ("move", "rmtree", "copy", "copy2", "copyfile", "copytree"):
+            return f"shutil.{_f.attr}"
+        if _recv == "os" and _f.attr in ("replace", "rename", "remove", "unlink", "rmdir", "removedirs"):
+            return f"os.{_f.attr}"
+        if _recv == "os" and _f.attr == "fdopen":
+            return "os.fdopen" if _engine_mode(_call.args[1:2], _call.keywords) else None
+        if _recv != "os" and _f.attr in ("unlink", "rmdir", "write_text", "write_bytes", "touch"):
+            return f".{_f.attr}"
+        if _f.attr == "open" and _recv != "os" and _engine_mode(_call.args[:1], _call.keywords):
+            return ".open"
+    if isinstance(_f, _ast.Name) and _f.id == "open" and _engine_mode(_call.args[1:2], _call.keywords):
+        return "open"
+    return None
+def _engine_git_kind(_call):
+    _f = _call.func
+    if not (isinstance(_f, _ast.Attribute) and _f.attr == "run" and isinstance(_f.value, _ast.Name) and _f.value.id == "subprocess"):
+        return None
+    _argv = _call.args[0] if _call.args else None
+    if not (isinstance(_argv, _ast.List) and _argv.elts and isinstance(_argv.elts[0], _ast.Constant) and _argv.elts[0].value == "git"):
+        return None
+    _rest = list(_argv.elts[1:])
+    while _rest and isinstance(_rest[0], _ast.Constant) and str(_rest[0].value).startswith("-"):  # -C <dir>, --no-optional-locks
+        _rest = _rest[2:] if _rest[0].value == "-C" else _rest[1:]
+    if not _rest or not isinstance(_rest[0], _ast.Constant):
+        return "runner"
+    return "mutation" if _rest[0].value in _ENGINE_GIT_MUTATING else None
+_engine_bad, _engine_seen = [], set()
+def _engine_visit(_name, _src, _node, _fn):
+    for _child in _ast.iter_child_nodes(_node):
+        _inner = _child if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)) else _fn
+        if isinstance(_child, _ast.Call):
+            _key = f"{_name}:{_fn.name if _fn is not None else '<module>'}"
+            _raw, _git_kind = _engine_raw_kind(_child), _engine_git_kind(_child)
+            if _raw and _name not in _ENGINE_GUARD_FREE_MODULES:
+                _lines = _src.splitlines()[_fn.lineno - 1:_fn.end_lineno] if _fn is not None else []
+                _body = "\n".join(_lines)
+                if _key in _ENGINE_GUARD_ALLOW:
+                    _engine_seen.add(_key)
+                elif "engine_mutation(" not in _body and "engine_write(" not in _body:
+                    _engine_bad.append(f"{_key}:{_child.lineno} {_raw} writes outside the engine stamp's guard")
+            if _git_kind == "runner":
+                if _key in _ENGINE_GIT_RUNNERS:
+                    _engine_seen.add(_key)
+                elif _name not in _ENGINE_GUARD_FREE_MODULES:
+                    _engine_bad.append(f"{_key}:{_child.lineno} runs git with a variable subcommand outside the known runners")
+            if _git_kind == "mutation" and _name not in _ENGINE_GUARD_FREE_MODULES:
+                _engine_bad.append(f"{_key}:{_child.lineno} runs a git mutation outside wf_store._git")
+        _engine_visit(_name, _src, _child, _inner)
+for _f in sorted((root / "scripts").glob("*.py")) + [root / "adapters/claude_code/adapter.py"]:
+    _src = _f.read_text(encoding="utf-8")
+    _engine_visit(_f.name, _src, _ast.parse(_src), None)
+assert not _engine_bad, _engine_bad
+assert not (_ENGINE_GUARD_ALLOW | _ENGINE_GIT_RUNNERS) - _engine_seen, sorted((_ENGINE_GUARD_ALLOW | _ENGINE_GIT_RUNNERS) - _engine_seen)
+_store = (root / "scripts/wf_store.py").read_text(encoding="utf-8")
+assert 'ENGINE_STAMP_REL = "works/engine.json"' in _store
+assert _store.split("def rebuild_index_and_state() -> None:\n", 1)[1].startswith("    if engine_stale():")
+# The order of a stale refusal: in a stale process it comes before any of the command's effects. Each function below has
+# effects past the workspace's guarded writers (a request that changes sikstack, CLOUD_DIR, the [cloud] or [design]
+# table, the key file, a sign-in, the inbox's answers), so every one of its effect calls (_ENGINE_EFFECTS) must be gated
+# by a check that blocks a stale process, never by a verdict whose answer is ignored. An effect is gated when, walking
+# the function's statements in source order, a stop came since the last pull or held-stamp judgement (begin, _pull,
+# engine_judge_held: each may bring a later stamp, so the verdict must be taken again after it), or when it sits in the
+# branch an `if` on the verdict's `stale` takes for a process that is not stale. A stop is engine_refuse_stale() as a
+# statement, or an `if` on the verdict's `stale` (engine_verdict()["stale"], or a name assigned from it since the last
+# pull) whose stale branch ends in a return, a raise or engine_refuse_stale(). A bare engine_verdict() gates nothing.
+# CloudSession.commit is on the list, so a call to it needs no verdict of its own.
+_ENGINE_STOP = "engine_refuse_stale"
+_ENGINE_RESETS = {"begin", "_pull", "engine_judge_held"}
+_ENGINE_EFFECTS = {"send", "_push", "evict", "settle_appends", "cloud_restore_cold", "rmtree", "cloud_drop_link",
+                   "cloud_write_link", "config_write_table", "cloud_save_key", "cloud_exclude", "write_back", "keep_held",
+                   "cloud_inbox_apply", "cloud_keep", "cloud_device_sign_in", "cloud_link_with", "_design_link_with",
+                   "_cloud_remove", "_git", "mkdir"}
+_ENGINE_FIRST = {  # file:function -> effect calls allowed before the verdict, each with why
+    "wf_cloud.py:cloud_link": {}, "wf_cloud.py:cloud_link_with": {}, "wf_cloud.py:cloud_sign_in": {},
+    "wf_cloud.py:cloud_unlink": {}, "wf_cloud.py:cloud_unlink_from_disk": {}, "wf_cloud.py:commit": {},
+    "wf_cloud.py:cloud_inbox_step": {}, "wf_design.py:design_link": {},
+    "wf_cloud.py:cloud_sync_run": {"_push": "the resend of a journaled batch: an earlier command's push, as it composed it"},
+}
+def _engine_name(_call):
+    _f = _call.func
+    return _f.attr if isinstance(_f, _ast.Attribute) else getattr(_f, "id", "")
+def _engine_stale_test(_test, _names):  # True: stale when the test holds; False: stale when it fails; None: no stale test
+    if isinstance(_test, _ast.UnaryOp) and isinstance(_test.op, _ast.Not):
+        _inner = _engine_stale_test(_test.operand, _names)
+        return None if _inner is None else not _inner
+    if isinstance(_test, _ast.Subscript) and isinstance(_test.value, _ast.Call) and _engine_name(_test.value) == "engine_verdict" \
+            and isinstance(_test.slice, _ast.Constant) and _test.slice.value == "stale":
+        return True
+    if isinstance(_test, _ast.Name) and _test.id in _names:
+        return True
+    return None
+def _engine_ends(_block):  # a stale process never falls out of this branch
+    _last = _block[-1] if _block else None
+    return isinstance(_last, (_ast.Return, _ast.Raise)) or (isinstance(_last, _ast.Expr) and isinstance(_last.value, _ast.Call)
+                                                            and _engine_name(_last.value) == _ENGINE_STOP)
+class _EngineOrder:
+    def __init__(self, key, allowed):
+        self.key, self.allowed, self.gated, self.names, self.effects, self.bad = key, allowed, False, set(), 0, []
+    def scan(self, node, stop=None):  # the calls in one statement's own expressions, in source order
+        _calls = sorted((c for c in _ast.walk(node) if isinstance(c, _ast.Call)), key=lambda c: (c.lineno, c.col_offset))
+        for _c in _calls:
+            _n = _engine_name(_c)
+            if _n in _ENGINE_RESETS:
+                self.gated = False
+                self.names.clear()
+            elif _c is stop:
+                self.gated = True
+            elif _n in _ENGINE_EFFECTS:
+                self.effects += 1
+                if not self.gated and _n not in self.allowed:
+                    self.bad.append(f"{self.key}:{_c.lineno} {_n} runs with no stale check blocking it (a stop since the last pull, or the not-stale branch of an if on the verdict)")
+    def walk(self, stmts):
+        for _s in stmts:
+            if isinstance(_s, _ast.If):
+                _pol = _engine_stale_test(_s.test, self.names)
+                self.scan(_s.test)
+                if _pol is None:
+                    self.walk(_s.body)
+                    self.walk(_s.orelse)
+                    continue
+                _stale, _live = (_s.body, _s.orelse) if _pol else (_s.orelse, _s.body)
+                self.walk(_stale)
+                _after_stale = self.gated
+                self.gated = True
+                self.walk(_live)
+                self.gated = self.gated if _engine_ends(_stale) else (self.gated and _after_stale)
+            elif isinstance(_s, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                self.walk(_s.body)  # a nested callback, run after the statements before it
+            elif isinstance(_s, (_ast.For, _ast.AsyncFor, _ast.While)):
+                self.scan(_s.iter if hasattr(_s, "iter") else _s.test)
+                self.walk(_s.body)
+                self.walk(_s.orelse)
+            elif isinstance(_s, (_ast.With, _ast.AsyncWith)):
+                for _item in _s.items:
+                    self.scan(_item.context_expr)
+                self.walk(_s.body)
+            elif isinstance(_s, _ast.Try):
+                self.walk(_s.body)
+                for _h in _s.handlers:
+                    self.walk(_h.body)
+                self.walk(_s.orelse)
+                self.walk(_s.finalbody)
+            else:
+                _stop = _s.value if isinstance(_s, _ast.Expr) and isinstance(_s.value, _ast.Call) \
+                    and _engine_name(_s.value) == _ENGINE_STOP else None
+                self.scan(_s, _stop)
+                if isinstance(_s, (_ast.Assign, _ast.AnnAssign, _ast.AugAssign)):
+                    _targets = _s.targets if isinstance(_s, _ast.Assign) else [_s.target]
+                    _ids = {n.id for t in _targets for n in _ast.walk(t) if isinstance(n, _ast.Name)}
+                    self.names -= _ids
+                    if isinstance(_s, _ast.Assign) and _s.value is not None and _engine_stale_test(_s.value, self.names) is True \
+                            and all(isinstance(t, _ast.Name) for t in _targets):
+                        self.names |= _ids
+_order_bad = []
+for _key, _allowed in sorted(_ENGINE_FIRST.items()):
+    _file, _fname = _key.split(":")
+    _defs = [n for n in _ast.walk(_ast.parse((root / "scripts" / _file).read_text(encoding="utf-8")))
+             if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == _fname]
+    if len(_defs) != 1:
+        _order_bad.append(f"{_key}: {len(_defs)} definitions")
+        continue
+    _walker = _EngineOrder(_key, _allowed)
+    _walker.walk(_defs[0].body)
+    _order_bad += _walker.bad
+    if not _walker.effects:
+        _order_bad.append(f"{_key}: no effect call left to order (update _ENGINE_FIRST)")
+assert not _order_bad, _order_bad
+# The walker's own teeth: a verdict whose answer is ignored, or a stop taken before a pull or a held-stamp judgement,
+# leaves the effect ungated; a stop, a stale branch that returns, or the not-stale branch gates it.
+for _snippet, _gated in (("engine_verdict()\ns.send(x)", False), ("engine_refuse_stale()\ns.begin()\ns.send(x)", False),
+                         ("engine_refuse_stale()\nengine_judge_held(d, w)\ns.send(x)", False),
+                         ("x = engine_refuse_stale()\ns.send(x)", False), ("if engine_verdict()['stale']:\n    s.clear()\ns.send(x)", False),
+                         ("stale = engine_verdict()['stale']\ns.begin()\nif stale:\n    return 0\ns.send(x)", False),
+                         ("engine_refuse_stale()\ns.send(x)", True), ("if engine_verdict()['stale']:\n    return 0\ns.send(x)", True),
+                         ("s.begin()\nstale = engine_verdict()['stale']\nif stale:\n    s.clear()\nelse:\n    s.send(x)", True),
+                         ("if not engine_verdict()['stale']:\n    s.send(x)", True),
+                         ("s.begin()\nstale = engine_verdict()['stale']\nif stale:\n    engine_refuse_stale()\nshutil.rmtree(p)", True)):
+    _walker = _EngineOrder("selftest", {})
+    _walker.walk(_ast.parse("def f():\n" + "".join(f"    {_l}\n" for _l in _snippet.splitlines())).body[0].body)
+    assert _walker.effects and (not _walker.bad) == _gated, (_snippet, _walker.bad)
+assert {"wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:cloud_unlink_from_disk"} <= set(_ENGINE_FIRST)
+# The boundary: workflow.run takes the verdict before every command that runs outside the cloud boundary (the design and
+# feedback API verbs, link, sign-in) but sync and unlink, which take it after their pull (both on the list above).
+assert 'if args.cmd not in ("sync", "unlink"):\n            engine_verdict()' in (root / "scripts/workflow.py").read_text(encoding="utf-8")
+# The Migration notes reach the agent in every form the CHANGELOG writes them: a list item (its wrapped lines indented)
+# or a paragraph of its own (to the next blank line), as 0.11.0's is. The engine's own parser, run over the whole
+# CHANGELOG, reads each release's first note whole.
+_notes_ns = {"re": re}
+exec(compile(_ast.Module(body=[_n for _n in _ast.parse(_store).body
+                               if (isinstance(_n, _ast.Assign) and [getattr(_t, "id", "") for _t in _n.targets] in (["ENGINE_CHANGELOG_RE"], ["ENGINE_NOTE_RE"]))
+                               or (isinstance(_n, _ast.FunctionDef) and _n.name == "_changelog_notes")], type_ignores=[]),
+             "wf_store.py", "exec"), _notes_ns)
+assert {"ENGINE_CHANGELOG_RE", "ENGINE_NOTE_RE", "_changelog_notes"} <= set(_notes_ns), sorted(_notes_ns)
+_log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+_read = _notes_ns["_changelog_notes"](_log)
+_mark = re.compile(r"^(- )?\*\*Migration notes(?::\*\*|\.\*\*|\*\*[:.])\s*")
+_heads = list(_notes_ns["ENGINE_CHANGELOG_RE"].finditer(_log))
+_missed = []
+for _i, _h in enumerate(_heads):
+    _lines = _log[_h.end():_heads[_i + 1].start() if _i + 1 < len(_heads) else len(_log)].split("\n")
+    _at = next((_j for _j, _l in enumerate(_lines) if _mark.match(_l)), None)
+    if _at is None:
+        continue
+    _block = [_lines[_at]]
+    for _l in _lines[_at + 1:]:
+        if not _l.strip() or (_lines[_at].startswith("- ") and not _l.startswith(" ")):
+            break
+        _block.append(_l)
+    if " ".join(_read.get(_h.group(1), "").split()) != " ".join(_mark.sub("", "\n".join(_block)).split()):
+        _missed.append(_h.group(1))
+assert not _missed, _missed
+assert _read.get("0.11.0", "").endswith("pass `--no-webkit`."), _read.get("0.11.0")

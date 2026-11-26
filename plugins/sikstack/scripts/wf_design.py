@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from wf_store import (  # noqa: E402
-    HOST_ROOT, MAIN_HOST, nested_repos, now_iso, read_json, require_slice, ROOT, shown, write_json,
+    engine_refuse_stale, HOST_ROOT, MAIN_HOST, nested_repos, now_iso, read_json, require_slice, ROOT, shown, write_json,
 )
 
 SIGNOFF_FILE = "design-signoff.json"
@@ -204,6 +204,7 @@ def design_link(args: argparse.Namespace) -> int:
     if bool(args.address) == bool(args.data_dir):
         raise SystemExit(f"{prog}: give one of the project's page address (<server>/projects/<project-id>, then paste "
                          f"its workspace key) or --data-dir (the connect page, which makes a new project) ({nothing})")
+    engine_refuse_stale()  # a stale process: before the key is asked for, any request, a sign-in or the [design] table
     target = _main_config()
     try:
         current, where = design_read_link()

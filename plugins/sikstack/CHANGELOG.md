@@ -10,6 +10,30 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.12.0 — 2026-11-26
+
+- **The workspace records the release that last wrote it: `works/engine.json`.** It holds `{"version": "<plugin
+  version>"}`. `sikstack init` and `migrate --apply` write it, and the first command that changes anything on a newer
+  plugin raises it to that version. It is a tracked truth file: a worktree's start commit carries it, `worktree gate`
+  counts it with the phase folder and generated files, `worktree merge-finish` keeps the later release of a merge's
+  two sides, and a linked checkout syncs it.
+- **An older engine refuses to write a workspace a newer one wrote.** When the stamp names a later release than the
+  running plugin (in the CHANGELOG's release order, never semver), every write refuses in one line naming both
+  versions, with nothing written: restart Claude Code to load the updated plugin, after `claude plugin update
+  sikstack@sikstack` if this machine's install is the older one. A deliberate rollback sets the file's version to
+  the running one and commits it. Reads (`next`, `check`) still run, rebuild nothing and end with one warning line.
+  A malformed stamp refuses the same way.
+- **The Migration notes reach the agent after an update.** When the stamp (or, before any stamp, an older engine's
+  `- sikstack version:` backlog line) names an older release, the session-start hook prints, after the contract
+  card, every release in between that carries a Migration notes line, newest first, at most about 2,000 characters
+  (cut with a pointer at the plugin's `CHANGELOG.md`). The first command that raises the stamp prints the same block
+  on stderr once, so `--json` output stays valid. A stamp newer than the plugin gets one line instead: update the
+  plugin, then restart Claude Code. With no record of the last release, one line points at `CHANGELOG.md`.
+- **Not covered: sessions started on 0.11.0 or earlier.** Their engine has no stamp check, so an older session left
+  running can still write a workspace a newer one stamped. Restart such sessions after updating.
+- **Migration notes:** nothing to run. The first command on 0.12.0 writes `works/engine.json`; commit it with your
+  next workflow-state commit.
+
 ## 0.11.0 — 2026-11-26
 
 - **A design is measured on a desktop, a tablet and a phone.** The layout check (`templates/design/check.mjs`) and
