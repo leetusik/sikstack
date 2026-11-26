@@ -81,6 +81,10 @@ class ApiAuthContext:
 
     ``scope`` is ``"full"`` for legacy mode, the master bearer and sessions, and the
     credential's own scope (``"full"``, ``"capture"`` or ``"workspace"``) for a ``vk_`` key.
+
+    ``user_id`` is the signed-in user behind a session token, else ``None``: what an
+    owner-only act on ``/api`` (making an item Public, ``server.sharing.api_may_publish``)
+    asks the org role of.
     """
 
     tenant_id: UUID | None = None
@@ -88,6 +92,7 @@ class ApiAuthContext:
     credential_id: UUID | None = None
     is_public: bool = True
     scope: str = "full"
+    user_id: UUID | None = None
 
 
 # Shared, immutable-in-practice legacy context (tenant_id=None, project_id=None,
@@ -224,7 +229,9 @@ async def _resolve_tenant_bearer(
         if user is not None and user.is_approved:
             tenants = await service.list_tenants_for_user(user.id)
             if tenants:
-                return ApiAuthContext(tenant_id=active_tenant(request, tenants).id)
+                return ApiAuthContext(
+                    tenant_id=active_tenant(request, tenants).id, user_id=user.id
+                )
 
     return None
 

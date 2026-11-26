@@ -12,6 +12,7 @@ import sqlite3
 from uuid import uuid4
 
 from server import db, reading_time
+from tests.test_public_read import _fill
 from tests.test_documents_api import (  # noqa: F401 - the fixture is used by name
     _project,
     _seed_doc,
@@ -194,6 +195,7 @@ def test_a_books_second_title_rides_every_read_that_lists_or_opens_it(documents_
             )
     finally:
         conn.close()
+    _fill(client)  # day one: the public project's existing items read Public
 
     org = tenant  # a slug-less org is addressed by its tenant id
     want = {"guide": ("길잡이", "ko"), "plain": (None, None)}
@@ -233,6 +235,7 @@ def test_a_visitors_listing_carries_tags_only_of_documents_they_may_read(documen
     _seed_doc(tenant, "open", slug="a", title="A", markdown="x", tags=["capture", "alert"])
     _seed_doc(tenant, "open", slug="b", title="B", markdown="x")
     _seed_doc(tenant, "closed", slug="c", title="C", markdown="x", tags=["secret-plan"])
+    _fill(client)
 
     org = tenant
 

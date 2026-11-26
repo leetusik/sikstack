@@ -4,7 +4,8 @@
  * book's own by its address (`/@{org}/{project}/…`, P63-fk.F4), else, for a visitor, the org's public
  * library taken from the address, else the Library; its label is the address's slug, never `from`'s text.
  * Pure, and free of `next/headers`: the server states pass the request's path, the error boundary the
- * browser's.
+ * browser's. P75: `orgLibrary` false (a link reader in an org with nothing Public, `@/lib/library/way-out`) sends
+ * a visitor's wordmark and way back to the sikstack home instead of the org's public library.
  */
 import {
   decodeFrom,
@@ -12,8 +13,8 @@ import {
   LIBRARY_ORIGIN,
   wayBack,
 } from "@/lib/library/from";
+import { readerHomeHref, reachableWayBack } from "@/lib/library/way-out";
 import { loginHref } from "@/lib/next-path";
-import { LIBRARY_HREF, publicLibraryHref } from "@/lib/reader-href";
 
 export interface StatePlace {
   back: { href: string; label: string };
@@ -22,7 +23,11 @@ export interface StatePlace {
   visitor: boolean;
 }
 
-export function statePlace(path: string, signedIn: boolean): StatePlace {
+export function statePlace(
+  path: string,
+  signedIn: boolean,
+  orgLibrary = true,
+): StatePlace {
   let url: URL | null = null;
   try {
     url = new URL(path.startsWith("/") ? path : "/", "https://book.invalid");
@@ -38,12 +43,14 @@ export function statePlace(path: string, signedIn: boolean): StatePlace {
     orgs: [org],
     project,
   });
-  const back = way
-    ? { href: way.href, label: way.label }
-    : wayBack(LIBRARY_ORIGIN);
+  const back =
+    reachableWayBack(way ? { href: way.href, label: way.label } : null, {
+      member: signedIn,
+      orgLibrary,
+    }) ?? wayBack(LIBRARY_ORIGIN);
   return {
-    back,
-    homeHref: signedIn || !org ? LIBRARY_HREF : publicLibraryHref(org),
+    back: { href: back.href, label: back.label },
+    homeHref: readerHomeHref({ member: signedIn, org, orgLibrary }),
     signInHref: loginHref(url ? `${url.pathname}${url.search}` : "/"),
     visitor: !signedIn,
   };

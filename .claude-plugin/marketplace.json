@@ -3,7 +3,7 @@
   "owner": {
     "name": "leetusik"
   },
-  "description": "sikstack: a phase-and-slice workflow for Claude Code that works with no account.",
+  "description": "sikstack: a phase-and-slice workflow for Claude Code that works with no account, with /sikstack:explain for documents in the sikstack Library.",
   "plugins": [
     {
       "name": "sikstack",

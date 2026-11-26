@@ -80,15 +80,17 @@ linked workspace and a workspace read that fails all read ``[]``.
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
 from server import assets as assets_mod
 from server import config
 from server import db
-from server import publish_gate
+from server import sharing
 from server import search as search_mod
 from server.accounts.auth import AuthContext, optional_user, require_user
 from server.accounts.service import AccountsReadError, get_accounts_service
@@ -178,27 +180,29 @@ async def _resolve_project_name(project_id: UUID, ctx: AuthContext) -> str:
     return project.name
 
 
-async def _is_publicly_readable(doc: dict) -> bool:
-    """Whether ``doc`` may be served to a caller who is **not** its owner (P19 gate).
+async def _is_publicly_readable(
+    conn, doc: dict, share: tuple[str, ...] | None = None
+) -> bool:
+    """Whether ``doc`` may be served to a caller who is **not** its owner.
 
-    The public half of the trust boundary, extracted from ``_resolve_readable_doc``
-    (P25.S2) so the slug resolver lands on the *same* predicate instead of
-    re-deriving it. Three ordered guards, every one of them a plain ``False`` (the
-    caller renders an indistinguishable 404 — never a 403):
+    The public half of the trust boundary, shared by the id and slug resolvers (and the
+    asset routes) so none re-derives it. Ordered guards, every one of them a plain
+    ``False`` (the caller renders an indistinguishable 404, never a 403):
 
-    * **Legacy-mode guard** — ``DATABASE_URL`` unset ⇒ ``False`` before touching the
-      (absent) accounts service, so the single-tenant template stack never 500s and
-      never exposes a public path.
-    * **Registry-less owner** — an empty/legacy ``''`` sentinel or an unparseable
-      UUID ⇒ ``False``; such rows are never public.
-    * **Visibility** — the owner tenant's project (resolved by *name*) must exist and
-      be ``visibility == "public"``.
+    * **Legacy-mode guard**: ``DATABASE_URL`` unset is ``False`` before touching the
+      (absent) accounts service.
+    * **Registry-less owner**: an empty/legacy ``''`` sentinel or an unparseable UUID is
+      ``False``; such rows are never public.
+    * **The item's sharing** (``server.sharing``): the document's own state, or its
+      book's when it is a chapter variant, must be ``public``, or ``link`` with ``share``
+      one of its live tokens. No row is Members; a store that cannot be read is Members too.
+      The project's visibility no longer decides it (it is only new items' default).
 
-    Costs one Postgres round trip, so callers must keep it off the member fast-path.
+    Costs Postgres round trips, so callers must keep it off the member fast-path.
     """
 
     if config.database_url() is None:
-        return False  # legacy/template mode: no accounts registry ⇒ never public.
+        return False  # legacy/template mode: no accounts registry => never public.
     owner = doc.get("tenant_id")
     if not owner:
         return False  # '' legacy sentinel / NULL: registry-less rows are never public.
@@ -206,12 +210,12 @@ async def _is_publicly_readable(doc: dict) -> bool:
         owner_uuid = UUID(str(owner))
     except (ValueError, TypeError):
         return False
-    project = await get_accounts_service().get_project_by_name(owner_uuid, doc["project"])
-    return project is not None and project.visibility == "public"
+    kind, key = sharing.item_of_doc(conn, doc)
+    return await sharing.readable(owner_uuid, doc["project"], kind, key, share)
 
 
 async def _resolve_readable_doc(
-    conn, doc_id: int, ctx: AuthContext | None
+    conn, doc_id: int, ctx: AuthContext | None, share: tuple[str, ...] | None = None
 ) -> dict | None:
     """Resolve a document for a possibly-anonymous caller, or ``None`` (⇒ 404).
 
@@ -223,8 +227,8 @@ async def _resolve_readable_doc(
        semantics — and the accounts service is never consulted.
     2. **Public path** (no ``ctx``, or a scoped miss — which covers anonymous *and*
        cross-org callers). An unscoped lookup gated by ``_is_publicly_readable``
-       (legacy-mode guard, registry-less-owner guard, then the owner project's
-       ``visibility == "public"``); a missing row ⇒ ``None`` too.
+       (legacy-mode guard, registry-less-owner guard, then the item's sharing:
+       public, or a link whose live token the caller holds); a missing row ⇒ ``None``.
 
     Every miss returns ``None`` so the caller renders an indistinguishable 404:
     private and nonexistent look identical (404-never-403), and no private doc or
@@ -243,7 +247,7 @@ async def _resolve_readable_doc(
     doc = db.get_document(conn, doc_id)
     if doc is None:
         return None
-    return doc if await _is_publicly_readable(doc) else None
+    return doc if await _is_publicly_readable(conn, doc, share) else None
 
 
 # --- Canonical (pretty) share path (P25.S2) --------------------------------
@@ -403,6 +407,28 @@ async def _explained_from(doc: dict, ctx: AuthContext | None) -> list[dict]:
     return links["byDoc"].get(int(doc["id"]), [])
 
 
+async def _member_share(conn, doc: dict, ctx: AuthContext | None) -> dict | None:
+    """The item's sharing as a member sees it (``server.sharing.share_json``), else ``None``.
+
+    Only a member of the owning org reads it (an anonymous, link or cross-org reader
+    gets ``null``): the state, whether it is the document's own or its book's, and the
+    live link's URL. Legacy mode and a store that cannot be read answer ``None``.
+    """
+
+    if ctx is None or not _is_member_of(doc, ctx) or config.database_url() is None:
+        return None
+    kind, key = sharing.item_of_doc(conn, doc)
+    try:
+        can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
+        record = await get_accounts_service().get_project_by_name(ctx.tenant.id, doc["project"])
+        if record is None:
+            return sharing.share_json(sharing.NO_ROW, kind, can_publish=can)
+        share = await sharing.get_share(record.id, kind, key)
+        return sharing.share_json(share, kind, can_publish=can)
+    except Exception:  # noqa: BLE001 - the read still answers; the switch shows nothing
+        return None
+
+
 @router.get("/app/documents")
 async def list_documents(
     project: UUID | None = None,
@@ -443,6 +469,7 @@ async def list_documents(
 async def get_document(
     doc_id: int,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
     """One document by id, with ``markdown`` — member-scoped **or** public (P19.S2).
@@ -462,7 +489,7 @@ async def get_document(
     id to a different document (P25.F1's round-trip guard).
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
     tenant = await _owner_tenant(doc, ctx)
@@ -472,6 +499,7 @@ async def get_document(
         "chapter": _chapter_of(conn, doc),
         "org": _org_of(tenant),
         "phases": await _explained_from(doc, ctx),
+        "share": await _member_share(conn, doc, ctx),
     }
 
 
@@ -481,6 +509,7 @@ async def resolve_document_by_slug(
     project: str,
     slug: str,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
     """One document by its DURABLE public identity: org slug + project + doc slug.
@@ -509,7 +538,7 @@ async def resolve_document_by_slug(
     applied.
     """
 
-    resolved = await _resolve_readable_slug(conn, org, project, slug, ctx)
+    resolved = await _resolve_readable_slug(conn, org, project, slug, ctx, share)
     if resolved is None:
         raise _no_such_path()
     doc, tenant, _is_member = resolved
@@ -519,11 +548,13 @@ async def resolve_document_by_slug(
         "chapter": _chapter_of(conn, doc),
         "org": _org_of(tenant),
         "phases": await _explained_from(doc, ctx),
+        "share": await _member_share(conn, doc, ctx),
     }
 
 
 async def _resolve_readable_slug(
-    conn, org: str, project: str, slug: str, ctx: AuthContext | None
+    conn, org: str, project: str, slug: str, ctx: AuthContext | None,
+    share: tuple[str, ...] | None = None,
 ) -> tuple[dict, TenantRecord, bool] | None:
     """The slug resolver's trust gate, shared by the document and asset routes.
 
@@ -541,15 +572,95 @@ async def _resolve_readable_slug(
     if doc is None:
         return None
     is_member = ctx is not None and ctx.tenant.id == tenant.id
-    if not is_member and not await _is_publicly_readable(doc):
+    if not is_member and not await _is_publicly_readable(conn, doc, share):
         return None
     return doc, tenant, is_member
+
+
+# --- Item sharing: the link's address and the member's switch ----------------------
+
+_NO_SHARED_DETAIL = "no shared item at that link"
+
+
+@router.get("/app/shared/{token}")
+async def resolve_shared(token: str, conn=Depends(get_conn)) -> dict[str, object]:
+    """What a live link opens: ``{kind, org, project, path}`` (plus ``doc_id`` or ``book``).
+
+    Anyone may ask (the link is the credential). ``path`` is the reader address on the
+    web app the link reader is sent to, holding the token as ``X-Share-Token`` for the
+    content reads. A dead, cleared or malformed token, an item gone from the content
+    index, and legacy mode are the one 404.
+    """
+
+    if config.database_url() is None:
+        raise HTTPException(status_code=404, detail=_NO_SHARED_DETAIL)
+    item = await sharing.by_token(token)
+    if item is None:
+        raise HTTPException(status_code=404, detail=_NO_SHARED_DETAIL)
+    tenant = await get_accounts_service().get_tenant(item.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail=_NO_SHARED_DETAIL)
+    tid = str(item.tenant_id)
+    label = tenant.slug or str(tenant.id)
+    if item.kind == sharing.KIND_BOOK:
+        if db.get_book(conn, project=item.project, slug=item.key, tenant_id=tid) is None:
+            raise HTTPException(status_code=404, detail=_NO_SHARED_DETAIL)
+        return {
+            "kind": item.kind, "org": label, "project": item.project, "book": item.key,
+            "path": f"/@{label}/{item.project}/books/{item.key}",
+        }
+    matches = db.find_documents_by_stem(conn, f"{item.project}/{item.key}", tenant_id=tid)
+    if len(matches) != 1:
+        raise HTTPException(status_code=404, detail=_NO_SHARED_DETAIL)
+    doc = matches[0]
+    pretty = _canonical_path(tenant.slug, doc) if _owns_its_canonical_path(conn, doc) else None
+    return {
+        "kind": item.kind, "org": label, "project": item.project, "doc_id": doc["id"],
+        "path": pretty or f"/documents/{doc['id']}",
+    }
+
+
+class ShareIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["members", "link", "public"]
+
+
+@router.put("/app/documents/{doc_id}/share")
+async def set_document_share(
+    doc_id: int,
+    body: ShareIn,
+    ctx: AuthContext = Depends(require_user),
+    conn=Depends(get_conn),
+) -> dict[str, object]:
+    """A member sets a document's sharing (a chapter's is its book's) -> ``{share}``.
+
+    Session-only and member-only: another org's or a missing id is the 404 every read
+    answers. ``public`` is the org owner's (a member's is a **403**, as the project
+    switch's is); ``link`` and ``members`` are any member's. ``link`` mints a link
+    unless one is on; ``members``/``public`` clear it.
+    """
+
+    doc = db.get_document(conn, doc_id, tenant_id=str(ctx.tenant.id))
+    if doc is None or config.database_url() is None:
+        raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
+    can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
+    if body.state == sharing.PUBLIC and not can:
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+    kind, key = sharing.item_of_doc(conn, doc)
+    record = await get_accounts_service().get_or_create_project(ctx.tenant.id, doc["project"])
+    try:
+        share = await sharing.set_share(record.id, kind, key, body.state)
+    except sharing.SharingError:
+        raise HTTPException(status_code=503, detail="could not change the sharing; try again")
+    return {"share": sharing.share_json(share, kind, can_publish=can)}
 
 
 @router.get("/app/documents/{doc_id}/raw")
 async def get_document_raw(
     doc_id: int,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> Response:
     """Serve one HTML explainer's raw HTML as ``text/html`` for the sandboxed viewer.
@@ -571,7 +682,7 @@ async def get_document_raw(
     document starts at ``<!DOCTYPE html>`` with no quirks-mode prefix.
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     if doc is None or doc.get("format") != "html" or not doc.get("raw_html"):
         raise HTTPException(status_code=404, detail=f"no HTML document with id {doc_id}")
     return Response(
@@ -616,6 +727,7 @@ def _archive_tenant(doc: dict) -> str:
 async def list_document_versions(
     doc_id: int,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
     """One document's superseded versions, newest first, without their bodies.
@@ -629,7 +741,7 @@ async def list_document_versions(
     history" without a second call.
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
     rows = db.list_document_versions(conn, doc["rel_path"], tenant_id=_archive_tenant(doc))
@@ -646,6 +758,7 @@ async def get_document_version(
     doc_id: int,
     version: int,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
     """One superseded version with its ``markdown`` body, for the past-version view.
@@ -658,7 +771,7 @@ async def get_document_version(
     below.
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     row = (
         None
         if doc is None
@@ -678,6 +791,7 @@ async def get_document_version_raw(
     doc_id: int,
     version: int,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> Response:
     """An archived HTML version's raw HTML — the ``/raw`` route's version-aware twin.
@@ -695,7 +809,7 @@ async def get_document_version_raw(
     the current one. Unmetered (``/app``).
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     row = (
         None
         if doc is None
@@ -734,7 +848,9 @@ async def get_document_version_raw(
 _NO_SUCH_ASSET_DETAIL = "no such asset"
 
 # Content-addressed bytes never change; the only staleness is a lost right to read
-# them, so the cache window stays short. Shared caches only for a public project.
+# them, so the cache window stays short. Shared caches only for a Public item: a member's
+# read and a link holder's read are ``private`` (a shared cache keyed on the URL would
+# serve a link-only image to anyone, and keep it after the link is turned off).
 _ASSET_CACHE_PRIVATE = "private, max-age=300"
 _ASSET_CACHE_PUBLIC = "public, max-age=300"
 # Raster bytes only, never a document: nothing in the response may run.
@@ -808,20 +924,39 @@ async def get_document_asset(
     doc_id: int,
     file: str,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> Response:
     """One stored image of a document, by ``<sha256>.<ext>`` (P30.S4).
 
     Optional-identity exactly like ``GET /app/documents/{id}``: resolved through
     ``_resolve_readable_doc``, so a member reads their own private document's images
-    and anyone reads a public project's. ``Cache-Control`` is ``public`` only when
-    the read came through the public path. Unmetered (``/app``).
+    and anyone reads a Public item's, or a Link item's while holding its link.
+    ``Cache-Control`` is ``public`` only for a Public item read by a non-member
+    (``_shared_cache_ok``). Unmetered (``/app``).
     """
 
-    doc = await _resolve_readable_doc(conn, doc_id, ctx)
+    doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     if doc is None:
         raise _no_such_asset()
-    return await _asset_response(conn, doc, file, public=not _is_member_of(doc, ctx))
+    public = await _shared_cache_ok(conn, doc, is_member=_is_member_of(doc, ctx), share=share)
+    return await _asset_response(conn, doc, file, public=public)
+
+
+async def _shared_cache_ok(
+    conn, doc: dict, *, is_member: bool, share: tuple[str, ...] | None
+) -> bool:
+    """May a shared cache keep this read? Only a non-member's read of a Public item.
+
+    A read that held link tokens is asked again without them, so a Link item read by
+    its link is ``private``; one more share lookup, only on that path.
+    """
+
+    if is_member:
+        return False
+    if not share:
+        return True  # it passed the gate without a link: Public
+    return await _is_publicly_readable(conn, doc, None)
 
 
 @router.get("/app/orgs/{org}/{project}/{slug}/assets/{file:path}")
@@ -831,6 +966,7 @@ async def get_document_asset_by_slug(
     slug: str,
     file: str,
     ctx: AuthContext | None = Depends(optional_user),
+    share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> Response:
     """The same image addressed by the document's pretty identity (P30.S4).
@@ -839,11 +975,12 @@ async def get_document_asset_by_slug(
     gate, then the same per-document asset check and the same constant 404.
     """
 
-    resolved = await _resolve_readable_slug(conn, org, project, slug, ctx)
+    resolved = await _resolve_readable_slug(conn, org, project, slug, ctx, share)
     if resolved is None:
         raise _no_such_asset()
     doc, _tenant, is_member = resolved
-    return await _asset_response(conn, doc, file, public=not is_member)
+    public = await _shared_cache_ok(conn, doc, is_member=is_member, share=share)
+    return await _asset_response(conn, doc, file, public=public)
 
 
 def _delete_owned_document(doc_id: int, api_ctx: ApiAuthContext) -> bool:
@@ -851,10 +988,8 @@ def _delete_owned_document(doc_id: int, api_ctx: ApiAuthContext) -> bool:
 
     Runs **entirely off the event loop** (``run_in_threadpool``): the delete is
     synchronous, takes ``server/main.py``'s process-wide ``threading`` ``WRITE_LOCK``,
-    and — for a public-root caller — shells out to git for a local commit (the push,
-    when ``KB_GIT_PUSH`` is on, is queued on the after-response publish worker since
-    P24 and no longer runs here). Blocking the loop on that would stall every other
-    request.
+    and bridges back to the loop for the reader-state and sharing purges. Blocking the
+    loop on that would stall every other request.
 
     Two consequences shape this function:
 
@@ -872,12 +1007,6 @@ def _delete_owned_document(doc_id: int, api_ctx: ApiAuthContext) -> bool:
 
     The lookup is tenant-scoped, so another tenant's id is simply a miss (⇒ 404,
     never 403) and the delete can never cross tenants.
-
-    P34-n0.S1: the document's project is known only after that lookup, so the
-    project-visibility rule runs here, on this worker thread, through the same
-    sync-to-async bridge ``_delete_document``'s reader-state purge already uses
-    (``publish_gate.publish_decision_from_worker``): a private project's delete never
-    commits, and an unreadable visibility fails closed.
     """
 
     from server.main import _delete_document  # deferred: main imports this module.
@@ -887,11 +1016,7 @@ def _delete_owned_document(doc_id: int, api_ctx: ApiAuthContext) -> bool:
         doc = db.get_document(conn, doc_id, tenant_id=str(api_ctx.tenant_id))
         if doc is None:
             return False
-        decision = publish_gate.publish_decision_from_worker(api_ctx, doc["project"])
-        _delete_document(
-            conn, doc, api_ctx, commit=True, co_authored_by=None,
-            publish_decision=decision,
-        )
+        _delete_document(conn, doc, api_ctx)
         return True
     finally:
         conn.close()

@@ -171,7 +171,7 @@ ls -l /opt/knowledge/.env     # expect: -rw------- 1 opc opc
 Read the token back only when you actually need it (e.g. to hand it to the hi2vi_web
 content agent as `KNOWLEDGE_API_TOKEN`): `sudo grep '^KB_API_TOKEN=' /opt/knowledge/.env`.
 
-The non-secret box config (`KB_GIT_PUSH=true`, `KB_REQUIRE_READ_AUTH=true`,
+The non-secret box config (`KB_REQUIRE_READ_AUTH=true`,
 `KB_PUBLIC_BASE_URL=https://sikstack.com`, `TZ`, `KB_ROOT`, `KB_STARTUP_REINDEX=true`,
 `KB_FEEDBACK_ATTACHMENTS_DIR=/data/feedback-attachments`,
 `KB_DESIGN_BUILDS_DIR=/data/design-builds`) is baked into `compose.prod.yml` — do not
@@ -180,12 +180,11 @@ in `SECRETS.md` §5 (among them `KB_DESIGN_ORIGIN`, `KB_DESIGN_SECRET`,
 `KB_INSTALL_FEEDBACK_PROJECT_ID` and `SIKSTACK_FEEDBACK_CAPTURE_KEY`).
 
 One more non-secret knob is **not** set there and defaults safely: **`KB_GIT_TIMEOUT_S`**
-(default **60**, seconds) caps *every* git subprocess — fetch, rebase, push, add, commit
-(P24). Since the after-response publish worker holds the write lock while it pushes, this
-cap is what stops a hung SSH round-trip from stalling later writes; a hit surfaces as a
-`[kb-api] publish: … FAILED` log line and the doc republishes on the next push. Leave it
-alone unless the box's link to GitHub is genuinely slow; unparseable or non-positive
-values fall back to 60, so the cap cannot be switched off.
+(default **60**, seconds) caps *every* git subprocess. Since item sharing (P75) a Library
+write no longer commits or pushes, so only the git publish's leftover tools
+(`python -m server.reconcile`) run git now. Leave it alone unless the box's link to GitHub
+is genuinely slow; unparseable or non-positive values fall back to 60, so the cap cannot
+be switched off.
 
 ---
 
@@ -228,8 +227,13 @@ docker compose -f compose.prod.yml exec api sh -c 'echo "$KB_FEEDBACK_ATTACHMENT
 # expect: /data/feedback-attachments, then a directory line
 ```
 
-The image must contain **`ssh`** — `git` alone cannot push over an SSH remote, so
-publish-on-write depends on it. Assert it once after the build:
+> **The git publish is retired.** Since item sharing (P75) no Library write commits or
+> pushes: `server/sharing.py` decides who reads each item. The push checks in this section
+> (`ssh` in the image, 2a and 2b below) matter only to the leftover
+> `python -m server.reconcile --push` repair CLI, and go when it does.
+
+The image must contain **`ssh`** — `git` alone cannot push over an SSH remote, so the
+reconcile CLI's push depends on it. Assert it once after the build:
 
 ```bash
 docker compose -f compose.prod.yml exec api sh -c 'command -v ssh && git --version'

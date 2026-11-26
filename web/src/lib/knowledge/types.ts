@@ -1,3 +1,5 @@
+import type { ItemShare } from "@/lib/sharing/model";
+
 // P12.S2 — shared shapes for knowledge's `/auth/*` JSON (server-side). Pure types,
 // no runtime values. S3–S6 extend this seam with the `/app/*` shapes (projects,
 // credentials, usage, documents) as they add those calls — this file holds
@@ -382,6 +384,12 @@ export interface KbDocument extends KbDocumentListItem {
    * mode; absent from an older backend.
    */
   org?: KbOwnerOrg | null;
+  /**
+   * The item's sharing (P75, `server/sharing.py`) on the two detail reads, for a member of its org only:
+   * its state, whether it is the document's own or its book's (a chapter's), and the live link's URL. Null
+   * for anyone else; absent from an older backend.
+   */
+  share?: ItemShare | null;
 }
 
 /** An item's owning org as its read names it (P63): the slug (null when it has none) and the display name. */
@@ -593,6 +601,8 @@ export interface KbBook {
    * read (`GET /app/orgs/{org}/{project}/books/{book}`) only. Absent from an older backend.
    */
   org?: KbOwnerOrg | null;
+  /** The book's sharing (P75; it covers every chapter), for a member only; null for anyone else. */
+  share?: ItemShare | null;
 }
 
 /** One chapter variant in an org library listing (`GET /app/orgs/{org}/library`, P30.S22). */

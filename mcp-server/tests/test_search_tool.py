@@ -1,4 +1,5 @@
-"""Terse behavioral tests for the `search` + `fetch_document` tools and the app.
+"""Terse behavioral tests for the `search`, `fetch` (`fetch_document`) and
+`list_library` tools and the app (contract v2).
 
 Upstream is stubbed with an `httpx.MockTransport` (no live API): we exercise the
 real request path — bearer forwarding, param/path building — and assert the mapping
@@ -23,35 +24,35 @@ from starlette.testclient import TestClient
 
 from knowledge_mcp import server
 
-# One upstream /api/search result in the exact shape server/search.py:_finalize
-# emits (only the fields the tool reads matter, but keep it realistic).
+# One upstream /api/sections/search response in the exact shape
+# server/search.py:search_sections emits.
 _SAMPLE = {
     "query": "vector index",
     "mode": "hybrid",
     "total": 1,
     "limit": 5,
-    "offset": 0,
     "results": [
         {
-            "id": 42,
-            "project": "changple5",
-            "slug": "vector-index-notes",
-            "date": "2026-05-01",
-            "title": "Vector index notes",
-            "tags": ["search", "vectors"],
-            "rel_path": "changple5/2026-05-01-vector-index-notes.md",
-            "source_repo": "changple5",
-            "created_at": "2026-05-01T00:00:00Z",
-            "updated_at": "2026-05-01T00:00:00Z",
-            "score": 0.87,
+            "document": {
+                "id": 42,
+                "rel_path": "changple5/2026-05-01-vector-index-notes.md",
+                "title": "Vector index notes",
+                "project": "changple5",
+                "book": None,
+                "chapter": None,
+                "lang": None,
+            },
+            "anchor": "the-index",
+            "heading": "The index",
             "snippet": "a <mark>vector</mark> index over <mark>embeddings</mark>",
-            "signals": {"bm25": 1.2, "recency": 0.5, "vector": 0.9},
+            "score": 0.03,
+            "url": "https://sikstack.com/@acme/changple5/vector-index-notes#the-index",
         }
     ],
 }
 
 
-def test_search_maps_hits_and_forwards_bearer():
+def test_search_maps_section_hits_and_forwards_bearer():
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -70,30 +71,83 @@ def test_search_maps_hits_and_forwards_bearer():
         )
     )
 
-    # Envelope.
-    assert out["query"] == "vector index"
-    assert out["total"] == 1
-    assert len(out["results"]) == 1
-
-    # Exact search-hit contract, no extra keys.
+    assert (out["query"], out["mode"], out["total"]) == ("vector index", "hybrid", 1)
     hit = out["results"][0]
-    assert set(hit) == {"title", "snippet", "url", "id", "rel_path"}
-    assert hit["title"] == "Vector index notes"
-    assert hit["id"] == 42
+    # Contract v2: one section per hit, no extra keys.
+    assert set(hit) == {
+        "title", "heading", "anchor", "snippet", "url", "id", "rel_path", "project",
+        "book", "chapter",
+    }
+    assert (hit["id"], hit["anchor"], hit["heading"]) == (42, "the-index", "The index")
     assert hit["rel_path"] == "changple5/2026-05-01-vector-index-notes.md"
+    assert hit["snippet"] == "a vector index over embeddings"  # <mark> stripped
+    assert hit["url"].endswith("#the-index")  # the reader lands on the section
 
-    # <mark>…</mark> stripped for agent consumption.
-    assert hit["snippet"] == "a vector index over embeddings"
-    assert "<mark>" not in hit["snippet"] and "</mark>" not in hit["snippet"]
-
-    # url is the reserved seam — empty for the whole corpus until source_url lands.
-    assert hit["url"] == ""
-
-    # The inbound bearer is forwarded verbatim to the upstream /api/search call,
-    # with q + project + clamped limit.
     assert seen["authorization"] == "Bearer vk_test_123"
-    assert seen["path"] == "/api/search"
+    assert seen["path"] == "/api/sections/search"
     assert seen["params"] == {"q": "vector index", "project": "changple5", "limit": "5"}
+
+
+def test_fetch_one_section_by_anchor():
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["params"] = dict(request.url.params)
+        return httpx.Response(200, json={
+            "id": 42, "rel_path": "p/2026-05-01-x.md", "title": "X", "project": "p",
+            "date": "2026-05-01", "tags": [], "format": "native",
+            "section": {"anchor": "the-index", "heading": "The index", "level": 2,
+                        "position": 1, "text": "Section body."},
+        })
+
+    out = asyncio.run(
+        server.run_fetch_document(
+            id=42, anchor="the-index", authorization="Bearer vk_x",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    assert seen == {"path": "/api/documents/42", "params": {"anchor": "the-index"}}
+    assert (out["anchor"], out["heading"], out["markdown"]) == ("the-index", "The index", "Section body.")
+    assert out["total_chars"] == len("Section body.") and out["truncated"] is False
+
+
+def test_list_library_maps_books_and_documents():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/library"
+        assert request.headers.get("authorization") == "Bearer vk_x"
+        return httpx.Response(200, json={
+            "books": [{"project": "p", "slug": "guide", "title": "Guide", "kind": "codebase",
+                       "chapters": [{"key": "ch1", "position": 1, "title": None, "variants": [
+                           {"lang": "en", "id": 7, "rel_path": "p/2026-01-01-ch1.md",
+                            "title": "One", "version": 1, "format": "native", "url": "u1"}]}]}],
+            "documents": [{"id": 9, "rel_path": "p/2026-01-02-d.md", "project": "p",
+                           "slug": "d", "title": "D", "date": "2026-01-02", "lang": "en",
+                           "format": "md", "version": 1, "url": "u2"}],
+        })
+
+    out = asyncio.run(server.run_list_library(
+        authorization="Bearer vk_x", transport=httpx.MockTransport(handler)))
+    assert out["books"][0]["chapters"][0]["variants"][0] == {
+        "lang": "en", "id": 7, "rel_path": "p/2026-01-01-ch1.md", "title": "One", "url": "u1",
+    }
+    assert out["documents"] == [{"id": 9, "rel_path": "p/2026-01-02-d.md", "project": "p",
+                                 "title": "D", "date": "2026-01-02", "lang": "en", "url": "u2"}]
+
+
+def test_a_refused_key_is_a_tool_error_on_every_tool():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"detail": "this key may not read"})
+
+    t = httpx.MockTransport(handler)
+    for call in (
+        server.run_search(query="x", project=None, limit=5, authorization="Bearer vk_w", transport=t),
+        server.run_fetch_document(id=1, authorization="Bearer vk_w", transport=t),
+        server.run_list_library(authorization="Bearer vk_w", transport=t),
+    ):
+        with pytest.raises(ToolError) as excinfo:
+            asyncio.run(call)
+        assert "403" in str(excinfo.value)
 
 
 def test_limit_clamped_to_max():
@@ -132,7 +186,7 @@ def test_app_builds_and_healthz_ok():
     body = resp.json()
     assert body["status"] == "ok"
     # /healthz surfaces the consumer-pinned contract version (S4, CONTRACT.md).
-    assert body["contract_version"] == server.config.CONTRACT_VERSION == "1"
+    assert body["contract_version"] == server.config.CONTRACT_VERSION == "2"
 
 
 # --- fetch_document (S2) -----------------------------------------------------

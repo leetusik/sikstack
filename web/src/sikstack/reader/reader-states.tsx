@@ -12,7 +12,8 @@ import {
   DEFAULT_READER_SETTINGS,
   type ReaderSettings,
 } from "@/lib/reader-cookie";
-import { bookHref, LIBRARY_HREF, publicLibraryHref } from "@/lib/reader-href";
+import { readerHomeHref } from "@/lib/library/way-out";
+import { bookHref, LIBRARY_HREF } from "@/lib/reader-href";
 import { loginHref } from "@/lib/next-path";
 
 /**
@@ -31,6 +32,11 @@ export interface ReaderSegmentValue {
   member: boolean;
   nonce?: string;
   settings: ReaderSettings;
+  /**
+   * Whether the org's public library reads for this reader (P75, `@/lib/library/way-out`): false for a link
+   * reader in an org with nothing Public, whose wordmark and way back then lead to the sikstack home. Absent: true.
+   */
+  orgLibrary?: boolean;
 }
 
 export const ReaderSegmentContext = createContext<ReaderSegmentValue>({
@@ -237,7 +243,7 @@ export function failedState(
  * Library**. A visitor: no way back in the bar, and **Sign in**, which returns to this address.
  */
 export function ReaderMissing() {
-  const { member } = useContext(ReaderSegmentContext);
+  const { member, orgLibrary } = useContext(ReaderSegmentContext);
   const place = useBookPlace();
   const signIn = loginHref(usePathname());
   return (
@@ -245,9 +251,7 @@ export function ReaderMissing() {
       back={member ? READER_FRAME.library : undefined}
       backHref={member ? LIBRARY_HREF : undefined}
       viewer={member ? "member" : "visitor"}
-      homeHref={
-        member || !place.org ? LIBRARY_HREF : publicLibraryHref(place.org)
-      }
+      homeHref={readerHomeHref({ member, org: place.org, orgLibrary })}
       signInHref={signIn}
     >
       <StateBlock state={missingState(member, signIn)} />
@@ -268,7 +272,7 @@ export function ReaderFailed({
   retrying: boolean;
   onRetry: () => void;
 }) {
-  const { member } = useContext(ReaderSegmentContext);
+  const { member, orgLibrary } = useContext(ReaderSegmentContext);
   const place = useBookPlace();
   const signIn = loginHref(usePathname());
   if (retrying) return <ReaderLoading />;
@@ -277,9 +281,7 @@ export function ReaderFailed({
       back={READER_FRAME.book}
       backHref={place.book ?? LIBRARY_HREF}
       viewer={member ? "member" : "visitor"}
-      homeHref={
-        member || !place.org ? LIBRARY_HREF : publicLibraryHref(place.org)
-      }
+      homeHref={readerHomeHref({ member, org: place.org, orgLibrary })}
       signInHref={signIn}
     >
       <StateBlock state={failedState(member, digest)} onRetry={onRetry} />

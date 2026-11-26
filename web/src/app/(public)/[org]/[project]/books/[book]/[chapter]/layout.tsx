@@ -4,6 +4,8 @@ import { unstable_rethrow } from "next/navigation";
 import { ReaderSegment } from "@/sikstack/reader";
 import { requestNonce } from "@/sikstack/shell/data";
 import { optionalIdentity } from "@/lib/auth-guards";
+import { addressOrg } from "@/lib/library/way-out";
+import { orgLibraryReadsOnce } from "@/lib/library/way-out-read";
 import { parseReaderCookie, READER_COOKIE } from "@/lib/reader-cookie";
 
 // P63-fk.S8 — what the chapter's loading, not found and error screens need to know before (or
@@ -12,6 +14,8 @@ import { parseReaderCookie, READER_COOKIE } from "@/lib/reader-cookie";
 // reader's display settings (Loading keeps the reader's scheme and size). The session read is the
 // page's own (`optionalIdentity` is cached per request); a failure of it reads as a visitor here
 // and leaves the page's own handling to the page.
+// P75: and whether the org's public library reads for this reader (`orgLibraryReadsOnce`): a link reader in an
+// org with nothing Public has none, so the wordmark and the way back lead to the sikstack home.
 async function viewer(): Promise<boolean> {
   try {
     return (await optionalIdentity()) !== null;
@@ -23,18 +27,22 @@ async function viewer(): Promise<boolean> {
 
 export default async function ChapterLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ org: string }>;
 }) {
-  const [member, nonce, jar] = await Promise.all([
+  const [member, nonce, jar, orgLibrary] = await Promise.all([
     viewer(),
     requestNonce(),
     cookies(),
+    params.then(({ org }) => orgLibraryReadsOnce(addressOrg(org))),
   ]);
   return (
     <ReaderSegment
       member={member}
       nonce={nonce}
+      orgLibrary={orgLibrary}
       settings={parseReaderCookie(jar.get(READER_COOKIE)?.value)}
     >
       {children}

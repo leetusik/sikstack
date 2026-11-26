@@ -39,3 +39,18 @@ export function withDocumentPhases(
     phases: rows,
   });
 }
+
+/**
+ * The page's reader with a member's sharing switch (P75): the document's `share` (a member's read only) and its
+ * id as the switch's target. A visitor's or link reader's read carries none, and the html original comes back
+ * as it was.
+ */
+export function withDocumentShare(
+  el: ReactElement,
+  doc: Pick<KbDocument, "id" | "share">,
+): ReactElement {
+  if (!doc.share || !isValidElement(el) || el.type !== DocumentReader) return el;
+  return cloneElement(el as ReactElement<DocumentReaderProps>, {
+    share: { target: { kind: "doc", docId: doc.id }, share: doc.share },
+  });
+}

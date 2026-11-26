@@ -44,6 +44,34 @@ def _set_public(client, headers, project_id, visibility="public"):
     assert res.status_code == 200, res.text
 
 
+def _fill(client):
+    """Day one: every existing item of a public project gets a Public row.
+
+    Items seeded straight into SQLite stand for content that existed before item
+    sharing, so a test that reads them publicly runs the same one-time fill the box
+    runs (``server.sharing.fill``), on the app's own loop.
+    """
+
+    from server import sharing
+
+    async def run():
+        conn = db.connect()
+        try:
+            return await sharing.fill(conn)
+        finally:
+            conn.close()
+
+    return client.portal.call(run)
+
+
+def _share_state(client, headers, doc_id):
+    """A member's read of one document's sharing state."""
+
+    res = client.get(f"/app/documents/{doc_id}", headers=headers)
+    assert res.status_code == 200, res.text
+    return res.json()["share"]["state"]
+
+
 def _set_slug(client, headers) -> str:
     """Claim a fresh org slug for the caller's tenant and return it.
 
@@ -105,6 +133,7 @@ def test_anonymous_reads_public_denies_private(documents_client):
 
     pub_id = _seed(tenant, "pub", slug="p", fmt="html", raw_html=_HTML)
     priv_id = _seed(tenant, "priv", slug="s")
+    _fill(client)
 
     # Anonymous (no headers): public doc JSON → 200, and the projection drops tenant_id.
     r = client.get(f"/app/documents/{pub_id}")
@@ -135,6 +164,7 @@ def test_cross_org_user_sees_only_public(documents_client):
 
     pub_id = _seed(a_tenant, "pub", slug="p")
     secret_id = _seed(a_tenant, "secret", slug="s")
+    _fill(client)
 
     # A second, authenticated org reads A's public doc but never A's private one:
     # the member fast-path misses (cross-org) then the public path gates on visibility.
@@ -158,6 +188,7 @@ def test_anonymous_reads_public_version_history(documents_client):
     _seed_version(
         tenant, "pub/2026-01-01-p.html", 1, markdown="old text", fmt="html", raw_html=_HTML
     )
+    _fill(client)
 
     page = client.get(f"/app/documents/{pub_id}/versions").json()
     assert (page["current_version"], page["total"]) == (2, 1)
@@ -192,6 +223,7 @@ def test_slug_resolver_serves_public_and_hides_everything_else(documents_client)
 
     pub_id = _seed(tenant, "pub", slug="p")
     _seed(tenant, "priv", slug="s")
+    _fill(client)
 
     hit = client.get(f"/app/orgs/{org}/pub/p")
     assert hit.status_code == 200, hit.text
@@ -242,6 +274,7 @@ def test_document_detail_carries_canonical_path(documents_client):
     pub = _project(client, headers, "pub")
     _set_public(client, headers, pub)
     doc_id = _seed(tenant, "pub", slug="p")
+    _fill(client)
 
     # No slug claimed yet: additive key present, null — for the member AND anonymously.
     assert client.get(f"/app/documents/{doc_id}", headers=headers).json()["canonical_path"] is None
@@ -270,6 +303,7 @@ def test_superseded_duplicate_slug_has_no_canonical_path(documents_client):
 
     old_id = _seed(tenant, "pub", slug="notes", date="2026-01-01")
     new_id = _seed(tenant, "pub", slug="notes", date="2026-06-01")
+    _fill(client)
     assert old_id != new_id  # a re-publish on another date really is a second row
 
     expected = f"/@{org}/pub/notes"
@@ -293,18 +327,30 @@ def test_superseded_duplicate_slug_has_no_canonical_path(documents_client):
     assert hit.json()["canonical_path"] == expected
 
 
-def test_visibility_toggle_flips_anonymous_read(documents_client):
-    client, tenant = documents_client[0], None
+def test_the_project_switch_is_only_a_default(documents_client):
+    """A project's visibility decides only what NEW items start as: toggling it changes
+    no existing item's state, read through the API before and after."""
+
+    client = documents_client[0]
     headers, tenant = _signup(client, f"tog-{uuid4()}@example.com")
     proj = _project(client, headers, "flip")
     _set_public(client, headers, proj)
-    doc_id = _seed(tenant, "flip", slug="d")
+    old_id = _seed(tenant, "flip", slug="d")
+    _fill(client)  # an item that existed before the change: Public on day one
+    assert _share_state(client, headers, old_id) == "public"
+    assert client.get(f"/app/documents/{old_id}").status_code == 200
 
-    # Public → anonymous read allowed; flip to private → the same read 404s at once
-    # (the bridge resolves visibility per-read from Postgres, no reindex).
-    assert client.get(f"/app/documents/{doc_id}").status_code == 200
     _set_public(client, headers, proj, visibility="private")
-    assert client.get(f"/app/documents/{doc_id}").status_code == 404
+    assert _share_state(client, headers, old_id) == "public"  # unchanged by the switch
+    assert client.get(f"/app/documents/{old_id}").status_code == 200
+
+    # A new item starts at the project's (now private) default: Members.
+    new_id = _seed(tenant, "flip", slug="e")
+    assert _share_state(client, headers, new_id) == "members"
+    assert client.get(f"/app/documents/{new_id}").status_code == 404
+    _set_public(client, headers, proj)
+    assert _share_state(client, headers, new_id) == "members"  # still unchanged
+    assert client.get(f"/app/documents/{new_id}").status_code == 404
 
 
 def test_document_reads_name_their_org_past_the_gate_only(documents_client):
@@ -320,6 +366,7 @@ def test_document_reads_name_their_org_past_the_gate_only(documents_client):
     _set_public(client, headers, pub)
     pub_id = _seed(tenant, "pub", slug="p")
     priv_id = _seed(tenant, "priv", slug="s")
+    _fill(client)
 
     library = client.get(f"/app/orgs/{org}/library?scope=public").json()["org"]
     expected = {"slug": org, "name": library["name"]}

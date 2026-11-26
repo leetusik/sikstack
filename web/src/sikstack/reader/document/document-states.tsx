@@ -10,7 +10,8 @@ import { StateBlock, type StateModel } from "@/sikstack/states";
 import { UiRoot } from "@/sikstack/ui";
 import { FROM_PARAM } from "@/lib/library/from";
 import { loginHref } from "@/lib/next-path";
-import { LIBRARY_HREF, publicLibraryHref } from "@/lib/reader-href";
+import { readerHomeHref } from "@/lib/library/way-out";
+import { LIBRARY_HREF } from "@/lib/reader-href";
 
 import { failedState, ReaderSegmentContext } from "../reader-states";
 import { documentBack } from "./model";
@@ -26,7 +27,8 @@ import { documentBack } from "./model";
  *
  * Who is reading, the nonce and the display settings come from the route's layout (`ReaderSegment`); the
  * org and the project from the address (`/@<org>/<project>/<slug>`; P63-fk.F4: they name the way back
- * until the document is read), the list from `?from=`.
+ * until the document is read), the list from `?from=`. P75: the segment also says whether the org's public library
+ * reads for this reader; a link reader in an org with nothing Public goes home to sikstack (`@/lib/library/way-out`).
  */
 function decoded(value: string | string[] | undefined): string {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -40,7 +42,7 @@ function decoded(value: string | string[] | undefined): string {
 
 /** The way back from the address and `?from=`, as the page draws it. */
 function useBack() {
-  const { member } = useContext(ReaderSegmentContext);
+  const { member, orgLibrary } = useContext(ReaderSegmentContext);
   const params = (useParams() ?? {}) as Record<string, string | string[]>;
   const search = useSearchParams();
   const at = decoded(params.org);
@@ -50,8 +52,9 @@ function useBack() {
     from: search?.get(FROM_PARAM) ?? null,
     org,
     names: { project: decoded(params.project) || null },
+    orgLibrary,
   });
-  const homeHref = member || !org ? LIBRARY_HREF : publicLibraryHref(org);
+  const homeHref = readerHomeHref({ member, org, orgLibrary });
   return { member, back, homeHref };
 }
 

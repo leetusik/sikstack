@@ -55,41 +55,29 @@ def client(tmp_path, monkeypatch):
     return TestClient(app), tmp_path
 
 
-def test_happy_path_shape_and_scoped_commit(client):
+def test_happy_path_shape_and_no_commit(client):
     tc, root = client
+    index = (root / "docs" / "index.md").read_bytes()
     r = tc.post(
         "/api/documents",
         json={**_PAYLOAD, "co_authored_by": "Tester <t@example.com>"},
     )
     assert r.status_code == 201, r.text
     b = r.json()
-    assert b["committed"] is True and b["commit_sha"]
-    assert b["rel_path"] == _REL and b["recent_updated"] is True
+    # No git publish: nothing is committed, no Recent bullet, no landing page.
+    assert (b["committed"], b["commit_sha"], b["pushed"], b["push_pending"]) == (
+        False, None, False, False,
+    )
+    assert b["rel_path"] == _REL and b["recent_updated"] is False
+    assert b["landing_created"] is False
     assert b["url"].endswith("/test-project/2026-07-02-api-smoke-test/")
 
     content = (root / "docs" / _REL).read_text(encoding="utf-8")
     assert content.startswith(_EXPECTED_FM)  # byte-exact frontmatter head
 
-    lines = (root / "docs" / "index.md").read_text(encoding="utf-8").split("\n")
-    m = lines.index("<!-- explain:recent -->")
-    assert lines[m + 1] == (
-        "- 2026-07-02 · [API Smoke Test: Colons & Quotes]"
-        "(test-project/2026-07-02-api-smoke-test.md) — test-project"
-    )
-
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-        .stdout.split()
-    )
-    # First doc of a fresh project → scoped commit also carries the auto-created
-    # landing (3 paths); a later doc into the same project stays 2 (see below).
-    assert names == {f"docs/{_REL}", "docs/index.md", "docs/test-project/index.md"}
-    assert _git(root, "log", "-1", "--pretty=%s").stdout.strip() == (
-        "docs(test-project): add api-smoke-test"
-    )
-    assert "Co-Authored-By: Tester <t@example.com>" in (
-        _git(root, "log", "-1", "--pretty=%b").stdout
-    )
+    assert (root / "docs" / "index.md").read_bytes() == index  # the tracked index stays
+    assert not (root / "docs" / "test-project" / "index.md").exists()
+    assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"
 
 
 def test_repeat_409_then_overwrite(client):
@@ -107,8 +95,6 @@ def test_repeat_409_then_overwrite(client):
         },
     )
     assert ow.status_code == 201 and ow.json()["recent_updated"] is False
-    idx = (root / "docs" / "index.md").read_text(encoding="utf-8")
-    assert idx.count("test-project/2026-07-02-api-smoke-test.md") == 1  # no dup bullet
     got = tc.get(f"/api/documents/by-path/{_REL}").json()
     assert "Updated body." in got["markdown"]  # DB row updated
 
@@ -145,14 +131,7 @@ def test_new_version_archives_and_keeps_identity(client):
 
     got = tc.get(f"/api/documents/by-path/{_REL}").json()
     assert got["version"] == 2 and "Second edition." in got["markdown"]
-    # The archived body travels in the same scoped commit.
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").stdout.split()
-    )
-    assert f"docs/{_V1_ARCHIVE}" in names
-    assert _git(root, "log", "-1", "--pretty=%s").stdout.strip() == (
-        "docs(test-project): update api-smoke-test to v2"
-    )
+    assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"  # no commit
 
 
 def test_new_version_without_target_creates_v1(client):
@@ -319,54 +298,7 @@ def test_post_absolute_source_repo_sanitized(client):
     assert got_by_path["source_repo"] == "test-project"
 
 
-# Auto-created project landing (docs/<project>/index.md) — the deploy-gate
-# invariant: every project mkdocs discovers must ship site/<project>/index.html.
-_LANDING = (
-    "# test-project\n\nExplainers about `test-project`, kept in this knowledge base.\n"
-)
-
-
-def test_first_doc_creates_project_landing(client):
-    tc, root = client
-    r = tc.post("/api/documents", json=_PAYLOAD)
-    assert r.status_code == 201, r.text
-    assert r.json()["landing_created"] is True
-
-    landing = root / "docs" / "test-project" / "index.md"
-    assert landing.read_text(encoding="utf-8") == _LANDING  # minimal, no frontmatter
-
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-        .stdout.split()
-    )
-    # 3-path scoped commit — landing joins only on the project's first doc.
-    assert names == {f"docs/{_REL}", "docs/index.md", "docs/test-project/index.md"}
-
-
-def test_second_doc_leaves_landing_untouched(client):
-    tc, root = client
-    assert tc.post("/api/documents", json=_PAYLOAD).status_code == 201
-    landing = root / "docs" / "test-project" / "index.md"
-    before = landing.read_text(encoding="utf-8")
-
-    r = tc.post("/api/documents", json={
-        **_PAYLOAD,
-        "slug": "second-note",
-        "title": "Second Note",
-        "markdown": "# Second Note\n\nMore body.\n",
-    })
-    assert r.status_code == 201 and r.json()["landing_created"] is False
-    assert landing.read_text(encoding="utf-8") == before  # not recreated/modified
-
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-        .stdout.split()
-    )
-    # Back to a 2-path commit — the existing landing is not re-staged.
-    assert names == {"docs/test-project/2026-07-02-second-note.md", "docs/index.md"}
-
-
-def test_existing_landing_never_overwritten(client):
+def test_no_landing_is_written_and_a_handwritten_one_is_kept(client):
     tc, root = client
     landing = root / "docs" / "test-project" / "index.md"
     landing.parent.mkdir(parents=True, exist_ok=True)
@@ -376,12 +308,6 @@ def test_existing_landing_never_overwritten(client):
     r = tc.post("/api/documents", json=_PAYLOAD)
     assert r.status_code == 201 and r.json()["landing_created"] is False
     assert landing.read_text(encoding="utf-8") == handwritten  # preserved
-
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-        .stdout.split()
-    )
-    assert names == {f"docs/{_REL}", "docs/index.md"}  # landing not staged
 
 
 def test_invalid_tags_422(client):
@@ -398,23 +324,15 @@ def test_delete_happy_path(client):
     assert r.status_code == 200, r.text
     b = r.json()
     assert b["deleted"] is True and b["id"] == doc_id and b["rel_path"] == _REL
-    assert b["recent_removed"] is True
-    assert b["committed"] is True and b["commit_sha"]
+    assert b["recent_removed"] is False  # the tracked index is never touched
+    assert b["committed"] is False and b["commit_sha"] is None
 
     assert not (root / "docs" / _REL).exists()  # file gone
-    assert _REL not in (root / "docs" / "index.md").read_text(encoding="utf-8")  # bullet gone
 
     assert tc.get(f"/api/documents/{doc_id}").status_code == 404
     assert tc.get(f"/api/documents/by-path/{_REL}").status_code == 404
 
-    names = set(
-        _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-        .stdout.split()
-    )
-    assert names == {f"docs/{_REL}", "docs/index.md"}  # scoped delete commit
-    assert _git(root, "log", "-1", "--pretty=%s").stdout.strip() == (
-        "docs(test-project): remove api-smoke-test"
-    )
+    assert _git(root, "rev-list", "--count", "HEAD").stdout.strip() == "1"  # no commit
 
 
 def test_delete_404(client):

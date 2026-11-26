@@ -15,6 +15,7 @@ from typing import Optional
 
 from server import assets as assets_mod
 from server import books, config, db, documents, embeddings, native_ingest
+from server import sections as sections_mod
 
 # Generated agentic-workspace internals that live inside the MkDocs content root
 # (docs/current/*.md, docs/versions/**/*.md). They carry no explainer frontmatter,
@@ -402,12 +403,14 @@ def reindex_path(
 
     # Sync embeddings (content-hash-cached, best-effort).
     embeddings_report = _sync_embeddings(conn)
+    sections_report = sections_mod.sync_embeddings(conn, retries=_EMBED_RETRIES)
 
     duration_ms = int((time.monotonic() - start) * 1000)
     if own_conn:
         conn.close()
 
     result = {
+        "sections": sections_report,
         "rel_path": rel_path,
         "action": action,
         "embeddings": embeddings_report,
@@ -680,11 +683,18 @@ def reindex(
         conn.commit()
 
     embeddings_report = _sync_embeddings(conn)
+    # P75: section vectors, cached by content; a full reindex also drops the vectors no
+    # section holds any more.
+    sections_report = {
+        "count": sections_mod.count(conn),
+        **sections_mod.sync_embeddings(conn, retries=_EMBED_RETRIES, collect=True),
+    }
 
     duration_ms = int((time.monotonic() - start) * 1000)
     if own_conn:
         conn.close()
     return {
+        "sections": sections_report,
         "indexed": indexed,
         "removed": removed,
         "skipped": skipped,
@@ -747,6 +757,12 @@ def _main() -> int:
             f"embedded={emb.get('embedded', 0)} cached={emb.get('cached', 0)} "
             f"removed={emb.get('removed', 0)}"
             + (f" skipped_reason={emb['skipped_reason']}" if emb.get("skipped_reason") else "")
+        )
+        sec = result.get("sections", {})
+        print(
+            f"sections: count={sec.get('count', 0)} embedded={sec.get('embedded', 0)} "
+            f"cached={sec.get('cached', 0)} removed={sec.get('removed', 0)}"
+            + (f" skipped_reason={sec['skipped_reason']}" if sec.get("skipped_reason") else "")
         )
         print(f"duration_ms: {result['duration_ms']}")
         return 0

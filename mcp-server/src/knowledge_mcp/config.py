@@ -27,9 +27,10 @@ FEEDBACK_SERVER_NAME = "feedback"
 # `mcp` SDK release, `1.28.1`). This is the consumer-pinned contract: bumped only
 # on a BREAKING change (a removed/renamed tool, a removed output field, a changed
 # type or auth model). Additive changes (a new tool, a new optional param, a new
-# output field) stay v1. Surfaced at `GET /healthz` so a consumer/monitor can read
+# output field) stay within the version. v2 (P75): `search` returns sections
+# and `fetch_document` became `fetch` (kept one version as an alias). Surfaced at `GET /healthz` so a consumer/monitor can read
 # it without a protocol handshake.
-CONTRACT_VERSION = "1"
+CONTRACT_VERSION = "2"
 
 # `search` result-count caps. `limit` defaults to a small, agent-friendly page
 # and is clamped to a small max before being forwarded to /api/search (which is

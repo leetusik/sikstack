@@ -28,17 +28,13 @@ import {
   type ListOrigin,
 } from "@/lib/library/from";
 import { sectionTitle } from "@/lib/library/continue";
+import { readerHomeHref, reachableWayBack } from "@/lib/library/way-out";
+import { orgLibraryReadsOnce } from "@/lib/library/way-out-read";
 import { validateChapter } from "@/lib/native";
 import { loginHref } from "@/lib/next-path";
 import { languageName } from "@/lib/reader/language";
 import { versionDate } from "@/lib/reader/load";
-import {
-  bookHref,
-  bookNotesHref,
-  LIBRARY_HREF,
-  publicLibraryHref,
-  readerHref,
-} from "@/lib/reader-href";
+import { bookHref, bookNotesHref, readerHref } from "@/lib/reader-href";
 import { viewerTimeZone } from "@/lib/time-zone";
 
 import {
@@ -77,6 +73,17 @@ const miss = (error: unknown): never => {
     (error.status === 404 || error.status === 400)
   )
     notFound();
+  throw error;
+};
+
+/**
+ * The reader's own state is optional (P75): a signed-in reader of another org who opened the book by its link
+ * reads the book with no state (the reader-state routes answer their 404, and a lapsed session its 401), so
+ * those read as none; any other fault still throws.
+ */
+const noState = (error: unknown): null => {
+  if (error instanceof ApiError && [401, 403, 404].includes(error.status))
+    return null;
   throw error;
 };
 
@@ -124,7 +131,8 @@ function originOf(raw: string, owner: string, signedIn: boolean): ListOrigin {
  * is kept only when it is the book's own (a member's Library or project page, the public library of the
  * book's org, its project's page there); anything else is the book's default, as with no list. The org's
  * name (the book read's `org.name`, P63; a member's own tenant's when an older backend carries none)
- * labels the book's own public library, else the slug of the book's own address. Pure.
+ * labels the book's own public library, else the slug of the book's own address. P75: a visitor the org's public
+ * library refuses (a link reader in an org with nothing Public) goes back to the sikstack home. Pure.
  */
 export function bookBack(
   from: ListOrigin,
@@ -137,6 +145,8 @@ export function bookBack(
     slug?: string | null;
     orgName: string | null;
     project: string;
+    /** Whether the org's public library reads for this reader (P75, `@/lib/library/way-out`); absent: true. */
+    orgLibrary?: boolean;
   },
 ): { href: string; label: string } {
   const back = itemWayBack(from, {
@@ -145,9 +155,11 @@ export function bookBack(
     project: read.project,
     orgName: read.orgName,
   });
-  return back
-    ? { href: back.href, label: back.label }
-    : wayBack(LIBRARY_ORIGIN);
+  const out = reachableWayBack(
+    back ? { href: back.href, label: back.label } : null,
+    { member: read.member, orgLibrary: read.orgLibrary },
+  );
+  return out ? { href: out.href, label: out.label } : wayBack(LIBRARY_ORIGIN);
 }
 
 export async function loadBook(
@@ -162,7 +174,7 @@ export async function loadBook(
   const [book, state]: [KbBook, KbReaderBook | null] = await Promise.all([
     getBook(token, org, project, bookSlug).catch(miss),
     token
-      ? getReaderBook(token, org, project, bookSlug).catch(miss)
+      ? getReaderBook(token, org, project, bookSlug).catch(noState)
       : Promise.resolve(null),
   ]);
   const owner = canonicalOrg(book, org);
@@ -174,6 +186,8 @@ export async function loadBook(
   const signedIn = viewer !== "anon";
   const target = { org: owner, project, book: book.slug };
   const from = originOf(fromRaw, owner, signedIn);
+  // P75: a link reader in an org with nothing Public has no org library to go back to (`@/lib/library/way-out`).
+  const orgLibrary = signedIn ? true : await orgLibraryReadsOnce(owner);
 
   const chapters = orderChapters(book.chapters);
   const M = chapters.length;
@@ -390,6 +404,7 @@ export async function loadBook(
     title: book.title,
     viewer,
     signedIn,
+    share: viewer === "member" ? (book.share ?? null) : null,
     head: headOf({
       title: book.title,
       sub: book.sub?.trim() ?? "",
@@ -420,8 +435,9 @@ export async function loadBook(
       slug: book.org?.slug,
       orgName: book.org?.name || tenant?.name || null,
       project: book.project,
+      orgLibrary,
     }),
-    homeHref: signedIn ? LIBRARY_HREF : publicLibraryHref(owner),
+    homeHref: readerHomeHref({ member: signedIn, org: owner, orgLibrary }),
     signInHref: loginHref(withFrom(bookHref(target), fromRaw ? from : null)),
   };
 }

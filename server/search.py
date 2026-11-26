@@ -29,6 +29,7 @@ import sqlite3
 from typing import Any, Optional
 
 from server import config, db, embeddings
+from server import sections as sections_mod
 
 # Reciprocal Rank Fusion constant: the standard dampener (Cormack et al. 2009). A
 # larger K flattens the contribution of top ranks; 60 is the widely-used default.
@@ -558,3 +559,160 @@ def text_snippets(
     if not match or not ids:
         return {}
     return _text_cuts(conn, match, [int(i) for i in ids], tenant_id=tenant_id)
+
+
+# --- Section search (P75) -------------------------------------------------------------
+#
+# The one section-level read: the reader's search, P68's assistant (in process) and
+# outside agents (``GET /api/sections/search``, MCP ``search``). The same quoted-token
+# MATCH, a weighted bm25 over the section index (``document_sections_fts``: the
+# section's heading 8x, its document's title 2x, its text 1x), fused by RRF with the
+# section vectors (``section_embeddings``) when a key is set. Each hit is one section
+# with its document and a reader URL that lands on it (``sections.reader_url``).
+
+_SECTION_RANK = "bm25(document_sections_fts, 2.0, 8.0, 1.0)"
+_SECTION_SNIPPET = (
+    f"snippet(document_sections_fts, 2, '<mark>', '</mark>', '…', {_SNIPPET_TOKENS})"
+)
+_SECTION_COLUMNS = (
+    "s.id AS sid, s.anchor, s.heading, s.level, s.text, "
+    "d.id AS doc_id, d.project, d.slug, d.title, d.rel_path, d.date, "
+    "cv.book AS book, cv.chapter_key AS chapter_key, cv.lang AS lang"
+)
+_SECTION_JOIN = (
+    "JOIN documents d ON d.id = s.doc_id "
+    "LEFT JOIN chapter_variants cv ON cv.tenant_id = d.tenant_id AND cv.rel_path = d.rel_path"
+)
+
+
+def _section_filters(tenant: Optional[str], project: Optional[str]) -> tuple[str, list[Any]]:
+    sql, params = "", []
+    if tenant is not None:
+        sql += " AND d.tenant_id = ?"
+        params.append(tenant)
+    if project is not None:
+        sql += " AND d.project = ?"
+        params.append(project)
+    return sql, params
+
+
+def _section_vectors(
+    conn: sqlite3.Connection, q: str, tenant: Optional[str], project: Optional[str]
+) -> list[tuple[dict[str, Any], float]]:
+    """Every candidate section with its cosine to ``q``, best first; ``[]`` on no key or
+    any embed failure (keyword-only)."""
+
+    if not config.embeddings_enabled():
+        return []
+    try:
+        qvec = embeddings.embed_texts([q], kind="query")[0]
+    except embeddings.EmbeddingError:
+        return []
+    where, params = _section_filters(tenant, project)
+    rows = conn.execute(
+        f"SELECT {_SECTION_COLUMNS}, e.vector AS _vector FROM document_sections s "
+        f"JOIN section_embeddings e ON e.content_hash = s.content_hash AND e.model = ? "
+        f"{_SECTION_JOIN} WHERE 1 {where}",
+        [config.embedding_model(), *params],
+    ).fetchall()
+    scored = [
+        (dict(r), embeddings.cosine(qvec, embeddings.unpack_vector(r["_vector"]))) for r in rows
+    ]
+    scored.sort(key=lambda p: (p[1], p[0]["sid"]), reverse=True)
+    return scored
+
+
+def search_sections(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    tenant: Optional[str],
+    project: Optional[str] = None,
+    limit: int = 10,
+    viewer: "sections_mod.Viewer",
+) -> dict[str, Any]:
+    """Sections of ``tenant``'s library (``None``: unscoped, legacy) that match ``query``.
+
+    → ``{"results": [...], "total": N, "mode": "bm25"|"hybrid"}``. Each hit:
+    ``{document: {id, rel_path, title, project, book, chapter, lang}, anchor, heading,
+    snippet, score, url}``. ``viewer`` decides what may appear (``sections.Viewer``: a
+    member reads every item; anyone else only the Public ones, so a Link item never
+    appears) and how ``url`` is built. Blank ``query`` -> empty.
+    """
+
+    empty: dict[str, Any] = {"results": [], "total": 0, "mode": "bm25"}
+    if not query or not query.strip():
+        return empty
+    match = build_match_query(query)
+    if not match.strip():
+        return empty
+    where, params = _section_filters(tenant, project)
+    rows = conn.execute(
+        f"SELECT {_SECTION_COLUMNS}, {_SECTION_RANK} AS rank, {_SECTION_SNIPPET} AS snippet "
+        f"FROM document_sections_fts JOIN document_sections s ON s.id = document_sections_fts.rowid "
+        f"{_SECTION_JOIN} WHERE document_sections_fts MATCH ? {where}",
+        [match, *params],
+    ).fetchall()
+
+    def allowed(r: dict[str, Any]) -> bool:
+        kind, key = sections_mod.item_key(r["project"], r["rel_path"], r["book"])
+        return viewer.may_read(r["project"], kind, key)
+
+    records: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        r = dict(row)
+        if allowed(r):
+            r["_bm25"] = round(-float(r["rank"]), 4)
+            records[r["sid"]] = r
+    kw_order = sorted(records.values(), key=lambda r: (r["_bm25"], r["sid"]), reverse=True)
+    vec = [(r, sim) for r, sim in _section_vectors(conn, query, tenant, project) if allowed(r)]
+
+    if not vec:
+        for r in kw_order:
+            r["_score"] = r["_bm25"]
+        ranked, mode = kw_order, "bm25"
+    else:
+        kw_rank = {r["sid"]: i + 1 for i, r in enumerate(kw_order)}
+        vec_rank = {r["sid"]: i + 1 for i, (r, _sim) in enumerate(vec)}
+        for r, _sim in vec:
+            if r["sid"] not in records:
+                r["snippet"] = sections_mod.excerpt(r["text"])
+                records[r["sid"]] = r
+        for sid, r in records.items():
+            score = 0.0
+            if sid in kw_rank:
+                score += 1.0 / (RRF_K + kw_rank[sid])
+            if sid in vec_rank:
+                score += 1.0 / (RRF_K + vec_rank[sid])
+            r["_score"] = round(score, 6)
+        ranked = sorted(records.values(), key=lambda r: (r["_score"], r["sid"]), reverse=True)
+        mode = "hybrid"
+
+    results = []
+    for r in ranked[:limit]:
+        snippet = r.get("snippet") or ""
+        if "<mark>" not in snippet and not snippet.strip():
+            snippet = sections_mod.excerpt(r["text"])
+        results.append(
+            {
+                "document": {
+                    "id": r["doc_id"],
+                    "rel_path": r["rel_path"],
+                    "title": r["title"],
+                    "project": r["project"],
+                    "book": r["book"],
+                    "chapter": r["chapter_key"],
+                    "lang": r["lang"],
+                },
+                "anchor": r["anchor"],
+                "heading": r["heading"],
+                "snippet": snippet,
+                "score": r["_score"],
+                "url": sections_mod.reader_url(
+                    viewer, doc_id=r["doc_id"], project=r["project"], slug=r["slug"],
+                    anchor=r["anchor"], book=r["book"], chapter_key=r["chapter_key"],
+                    lang=r["lang"],
+                ),
+            }
+        )
+    return {"results": results, "total": len(records), "mode": mode}

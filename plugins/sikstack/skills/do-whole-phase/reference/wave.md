@@ -1,6 +1,6 @@
 # A wave: several slices at once (the orchestrator's side)
 
-Read this when `DECOMP` declared the phase's slices (`next` prints `ready_slices=`). *Resume* runs at every session start, after every compaction and before every start or commit; the rest applies when `ready_slices=` lists more than one id, or a slice becomes ready while others run. The executor's side is `playbooks/wave.md`. `/do-next-slice` never runs a wave; an explain phase declares nothing.
+Read this when `DECOMP` declared the phase's slices (`next` prints `ready_slices=`). *Resume* runs at every session start, after every compaction and before every start or commit; the rest applies when `ready_slices=` lists more than one id, or a slice becomes ready while others run. The executor's side is `playbooks/wave.md`. `/do-next-slice` never runs a wave.
 
 ## What the engine prints
 

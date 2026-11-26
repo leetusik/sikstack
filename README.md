@@ -53,9 +53,8 @@ code you confirm does.
 
 - `plugins/sikstack/`: the sikstack plugin, the workflow engine and its skills, agents and hooks
   ([`CHANGELOG.md`](plugins/sikstack/CHANGELOG.md)). Its history before the move is
-  `leetusik/bootstrap_agentic_workspace.sh`'s.
-- `plugins/explain/`: a second plugin, `explain`, that writes a chapter from the code and your phases' records
-  into your Library. It is on hold and not in the marketplace yet.
+  `leetusik/bootstrap_agentic_workspace.sh`'s. Its `/sikstack:explain` skill writes a document or a book from your
+  code (and your phases' records, when you keep them) and publishes it to your Library.
 - `server/`, `web/`, `cli/`, `mcp-server/`, `tools/listen-runner/`: the services behind sikstack.com.
 - `.claude-plugin/marketplace.json`: the marketplace, which lists the sikstack plugin.
 

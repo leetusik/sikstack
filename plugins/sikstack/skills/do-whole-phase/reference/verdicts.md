@@ -1,6 +1,6 @@
 # Verdicts, escalation and the commit
 
-**Trust the verdict.** Read the returned block and the head of `result.md` (its durable copy; read further only on a verdict other than `done`), then `sikstack check` (state only; never re-run the slice's tests). The fields you read: `status`, `route`, `model`, `effort`, `summary`, `files_changed`, `validation`, `claims`, `deviations`, plus the playbook's own (`parallel`, `notebook`, `review_verdict`, `walkthrough`, `pr_bodies`, `code_read`, `explain`).
+**Trust the verdict.** Read the returned block and the head of `result.md` (its durable copy; read further only on a verdict other than `done`), then `sikstack check` (state only; never re-run the slice's tests). The fields you read: `status`, `route`, `model`, `effort`, `summary`, `files_changed`, `validation`, `claims`, `deviations`, plus the playbook's own (`parallel`, `notebook`, `review_verdict`, `walkthrough`, `pr_bodies`, `code_read`).
 
 - `done` → `slice finish <slice_id> --outcome "<summary>"`, `check`, commit.
 - `needs_operator` → `slice status <slice_id> pending --stop-kind decision|operator-action --on-words "<its operator_need>"`, report, STOP.

@@ -5,8 +5,8 @@ over HTTP from one process. Both are thin proxies: each tool calls the platform'
 REST API and **forwards the caller's** `Authorization: Bearer vk_…` upstream, so
 every scope and permission check stays in the API. Nothing is reimplemented here.
 
-- **The Library** at **`/mcp`**: the read tools `search` and `fetch_document`
-  (proxying `GET /api/search` and the single-document reads).
+- **The Library** at **`/mcp`**: the read tools `search` (sections), `fetch` and
+  `list_library` (contract v2; `fetch_document` stays one version as `fetch`'s alias).
 - **Feedback** at **`/feedback/mcp`**: write-only, one tool, `capture_feedback`
   (proxying `POST /api/feedback`).
 
@@ -23,16 +23,17 @@ Public URLs: `https://sikstack.com/mcp` and `https://sikstack.com/feedback/mcp`.
 - **Auth:** `initialize` and `tools/list` need no key on either endpoint. Each tool
   call forwards the bearer and the API decides: a missing/invalid key → the tool
   error `unauthorized: missing/invalid bearer`.
-- **Tool `search`** — `search(query, project?, limit?)` → `{query, total, results[]}`,
-  each hit `{title, snippet, url, id, rel_path}`:
+- **Tool `search`** — `search(query, project?, limit?)` → `{query, mode, total,
+  results[]}`, each hit one **section** `{title, heading, anchor, snippet, url, id,
+  rel_path, project, book, chapter}` (proxying `GET /api/sections/search`):
   - `snippet` — the FTS excerpt with `<mark>`/`</mark>` highlight tags stripped.
-  - `url` — the document's public citation origin when one exists, else `""`.
-    No document carries an origin today, so `url` is empty for the whole current
-    corpus; it lights up non-breakingly once a future `source_url` ingester job
-    populates it. (It is deliberately *not* pointed at the login-gated web app or
-    the retired mkdocs path — a dead/misleading citation is worse than empty.)
-  - `id`, `rel_path` — durable handles for stable citations and `fetch_document`.
-- **Tool `fetch_document`** — one document's size-capped body by `id` or `rel_path`.
+  - `url` — the reader address that lands on the section (`…#<anchor>`).
+  - `id`, `rel_path`, `anchor` — what `fetch` takes.
+- **Tool `fetch`** — one document's size-capped body by `id` or `rel_path`, or with
+  `anchor` only that section's text. **`fetch_document`** is its deprecated v1 alias,
+  kept for one contract version.
+- **Tool `list_library`** — the key's books with their chapters, plus loose documents
+  (proxying `GET /api/library`).
 - **Tool `capture_feedback`** (on `/feedback/mcp` only) — `capture_feedback(message,
   source{product, integration?}, …)` stores one feedback event and returns
   `Accepted feedback capture <request_id>` with `{request_id, accepted_at, status}`.
@@ -50,7 +51,7 @@ Public URLs: `https://sikstack.com/mcp` and `https://sikstack.com/feedback/mcp`.
 | `MCP_STATELESS_HTTP` | `0` | `1` to run the Streamable-HTTP transport statelessly (no session affinity); applies to both endpoints. |
 | `MCP_ALLOWED_HOSTS` | *(localhost only)* | Extra `Host` values both endpoints accept (comma-separated). A port-less public host needs an exact entry (`sikstack.com`); a host with a port needs `name:*`. |
 | `MCP_ALLOWED_ORIGINS` | *(localhost only)* | Extra `Origin` values both endpoints accept (an absent Origin always passes). |
-| `MCP_FETCH_MAX_CHARS` | `20000` | `fetch_document`'s character cap. |
+| `MCP_FETCH_MAX_CHARS` | `20000` | `fetch`'s character cap. |
 
 ## Run locally
 

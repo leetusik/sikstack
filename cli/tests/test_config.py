@@ -1,10 +1,9 @@
-"""Pins the config-seam contract documented at plugins/explain/skills/explain/SKILL.md:31-78.
+"""Pins the config-seam contract `config.resolve()` ported from the old explain plugin.
 
-`config.py` is a *second* implementation of a contract whose first implementation
-is an inline heredoc inside a SKILL.md the CLI must never edit. They cannot be
-merged (the skill must work with the CLI uninstalled) and so they can drift.
-These tests are the thing that catches the drift: each one restates a rule the
-skill's resolver already obeys. If a rule changes, change both sides.
+That plugin's resolver (an inline heredoc in its skill card, deleted with sikstack
+plugin 0.10.0) was the seam's first implementation; `config.py` is now its only one.
+Each test restates a rule that resolver obeyed, so a change to the seam is a
+deliberate one.
 
 Every test runs under an isolated HOME + XDG_CONFIG_HOME: the operator's real
 ~/.config/knowledge-kb/config.json is never read or written.
@@ -38,7 +37,7 @@ def write_cfg(home, payload):
 
 
 def make_legacy(home):
-    """The pre-/explain:setup convention: ~/projects/personal/knowledge/mkdocs.yml."""
+    """The convention from before the config file: ~/projects/personal/knowledge/mkdocs.yml."""
 
     root = home / "projects" / "personal" / "knowledge"
     root.mkdir(parents=True)
@@ -93,7 +92,7 @@ def test_env_overrides_are_per_key_and_site_base_url_has_none(home, monkeypatch)
     assert resolved.api_token == "vk_from_env"  # overridden
     assert resolved.api_base_url == "http://cfg:1"  # its neighbour is untouched
     assert resolved.kb_root == "/from/cfg"
-    assert resolved.site_base_url == "http://cfg-site:2"  # SKILL.md:69: no env override
+    assert resolved.site_base_url == "http://cfg-site:2"  # no env override (as in the old resolver)
 
 
 def test_empty_env_var_is_treated_as_unset(home, monkeypatch):

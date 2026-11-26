@@ -249,6 +249,9 @@ describe("publishing is the owner's", () => {
     expect(head(true)).toContain("Make public");
     expect(head(false)).not.toContain("Make public");
     expect(head(false)).not.toContain("Make private");
-    expect(head(false)).toContain("Private");
+    // P75: the badge names the project's default for new items, not the items' sharing.
+    expect(head(false)).toContain("New items members only");
+    expect(head(true)).toContain("Each one keeps its own sharing");
+    expect(head(false)).not.toContain("Each one keeps its own sharing");
   });
 });

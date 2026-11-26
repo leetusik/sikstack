@@ -23,7 +23,7 @@ SEAMS = {
         '_find_phase_dir', '_freeze_host_review_base', '_freeze_repo_anchors', '_parallel_verdict_pair',
         '_phase_repo_path', '_pr_label', '_pr_next_lines', '_pr_open_entries', '_pr_registry_names',
         '_repo_anchor_problems', '_repo_current_branch', '_pr_draft_advice', '_unstamped_set_warning',
-        'explain_unit_lines', 'merge_ready_line', 'nested_next_lines', 'nested_repo_checks', 'new_pr_block',
+        'merge_ready_line', 'nested_next_lines', 'nested_repo_checks', 'new_pr_block',
         'parallel_start_hint', 'pr_block_problems', 'pr_lines', 'pr_open_items', 'pr_open_lines', '_pr_open_hint',
         'pr_rules_validate', 'pr_stack_items', 'pr_stack_lines',
     ),
@@ -127,12 +127,10 @@ NESTED_CONVERTED_KEYS = ("repo", "old_nested", "at")
 NESTED_HOST_BRANCH_REQUIRED = (
     "worktree start in a nested install needs --host-branch <name>: the host repo's branch for this phase's product commits, "
     "named by the host's own convention for branches (see repo convention), with no workspace phase/slice IDs in it; "
-    "an existing branch is reused when no host worktree has it checked out (an explain phase may omit it: v86 cuts its host worktree "
-    "detached, since an explain makes no host commit) -- nothing was written")
-# v86 (§9.4): a worktree SET's repos ride beside a host BRANCH; only an explain phase's lone pair may be detached.
+    "an existing branch is reused when no host worktree has it checked out -- nothing was written")
+# v86 (§9.4): a worktree SET's repos ride beside a host BRANCH.
 NESTED_SET_NEEDS_HOST_BRANCH = (
-    "--repo and --repo-base need --host-branch <name>: a worktree set's host half is a branch the operator names; only an explain "
-    "phase's plain pair may omit it (a detached host worktree, no host branch) -- nothing was written")
+    "--repo and --repo-base need --host-branch <name>: a worktree set's host half is a branch the operator names -- nothing was written")
 # phase.json `host_anchors` (nested only): the host HEAD at phase new and at the passing review --
 # phase scope's range in the host repo, whose commits the nested repo never sees. `review_base`
 # (P40, optional) is written at the passing review only when the base rule resolved something other
@@ -540,10 +538,6 @@ BUSY_PHASE_STATUSES = ("in_progress", "in_review", "pending", "blocked")
 # this checkout's copy of another stream's phase.json is frozen at the stamp, and rewriting it would collide
 # with that stream's own writes; agenda-delete leaves such a link (validate then warns of it, dangling).
 GATE_EXEMPT_ADDED_PREFIXES = ("works/agenda/",)
-# An explain phase's publishable unit (`- unit:` in intent.md's `## Explain`); absent reads `book`,
-# the only unit before v86.
-EXPLAIN_UNITS = ("document", "book", "chapter")
-EXPLAIN_UNIT_DEFAULT = "book"
 # Regenerated from works/phases/** by `worktree merge-finish`; never merged by hand (see .gitattributes).
 # docs/current/*.md are plain files agents edit, so they are not among them.
 GENERATED_FILES = ("works/state.json", "works/index.json", "works/backlog.md", "works/agenda.md")
@@ -918,7 +912,7 @@ HOST_DETACHED = object()  # v86: the ## Streams Host branch cell of a detached h
 
 
 def _host_branch_cell(execution: dict):
-    """The Host branch cell's value: the stamped branch, `HOST_DETACHED` for an explain phase's detached
+    """The Host branch cell's value: the stamped branch, `HOST_DETACHED` for a detached
     host worktree (`host_branch` stamped null beside the other host keys, v86), else None (`-`)."""
     if execution.get("host_branch"):
         return execution["host_branch"]
@@ -936,7 +930,7 @@ def _nested_execution_problems(phase_id: str, execution: dict) -> list:
     nested install; `base_branch` comes with them there, and is otherwise only type-checked (a root
     stamp of it is additive). `worktree` is the nested worktree: `<host_worktree>/<workflow>` while
     both are set. A block without any of them (every at-root block, and a legacy one) is untouched.
-    v86 (§9.4): `host_branch` may be null -- a DETACHED host worktree (an explain phase's) -- and then
+    v86 (§9.4): `host_branch` may be null -- a DETACHED host worktree (cut by an engine before 0.10.0 for an old phase kind) -- and then
     `host_branch_created` must be false and the block carries no `repos` (a set needs a host branch)."""
     problems = []
     present = [k for k in NESTED_EXECUTION_HOST_KEYS if k in execution]
@@ -1692,36 +1686,7 @@ def declaration_checks(phase: dict, s: dict, errors: list, warnings: list) -> No
 # Declaration at the cut (v77; advice since the thin engine). A decomposition should leave every open middle
 # slice of its phase DECLARED, so slice finish on a decomposition prints one advice: line per undeclared one,
 # which runs alone. The engine, not the decomposition's prose, determines what may run together
-# (parallel_plan). An explain phase
-# (`## Explain` in intent.md) is exempt: its chapters stay undeclared by design, as fix slices do. slice deps
-# declares a slice that was cut without the flag.
-def explain_phase(pdir: Path) -> bool:
-    """True when the phase's intent.md carries the `## Explain` section (the explain route's only marker)."""
-    intent = pdir / "intent.md"
-    return intent.is_file() and any(line.strip() == "## Explain" for line in intent.read_text(encoding="utf-8").split("\n"))
-
-
-def explain_unit(pdir: Path):
-    """An explain phase's publishable unit: the `- unit:` value in intent.md's `## Explain` section
-    (`document` | `book` | `chapter`, lower-cased, as written: `validate` reports an unknown one), or
-    `book` when the field is absent -- every explain phase before v86 is a book. None for a phase that
-    is not an explain phase. `next` prints it so the orchestrator picks its reference branch."""
-    if not explain_phase(pdir):
-        return None
-    inside = False
-    for line in (pdir / "intent.md").read_text(encoding="utf-8").split("\n"):
-        text = line.strip()
-        if text.startswith("## "):
-            if inside:
-                break
-            inside = text == "## Explain"
-            continue
-        if inside:
-            m = re.match(r"[-*]\s+unit\s*:\s*(.*)$", text, re.IGNORECASE)
-            if m:
-                value = m.group(1).strip().strip("`").strip()
-                return value.split()[0].lower() if value else EXPLAIN_UNIT_DEFAULT
-    return EXPLAIN_UNIT_DEFAULT
+# (parallel_plan). Fix slices stay undeclared by design. slice deps declares a slice that was cut without the flag.
 
 
 def undeclared_middle_slices(phase: dict) -> list:
@@ -3038,10 +3003,6 @@ def validate() -> int:
             errors.extend(f"phase {p['id']} {problem}" for problem in pr_block_problems(p["pr"], _pr_registry_names()))
         if not (ACTIVE / p["id"] / "intent.md").exists():
             warnings.append(f"phase {p['id']} has no intent.md (expected {p['id']}/intent.md); capture operator intent via the create-phase skill")
-        unit = explain_unit(ACTIVE / p["id"])
-        if unit is not None and unit not in EXPLAIN_UNITS:
-            errors.append(f"phase {p['id']} has an unknown explain unit {unit!r} in intent.md's ## Explain; expected one of "
-                          f"{', '.join(EXPLAIN_UNITS)} (an absent unit reads {EXPLAIN_UNIT_DEFAULT})")
         # Bounded notebook (v35). Warnings only: `validate` prints them and still exits 0.
         # A `done` phase is skipped for the budget: its notebook is closed history waiting
         # to be archived, so "rewrite it under budget" is advice nobody can act on -- the
@@ -3368,7 +3329,7 @@ def set_slice_deps(args: argparse.Namespace) -> None:
 
 def cmd_parallel_plan(args: argparse.Namespace) -> None:
     """`phase rounds`: what the engine lets run together in a phase (v77): its open slices in rounds, the
-    undeclared middle slices (each runs alone), and, for an explain phase, that it stays sequential.
+    undeclared middle slices (each runs alone).
     Read-only: the decomposition runs it before it returns, and slice finish prints the same plan."""
     pdir = require_phase(args.phase)
     phase = _active_phase(pdir.name) or {}
@@ -3378,9 +3339,6 @@ def cmd_parallel_plan(args: argparse.Namespace) -> None:
         return
     for line in lines:
         print(line)
-    if explain_phase(pdir):
-        print("note: an explain phase's chapters stay undeclared and run one at a time")
-        return
     loose = undeclared_middle_slices(phase)
     if loose:
         print(f"undeclared={', '.join(str(s.get('id')) for s in loose)} (advice: each runs alone until it is declared: "
@@ -3453,7 +3411,7 @@ def finish_slice(args: argparse.Namespace) -> None:
     pdir = sdir.parents[1]  # .../<phase>/slices/<slice> -> <phase>
     decomposition = read_json(sdir / "slice.json").get("kind") == "decomposition"
     loose = []
-    if decomposition and not explain_phase(pdir):  # v77: the cut decides parallelism; an undeclared slice runs alone
+    if decomposition:  # v77: the cut decides parallelism; an undeclared slice runs alone
         loose = undeclared_middle_slices(_active_phase(pdir.name) or {})
     outcome = (getattr(args, "outcome", None) or "").strip()
     if outcome:  # stored before the status change, so the rebuild it triggers renders the row
@@ -3985,8 +3943,6 @@ def cmd_next(args: argparse.Namespace) -> None:
                 gate = phase_acceptance(pdata)
                 clear = f"gate {waiting} clear --words \"<the operator's words>\""
         print(f"current_phase={state.get('current_phase')}")
-        for line in explain_unit_lines(state.get("current_phase")):
-            print(line)
         for line in _pr_next_lines(state.get("current_phase")):  # P51: silent for a phase without a pr block
             print(line)
         print(f"waiting_on_operator={waiting}")
@@ -4018,8 +3974,6 @@ def cmd_next(args: argparse.Namespace) -> None:
     if not current_slice:
         if state.get("current_phase"):
             print(f"current_phase={state['current_phase']}")
-            for line in explain_unit_lines(state["current_phase"]):
-                print(line)
             for line in _pr_next_lines(state["current_phase"]):
                 print(line)
             print("no open slice in the current phase; review/archive it or create a new phase")
@@ -4028,8 +3982,6 @@ def cmd_next(args: argparse.Namespace) -> None:
         return
     sdir = require_slice(current_slice)
     print(f"current_phase={current_slice.split('.', 1)[0]}")
-    for line in explain_unit_lines(current_slice.split(".", 1)[0]):
-        print(line)
     for line in _pr_next_lines(current_slice.split(".", 1)[0]):
         print(line)
     print(f"current_slice={current_slice}")
