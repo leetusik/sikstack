@@ -41,7 +41,8 @@ apply   a separate slice moves the signed files into production
 
 - **Open.** Quote the operator's request verbatim. Take a screenshot of the page as it is today (the design build,
   or the product in `## Operator Runtime`) when one exists. Write `brief.md` in the slice folder: the words, the
-  screenshot paths, the pages in play (each by its entry or route) and their states, what must not change, the taste file's path. Nothing in it is a
+  screenshot paths, the pages in play (each by its entry or route) and their states, the devices (1440, 768, 375;
+  none named means all three), what must not change, the taste file's path. Nothing in it is a
   decision of yours.
 - **Draft.** `sikstack-adapter route --drafter --phase <P>` names the model (the design row, or the phase's
   `Drafter:` line); dispatch `sikstack:design-drafter` in the background with the brief's path, the folder, its

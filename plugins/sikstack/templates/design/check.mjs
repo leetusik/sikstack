@@ -5,18 +5,33 @@
 // product's production-exclusion check (platform's `pnpm --dir web design:check` proves production holds none of
 // the design; it measures no page).
 //
-// What fails, at 1440 and 390 px wide, on every page and every state the page lists:
+// Widths: desktop 1440 (a 900 px window), tablet 768 (1024) and phone 375 (812), the iPhone 13 mini: a page that
+// fits it fits every phone. A phone width (under 600) runs twice: in Chrome through playwright-cli, and in WebKit
+// 18.2 with the iPhone 13 Mini profile (every iOS browser is WebKit; this old one is pinned because it shows a class
+// of grid bug newer WebKit builds do not: an auto-fit grid that is its own size container lays out 0 px columns).
+// The WebKit driver is playwright-core 1.49.1, installed on first use into a cache outside any repo (about 63 MiB,
+// once; SIKSTACK_WEBKIT_HOME moves it). When it cannot be installed or launched the check stops with a driver error;
+// it never skips WebKit silently. --no-webkit skips it on purpose, and the ok line says so.
+//
+// What fails, at every width, on every page and every state the page lists:
 //   console    a console error or an uncaught page error
 //   request    a failed request, or a response of 400 or more
-//   overflow   the page scrolls sideways; the crop is the element that sticks out
+//   overflow   the page scrolls sideways; the crop is the element that sticks out. On WebKit, also a page laid
+//              out wider than the phone (no <meta name="viewport">)
 //   clipped    an element's own text cut off by overflow hidden or clip (an ellipsis or a line clamp is fine)
-//   overlap    two controls that overlap, or a control another element covers
+//   overlap    two controls that overlap, or a control another element covers; or two runs of text of different
+//              elements drawn on one spot (two labels on top of each other)
 //   target     a control under 24 x 24 px with less than 24 px of room around it (WCAG 2.5.8; inline text links
 //              in a sentence are exempt)
 //   state      the page does not show the state its run names (below); that run is not measured
-// A control is measured where it shows: cut by every scroll or clip box around it, so a row scrolled out of a
-// capped table is neither overlapping nor a target. Each crop outlines what failed (both elements of an overlap,
-// red then blue) and keeps context around it: 48 px each side, at least 360 x 220, clamped to the page.
+// A control or a run of text is measured where it shows: cut by every scroll or clip box around it, so a row
+// scrolled out of a capped table is neither overlapping nor a target. What is not painted is not measured: under an
+// opacity: 0 ancestor (a skip link hidden until focused), visibility: hidden, or visually hidden text. Something laid
+// over the page on purpose is not compared with what it lies over, for text and controls alike: an open menu or
+// dialog (a dialog or popover open, a box lifted by z-index over its own background, a backdrop over the whole
+// window; a transparent one only while a control says aria-expanded="true" or a dialog is open), and a fixed or
+// sticky bar while the page scrolls out from under it. Each crop outlines what failed (both elements of an overlap, red then blue) and keeps context around it:
+// 48 px each side, at least 360 x 220, clamped to the page.
 // The design-only state widget ([data-design-states]) is never measured.
 //
 // Pages: the build's out/manifest.json (each pages[].entry; --all-entries adds pages[].entries and presetItems),
@@ -31,25 +46,38 @@
 // --shots <dir> also saves what a person sees, for the design critic to open: every measured run's page in
 // viewport-height tiles from the top (at most 12 a run), <page>-w<width>-<state>-t<n>.png. Without it, none.
 //
-// Needs playwright-cli (npm install -g @playwright/cli@0.1.25) and a server already serving the build.
+// Needs playwright-cli (npm install -g @playwright/cli@0.1.25), npm for the WebKit driver's first install, and a
+// server already serving the build.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const USAGE = `usage: node check.mjs --base <url> [--manifest <out/manifest.json>] [--all-entries] [--widths <w,w>] [--out <dir>] [--shots <dir>] [<url-or-path> ...]
+/** The widths a design is measured at when none are named: desktop, tablet, phone (the iPhone 13 mini). */
+export const DEFAULT_WIDTHS = [1440, 768, 375];
+/** A width under this is a phone: it also runs on WebKit. */
+export const PHONE_MAX = 600;
+/** The window's height at a width: a phone 812 (the iPhone 13 mini), a tablet 1024, a desktop 900. */
+export const viewportHeight = (w) => (w < PHONE_MAX ? 812 : w <= 1024 ? 1024 : 900);
+/** The phone engine: WebKit 18.2 (build 2104) from playwright-core 1.49.1, with its iPhone 13 Mini profile. */
+export const WEBKIT = { core: "1.49.1", name: "WebKit 18.2", device: "iPhone 13 Mini" };
+
+export const USAGE = `usage: node check.mjs --base <url> [--manifest <out/manifest.json>] [--all-entries] [--widths <w,w,w>] [--no-webkit] [--out <dir>] [--shots <dir>] [<url-or-path> ...]
   --base         the server the build is served on, e.g. http://127.0.0.1:3042 (paths are joined to it)
   --manifest     the build's manifest; its pages are checked (default: none, the URLs given)
   --all-entries  also check each page's other entries (pages[].entries, presetItems)
-  --widths       comma-separated widths (default: 1440,390)
+  --widths       comma-separated widths (default: 1440,768,375: desktop, tablet, phone)
+  --no-webkit    do not run the phone widths (under 600) a second time on ${WEBKIT.name} (default: run them; the
+                 driver, playwright-core ${WEBKIT.core}, installs on first use into a cache, SIKSTACK_WEBKIT_HOME)
   --out          the folder for the cropped screenshots (default: ./design-check)
   --shots        also save every measured run as viewport-height tiles in this folder (default: none)
 Each run opens in a fresh browser context (empty storage); a page with a state widget must show the state its run names.
 exit 0: nothing failed, one ok line
 exit 1: layout failures, one FAIL line each (console, request, overflow, clipped, overlap, target, state)
-exit 2: a usage error, or a driver error (no server, a playwright-cli failure, the check's page script failing),
-        printed as "driver error: ..."; nothing after it is checked`;
+exit 2: a usage error, or a driver error (no server, a playwright-cli failure, WebKit not installed or not
+        launching, the check's page script failing), printed as "driver error: ..."; nothing after it is checked`;
 
 /** The pages to check, from a build manifest: each page's entry (and, with allEntries, its other entries),
  * with its listed state keys, or null when the manifest lists none (the state widget is read instead). */
@@ -71,23 +99,37 @@ export function stateUrl(url, base, state) {
 }
 
 /** The run plan: every page (its states known: a list, empty when it has no widget) at every width, the default
- * first (the page with no state, which must show the first listed state), then each other state. Every step opens
- * in a fresh browser context, so nothing one run stores reaches the next. Pure: no browser, no file. */
-export function plan(pages, widths, base) {
+ * first (the page with no state, which must show the first listed state), then each other state, in Chrome. With
+ * { webkit: true }, the same runs at each phone width (under 600) follow, on WebKit. Every step opens in a fresh
+ * browser context, so nothing one run stores reaches the next. Pure: no browser, no file. */
+export function plan(pages, widths, base, { webkit = false } = {}) {
   const steps = [];
-  for (const p of pages) {
-    const states = p.states ?? [];
-    for (const width of widths) {
-      steps.push({ page: p.url, name: p.name, url: stateUrl(p.url, base, null), width, state: null, expect: states[0] ?? null, fresh: true });
-      for (const s of states.slice(1)) steps.push({ page: p.url, name: p.name, url: stateUrl(p.url, base, s), width, state: s, expect: s, fresh: true });
+  const walk = (ws, engine) => {
+    for (const p of pages) {
+      const states = p.states ?? [];
+      for (const width of ws) {
+        steps.push({ page: p.url, name: p.name, url: stateUrl(p.url, base, null), width, engine, state: null, expect: states[0] ?? null, fresh: true });
+        for (const s of states.slice(1)) steps.push({ page: p.url, name: p.name, url: stateUrl(p.url, base, s), width, engine, state: s, expect: s, fresh: true });
+      }
     }
-  }
+  };
+  walk(widths, "chromium");
+  if (webkit) walk(widths.filter((w) => w < PHONE_MAX), "webkit");
   return steps;
+}
+
+/** The browser context's options for a run: its width and window height; on WebKit, the iPhone 13 Mini profile
+ * (user agent, scale, touch, a mobile viewport) at that width. `devices` is playwright-core's table. */
+export function contextOptions(width, engine, devices = null) {
+  const viewport = { width, height: viewportHeight(width) };
+  if (engine !== "webkit") return { viewport };
+  const { defaultBrowserType, ...device } = devices[WEBKIT.device];
+  return { ...device, viewport, screen: viewport };
 }
 
 /** The discovery run for a page the manifest lists no states for: its state widget's keys, read at one width. */
 export function discoverStep(p, width, base) {
-  return { page: p.url, name: p.name, url: stateUrl(p.url, base, null), width, state: null, expect: null, fresh: true, discover: true };
+  return { page: p.url, name: p.name, url: stateUrl(p.url, base, null), width, engine: "chromium", state: null, expect: null, fresh: true, discover: true };
 }
 
 export class DriverError extends Error {}
@@ -135,6 +177,94 @@ export function makeDriver(session, scratch) {
   return { cli, firstLines, runCode };
 }
 
+/** Where the WebKit driver lives: SIKSTACK_WEBKIT_HOME, else a folder in the user's cache (never in a repo). */
+export function webkitHome(env = process.env) {
+  if (env.SIKSTACK_WEBKIT_HOME) return path.resolve(env.SIKSTACK_WEBKIT_HOME);
+  const cache = env.XDG_CACHE_HOME || (process.platform === "darwin" ? path.join(homedir(), "Library", "Caches") : path.join(homedir(), ".cache"));
+  return path.join(cache, "sikstack", `playwright-core-${WEBKIT.core}`);
+}
+
+const coreAt = (home) => path.join(home, "node_modules", "playwright-core");
+const coreVersion = (home) => {
+  try {
+    return JSON.parse(readFileSync(path.join(coreAt(home), "package.json"), "utf8")).version;
+  } catch {
+    return null;
+  }
+};
+
+/** Whether the WebKit driver is ready without installing anything: the pinned playwright-core in its home and its
+ * WebKit build on disk. (The smoke runs its WebKit fixture only then.) */
+export function webkitReady(env = process.env) {
+  const home = webkitHome(env);
+  if (coreVersion(home) !== WEBKIT.core) return false;
+  try {
+    return existsSync(createRequire(path.join(home, "package.json"))(coreAt(home)).webkit.executablePath());
+  } catch {
+    return false;
+  }
+}
+
+/** The WebKit driver: playwright-core 1.49.1's WebKit 18.2 in this process, installed on first use. Its runCode runs
+ * the same page-side script the playwright-cli driver runs, handed a page of its own browser. Every failure to
+ * install, launch or run is a DriverError: never a silent skip. log(line) reports an install. */
+export async function makeWebkitDriver(log = (l) => console.error(l)) {
+  const home = webkitHome();
+  const sh = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 << 20 });
+  const tail = (r) => `${r.error ? r.error.message : ""} ${r.stderr ?? ""} ${r.stdout ?? ""}`.trim().split("\n").slice(-3).join(" ");
+  const by_hand = `install it by hand (npm install --prefix ${home} playwright-core@${WEBKIT.core}, then node ${coreAt(home)}/cli.js install webkit), or run with --no-webkit`;
+  if (coreVersion(home) !== WEBKIT.core) {
+    log(`layout check: installing ${WEBKIT.name}'s driver, playwright-core ${WEBKIT.core}, into ${home} (once)`);
+    const staging = `${home}.part-${process.pid}`;
+    try {
+      mkdirSync(path.dirname(home), { recursive: true });
+    } catch (e) {
+      throw new DriverError(`${WEBKIT.name}: cannot make ${path.dirname(home)}: ${e.message}; ${by_hand}`);
+    }
+    rmSync(staging, { recursive: true, force: true });
+    const r = sh("npm", ["install", "--prefix", staging, "--no-audit", "--no-fund", "--loglevel=error", `playwright-core@${WEBKIT.core}`]);
+    if (r.status !== 0 || coreVersion(staging) !== WEBKIT.core) {
+      rmSync(staging, { recursive: true, force: true });
+      throw new DriverError(`${WEBKIT.name}: npm could not install playwright-core ${WEBKIT.core}: ${tail(r)}; ${by_hand}`);
+    }
+    rmSync(home, { recursive: true, force: true });
+    renameSync(staging, home);
+  }
+  let pc;
+  try {
+    pc = createRequire(path.join(home, "package.json"))(coreAt(home));
+  } catch (e) {
+    throw new DriverError(`${WEBKIT.name}: cannot load playwright-core from ${home}: ${e.message}; ${by_hand}`);
+  }
+  if (!existsSync(pc.webkit.executablePath())) {
+    log(`layout check: installing ${WEBKIT.name} (playwright's WebKit build for playwright-core ${WEBKIT.core}, about 63 MiB, once)`);
+    const r = sh(process.execPath, [path.join(coreAt(home), "cli.js"), "install", "webkit"]);
+    if (r.status !== 0) throw new DriverError(`${WEBKIT.name}: the browser install failed: ${tail(r)}; ${by_hand}`);
+  }
+  let browser;
+  try {
+    browser = await pc.webkit.launch();
+  } catch (e) {
+    throw new DriverError(`${WEBKIT.name} does not launch here: ${String(e.message).split("\n").slice(0, 3).join(" ")}; run with --no-webkit to skip it`);
+  }
+  const session = await (await browser.newContext()).newPage();
+  const runCode = async (source, at) => {
+    let v;
+    try {
+      // the same `async sessionPage => {...}` text playwright-cli's run-code takes, called on this browser's page
+      v = await (0, eval)(`(${source})`)(session);
+    } catch (e) {
+      throw new DriverError(`${at} webkit :: ${String(e && e.message || e).split("\n").slice(0, 3).join(" ")}`);
+    }
+    try {
+      return JSON.parse(v);
+    } catch {
+      throw new DriverError(`${at} webkit :: the page script answered no result`);
+    }
+  };
+  return { runCode, devices: pc.devices, version: browser.version(), close: () => browser.close().catch(() => {}) };
+}
+
 // The page-side run: one playwright-cli run-code call per step, in a fresh browser context it opens and closes.
 // It returns { failures: [...], states: [...], shows, widget }.
 const RUN = String.raw`async sessionPage => {
@@ -142,7 +272,7 @@ const RUN = String.raw`async sessionPage => {
   const C = __CFG__;
   const browser = sessionPage.context().browser();
   if (!browser) throw new Error("the session's browser cannot open a fresh context (a persistent profile?)");
-  const ctx = C.fresh ? await browser.newContext({ viewport: { width: C.width, height: C.width < 600 ? 844 : 900 } }) : sessionPage.context();
+  const ctx = C.fresh ? await browser.newContext(C.ctx) : sessionPage.context();
   const page = C.fresh ? await ctx.newPage() : sessionPage;
   const failures = [];
   // A failed load is reported once, as its request; its console twin ("Failed to load resource") is dropped.
@@ -153,7 +283,7 @@ const RUN = String.raw`async sessionPage => {
   page.on("console", onConsole); page.on("pageerror", onError); page.on("requestfailed", onFailed); page.on("response", onResponse);
   let states = [], shows = null, widget = false, tiles = 0;
   try {
-    if (!C.fresh) await page.setViewportSize({ width: C.width, height: C.width < 600 ? 844 : 900 });
+    if (!C.fresh) await page.setViewportSize(C.ctx.viewport);
     const resp = await page.goto(C.url, { waitUntil: "networkidle", timeout: 30000 });
     if (!resp || !page.url().startsWith("http")) throw new Error("did not load " + C.url + " (at " + page.url() + ")");
     if (resp.status() >= 400) failures.push({ kind: "request", detail: resp.status() + " " + C.url });
@@ -163,21 +293,64 @@ const RUN = String.raw`async sessionPage => {
     if (C.discover) return JSON.stringify({ failures: [], states, shows, widget });
     if (C.expect !== null && shows !== C.expect) {
       const png = C.shot + "-state.png";
-      await page.screenshot({ path: png });
+      await page.screenshot({ path: png, scale: "css" });
       return JSON.stringify({ failures: [{ kind: "state", detail: (widget ? "shows " + (shows === null ? "no marked state" : shows) : "has no state widget") + ", not " + C.expect + "; not measured", png }], states, shows, widget, mismatch: true });
     }
-    const found = await page.evaluate(() => {
+    const found = await page.evaluate((C) => {
       const W = innerWidth, out = [];
       const skip = (el) => !!el.closest("[data-design-states]");
+      // faded: under an opacity: 0 ancestor (or itself at 0), so nothing of it is painted (a skip link hidden until focused)
+      const fadedMemo = new Map();
+      const faded = (el) => {
+        if (!el || el === document.documentElement) return false;
+        if (fadedMemo.has(el)) return fadedMemo.get(el);
+        const v = Number(getComputedStyle(el).opacity) === 0 || faded(el.parentElement);
+        fadedMemo.set(el, v);
+        return v;
+      };
       const visible = (el) => {
         const s = getComputedStyle(el), r = el.getBoundingClientRect();
-        return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0 && r.width > 1 && r.height > 1;
+        return s.visibility !== "hidden" && s.display !== "none" && !faded(el) && r.width > 1 && r.height > 1;
       };
       const box = (r) => ({ x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height });
       const label = (el) => {
         const t = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("title") || "").trim().replace(/\s+/g, " ");
         return el.tagName.toLowerCase() + (t ? ' "' + t.slice(0, 50) + '"' : "");
       };
+      // The layer an element is drawn in: the nearest box laid over the page on purpose, or null (the page). "over" is
+      // an open dialog or popover, a box lifted by z-index over its own background (a menu), or a fixed box over the
+      // whole window (a modal's backdrop; a transparent one, a menu's dismiss scrim, only while something is open, so
+      // a stray invisible overlay eating clicks still fails); "pinned" is any other fixed or sticky box (a bar the
+      // page scrolls under).
+      const layerMemo = new Map();
+      const opaque = (c) => !/^(transparent|rgba\(.*,\s*0\))$/.test(c);
+      const opened = [...document.querySelectorAll('[aria-expanded="true"], dialog[open]')].some((e) => !skip(e));
+      const layerOf = (el) => {
+        if (!el || el === document.body || el === document.documentElement) return null;
+        if (layerMemo.has(el)) return layerMemo.get(el);
+        const s = getComputedStyle(el);
+        let top = false;
+        try { top = el.matches("dialog[open], :popover-open"); } catch { top = el.matches("dialog[open]"); }
+        const r = el.getBoundingClientRect();
+        const screen = s.position === "fixed" && r.left <= 1 && r.top <= 1 && r.right >= innerWidth - 1 && r.bottom >= innerHeight - 1 && (opened || opaque(s.backgroundColor));
+        const v = top || screen || (s.position === "absolute" && Number(s.zIndex) >= 1 && opaque(s.backgroundColor)) ? { el, kind: "over" }
+          : s.position === "fixed" || s.position === "sticky" ? { el, kind: "pinned" }
+          : layerOf(el.parentElement);
+        layerMemo.set(el, v);
+        return v;
+      };
+      const pageScrolls = document.documentElement.scrollHeight > innerHeight + 1;
+      // two things in different layers are not compared when one lies over the other on purpose: a menu or dialog
+      // always; a fixed or sticky bar while the page scrolls out from under it (on a page that cannot scroll, what it
+      // covers is never seen)
+      const apart = (a, b) => {
+        const la = layerOf(a), lb = layerOf(b);
+        if ((la && la.el) === (lb && lb.el)) return false;
+        return (la && la.kind === "over") || (lb && lb.kind === "over") || pageScrolls;
+      };
+      // WebKit's phone profile lays a page out 980 px wide unless it says <meta name="viewport" content="width=device-width">
+      if (C.engine === "webkit" && document.documentElement.clientWidth > C.width + 1)
+        out.push({ kind: "overflow", detail: "the page lays out " + document.documentElement.clientWidth + "px wide in a " + C.width + "px phone window (no <meta name=\"viewport\" content=\"width=device-width\">?)", marks: null });
       const all = [...document.body.querySelectorAll("*")].filter((el) => !skip(el));
       // overflow: the page scrolls sideways; name the leaf-most elements that stick out
       if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
@@ -201,18 +374,24 @@ const RUN = String.raw`async sessionPage => {
       // controls: overlap, cover, and target size
       const CTRL = "a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[tabindex]:not([tabindex^='-'])";
       // the part of an element that shows: its box cut by each ancestor that scrolls or clips (a fixed element by none)
-      const shown = (el) => {
-        const r = el.getBoundingClientRect();
+      // a box cut by each box, from the one given up, that scrolls or clips, stopping after a fixed one
+      const cutBy = (r, from) => {
         let l = r.left, t = r.top, rt = r.right, b = r.bottom;
-        if (getComputedStyle(el).position !== "fixed") for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        for (let a = from; a && a !== document.documentElement; a = a.parentElement) {
           const s = getComputedStyle(a);
-          if (s.overflowX === "visible" && s.overflowY === "visible") continue;
-          const ar = a.getBoundingClientRect(), x0 = ar.left + a.clientLeft, y0 = ar.top + a.clientTop;
-          if (s.overflowX !== "visible") { l = Math.max(l, x0); rt = Math.min(rt, x0 + a.clientWidth); }
-          if (s.overflowY !== "visible") { t = Math.max(t, y0); b = Math.min(b, y0 + a.clientHeight); }
+          if (s.overflowX !== "visible" || s.overflowY !== "visible") {
+            const ar = a.getBoundingClientRect(), x0 = ar.left + a.clientLeft, y0 = ar.top + a.clientTop;
+            if (s.overflowX !== "visible") { l = Math.max(l, x0); rt = Math.min(rt, x0 + a.clientWidth); }
+            if (s.overflowY !== "visible") { t = Math.max(t, y0); b = Math.min(b, y0 + a.clientHeight); }
+          }
           if (s.position === "fixed") break;
         }
         return { left: l, top: t, right: rt, bottom: b, width: rt - l, height: b - t };
+      };
+      const shown = (el) => {
+        const r = el.getBoundingClientRect();
+        if (getComputedStyle(el).position === "fixed") return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+        return cutBy(r, el.parentElement);
       };
       const cands = [...document.body.querySelectorAll(CTRL)].filter((el) => !skip(el) && visible(el) && !el.disabled);
       const cut = cands.map(shown);
@@ -223,7 +402,7 @@ const RUN = String.raw`async sessionPage => {
       const hit = (a, b, pad = 0) => a.left - pad < b.right && b.left < a.right + pad && a.top - pad < b.bottom && b.top < a.bottom + pad;
       for (let i = 0; i < ctrls.length; i++) for (let j = i + 1; j < ctrls.length; j++) {
         const a = rects[i], b = rects[j];
-        if (ctrls[i].contains(ctrls[j]) || ctrls[j].contains(ctrls[i])) continue;
+        if (ctrls[i].contains(ctrls[j]) || ctrls[j].contains(ctrls[i]) || apart(ctrls[i], ctrls[j])) continue;
         const w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         if (w > 2 && h > 2) out.push({ kind: "overlap", detail: label(ctrls[i]) + " overlaps " + label(ctrls[j]) + " by " + Math.round(w) + "x" + Math.round(h) + "px",
           marks: [box(a), box(b)] });
@@ -232,7 +411,7 @@ const RUN = String.raw`async sessionPage => {
         const r = rects[i], cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return;
         const top = document.elementFromPoint(cx, cy);
-        if (!top || el.contains(top) || top.contains(el) || skip(top) || (top.tagName === "LABEL" && top.control === el)) return;
+        if (!top || el.contains(top) || top.contains(el) || skip(top) || (top.tagName === "LABEL" && top.control === el) || apart(el, top)) return;
         out.push({ kind: "overlap", detail: label(el) + " is covered by " + label(top), marks: [box(r), box(top.getBoundingClientRect())] });
       });
       ctrls.forEach((el, i) => {
@@ -245,8 +424,57 @@ const RUN = String.raw`async sessionPage => {
         if (near < 0) return;
         out.push({ kind: "target", detail: label(el) + " is " + Math.round(r.width) + "x" + Math.round(r.height) + "px with " + label(ctrls[near]) + " within 24px", marks: [box(r), box(rects[near])] });
       });
+      // text: two runs of text of different elements drawn on one spot. A run is a text node's line boxes, cut by the
+      // boxes that scroll or clip it; what is not painted (faded, visibility: hidden, visually hidden) is left out.
+      // Two runs inside two different controls are the controls' overlap above; two runs in one control (two spans
+      // in a link) are compared. An overlap counts when it is over 2 px wide and at least half the shorter run's
+      // height, so a tight line height between a heading and the line under it is not one.
+      const hidden = (el) => {
+        for (let a = el; a && a !== document.body; a = a.parentElement) {
+          const s = getComputedStyle(a), r = a.getBoundingClientRect();
+          if ((s.clip && s.clip !== "auto") || s.clipPath === "inset(50%)" || (s.display !== "contents" && r.width <= 2 && r.height <= 2)) return true;
+        }
+        return false;
+      };
+      const ctrlOf = (el) => el.closest(CTRL);
+      const runs = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!n.nodeValue.trim()) continue;
+        const el = n.parentElement;
+        if (!el || el.closest("script,style,noscript,template,textarea,select,svg") || skip(el)) continue;
+        const s = getComputedStyle(el);
+        if (s.visibility === "hidden" || s.display === "none" || faded(el) || hidden(el)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        for (const r of range.getClientRects()) {
+          if (r.width < 2 || r.height < 2) continue;
+          const c = getComputedStyle(el).position === "fixed" ? r : cutBy(r, el);
+          if (c.width >= 2 && c.height >= 2) runs.push({ n, el, r: c });
+        }
+      }
+      runs.sort((a, b) => a.r.top - b.r.top);
+      const pairs = new Set();
+      let extra = 0;
+      for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length && runs[j].r.top < runs[i].r.bottom; j++) {
+        const a = runs[i], b = runs[j];
+        if (a.n === b.n || a.el === b.el) continue;
+        const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+        if (w <= 2 || h < Math.max(2, 0.5 * Math.min(a.r.height, b.r.height))) continue;
+        const ca = ctrlOf(a.el), cb = ctrlOf(b.el);
+        if (ca && cb && ca !== cb) continue;
+        if (apart(a.el, b.el)) continue;
+        const key = [a.el, b.el];
+        if ([...pairs].some((p) => (p[0] === key[0] && p[1] === key[1]) || (p[0] === key[1] && p[1] === key[0]))) continue;
+        pairs.add(key);
+        if (pairs.size > 8) { extra += 1; continue; }
+        const text = (x) => x.el.tagName.toLowerCase() + ' "' + x.n.nodeValue.trim().replace(/\s+/g, " ").slice(0, 40) + '"';
+        out.push({ kind: "overlap", detail: "text " + text(a) + " overlaps text " + text(b) + " by " + Math.round(w) + "x" + Math.round(h) + "px",
+          marks: [box(a.r), box(b.r)] });
+      }
+      if (extra) out.push({ kind: "overlap", detail: "and " + extra + " more overlapping text pair(s) on this page", marks: null });
       return out;
-    });
+    }, { engine: C.engine, width: C.width });
     failures.push(...found);
     // --shots: the page as a person scrolls it, one viewport-height tile at a time, taken after measuring
     if (C.tiles) {
@@ -254,7 +482,7 @@ const RUN = String.raw`async sessionPage => {
       for (let k = 0; k < 12 && (k === 0 || k * vh < full); k++) {
         await page.evaluate((y) => scrollTo(0, y), Math.min(k * vh, Math.max(0, full - vh)));
         await page.waitForTimeout(80);
-        await page.screenshot({ path: C.tiles + "-t" + (k + 1) + ".png" });
+        await page.screenshot({ path: C.tiles + "-t" + (k + 1) + ".png", scale: "css" });
         tiles += 1;
       }
       await page.evaluate(() => scrollTo(0, 0));
@@ -284,10 +512,10 @@ const RUN = String.raw`async sessionPage => {
           d.style.cssText = "position:absolute;pointer-events:none;z-index:2147483647;box-sizing:border-box;left:" + (b.x - 2) + "px;top:" + (b.y - 2) + "px;width:" + (b.w + 4) + "px;height:" + (b.h + 4) + "px;border:2px " + (k ? "dashed #2563eb" : "solid #dc2626");
           document.documentElement.appendChild(d);
         }), f.marks);
-        await page.screenshot({ path: f.png, fullPage: true, clip: { x, y, width, height } });
+        await page.screenshot({ path: f.png, fullPage: true, clip: { x, y, width, height }, scale: "css" });
         await page.evaluate(() => document.querySelectorAll("[data-design-check-mark]").forEach((d) => d.remove()));
       } else {
-        await page.screenshot({ path: f.png });
+        await page.screenshot({ path: f.png, scale: "css" });
       }
       delete f.marks;
     }
@@ -300,7 +528,7 @@ const RUN = String.raw`async sessionPage => {
 
 const slug = (s) => s.replace(/^https?:\/\/[^/]+/, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(-60) || "root";
 
-function main(argv) {
+async function main(argv) {
   const args = argv.slice(0);
   if (args.includes("--help") || args.includes("-h")) {
     console.log(USAGE);
@@ -325,14 +553,15 @@ function main(argv) {
   const base = opt("--base");
   const manifestPath = opt("--manifest");
   const out = path.resolve(opt("--out", "design-check"));
-  const widths = (opt("--widths", "1440,390") ?? "").split(",").map(Number).filter((n) => n > 0);
+  const widths = (opt("--widths", DEFAULT_WIDTHS.join(",")) ?? "").split(",").map(Number).filter((n) => n > 0);
   const allEntries = flag("--all-entries");
+  const noWebkit = flag("--no-webkit");
   const shotsArg = opt("--shots");
   const shots = shotsArg ? path.resolve(shotsArg) : null;
   if (!base) return usage(`--base is required\n${USAGE}`);
   if (!/^https?:\/\//.test(base)) return usage(`--base must be an http(s) server (playwright-cli blocks file:); serve the folder first`);
   if (args.some((a) => a.startsWith("--"))) return usage(`unknown option ${args.find((a) => a.startsWith("--"))}\n${USAGE}`);
-  if (!widths.length) return usage(`--widths takes comma-separated widths, e.g. 1440,390`);
+  if (!widths.length) return usage(`--widths takes comma-separated widths, e.g. ${DEFAULT_WIDTHS.join(",")}`);
 
   let pages = [];
   if (manifestPath) {
@@ -347,18 +576,23 @@ function main(argv) {
   for (const u of args) pages.push({ name: u, url: u, states: null });
   if (!pages.length) return usage("no pages: give --manifest or one or more URLs");
 
+  const phones = widths.filter((w) => w < PHONE_MAX);
+  const webkit = phones.length > 0 && !noWebkit;
   const session = `design-check-${process.pid}`;
   const scratch = mkdtempSync(path.join(tmpdir(), "design-check-"));
   mkdirSync(out, { recursive: true });
   if (shots) mkdirSync(shots, { recursive: true });
   const { cli, firstLines, runCode } = makeDriver(session, scratch);
-  const exec = (step, shot, tiles = null) => {
-    const cfg = { url: step.url, width: step.width, fresh: step.fresh, expect: step.expect, discover: !!step.discover, shot, tiles };
-    return runCode(RUN.replace("__CFG__", JSON.stringify(cfg)), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
+  let wk = null;
+  const exec = async (step, shot, tiles = null) => {
+    const ctx = contextOptions(step.width, step.engine, step.engine === "webkit" ? wk.devices : null);
+    const cfg = { url: step.url, width: step.width, engine: step.engine, ctx, fresh: step.fresh, expect: step.expect, discover: !!step.discover, shot, tiles };
+    const at = `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`;
+    return (step.engine === "webkit" ? wk.runCode : runCode)(RUN.replace("__CFG__", () => JSON.stringify(cfg)), at);
   };
 
-  let failures = 0, stateCount = 0, driver = null, tileCount = 0;
-  // The same failure on the same page in several states or widths is one line: the first crop, then where else.
+  let failures = 0, stateCount = 0, driver = null, tileCount = 0, opened = null;
+  // The same failure on the same page in several states, widths or engines is one line: the first crop, then where else.
   const seen = new Map();
   const report = (page, where, f) => {
     failures += 1;
@@ -367,26 +601,30 @@ function main(argv) {
     seen.set(key, { line: `FAIL ${f.kind} ${page} ${where} :: ${f.detail} -> ${f.png}`, where: [where] });
   };
   try {
-    const opened = cli("open", "about:blank");
+    // WebKit first: a driver that cannot be installed or launched stops the check before anything is measured
+    if (webkit) wk = await makeWebkitDriver();
+    opened = cli("open", "about:blank");
     if (opened.status !== 0) throw new DriverError(`playwright-cli open failed: ${firstLines(opened)}`);
     for (const p of pages) {
       if (p.states !== null) continue;
-      const found = exec(discoverStep(p, widths[0], base), path.join(out, `${slug(p.url)}-discover`));
+      const found = await exec(discoverStep(p, widths[0], base), path.join(out, `${slug(p.url)}-discover`));
       p.states = found.widget ? found.states : [];
     }
     for (const p of pages) stateCount += Math.max(0, p.states.length - 1);
-    for (const step of plan(pages, widths, base)) {
-      const name = `${slug(step.page)}-w${step.width}-${step.state === null ? "default" : slug(step.state)}`;
-      const res = exec(step, path.join(out, name), shots && path.join(shots, name));
+    for (const step of plan(pages, widths, base, { webkit })) {
+      const engine = step.engine === "webkit" ? "-webkit" : "";
+      const name = `${slug(step.page)}-w${step.width}${engine}-${step.state === null ? "default" : slug(step.state)}`;
+      const res = await exec(step, path.join(out, name), shots && path.join(shots, name));
       tileCount += res.tiles ?? 0;
-      const where = `w=${step.width}${step.state === null ? "" : ` state=${step.state}`}`;
+      const where = `w=${step.width}${step.engine === "webkit" ? " webkit" : ""}${step.state === null ? "" : ` state=${step.state}`}`;
       for (const f of res.failures) report(step.page, where, f);
     }
   } catch (e) {
     if (!(e instanceof DriverError)) throw e;
     driver = e;
   } finally {
-    cli("close");
+    if (opened) cli("close");
+    if (wk) await wk.close();
     rmSync(scratch, { recursive: true, force: true });
   }
   for (const { line, where } of seen.values()) {
@@ -400,9 +638,11 @@ function main(argv) {
     return 2;
   }
   if (failures) return 1;
-  console.log(`ok: ${pages.length} page(s), ${stateCount} state(s) beyond the defaults, at ${widths.join(" and ")} px, each run from empty storage: no failure`);
+  const engines = !phones.length ? "" : webkit ? ` (${phones.join(" and ")} also on ${WEBKIT.name}, ${WEBKIT.device})` : ` (WebKit skipped: --no-webkit)`;
+  console.log(`ok: ${pages.length} page(s), ${stateCount} state(s) beyond the defaults, at ${widths.join(" and ")} px${engines}, each run from empty storage: no failure`);
   return 0;
 }
+
 
 // Run only as the entry script (`node check.mjs ...`); an import (the plan test) runs nothing.
 const entry = () => {
@@ -414,4 +654,4 @@ const entry = () => {
     return false;
   }
 };
-if (entry()) process.exitCode = main(process.argv.slice(2));
+if (entry()) process.exitCode = await main(process.argv.slice(2));

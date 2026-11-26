@@ -24,7 +24,7 @@ the production build when the two differ.
 - Run command(s):
 - Mode: <dev or production build; say where they differ — dev may enable StrictMode / Fast Refresh, production does not>
 - Origin / host the operator browses: <localhost, LAN IP, Tailscale host, deployed URL>
-- Devices / viewports / browsers: <e.g. desktop 1440px Chrome, phone 390px Safari>
+- Devices / viewports / browsers: <e.g. desktop 1440px Chrome, tablet 768px Safari, phone 375px Safari (iPhone 13 mini)>
 - Browser instrument for the agent: playwright-cli (`@playwright/cli`, driven from the shell; the agent installs, starts and closes it itself, headless on a throwaway profile, never the operator's)
 - Saved sign-in: <path of a `playwright-cli state-save` file the operator makes once (signed into a test account, never their own), which the agent `state-load`s; or none>
 - Production build command + origin (when different):

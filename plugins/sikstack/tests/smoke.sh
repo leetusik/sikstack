@@ -5021,25 +5021,40 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
       assert(pages.length === 3 && pages[0].states.join() === "recorded,behind,loading" && pages[2].states === null, "pagesFromManifest " + JSON.stringify(pages));
       assert(m.pagesFromManifest({ pages: [{ entry: "/ws/a/1/", entries: ["/ws/a/1/", "/ws/a/2/"] }] }, true).length === 2, "all entries");
       pages[2].states = [];
-      const steps = m.plan(pages, [1440, 390], base);
+      // no --widths: desktop 1440, tablet 768, phone 375 (the iPhone 13 mini), each with its window height
+      assert(m.DEFAULT_WIDTHS.join() === "1440,768,375" && [1440, 768, 375].map(m.viewportHeight).join() === "900,1024,812", "default widths " + m.DEFAULT_WIDTHS);
+      const steps = m.plan(pages, m.DEFAULT_WIDTHS, base);
       const at = (s) => s.page + "@" + s.width + ":" + (s.state ?? "default") + ">" + (s.expect ?? "-");
-      assert(steps.map(at).join(" ") === "/ws/@1440:default>recorded /ws/@1440:behind>behind /ws/@1440:loading>loading /ws/@390:default>recorded /ws/@390:behind>behind /ws/@390:loading>loading /ws/a/1/@1440:default>open /ws/a/1/@1440:deferred>deferred /ws/a/1/@390:default>open /ws/a/1/@390:deferred>deferred /system/@1440:default>- /system/@390:default>-", "order " + steps.map(at).join(" "));
-      assert(steps.every((s) => s.fresh === true), "a step reuses a browser context");
+      assert(steps.map(at).join(" ") === "/ws/@1440:default>recorded /ws/@1440:behind>behind /ws/@1440:loading>loading /ws/@768:default>recorded /ws/@768:behind>behind /ws/@768:loading>loading /ws/@375:default>recorded /ws/@375:behind>behind /ws/@375:loading>loading /ws/a/1/@1440:default>open /ws/a/1/@1440:deferred>deferred /ws/a/1/@768:default>open /ws/a/1/@768:deferred>deferred /ws/a/1/@375:default>open /ws/a/1/@375:deferred>deferred /system/@1440:default>- /system/@768:default>- /system/@375:default>-", "order " + steps.map(at).join(" "));
+      assert(steps.every((s) => s.fresh === true && s.engine === "chromium"), "a step reuses a browser context, or is not Chrome");
       assert(steps[1].url === base + "/ws/?state=behind" && steps[3].url === base + "/ws/" && steps[3].state === null, "urls " + steps[1].url + " " + steps[3].url);
+      // with WebKit: the same runs again at the phone width only, on WebKit, after the Chrome runs; its context is the
+      // iPhone 13 Mini profile at the width and window of the run
+      const wk = m.plan(pages, m.DEFAULT_WIDTHS, base, { webkit: true }), extra = wk.slice(steps.length);
+      assert(wk.length === steps.length + 6 && extra.every((s) => s.engine === "webkit" && s.width === 375) && extra.map(at).join(" ") === "/ws/@375:default>recorded /ws/@375:behind>behind /ws/@375:loading>loading /ws/a/1/@375:default>open /ws/a/1/@375:deferred>deferred /system/@375:default>-", "webkit steps " + extra.map(at).join(" "));
+      const dev = { "iPhone 13 Mini": { userAgent: "UA", viewport: { width: 375, height: 629 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, defaultBrowserType: "webkit" } };
+      const co = m.contextOptions(375, "webkit", dev);
+      assert(JSON.stringify(m.contextOptions(768, "chromium")) === JSON.stringify({ viewport: { width: 768, height: 1024 } }) && co.isMobile === true && co.userAgent === "UA" && co.viewport.height === 812 && !("defaultBrowserType" in co), "context " + JSON.stringify(co));
       const d = m.discoverStep({ name: "x", url: "/x/" }, 1440, base);
       assert(d.fresh === true && d.discover === true && d.expect === null, "discover step");
       console.log("plan ok");
     ' 2>&1)
     [ "$ck_plan" = "plan ok" ] \
-      && ok "the layout check's run plan (no browser): pages x widths x states in order, the default first expecting the first listed state at every width, every step in a fresh browser context" \
+      && ok "the layout check's run plan (no browser): 1440, 768 and 375 by default, pages x widths x states in order, the default first expecting the first listed state at every width, every step in a fresh browser context; with WebKit the phone width's runs again on WebKit with the iPhone 13 Mini profile" \
       || bad "the layout check's run plan is wrong -- $ck_plan"
     # Nothing served: a driver error, exit 2, never a layout FAIL (playwright-cli absent is a driver error too).
     ck_port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
     newtmp CKT
-    ck_drv=$(cd "$CKT" && node "$PLUGIN/templates/design/check.mjs" --base "http://127.0.0.1:$ck_port" --widths 390 --out "$CKT/out" / 2>&1); ck_drv_rc=$?
+    ck_drv=$(cd "$CKT" && node "$PLUGIN/templates/design/check.mjs" --base "http://127.0.0.1:$ck_port" --widths 1440 --out "$CKT/out" / 2>&1); ck_drv_rc=$?
     [ "$ck_drv_rc" = 2 ] && printf '%s\n' "$ck_drv" | grep -q '^driver error: ' && ! printf '%s\n' "$ck_drv" | grep -q '^FAIL ' \
       && ok "the layout check with no server prints a driver error and exits 2, with no FAIL line" \
       || bad "the layout check with no server (rc=$ck_drv_rc) -- $ck_drv"
+    # 0.11.0: a phone width runs on WebKit too, and a WebKit driver that cannot be installed is a driver error before
+    # anything is measured, never a silent skip (the home here cannot be made, so nothing is downloaded)
+    ck_wk=$(cd "$CKT" && SIKSTACK_WEBKIT_HOME=/dev/null/wk node "$PLUGIN/templates/design/check.mjs" --base "http://127.0.0.1:$ck_port" --widths 375 --out "$CKT/out" / 2>&1); ck_wk_rc=$?
+    [ "$ck_wk_rc" = 2 ] && printf '%s\n' "$ck_wk" | grep -q '^driver error: WebKit 18.2: ' && printf '%s\n' "$ck_wk" | grep -q -- '--no-webkit' && ! printf '%s\n' "$ck_wk" | grep -q '^FAIL ' \
+      && ok "the layout check at a phone width with no WebKit driver to be had stops with a driver error naming WebKit 18.2 and --no-webkit, exit 2, no FAIL line" \
+      || bad "the layout check without its WebKit driver (rc=$ck_wk_rc) -- $ck_wk"
     # 0.7.0: the claude.ai canvas copy, without a browser. canvas.mjs --plan-only pairs shots already taken (fake PNG
     # headers here) with a fake manifest's runs and writes plan.json: one artboard per page x state, its widths side by
     # side, the first Main.dc.html, the artboards of a canvas page stacked apart, upload batches; over 40 pages, no
@@ -5058,12 +5073,12 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
         { name: "Item", entry: "/ws/a/1/", states: ["open", "deferred"] } ] };
       writeFileSync(D + "/manifest.json", JSON.stringify(manifest));
       const pages = ck.pagesFromManifest(manifest); pages[1].states = [];
-      const shots = cv.shotList(ck.plan(pages, [1440, 390], "http://127.0.0.1:9"));
-      assert(shots.length === 12 && new Set(shots.map((s) => s.file)).size === 12, "shots " + shots.length);
+      const shots = cv.shotList(ck.plan(pages, ck.DEFAULT_WIDTHS, "http://127.0.0.1:9"));
+      assert(shots.length === 18 && new Set(shots.map((s) => s.file)).size === 18, "shots " + shots.length);
       mkdirSync(D + "/shots", { recursive: true });
       shots.forEach((s, i) => {
         const b = Buffer.alloc(24); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
-        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([900, cv.SHOT_MAX, 2400, 844][i % 4], 20);
+        b.writeUInt32BE(13, 8); b.write("IHDR", 12, "ascii"); b.writeUInt32BE(s.width, 16); b.writeUInt32BE([0, 3, 6].includes(i) ? 900 : [4, 10, 16].includes(i) ? cv.SHOT_MAX : 2400, 20); // Main (i 0, 3, 6) short; three cut
         writeFileSync(D + "/" + s.file, b);
       });
       // over 40 pages: no canvas pages; the first artboard is still Main.dc.html
@@ -5085,10 +5100,11 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
       assert(artboards[0].title === "Workspace · Agenda · recorded" && artboards[3].file === "p02-all-pages--default.dc.html", "names " + artboards.map((a) => a.file + "=" + a.title));
       assert(canvas.pages.length === 3 && canvas.boards["Main.dc.html"].page === canvas.pages[0].id && !("notes" in canvas) && canvas.createdOnFiles.at === null, "index");
       const b0 = canvas.boards["Main.dc.html"], b1 = canvas.boards[canvas.order[1]];
-      assert(b0.w === 1910 && b0.h === 932 && b1.h === 8000 && b1.y === b0.y + b0.h + 120 && b1.x === 0, "frames " + JSON.stringify([b0, b1]));
-      assert(artboards.every((a) => (a.html.match(/@@shot:/g) || []).length === 2 && a.shots.every((s) => a.html.includes("@@shot:" + s + "@@"))), "placeholders");
-      assert(artboards[0].html.includes(">1440 px</p>") && artboards[0].html.indexOf("1440 px") < artboards[0].html.indexOf("390 px"), "captions");
-      assert(uploads.length === 1 && uploads[0].length === 12, "uploads");
+      assert(b0.w === 1440 + 768 + 375 + 2 * 80 && b0.h === 932 && b1.h === 8000 && b1.y === b0.y + b0.h + 120 && b1.x === 0, "frames " + JSON.stringify([b0, b1]));
+      assert(artboards.every((a) => (a.html.match(/@@shot:/g) || []).length === 3 && a.shots.every((s) => a.html.includes("@@shot:" + s + "@@"))), "placeholders");
+      const cap = (w) => artboards[0].html.indexOf(">" + w + " px</p>");
+      assert(cap(1440) > 0 && cap(1440) < cap(768) && cap(768) < cap(375), "captions");
+      assert(uploads.length === 1 && uploads[0].length === 18, "uploads");
       // a folder written from the plan, as the orchestrator writes it; then four broken copies
       const write = (dir, mut) => {
         mkdirSync(dir + "/project", { recursive: true });
@@ -5112,9 +5128,9 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
       cv_o=$(node "$PLUGIN/tests/canvas_check.mjs" "$CVT/${cv_case%%:*}" 2>&1) && cv_bad="$cv_bad ${cv_case%%:*}:passed"
       printf '%s\n' "$cv_o" | grep -qF "${cv_case#*:}" || cv_bad="$cv_bad ${cv_case%%:*}:$(printf '%s' "$cv_o" | head -2 | tr '\n' '|')"
     done
-    [ "$cv_plan" = "fake ok" ] && [ "$cv_run_rc" = 0 ] && printf '%s\n' "$cv_run" | grep -q '^artboards=6 shots=12 pages=3 widths=1440,390 cut=3 ' \
+    [ "$cv_plan" = "fake ok" ] && [ "$cv_run_rc" = 0 ] && printf '%s\n' "$cv_run" | grep -q '^artboards=6 shots=18 pages=3 widths=1440,768,375 cut=3 ' \
       && [ "$cv_shape" = "plan ok" ] \
-      && ok "canvas.mjs --plan-only (no browser): plan.json holds one artboard per page x state with its widths side by side, Main.dc.html first, frames stacked 120 px apart, upload batches; over 40 pages, no canvas pages" \
+      && ok "canvas.mjs --plan-only (no browser): plan.json holds one artboard per page x state with its three widths (1440, 768, 375) side by side, Main.dc.html first, frames stacked 120 px apart, upload batches; over 40 pages, no canvas pages" \
       || bad "canvas.mjs's plan is wrong -- $cv_plan / rc=$cv_run_rc $cv_run / $cv_shape"
     [ "$cv_ok_rc" = 0 ] && [ "$cv_ok" = "canvas ok 6" ] && [ -z "$cv_bad" ] \
       && ok "canvas_check passes a folder written from the plan with /_blob/ urls, and fails a placeholder left, a src not /_blob/, a missing file and an overlap" \
@@ -5128,6 +5144,24 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
         && ok "canvas.mjs's shots (a browser over a fixture): lazy images and iframes drawn, a fixed overlay over the whole shot, a page that tracks the window not grown, a cut shot whole in its artboard" \
         || bad "canvas.mjs's shots (rc=$cv_shoot_rc) -- $(printf '%s' "$cv_shoot" | head -4 | tr '\n' '|')"
     else ok "canvas.mjs's shots in a browser (playwright-cli absent: skipped)"; fi
+    # 0.11.0: the layout check over fixture pages in a real browser (tests/check_fixtures.mjs serves them). In Chrome at
+    # 1440, 768 and 375: two labels on one spot, two spans pulled together in one link and a fixed bar over a page that
+    # cannot scroll fail overlap; a skip link in an opacity-0 band, a fixed bar over scrolling text and an open menu do
+    # not. On WebKit 18.2 at 375 (only when its driver is already installed: nothing is downloaded here), B1's stat
+    # strip (an auto-fit grid that is its own size container) fails overlap, the same strip fixed passes, and Chrome
+    # passes both.
+    if command -v playwright-cli >/dev/null 2>&1; then
+      ck_fx=$(node "$PLUGIN/tests/check_fixtures.mjs" chromium 2>&1); ck_fx_rc=$?
+      [ "$ck_fx_rc" = 0 ] && [ "$ck_fx" = "chromium ok" ] \
+        && ok "the layout check in Chrome (fixtures): overlapping text of different elements fails, at 1440, 768 and 375; an opacity-0 skip link, a fixed bar over scrolling text and an open menu pass" \
+        || bad "the layout check's fixtures in Chrome (rc=$ck_fx_rc) -- $(printf '%s' "$ck_fx" | head -4 | tr '\n' '|')"
+      if CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e 'import { pathToFileURL } from "node:url"; const m = await import(pathToFileURL(process.env.CK_FILE).href); process.exit(m.webkitReady() ? 0 : 1);' 2>/dev/null; then
+        ck_wkf=$(node "$PLUGIN/tests/check_fixtures.mjs" webkit 2>&1); ck_wkf_rc=$?
+        [ "$ck_wkf_rc" = 0 ] && [ "$ck_wkf" = "webkit ok" ] \
+          && ok "the layout check on WebKit 18.2 (fixtures): B1's stat strip fails overlap at w=375 webkit only; the fixed strip passes" \
+          || bad "the layout check's fixtures on WebKit (rc=$ck_wkf_rc) -- $(printf '%s' "$ck_wkf" | head -4 | tr '\n' '|')"
+      else ok "the layout check on WebKit 18.2 (its driver not installed here: skipped)"; fi
+    else ok "the layout check's fixtures in a browser (playwright-cli absent: skipped)"; fi
   else ok "the design agents bind no engine harness; templates/design/ ships check.mjs, options.html and TASTE.md (node absent: parse skipped)"; fi
 else bad "a design agent still carries the canvas harness, or templates/design/ is missing a file"; fi
 

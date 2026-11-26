@@ -43,9 +43,10 @@ look at a screenshot only where the layout check or your change points, and neve
    synthesize only what no API answers, and say so where you make it.
 4. **Build and check.** Build with the folder's command, serve on the dispatch's port, and run the layout check
    (`folder.md`, *The layout check*; not the folder's production-exclusion check, such as platform's
-   `design:check`) over the pages you touched (or the manifest). Answer every failure: fix it, or log it
+   `design:check`) over the pages you touched (or the manifest), at the widths of the brief's devices (its default
+   is all three). Answer every failure: fix it, or log it
    in `draft.md` with its reason when it sits inside a production component. Run the product's lint and typecheck
-   on the folder. Look at the crops it writes and one screenshot per changed page at 1440 and 390; at most two
+   on the folder. Look at the crops it writes and one screenshot per changed page at each width it ran; at most two
    build-and-check rounds. Stop the server and close the browser session you opened.
 5. **Write `draft.md`**, kept current as you work: the intent and the plan, the files you changed, each page's
    states and where production draws them, the data used (recorded, synthesized), every departure from the brief,
@@ -79,7 +80,9 @@ Each line is something a screenshot shows.
 - **Copy.** Real and specific: labels say what happens, errors say what happened and how to fix it, empty states
   say why and what to do. Strip explainer copy: no subtitle restating a title, no line under a control saying what
   it does. Real data, never lorem; an unknown fact is a visible placeholder.
-- **Phone width.** Every page works at 390 px: nothing sideways, nothing clipped.
+- **Every device.** The brief names the product's devices; a brief that names none means all three: desktop 1440,
+  tablet 768 and phone 375 (the iPhone 13 mini: a page that fits it fits every phone, and the check runs it on WebKit
+  too). Every page works at each: nothing sideways, nothing clipped, no text on top of other text.
 - **AI slop is a defect:** gradient washes, glass, glow, blobs; everything in a rounded card, cards in cards, a
   coloured left border; emoji as icons; icon-title-sentence triplets; invented stats or testimonials; everything
   centred; all-caps labels, an accent-coloured word in a headline, an arrow appended to every link; decorative SVG

@@ -10,6 +10,36 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.11.0 — 2026-11-26
+
+- **A design is measured on a desktop, a tablet and a phone.** The layout check (`templates/design/check.mjs`) and
+  the canvas copy (`canvas.mjs`) default to 1440, 768 and 375 px (the iPhone 13 mini: a page that fits it fits every
+  phone), in 900, 1024 and 812 px windows; 390 is gone. A canvas artboard holds three shots side by side. The brief
+  names the product's devices, and words that name none mean all three (`design-cowork`, the drafter and the
+  critic); a brief with fewer devices passes their `--widths`.
+- **The phone width also runs on WebKit.** Every width under 600 runs a second time in WebKit 18.2 with the
+  iPhone 13 Mini profile, after Chrome's runs; its failures read `w=375 webkit`. This old WebKit is pinned because
+  it shows a grid bug newer builds hide: an auto-fit grid that is its own size container lays out 0 px columns, and
+  its tiles land on one spot. The driver is playwright-core 1.49.1, installed on first use into the user's cache
+  (`~/Library/Caches/sikstack/` on a Mac, `~/.cache/sikstack/` elsewhere; about 63 MiB once;
+  `SIKSTACK_WEBKIT_HOME` moves it), never into a repo. When it cannot be installed or launched, the check stops with
+  a driver error naming WebKit (exit 2) before measuring anything; `--no-webkit` skips it on purpose, and the `ok`
+  line says so. The same page script runs on both drivers. On WebKit a page laid out wider than the phone (no
+  `<meta name="viewport">`) fails `overflow`.
+- **Overlapping text fails `overlap`.** Two runs of text of different elements drawn on one spot fail, not only
+  overlapping controls: two labels on one grid cell, two spans pulled together inside one link. What is not painted
+  is skipped (an `opacity: 0` ancestor, such as a skip link's band before it has focus; `visibility: hidden`;
+  visually hidden text), and what lies over the page on purpose is not compared with what is under it, for text and
+  for controls: an open menu or dialog with its backdrop (a transparent dismiss scrim only while something is open),
+  and a fixed or sticky bar while the page scrolls out from under it. So an open org menu, and a landing's skip link
+  before it has focus, no longer fail `overlap`. Crops are taken at CSS pixels.
+- **Tests.** `tests/check_fixtures.mjs` serves fixture pages and runs the check over them: in Chrome at the three
+  widths, and on WebKit 18.2 at 375 when its driver is installed (the smoke never downloads it). `canvas_shoot.mjs`
+  shoots three widths.
+
+**Migration notes.** The first design check with a phone width downloads WebKit 18.2's driver (npm and network
+needed once). Offline, pass `--no-webkit`.
+
 ## 0.9.0 — 2026-11-26
 
 - **A published build lists the round's pages: `design-publish --page`.** Name each page the round made, by its
