@@ -978,3 +978,31 @@ assert {"wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:
 # The boundary: workflow.run takes the verdict before every command that runs outside the cloud boundary (the design and
 # feedback API verbs, link, sign-in) but sync and unlink, which take it after their pull (both on the list above).
 assert 'if args.cmd not in ("sync", "unlink"):\n            engine_verdict()' in (root / "scripts/workflow.py").read_text(encoding="utf-8")
+# The Migration notes reach the agent in every form the CHANGELOG writes them: a list item (its wrapped lines indented)
+# or a paragraph of its own (to the next blank line), as 0.11.0's is. The engine's own parser, run over the whole
+# CHANGELOG, reads each release's first note whole.
+_notes_ns = {"re": re}
+exec(compile(_ast.Module(body=[_n for _n in _ast.parse(_store).body
+                               if (isinstance(_n, _ast.Assign) and [getattr(_t, "id", "") for _t in _n.targets] in (["ENGINE_CHANGELOG_RE"], ["ENGINE_NOTE_RE"]))
+                               or (isinstance(_n, _ast.FunctionDef) and _n.name == "_changelog_notes")], type_ignores=[]),
+             "wf_store.py", "exec"), _notes_ns)
+assert {"ENGINE_CHANGELOG_RE", "ENGINE_NOTE_RE", "_changelog_notes"} <= set(_notes_ns), sorted(_notes_ns)
+_log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+_read = _notes_ns["_changelog_notes"](_log)
+_mark = re.compile(r"^(- )?\*\*Migration notes(?::\*\*|\.\*\*|\*\*[:.])\s*")
+_heads = list(_notes_ns["ENGINE_CHANGELOG_RE"].finditer(_log))
+_missed = []
+for _i, _h in enumerate(_heads):
+    _lines = _log[_h.end():_heads[_i + 1].start() if _i + 1 < len(_heads) else len(_log)].split("\n")
+    _at = next((_j for _j, _l in enumerate(_lines) if _mark.match(_l)), None)
+    if _at is None:
+        continue
+    _block = [_lines[_at]]
+    for _l in _lines[_at + 1:]:
+        if not _l.strip() or (_lines[_at].startswith("- ") and not _l.startswith(" ")):
+            break
+        _block.append(_l)
+    if " ".join(_read.get(_h.group(1), "").split()) != " ".join(_mark.sub("", "\n".join(_block)).split()):
+        _missed.append(_h.group(1))
+assert not _missed, _missed
+assert _read.get("0.11.0", "").endswith("pass `--no-webkit`."), _read.get("0.11.0")

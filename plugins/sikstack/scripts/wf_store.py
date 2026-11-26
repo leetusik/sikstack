@@ -702,7 +702,7 @@ ENGINE_NOTES_UNKNOWN = ("this workspace has no record of the sikstack release th
                         "their word.")
 ENGINE_NEWER_LINE = ("this workspace was last written by sikstack {stamp}, newer than this install's {running}: update the "
                      "plugin (`claude plugin update sikstack@sikstack`), then restart Claude Code")
-ENGINE_NOTE_RE = re.compile(r"^- \*\*Migration notes(?::\*\*|\.\*\*|\*\*[:.])\s*(.*)$")
+ENGINE_NOTE_RE = re.compile(r"^(- )?\*\*Migration notes(?::\*\*|\.\*\*|\*\*[:.])\s*(.*)$")
 
 
 def changelog_versions():
@@ -802,8 +802,9 @@ def backlog_version_line():
 
 
 def _changelog_notes(text: str) -> dict:
-    """{version: its Migration notes text} for each CHANGELOG release that carries one (wrapped lines joined; a nested
-    list item kept on its own line)."""
+    """{version: its Migration notes text} for each CHANGELOG release that carries one, as a list item (its wrapped
+    lines indented) or as a paragraph of its own (running to the next blank line): wrapped lines joined, a nested
+    list item kept on its own line."""
     notes, heads = {}, list(ENGINE_CHANGELOG_RE.finditer(text))
     for n, head in enumerate(heads):
         body = text[head.end():heads[n + 1].start() if n + 1 < len(heads) else len(text)].split("\n")
@@ -811,9 +812,9 @@ def _changelog_notes(text: str) -> dict:
             match = ENGINE_NOTE_RE.match(line)
             if not match:
                 continue
-            parts = [match.group(1).strip()]
+            item, parts = bool(match.group(1)), [match.group(2).strip()]
             for more in body[i + 1:]:
-                if not more.startswith(" ") or not more.strip():
+                if not more.strip() or (item and not more.startswith(" ")):
                     break
                 if more.lstrip().startswith("- "):
                     parts.append("\n  " + more.strip())
