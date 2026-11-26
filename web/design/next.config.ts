@@ -48,6 +48,11 @@ const config: NextConfig = {
     // Relative targets resolve from this folder.
     resolveAlias: {
       "@/lib/workspace/actions": "./lib/actions.ts",
+      // The feedback control's server actions (the landing's footer), answered in the browser.
+      "@/lib/send-feedback/actions": "./lib/send-feedback-actions.ts",
+      // P83-8k.S1's landing: the next words, read by production's `LandingHeader` (unchanged) wherever it imports
+      // `@/content/marketing`; the next `Landing` (`next/landing/landing.tsx`) imports the same file by path.
+      "@/content/marketing": "./next/content/marketing/landing.ts",
       "design-recording": `./${path.relative(here, recording).split(path.sep).join("/")}`,
     },
   },
