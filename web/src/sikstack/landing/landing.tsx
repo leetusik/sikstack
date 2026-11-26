@@ -21,6 +21,11 @@ import "./landing.css";
  * `div.lpi`, the plugin's three numbered steps and how work starts, each command a block `Copy`. In the footer, after the five links, the feedback control's trigger
  * (job 08's `## Build` 3c-3d): only when the page passes `sendFeedback`, which it does only where the server
  * holds the control's key; without it the footer's row holds the links alone, the signed footer.
+ *
+ * Applied, this file is `src/sikstack/landing/landing.tsx`. P83-8k.S1's design changes only the Connect section:
+ * the plugin's sign-in (a block `Copy` of `/sikstack:sign-in`) and the connect page's confirm, in place of the CLI
+ * install, the two variables and the "Mint an org key" link; its words column loses the GitHub link (the install
+ * section keeps "The plugin on GitHub"). Every other part is production's, as it is.
  */
 const external = { target: "_blank", rel: "noopener noreferrer" } as const;
 
@@ -395,41 +400,19 @@ export function Landing({ sendFeedback, signedIn = false }: LandingProps) {
                   {connect.title}
                 </h2>
                 <p>{connect.text}</p>
-                <a
-                  className="link link-row"
-                  href={connect.guides.href}
-                  {...external}
-                >
-                  {connect.guides.label}
-                </a>
               </div>
               <div className="lp-pic stack gap-6">
                 <div className="stack gap-3">
-                  <h3 className="lp-h3">{connect.install.title}</h3>
+                  <h3 className="lp-h3">{connect.signIn.title}</h3>
                   <Copy
                     block
-                    text={connect.install.command}
-                    what={connect.install.what}
+                    text={connect.signIn.command}
+                    what={connect.signIn.what}
                   />
                 </div>
                 <div className="stack gap-3">
-                  <h3 className="lp-h3">{connect.env.title}</h3>
-                  <p>
-                    {connect.env.textBefore}
-                    <span className="lp-code-inline">{connect.env.path}</span>
-                    {connect.env.textAfter}
-                  </p>
-                  <Copy
-                    block
-                    text={connect.env.command}
-                    what={connect.env.what}
-                  />
-                  <Link
-                    className="link link-row"
-                    href={LANDING_LINKS.mintOrgKey}
-                  >
-                    {connect.env.mintOrgKey}
-                  </Link>
+                  <h3 className="lp-h3">{connect.confirm.title}</h3>
+                  <p>{connect.confirm.text}</p>
                 </div>
               </div>
             </div>

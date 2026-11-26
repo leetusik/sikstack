@@ -10,6 +10,7 @@ import {
   FEEDBACK_STATES,
   INVITE_STATES,
   ITEM_STATES,
+  LANDING_STATES,
   MEMBERS_STATES,
   NEW_ORG_STATES,
   ORG_SWITCHER_STATES,
@@ -55,6 +56,16 @@ const builds = buildPageIds();
 const plain = DESIGN_PART.builds.find((b) => !b.private && !b.share.on && !b.options)?.id ?? builds[0];
 
 export const PAGES: readonly BuildPage[] = [
+  // The landing (P83-8k.S1's design, applied: its Connect section offers only the plugin): production's `/`,
+  // drawn at /landing/ (the build's `/` is its front page). No recording: its words are its data.
+  {
+    name: "Landing",
+    route: "/",
+    production: "src/app/(marketing)/page.tsx",
+    entry: "/landing/",
+    reads: ["src/sikstack/landing/landing.tsx", "src/content/marketing/landing.ts", "src/sikstack/landing/header.tsx", "src/sikstack/landing/landing.css"],
+    states: LANDING_STATES,
+  },
   {
     name: "Workspace · Agenda",
     route: "/projects/[projectId]/workspace",

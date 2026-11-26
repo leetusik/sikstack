@@ -157,3 +157,17 @@ export const INVITE_STATES = pageStates("Invite", [
   { key: "member", label: "Already a member", from: `${ORG}/invite.tsx:181 phase member` },
   { key: "expired", label: "Expired, revoked or used", from: `${ORG}/invite.tsx:193 phase expired (one state for the three)` },
 ]);
+
+// ── The landing (P83-8k.S1's design, applied: its Connect section offers only the plugin): production's route
+// branches, drawn by production's `Landing` and its header.
+const MKT = "src/app/(marketing)/page.tsx";
+const LP = "src/sikstack/landing/landing.tsx";
+const LP_HEAD = "src/sikstack/landing/header.tsx";
+
+/** The landing (`/`): who reads it, and whether the server holds the feedback control's key. */
+export const LANDING_STATES = pageStates("Landing", [
+  { key: "signed-out", label: "Signed out", from: `${MKT}:30 signedIn false, :31 key held (as on sikstack.com) · ${LP}:58 Create account, Sign in; :442 Send feedback · ${LP_HEAD}:65 Sign in, Create account` },
+  { key: "signed-in", label: "Signed in", from: `${MKT}:18 optionalIdentity, :30 signedIn true · ${LP}:58 Open dashboard · ${LP_HEAD}:65 Dashboard` },
+  { key: "no-feedback-key", label: "No feedback key", from: `${MKT}:31 feedback.configured false · ${LP}:442 the footer's links alone` },
+]);
+export type LandingState = (typeof LANDING_STATES.list)[number]["key"];

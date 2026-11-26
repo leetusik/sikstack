@@ -10,6 +10,17 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.8.1 — 2026-11-26
+
+- **Plainer words at setup and init.** `sikstack setup` prints `install id: <id> (made now|kept)` without the data
+  folder's file path, and `compaction window: set to 500k in <settings path> …` (and its `already`/`not set`
+  variants) in place of the bare `autoCompactWindow: …` setting name; a settings file it cannot read still names the
+  `"autoCompactWindow": 500000` line to add by hand. `sikstack init` ends with `next: /sikstack:sik-mode, to start
+  the first phase` in place of `next: sikstack next`.
+- **The plugin's description says how it starts.** `plugin.json` (and the marketplace entry) said "no setup and no
+  server needed to start"; it now says to run `/sikstack:setup` once per machine, then `/sikstack:sik-mode` in any
+  repo. The marketplace now lists only the sikstack plugin.
+
 ## 0.8.0 — 2026-11-26
 
 - **The two dashboards live in `works/`.** `backlog.md` and `agenda.md` are written to `.sikstack/works/`, beside
