@@ -4,7 +4,7 @@
 
 `run.sh local <dir>` makes that workspace: a scratch nested install (the branch's engine) with phase P1 in its own worktree, cut before any link, then the design link set from that worktree with a workspace key it mints through the API for the test account's project `sikstack` and hands to `design-link` on stdin. The key stays in the home's XDG folder, which `down` removes. The build is platform's own `web/design`, made in a scratch copy of `web/` (deleted when the block ends). The signed-out sweep is `design-local.sweep.js` beside this file, run with `run-code --filename=`.
 
-**Drive it:** the link leaves the workspace local (no `store=cloud`, no `[cloud]`, no key in `config.toml`; `worktree start` on a new phase runs); publish from the worktree and from the main checkout, both in `design-builds`; the member opens the printed viewer, turns sharing on and copies the link; a signed-out browser on that link clicks every page from the build's front page and every state from each page's state bar at 1440 and 390, closing a modal state with its own Cancel before the next pick, and the counts match the manifest with no console error and no link off the build's host.
+**Drive it:** the link leaves the workspace local (no `store=cloud`, no `[cloud]`, no key in `config.toml`; `worktree start` on a new phase runs); publish from the worktree and from the main checkout, both in `design-builds`; the member opens the printed viewer, turns sharing on and copies the link; a signed-out browser on that link clicks every page from the build's front page and every state from each page's state bar at 1440 and 375, closing a modal state with its own Cancel before the next pick, and the counts match the manifest with no console error and no link off the build's host.
 
 ```bash drive
 GUEST="$SESSION-guest"
@@ -102,7 +102,7 @@ case "$LINK" in "${DESIGN/\{build\}/$FROM_MAIN}/_share/"*) ;; *) fail "the copie
 pw screenshot --filename="$EV/design-local-viewer-shared.png"
 echo "ok   the member turned sharing on in the viewer and copied the share link"
 
-# 4. A signed-out browser holding only that link sweeps the build at 1440 and 390, by click.
+# 4. A signed-out browser holding only that link sweeps the build at 1440 and 375, by click.
 sed -e "s#__LINK__#$LINK#" -e "s#__SHOTS__#$EV#" "$(dirname "$RUN")/features/design-local.sweep.js" >"$EV/design-local-sweep.js"
 playwright-cli -s="$GUEST" close >/dev/null 2>&1 || true
 playwright-cli -s="$GUEST" open --config="$EV/cli.config.json" >>"$EV/drive.log" 2>&1
@@ -140,11 +140,11 @@ print(f"seen {s['docCount']} documents, {len(s['badDocs'])} >= 400, {len(s['erro
 for b in bad: print("FAIL " + b)
 sys.exit(1 if bad else 0)
 PY
-echo "ok   a signed-out browser on the share link reached every page and state at 1440 and 390, on the build's host only"
+echo "ok   a signed-out browser on the share link reached every page and state at 1440 and 375, on the build's host only"
 pw goto "$VIEW"
 see "document.querySelector('a[href\$=\"/$FROM_WT\"]') !== null" "document.querySelector('a[href\$=\"/$FROM_MAIN\"]') !== null"
 pw screenshot --filename="$EV/design-local.png"
 echo "design-local: PASS"
 ```
 
-**Proof:** the block ends `design-local: PASS`, each step's `ok` line above it in `feature-design-local.log`. In `$EV`: `run.log` (the install, its P1 worktree and `design-link`'s `design_link=written` line, no key), `design-local-next.txt`, `design-local-p2.txt`, `publish.log` (two `published=` lines), `design-local-builds.txt` (both ids, newest first), `design-local-viewer-shared.png` (the viewer with sharing on), `design-local-sweep.json` (each page's landing, the states each bar switched, the modals closed by Cancel, links off the build, errors and document statuses), `design-local-<1440|390>-<nn>.png` (the front page as `00`, then each page; a modal state as `-modal-<key>`), `design-local.png` (the Design list with both builds). A run takes about three minutes, most of it the build and the sweep.
+**Proof:** the block ends `design-local: PASS`, each step's `ok` line above it in `feature-design-local.log`. In `$EV`: `run.log` (the install, its P1 worktree and `design-link`'s `design_link=written` line, no key), `design-local-next.txt`, `design-local-p2.txt`, `publish.log` (two `published=` lines), `design-local-builds.txt` (both ids, newest first), `design-local-viewer-shared.png` (the viewer with sharing on), `design-local-sweep.json` (each page's landing, the states each bar switched, the modals closed by Cancel, links off the build, errors and document statuses), `design-local-<1440|375>-<nn>.png` (the front page as `00`, then each page; a modal state as `-modal-<key>`), `design-local.png` (the Design list with both builds). A run takes about three minutes, most of it the build and the sweep.

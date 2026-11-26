@@ -2,7 +2,7 @@
 
 **Reach it:** `/members`, the org rail's section after Feedback, in the active org. Two accounts: the test account (`$SESSION`), the owner of its first org, and the second account (`$SESSION-other`, `run.sh signin other`), which owns only its own sign-up org. The second account joins the test account's org through the API: the owner's invite (`run.sh api POST /app/invites`), whose link the API logs to `$EV/api.log` (no SMTP on the stack), and the second account's accept (`run.sh api other POST /app/invite/<code>/accept`).
 
-**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave appears on the owner's own row; a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `default` org of its own, as at sign-up: its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 390, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
+**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave appears on the owner's own row; a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `default` org of its own, as at sign-up: its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 375, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
 
 ```bash drive
 OTHER="$SESSION-other"
@@ -21,9 +21,9 @@ see() { # session, then texts: wait up to 15 s for the page to show each
   done
 }
 must() { [ $# -eq 3 ] || { echo "FAIL must takes 3 arguments, got $#"; return 1; }; [ "$2" = "$3" ] && echo "ok   $1" || { echo "FAIL $1: got '$2', want '$3'"; return 1; }; }
-shots() { # name: 1440 and 390, each checked for sideways overflow, then back to 1440
+shots() { # name: 1440 and 375, each checked for sideways overflow, then back to 1440
   local w
-  for w in 1440 390; do
+  for w in 1440 375; do
     pw resize "$w" 900
     sleep 1
     must "$1 at $w has no sideways overflow" "$(js '() => document.documentElement.scrollWidth <= document.documentElement.clientWidth' "${S:-$SESSION}")" true
@@ -138,4 +138,4 @@ must "the owner is the sole owner again: no Leave" "$(has "$SESSION" "$LEAVE")" 
 pw screenshot --filename="$EV/members.png"
 ```
 
-**Proof:** every `must` prints `ok` and every `see` is seen; `members-owner-before-{1440,390}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,390}.png` the row as Owner and Leave on the owner's own row; `members-sole-owner-{1440,390}.png` the second account alone in its org, no controls; `members-co-owner-{1440,390}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,390}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `default` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).
+**Proof:** every `must` prints `ok` and every `see` is seen; `members-owner-before-{1440,375}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,375}.png` the row as Owner and Leave on the owner's own row; `members-sole-owner-{1440,375}.png` the second account alone in its org, no controls; `members-co-owner-{1440,375}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,375}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `default` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).

@@ -13,7 +13,7 @@ WEB=http://127.0.0.1:3040 EV="$EV" SESSION=sikstack-design bash -euo pipefail "$
 
 The pages sit at production's addresses for the recording's project (`00000000-0000-4000-8000-000000000001`): the Agenda at `/projects/<id>/workspace/`, an item at `…/workspace/agenda/<item>/`. Every change stays in the browser (`localStorage`). The **state widget** (`web/design/lib/states.tsx`, the pill at the window's bottom left, `Design states: <page>, <state>`) opens to the page's own states and **Reset design data**; a state is in the address as `?state=<key>`.
 
-**Drive it:** every Agenda action by client clicks, each change seen at once, after a reload and gone after Reset; an item added in the browser opened and edited, its Markdown note drawn; each page's states, each clicked, shown and kept by a reload; the widget by keyboard; the widget over no control at 1440 and 390 wide, scrolled to the top, middle and bottom; then the network log (only static files from `$WEB`) and the console (no error, so no hydration error).
+**Drive it:** every Agenda action by client clicks, each change seen at once, after a reload and gone after Reset; an item added in the browser opened and edited, its Markdown note drawn; each page's states, each clicked, shown and kept by a reload; the widget by keyboard; the widget over no control at 1440 and 375 wide, scrolled to the top, middle and bottom; then the network log (only static files from `$WEB`) and the console (no error, so no hydration error).
 
 ```bash drive
 P=00000000-0000-4000-8000-000000000001
@@ -267,7 +267,7 @@ pw press Escape
 see 'document.querySelector("[data-design-state]") === null' 'document.activeElement?.getAttribute("aria-label") === "Design states: Agenda, Empty agenda"'
 shot 10-keyboard
 
-# 11. It follows the scroll and covers no control: at 1440 and 390 wide, scrolled to the top, the middle and the
+# 11. It follows the scroll and covers no control: at 1440 and 375 wide, scrolled to the top, the middle and the
 #     bottom of the long Agenda, nothing a click or a key could reach lies under the widget.
 under='(() => { const w = document.querySelector("[data-design-states]"); const r = w.getBoundingClientRect(); const hit = new Set();
   for (let x = r.left + 1; x < r.right; x += 3) for (let y = r.top + 1; y < r.bottom; y += 3)
@@ -276,7 +276,7 @@ under='(() => { const w = document.querySelector("[data-design-states]"); const 
       if (c) hit.add(c.tagName + " " + (c.getAttribute("aria-label") || c.textContent.trim().slice(0, 40))); }
   return [...hit].join(" | ") === "" && r.bottom <= innerHeight && r.top >= 0; })()'
 pw goto "$AGENDA?state=many"
-for size in "1440 900" "390 844"; do
+for size in "1440 900" "375 812"; do
   pw resize $size
   for at in top middle bottom; do
     case $at in top) y=0 ;; middle) y='(document.documentElement.scrollHeight - innerHeight) / 2' ;; bottom) y=document.documentElement.scrollHeight ;; esac
@@ -291,7 +291,7 @@ logs
 # 12. The system page (/system/, linked from the index): every token of tokens.css (design:build already held the
 #     page's list equal to the file's and every shared export drawn or listed), the light accent painted by the
 #     token itself, both dialogs open in place (not modal), the toast on its board, no sideways scroll; one
-#     screenshot a section at 1440 and 390.
+#     screenshot a section at 1440 and 375.
 pw goto "$WEB/"
 pw click 'role=link[name="System"]'
 see '[...new Set([...document.querySelectorAll("[data-token]")].map(e => e.dataset.token))].length >= 30' \
@@ -299,7 +299,7 @@ see '[...new Set([...document.querySelectorAll("[data-token]")].map(e => e.datas
   '(() => { const s = document.querySelector("[data-scheme=light] [data-token=\"--accent\"]"); return getComputedStyle(s.firstElementChild).backgroundColor !== "rgba(0, 0, 0, 0)"; })()' \
   '[...document.querySelectorAll("dialog")].length === 2 && [...document.querySelectorAll("dialog")].every(d => d.open && !d.matches(":modal"))' \
   '!!document.querySelector(".toast")'
-for size in "1440 900" "390 844"; do
+for size in "1440 900" "375 812"; do
   pw resize $size
   see 'document.documentElement.scrollWidth <= innerWidth'
   for part in tokens ui frame states shell exports; do

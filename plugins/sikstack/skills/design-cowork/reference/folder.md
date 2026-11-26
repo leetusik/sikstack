@@ -60,13 +60,22 @@ is not the folder's production-exclusion check (platform's `design:check`), whic
 node "${CLAUDE_PLUGIN_ROOT}/templates/design/check.mjs" --base http://127.0.0.1:<port> --manifest <folder>/out/manifest.json --out <evidence folder> [--shots <dir>]
 ```
 
-It walks every page of the manifest (or the URLs given) and each state its widget lists, at 1440 and 390 px, and
-prints only failures, each with a cropped screenshot: console errors and failed requests, sideways overflow,
-clipped text, overlapping or covered controls, targets under 24 px. Every run (a page, at one width, in one state)
+It walks every page of the manifest (or the URLs given) and each state its widget lists, at 1440, 768 and 375 px
+(desktop, tablet, and the iPhone 13 mini: a page that fits it fits every phone), and prints only failures, each with a
+cropped screenshot: console errors and failed requests, sideways overflow, clipped text, overlapping or covered
+controls, text drawn on top of other text, targets under 24 px. The phone width runs twice: in Chrome, and in WebKit
+18.2 with the iPhone 13 Mini profile (every iOS browser is WebKit, and this old one shows grid bugs newer builds
+hide); its failures read `w=375 webkit`. The WebKit driver, playwright-core 1.49.1 and its browser, installs on first
+use into one folder in the user's cache (a download of about 63 MiB, about 250 MB on disk, once;
+`SIKSTACK_WEBKIT_HOME` moves all of it); when it cannot be installed or launched the check stops with a driver error,
+and `--no-webkit` skips it on purpose. An overlap passes only under an opened menu or dialog, or under a fixed bar
+that some scroll position moves off what it covers: a header over the first line, a foot bar over the last at the
+end of the scroll, or a lifted badge over a link fails. A brief that names fewer devices passes their
+widths (`--widths 1440` for a desktop-only tool). Every run (a page, at one width, in one state)
 opens in a fresh browser context, so no state a run stores reaches the next, and a page with a state widget must
 show the state its run names, else `FAIL state` and that run is not measured. A clean build prints one `ok` line;
 exit 1 is layout failures, exit 2 a usage or driver error (`driver error: …`: no server, a `playwright-cli`
-failure), where nothing was checked. `--shots <dir>` also saves every measured run as viewport-height tiles, what a
+failure, WebKit not to be had), where nothing was checked. `--shots <dir>` also saves every measured run as viewport-height tiles, what a
 person sees, for the critic to open (it runs `--shots <slice folder>/shots`); a tile's name can start with `-`, so
 pass `--` before it in a shell command. A product may copy it into its folder. Beside it, `canvas.mjs` walks the
 same runs into a claude.ai canvas copy (`claude-canvas.md`). The drafter answers every failure

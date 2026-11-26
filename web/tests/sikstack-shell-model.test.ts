@@ -7,6 +7,8 @@ import {
   newestFirst,
   nonceFromCsp,
   railFor,
+  railMore,
+  railScrollFor,
   reviewCount,
   showsProjectFilter,
 } from "@/sikstack/shell/model";
@@ -58,6 +60,26 @@ describe("the project switcher", () => {
       { id: "c", created_at: "2026-06-01T00:00:00Z" },
     ];
     expect(newestFirst(ps).map((p) => p.id)).toEqual(["b", "c", "a"]);
+  });
+});
+
+describe("the rail on a phone (one row that scrolls sideways, P86 U1)", () => {
+  it("marks the sides that hide tabs, a pixel of rounding none", () => {
+    expect(railMore(0, 343, 343)).toEqual({ start: false, end: false });
+    expect(railMore(0, 343, 344)).toEqual({ start: false, end: false });
+    expect(railMore(0, 343, 450)).toEqual({ start: false, end: true });
+    expect(railMore(50, 343, 450)).toEqual({ start: true, end: true });
+    expect(railMore(107, 343, 450)).toEqual({ start: true, end: false });
+  });
+
+  it("scrolls the current tab clear of the fade, and leaves a tab in view alone", () => {
+    // in view: no scroll
+    expect(railScrollFor(0, 343, 100, 80, 32)).toBeNull();
+    // past the end: its end lands a fade's width inside the rail
+    expect(railScrollFor(0, 343, 340, 90, 32)).toBe(340 + 90 + 32 - 343);
+    // before the start: its start lands a fade's width inside, never below 0
+    expect(railScrollFor(200, 343, 150, 80, 32)).toBe(118);
+    expect(railScrollFor(200, 343, 10, 80, 32)).toBe(0);
   });
 });
 
