@@ -6457,7 +6457,7 @@ fi
 kill "$AF_PID" 2>/dev/null; wait "$AF_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
-echo "== Test 40: the engine stamp (works/engine.json) -- init commits it; against a stamp of a later release a write refuses in one line (both versions, restart Claude Code, the rollback way out, no friction offer) with nothing written, in-process through workflow.run too, and next and check run with one warning line and no rebuild; a newer engine raises it at its first real change (not at a same-bytes rewrite) and records (old, new) once; with no stamp the backlog's version line seeds old by release order (2.1.0 before 0.3.0), never refusing; a worktree's start commit carries it, the gate's exemption counts it, and merge-finish keeps the later release of the two sides; in cloud mode the refusal comes before any effect: unlink --from-disk keeps .hi2vi/ and the link, and a linked next leaves the web inbox pending for a current engine =="
+echo "== Test 40: the engine stamp (works/engine.json) -- init commits it; against a stamp of a later release a write refuses in one line (both versions, restart Claude Code, the rollback way out, no friction offer) with nothing written, in-process through workflow.run too, and next and check run with one warning line and no rebuild; a newer engine raises it at its first real change (not at a same-bytes rewrite) and records (old, new) once; with no stamp the backlog's version line seeds old by release order (2.1.0 before 0.3.0), never refusing; a worktree's start commit carries it, the gate's exemption counts it, and merge-finish keeps the later release of the two sides; in cloud mode the refusal comes before any effect: unlink --from-disk keeps .hi2vi/ and the link, and a linked next leaves the web inbox pending for a current engine; with work for each effect to do, the commit step (a hand edit on disk), an online unlink, sync --keep local and cloud against a stamp only sikstack holds, link joining it, sign-in and design-link each send nothing and keep nothing =="
 # es_copy <var> <version>: a copy of this plugin whose plugin.json says <version>, listed atop its CHANGELOG like a release.
 es_copy() { local _esd; newtmp _esd; cp -R "$PLUGIN/." "$_esd/"; python3 - "$_esd" "$2" <<'PY'
 import json, sys
@@ -6629,6 +6629,93 @@ kill "$ES_PID" 2>/dev/null; wait "$ES_PID" 2>/dev/null
   && [ "$es_n2rc" = 0 ] && [ "$es_s2" = applied ] && [ -f "$ES/works/agenda/A3-x2/agenda.json" ] \
   && ok "linked, the pull brings a stamp of 0.99.0: next exits 0 with the warning, sends no commit and leaves the web's pending add pending; a 0.99.0 engine's next then applies it" \
   || bad "a stale linked next answered the inbox -- rc=$es_n1rc state=$es_s1 commits=$es_c1 stamp=$(es_stamp "$ES") ($(tail -2 "$ESF/n1.txt" | tr '\n' ' ')); current rc=$es_n2rc state=$es_s2 ($(tail -2 "$ESF/n2.txt" | tr '\n' ' '))"
+# (g) every stale guard in cloud mode, each run against the fake with work for its effect to do, so that removing the
+# guard, or reducing it to a verdict whose answer is ignored, turns a line here red. One project in sikstack: checkout A
+# links, B joins it, then another checkout raises sikstack's stamp to 0.99.0. A (stamp pulled by its next) checks the
+# commit step with a hand edit on disk, after a refused write and after a read, the inbox and an online unlink; B (stamp
+# only in sikstack, never pulled) checks sync --keep local and cloud, then an online unlink whose own pull brings it;
+# C, a fresh install, links to join it; D, unlinked with a local stamp of 0.99.0, runs sign-in and design-link.
+newtmp ESG; printf 'stamp-guard-key\n' > "$ESG/key"; chmod 600 "$ESG/key"
+python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$ESG/fake" --port-file "$ESG/port" --key-file "$ESG/key" \
+  --project proj-1 --org org-1 --lifetime 600 > "$ESG/fake.txt" 2>&1 &
+EG_PID=$!
+for _ in $(seq 1 100); do [ -s "$ESG/port" ] && break; sleep 0.1; done
+ESS="http://127.0.0.1:$(cat "$ESG/port" 2>/dev/null)"   # es_fake and es_state speak to this fake from here on
+eg_mark() { if [ -f "$ESG/fake/requests.jsonl" ]; then wc -l < "$ESG/fake/requests.jsonl" | tr -d ' '; else echo 0; fi; }
+# eg_since <mark>: the requests after <mark>, one "METHOD route" each; eg_sent <mark>: how many of them change sikstack
+# (anything but a read: head, manifest, fetch, the inbox's list).
+eg_since() { tail -n +"$(( $1 + 1 ))" "$ESG/fake/requests.jsonl" 2>/dev/null | python3 -c 'import json, sys
+for l in sys.stdin:
+    if l.strip():
+        e = json.loads(l); print(e.get("method"), e.get("route") or str(e.get("path") or "").rsplit("/", 1)[-1])'; }
+eg_sent() { eg_since "$1" | grep -cvE '^(GET head|GET manifest|POST fetch|GET inbox)$'; }
+eg_eng() { local _c=$1 _x=$2; shift 2; ( cd "$ESG/$_c/.sikstack" && XDG_CONFIG_HOME="$ESG/x$_x" python3 "$ENG" "$@" ); }
+eg_linked() { [ -f "$ESG/$1/.sikstack/.hi2vi/base.json" ] && grep -q '^\[cloud\]' "$ESG/$1/.sikstack/config.toml"; }
+mkhost "$ESG/a" >/dev/null 2>&1; mkhost "$ESG/b" >/dev/null 2>&1; mkhost "$ESG/c" >/dev/null 2>&1; mkhost "$ESG/d" >/dev/null 2>&1
+printf 'stamp-guard-key\n' | eg_eng a a link "$ESS/projects/proj-1" > "$ESG/link-a.txt" 2>&1; eg_la=$?
+printf 'stamp-guard-key\n' | eg_eng b b link "$ESS/projects/proj-1" > "$ESG/link-b.txt" 2>&1; eg_lb=$?
+( cd "$ESG/d" && CLAUDE_CONFIG_DIR="$ESG/cfg" SIKSTACK_SERVER="$ESS" XDG_CONFIG_HOME="$ESG/xd" python3 "$ENG" setup --email s@example.com --data-dir "$ESG/data" ) > "$ESG/setup.txt" 2>&1; eg_su=$?
+es_set "$ESG/d/.sikstack" 0.99.0
+es_fake POST /_fake/write '{"path": "docs/current/product.md", "content": "# Product\n\nfrom another checkout\n"}' >/dev/null
+es_fake POST /_fake/write '{"path": "works/engine.json", "content": "{\n  \"version\": \"0.99.0\"\n}\n"}' >/dev/null
+eg_id=$(es_fake POST /_fake/inbox '{"kind": "add", "minted_id": "A5-g7", "items": ["A5-g7"], "fields": {"title": "from the web"}}' | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])')
+[ "$eg_la" = 0 ] && [ "$eg_lb" = 0 ] && [ "$eg_su" = 0 ] && eg_linked a && eg_linked b \
+  || bad "Test 40 (g)'s setup failed -- link a rc=$eg_la ($(tail -1 "$ESG/link-a.txt")) b rc=$eg_lb ($(tail -1 "$ESG/link-b.txt")) setup rc=$eg_su ($(tail -1 "$ESG/setup.txt"))"
+# A: the commit step, with a hand edit on disk the stale command must not send (a refused write, then a read).
+printf '\na hand edit a stale command must not send\n' >> "$ESG/a/.sikstack/docs/current/operations.md"
+eg_m=$(eg_mark); eg_eng a a phase new --phase P1 --name One --objective o > "$ESG/a1.txt" 2>&1; eg_a1rc=$?; eg_a1=$(eg_sent "$eg_m")
+eg_m=$(eg_mark); eg_eng a a next > "$ESG/a2.txt" 2>&1; eg_a2rc=$?; eg_a2=$(eg_sent "$eg_m")
+eg_aj=no; [ -e "$ESG/a/.sikstack/.hi2vi/journal.json" ] && eg_aj=yes
+[ "$eg_a1rc" = 1 ] && [ "$eg_a1" = 0 ] && [ "$eg_a2rc" = 0 ] && [ "$eg_a2" = 0 ] && [ "$eg_aj" = no ] \
+  && [ "$(es_stamp "$ESG/a/.sikstack")" = 0.99.0 ] && grep -q 'a hand edit a stale command must not send' "$ESG/a/.sikstack/docs/current/operations.md" \
+  && ok "a hand edit on disk: the commit step after a stale refused write (rc 1) and after a stale next (rc 0, the stamp pulled) sends nothing and leaves no journal" \
+  || bad "a stale commit step sent the hand edit -- write rc=$eg_a1rc sent=$eg_a1 [$(eg_since 0 | tail -3 | tr '\n' ',')]; next rc=$eg_a2rc sent=$eg_a2 journal=$eg_aj stamp=$(es_stamp "$ESG/a/.sikstack") ($(tail -1 "$ESG/a2.txt"))"
+[ "$(es_state "$eg_id")" = pending ] && [ ! -e "$ESG/a/.sikstack/works/agenda/A5-g7" ] \
+  && ok "the stale next leaves the web's pending add pending (never answered refused) and applies nothing" \
+  || bad "a stale next answered the inbox -- state=$(es_state "$eg_id")"
+eg_ev0=$(cat "$ESG/a/.sikstack/works/events.jsonl" 2>/dev/null | sha_stdin)
+eg_m=$(eg_mark); eg_eng a a unlink > "$ESG/a3.txt" 2>&1; eg_a3rc=$?; eg_a3=$(eg_sent "$eg_m")
+eg_ev1=$(cat "$ESG/a/.sikstack/works/events.jsonl" 2>/dev/null | sha_stdin)
+[ "$eg_a3rc" = 1 ] && grep -q "older than sikstack 0.99.0" "$ESG/a3.txt" && [ "$eg_a3" = 0 ] && eg_linked a && [ "$eg_ev0" = "$eg_ev1" ] \
+  && ok "an online unlink against the pulled stamp refuses: nothing sent, no cold restore (the event log as it was), .hi2vi/ and the [cloud] table kept" \
+  || bad "a stale online unlink landed -- rc=$eg_a3rc sent=$eg_a3 linked=$(eg_linked a && echo yes || echo no) events_same=$([ "$eg_ev0" = "$eg_ev1" ] && echo yes || echo no) ($(tail -1 "$ESG/a3.txt"))"
+# B: sikstack holds 0.99.0 and a changed product.md; B's disk has neither (its own edit of product.md is the mismatch).
+cp "$ESG/b/.sikstack/docs/current/product.md" "$ESG/b-product.md"
+printf '\nthis disk'"'"'s edit\n' >> "$ESG/b/.sikstack/docs/current/product.md"; eg_mine=$(sha "$ESG/b/.sikstack/docs/current/product.md")
+eg_kbad=""
+for eg_side in local cloud; do
+  eg_m=$(eg_mark); eg_k=$(eg_eng b b sync --keep "$eg_side" docs/current/product.md 2>&1); eg_krc=$?; eg_ks=$(eg_sent "$eg_m")
+  [ "$eg_krc" = 1 ] && [ "$(printf '%s\n' "$eg_k" | grep -c .)" = 1 ] && printf '%s\n' "$eg_k" | grep -q "older than sikstack 0.99.0" \
+    && [ "$eg_ks" = 0 ] && [ "$(sha "$ESG/b/.sikstack/docs/current/product.md")" = "$eg_mine" ] && [ "$(es_stamp "$ESG/b/.sikstack")" = "$ES_RUN" ] \
+    || eg_kbad="$eg_kbad [$eg_side: rc=$eg_krc sent=$eg_ks stamp=$(es_stamp "$ESG/b/.sikstack") $(printf '%s' "$eg_k" | tail -1 | head -c 200)]"
+done
+[ -z "$eg_kbad" ] \
+  && ok "sync --keep local and --keep cloud against a stamp only sikstack holds: one refusal line each, nothing sent, the disk's copy and stamp kept" \
+  || bad "a stale sync --keep went ahead --$eg_kbad"
+cp "$ESG/b-product.md" "$ESG/b/.sikstack/docs/current/product.md"
+eg_m=$(eg_mark); eg_eng b b unlink > "$ESG/b3.txt" 2>&1; eg_b3rc=$?; eg_b3=$(eg_sent "$eg_m")
+[ "$eg_b3rc" = 1 ] && grep -q "older than sikstack 0.99.0" "$ESG/b3.txt" && [ "$eg_b3" = 0 ] && eg_linked b \
+  && ok "an online unlink whose own pull brings the stamp refuses after the pull: nothing sent, .hi2vi/ and the [cloud] table kept" \
+  || bad "a stale online unlink went past its pull -- rc=$eg_b3rc sent=$eg_b3 linked=$(eg_linked b && echo yes || echo no) ($(tail -1 "$ESG/b3.txt"))"
+# C: a fresh install joins the project whose stamp sikstack holds at 0.99.0.
+eg_m=$(eg_mark); printf 'stamp-guard-key\n' | eg_eng c c link "$ESS/projects/proj-1" > "$ESG/c1.txt" 2>&1; eg_c1rc=$?; eg_c1=$(eg_sent "$eg_m")
+[ "$eg_c1rc" = 1 ] && grep -q "older than sikstack 0.99.0" "$ESG/c1.txt" && [ "$eg_c1" = 0 ] && [ ! -e "$ESG/c/.sikstack/.hi2vi" ] \
+  && [ ! -e "$ESG/xc/sikstack/workspace-keys.json" ] && ! grep -q '^\[cloud\]' "$ESG/c/.sikstack/config.toml" \
+  && ok "link joining a workspace sikstack holds at 0.99.0 refuses after its reads: nothing sent, no key kept, no .hi2vi/, no [cloud] table" \
+  || bad "a stale link joined -- rc=$eg_c1rc sent=$eg_c1 hi2vi=$([ -e "$ESG/c/.sikstack/.hi2vi" ] && echo made || echo none) key=$([ -e "$ESG/xc/sikstack/workspace-keys.json" ] && echo kept || echo none) ($(tail -1 "$ESG/c1.txt"))"
+# D: sign-in and design-link, unlinked, against a local stamp of 0.99.0: refused before any request.
+eg_m=$(eg_mark); ( cd "$ESG/d" && SIKSTACK_SERVER="$ESS" XDG_CONFIG_HOME="$ESG/xd" python3 "$ENG" sign-in --data-dir "$ESG/data" --no-browser --wait 1 ) > "$ESG/d1.txt" 2>&1; eg_d1rc=$?
+eg_d1=$(eg_since "$eg_m" | grep -c .)
+[ "$eg_d1rc" = 1 ] && grep -q "older than sikstack 0.99.0" "$ESG/d1.txt" && [ "$eg_d1" = 0 ] && ! grep -q '^\[cloud\]' "$ESG/d/.sikstack/config.toml" \
+  && ok "sign-in against a local stamp of 0.99.0 refuses before any request: no sign-in started, no install claimed" \
+  || bad "a stale sign-in reached the server -- rc=$eg_d1rc requests=[$(eg_since "$eg_m" | tr '\n' ',')] ($(tail -1 "$ESG/d1.txt"))"
+eg_m=$(eg_mark); printf 'stamp-guard-key\n' | ( cd "$ESG/d" && XDG_CONFIG_HOME="$ESG/xd" python3 "$ENG" design-link "$ESS/projects/proj-1" ) > "$ESG/d2.txt" 2>&1; eg_d2rc=$?
+eg_d2=$(eg_since "$eg_m" | grep -c .)
+[ "$eg_d2rc" = 1 ] && grep -q "older than sikstack 0.99.0" "$ESG/d2.txt" && [ "$eg_d2" = 0 ] && [ ! -e "$ESG/xd/sikstack/workspace-keys.json" ] \
+  && ! grep -q '^\[design\]' "$ESG/d/.sikstack/config.toml" \
+  && ok "design-link against a local stamp of 0.99.0 refuses before any request: no key kept, no [design] table" \
+  || bad "a stale design-link reached the server -- rc=$eg_d2rc requests=[$(eg_since "$eg_m" | tr '\n' ',')] key=$([ -e "$ESG/xd/sikstack/workspace-keys.json" ] && echo kept || echo none) ($(tail -1 "$ESG/d2.txt"))"
+kill "$EG_PID" 2>/dev/null; wait "$EG_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 echo "== Test 41: the Migration notes after an update -- against a stamp of 0.8.0 the session-start hook prints, after the card, one block of the notes of each release after 0.8.0 (newest first, within HOOK_CAP); an equal stamp leaves the card byte-identical; a later stamp gets the update line; on compact the block shows once, before the resume card, and fit() keeps card and notes whole; the first command that raises the stamp prints the same block on stderr once (a --json stdout stays valid), the next none; with no stamp a backlog line of the running release owes nothing (card alone, a silent first write), and the default-checkout refresh keeps an unstamped checkout's older line (0.9.0), whose notes its hook and first write then show =="

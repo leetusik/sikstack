@@ -852,11 +852,16 @@ assert 'ENGINE_STAMP_REL = "works/engine.json"' in _store
 assert _store.split("def rebuild_index_and_state() -> None:\n", 1)[1].startswith("    if engine_stale():")
 # The order of a stale refusal: in a stale process it comes before any of the command's effects. Each function below has
 # effects past the workspace's guarded writers (a request that changes sikstack, CLOUD_DIR, the [cloud] or [design]
-# table, the key file, a sign-in, the inbox's answers), so every one of its effect calls (_ENGINE_EFFECTS) must have, as
-# its nearest earlier call in source order among the verdict calls and the pulls (begin, _pull, which may bring a
-# newer stamp), a verdict call. CloudSession.commit is on the list, so a call to it needs no verdict of its own.
-_ENGINE_VERDICTS = {"engine_verdict", "engine_refuse_stale"}
-_ENGINE_PULLS = {"begin", "_pull"}
+# table, the key file, a sign-in, the inbox's answers), so every one of its effect calls (_ENGINE_EFFECTS) must be gated
+# by a check that blocks a stale process, never by a verdict whose answer is ignored. An effect is gated when, walking
+# the function's statements in source order, a stop came since the last pull or held-stamp judgement (begin, _pull,
+# engine_judge_held: each may bring a later stamp, so the verdict must be taken again after it), or when it sits in the
+# branch an `if` on the verdict's `stale` takes for a process that is not stale. A stop is engine_refuse_stale() as a
+# statement, or an `if` on the verdict's `stale` (engine_verdict()["stale"], or a name assigned from it since the last
+# pull) whose stale branch ends in a return, a raise or engine_refuse_stale(). A bare engine_verdict() gates nothing.
+# CloudSession.commit is on the list, so a call to it needs no verdict of its own.
+_ENGINE_STOP = "engine_refuse_stale"
+_ENGINE_RESETS = {"begin", "_pull", "engine_judge_held"}
 _ENGINE_EFFECTS = {"send", "_push", "evict", "settle_appends", "cloud_restore_cold", "rmtree", "cloud_drop_link",
                    "cloud_write_link", "config_write_table", "cloud_save_key", "cloud_exclude", "write_back", "keep_held",
                    "cloud_inbox_apply", "cloud_keep", "cloud_device_sign_in", "cloud_link_with", "_design_link_with",
@@ -867,6 +872,81 @@ _ENGINE_FIRST = {  # file:function -> effect calls allowed before the verdict, e
     "wf_cloud.py:cloud_inbox_step": {}, "wf_design.py:design_link": {},
     "wf_cloud.py:cloud_sync_run": {"_push": "the resend of a journaled batch: an earlier command's push, as it composed it"},
 }
+def _engine_name(_call):
+    _f = _call.func
+    return _f.attr if isinstance(_f, _ast.Attribute) else getattr(_f, "id", "")
+def _engine_stale_test(_test, _names):  # True: stale when the test holds; False: stale when it fails; None: no stale test
+    if isinstance(_test, _ast.UnaryOp) and isinstance(_test.op, _ast.Not):
+        _inner = _engine_stale_test(_test.operand, _names)
+        return None if _inner is None else not _inner
+    if isinstance(_test, _ast.Subscript) and isinstance(_test.value, _ast.Call) and _engine_name(_test.value) == "engine_verdict" \
+            and isinstance(_test.slice, _ast.Constant) and _test.slice.value == "stale":
+        return True
+    if isinstance(_test, _ast.Name) and _test.id in _names:
+        return True
+    return None
+def _engine_ends(_block):  # a stale process never falls out of this branch
+    _last = _block[-1] if _block else None
+    return isinstance(_last, (_ast.Return, _ast.Raise)) or (isinstance(_last, _ast.Expr) and isinstance(_last.value, _ast.Call)
+                                                            and _engine_name(_last.value) == _ENGINE_STOP)
+class _EngineOrder:
+    def __init__(self, key, allowed):
+        self.key, self.allowed, self.gated, self.names, self.effects, self.bad = key, allowed, False, set(), 0, []
+    def scan(self, node, stop=None):  # the calls in one statement's own expressions, in source order
+        _calls = sorted((c for c in _ast.walk(node) if isinstance(c, _ast.Call)), key=lambda c: (c.lineno, c.col_offset))
+        for _c in _calls:
+            _n = _engine_name(_c)
+            if _n in _ENGINE_RESETS:
+                self.gated = False
+                self.names.clear()
+            elif _c is stop:
+                self.gated = True
+            elif _n in _ENGINE_EFFECTS:
+                self.effects += 1
+                if not self.gated and _n not in self.allowed:
+                    self.bad.append(f"{self.key}:{_c.lineno} {_n} runs with no stale check blocking it (a stop since the last pull, or the not-stale branch of an if on the verdict)")
+    def walk(self, stmts):
+        for _s in stmts:
+            if isinstance(_s, _ast.If):
+                _pol = _engine_stale_test(_s.test, self.names)
+                self.scan(_s.test)
+                if _pol is None:
+                    self.walk(_s.body)
+                    self.walk(_s.orelse)
+                    continue
+                _stale, _live = (_s.body, _s.orelse) if _pol else (_s.orelse, _s.body)
+                self.walk(_stale)
+                _after_stale = self.gated
+                self.gated = True
+                self.walk(_live)
+                self.gated = self.gated if _engine_ends(_stale) else (self.gated and _after_stale)
+            elif isinstance(_s, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                self.walk(_s.body)  # a nested callback, run after the statements before it
+            elif isinstance(_s, (_ast.For, _ast.AsyncFor, _ast.While)):
+                self.scan(_s.iter if hasattr(_s, "iter") else _s.test)
+                self.walk(_s.body)
+                self.walk(_s.orelse)
+            elif isinstance(_s, (_ast.With, _ast.AsyncWith)):
+                for _item in _s.items:
+                    self.scan(_item.context_expr)
+                self.walk(_s.body)
+            elif isinstance(_s, _ast.Try):
+                self.walk(_s.body)
+                for _h in _s.handlers:
+                    self.walk(_h.body)
+                self.walk(_s.orelse)
+                self.walk(_s.finalbody)
+            else:
+                _stop = _s.value if isinstance(_s, _ast.Expr) and isinstance(_s.value, _ast.Call) \
+                    and _engine_name(_s.value) == _ENGINE_STOP else None
+                self.scan(_s, _stop)
+                if isinstance(_s, (_ast.Assign, _ast.AnnAssign, _ast.AugAssign)):
+                    _targets = _s.targets if isinstance(_s, _ast.Assign) else [_s.target]
+                    _ids = {n.id for t in _targets for n in _ast.walk(t) if isinstance(n, _ast.Name)}
+                    self.names -= _ids
+                    if isinstance(_s, _ast.Assign) and _s.value is not None and _engine_stale_test(_s.value, self.names) is True \
+                            and all(isinstance(t, _ast.Name) for t in _targets):
+                        self.names |= _ids
 _order_bad = []
 for _key, _allowed in sorted(_ENGINE_FIRST.items()):
     _file, _fname = _key.split(":")
@@ -875,19 +955,25 @@ for _key, _allowed in sorted(_ENGINE_FIRST.items()):
     if len(_defs) != 1:
         _order_bad.append(f"{_key}: {len(_defs)} definitions")
         continue
-    _calls = sorted((c.lineno, c.col_offset, c.func.attr if isinstance(c.func, _ast.Attribute) else getattr(c.func, "id", ""))
-                    for c in _ast.walk(_defs[0]) if isinstance(c, _ast.Call))
-    _last, _effects = None, 0
-    for _line, _col, _name in _calls:
-        if _name in _ENGINE_VERDICTS or _name in _ENGINE_PULLS:
-            _last = _name
-        elif _name in _ENGINE_EFFECTS:
-            _effects += 1
-            if _last not in _ENGINE_VERDICTS and _name not in _allowed:
-                _order_bad.append(f"{_key}:{_line} {_name} runs before the engine stamp's verdict (last: {_last})")
-    if not _effects:
+    _walker = _EngineOrder(_key, _allowed)
+    _walker.walk(_defs[0].body)
+    _order_bad += _walker.bad
+    if not _walker.effects:
         _order_bad.append(f"{_key}: no effect call left to order (update _ENGINE_FIRST)")
 assert not _order_bad, _order_bad
+# The walker's own teeth: a verdict whose answer is ignored, or a stop taken before a pull or a held-stamp judgement,
+# leaves the effect ungated; a stop, a stale branch that returns, or the not-stale branch gates it.
+for _snippet, _gated in (("engine_verdict()\ns.send(x)", False), ("engine_refuse_stale()\ns.begin()\ns.send(x)", False),
+                         ("engine_refuse_stale()\nengine_judge_held(d, w)\ns.send(x)", False),
+                         ("x = engine_refuse_stale()\ns.send(x)", False), ("if engine_verdict()['stale']:\n    s.clear()\ns.send(x)", False),
+                         ("stale = engine_verdict()['stale']\ns.begin()\nif stale:\n    return 0\ns.send(x)", False),
+                         ("engine_refuse_stale()\ns.send(x)", True), ("if engine_verdict()['stale']:\n    return 0\ns.send(x)", True),
+                         ("s.begin()\nstale = engine_verdict()['stale']\nif stale:\n    s.clear()\nelse:\n    s.send(x)", True),
+                         ("if not engine_verdict()['stale']:\n    s.send(x)", True),
+                         ("s.begin()\nstale = engine_verdict()['stale']\nif stale:\n    engine_refuse_stale()\nshutil.rmtree(p)", True)):
+    _walker = _EngineOrder("selftest", {})
+    _walker.walk(_ast.parse("def f():\n" + "".join(f"    {_l}\n" for _l in _snippet.splitlines())).body[0].body)
+    assert _walker.effects and (not _walker.bad) == _gated, (_snippet, _walker.bad)
 assert {"wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:cloud_unlink_from_disk"} <= set(_ENGINE_FIRST)
 # The boundary: workflow.run takes the verdict before every command that runs outside the cloud boundary (the design and
 # feedback API verbs, link, sign-in) but sync and unlink, which take it after their pull (both on the list above).
