@@ -158,11 +158,11 @@ def test_writeback_is_own_rows_only_and_never_deletes(reader):
     client, engine = reader
     a, tenant = _signup(client, f"aa-{uuid4()}@example.com")
     b, _ = _signup(client, f"ab-{uuid4()}@example.com")
-    pid = _project(client, a, "pub")
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
+    _project(client, a, "pub")
     v1, v2 = _source("chapter-v1.md"), _source("chapter-v2.md")
     secs = _sections("chapter-v1.md")
-    _, doc = _doc(tenant, "pub", "lantern", v1)
+    doc_id, doc = _doc(tenant, "pub", "lantern", v1)
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     key = _key(tenant, "pub", doc)
 
     ids = {

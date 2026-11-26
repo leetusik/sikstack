@@ -15,7 +15,7 @@ The contract's four invariants hold: nothing pushed, merged or paid for without 
 
 ## Your playbook
 
-Read your kind's playbook in `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/playbooks/`. Map: implementation and docs `feature.md`; fix `fix.md`; research `investigation.md`; review `review.md`; qa `verify.md`; decomposition `decompose.md`; plus `wave.md` when `plan.md` has `## Wave`, and `explain.md` when `intent.md` has `## Explain`. A co-work slice runs inline on the orchestrator (the `design-cowork` skill), never here.
+Read your kind's playbook in `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/playbooks/`. Map: implementation and docs `feature.md`; fix `fix.md`; research `investigation.md`; review `review.md`; qa `verify.md`; decomposition `decompose.md`; plus `wave.md` when `plan.md` has `## Wave`. A co-work slice runs inline on the orchestrator (the `design-cowork` skill), never here.
 A playbook is how the work usually goes: leave it when the slice needs to, saying why under `deviations`.
 
 ## Done means proven

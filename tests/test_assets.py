@@ -140,7 +140,7 @@ def test_publish_stores_assets_out_of_git_and_delete_removes_them(client):
     assert r.status_code == 201, r.text
     body = r.json()
     amap = body["assets"]
-    assert body["committed"] is True
+    assert body["committed"] is False  # no git publish
     assert amap["red"]["file"] == amap["red-again"]["file"]
     assert amap["photo"]["media_type"] == "image/jpeg" and amap["photo"]["animated"] is False
 
@@ -162,9 +162,7 @@ def test_publish_stores_assets_out_of_git_and_delete_removes_them(client):
     finally:
         conn.close()
 
-    # Never committed: not in the publish commit, and not even untracked.
-    names = _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").stdout
-    assert ".assets" not in names
+    # Never committed, and not even untracked.
     assert ".assets" not in _git(root, "status", "--porcelain", "--untracked-files=all").stdout
     assert ".assets" not in _git(root, "log", "--all", "--name-only", "--pretty=").stdout
 
@@ -189,7 +187,7 @@ def test_publish_stores_assets_out_of_git_and_delete_removes_them(client):
 # --- the read routes (Postgres-gated: the accounts plane decides visibility) --
 
 from tests.test_documents_api import _project, _signup, documents_client  # noqa: E402,F401
-from tests.test_public_read import _set_public, _set_slug  # noqa: E402
+from tests.test_public_read import _fill, _set_public, _set_slug  # noqa: E402
 
 
 def _seed_with_asset(tmp_path, tenant_id, project, slug, data):
@@ -220,6 +218,7 @@ def test_private_asset_is_the_same_404_as_a_missing_one(documents_client, tmp_pa
 
     pub_id, pub_file = _seed_with_asset(tmp_path, tenant, "pub", "open", _png((1, 2, 3)))
     priv_id, priv_file = _seed_with_asset(tmp_path, tenant, "priv", "closed", _png((4, 5, 6)))
+    _fill(client)  # day one: the public project's existing items read Public
 
     # Anonymous, public project: served with the stated headers.
     ok = client.get(f"/app/documents/{pub_id}/assets/{pub_file}")

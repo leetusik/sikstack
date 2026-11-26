@@ -153,6 +153,60 @@ CREATE TABLE IF NOT EXISTS chapter_variants (
 CREATE UNIQUE INDEX IF NOT EXISTS chapter_variants_doc
   ON chapter_variants (tenant_id, rel_path);
 
+-- Sections (P75): every current document split at its level-2 and level-3 headings,
+-- plus a lead section for the text before the first one (server/sections.py). Derived
+-- rows like the rest of this store: upsert_document re-splits a document on every
+-- write, version and reindex, and a deleted document's rows cascade. `anchor` is the
+-- reader's `#anchor` ('' = the lead, the top); `title` copies the document's title for
+-- the FTS weighting; `content_hash` is the sha256 of the composed embedded text.
+CREATE TABLE IF NOT EXISTS document_sections (
+  id           INTEGER PRIMARY KEY,
+  doc_id       INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  anchor       TEXT NOT NULL,
+  heading      TEXT NOT NULL,
+  level        INTEGER NOT NULL,
+  position     INTEGER NOT NULL,
+  title        TEXT NOT NULL,
+  text         TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  UNIQUE (doc_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS document_sections_hash ON document_sections (content_hash);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS document_sections_fts USING fts5(
+  title, heading, text,
+  content='document_sections', content_rowid='id', tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS document_sections_ai AFTER INSERT ON document_sections BEGIN
+  INSERT INTO document_sections_fts(rowid, title, heading, text)
+  VALUES (new.id, new.title, new.heading, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS document_sections_ad AFTER DELETE ON document_sections BEGIN
+  INSERT INTO document_sections_fts(document_sections_fts, rowid, title, heading, text)
+  VALUES ('delete', old.id, old.title, old.heading, old.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS document_sections_au AFTER UPDATE ON document_sections BEGIN
+  INSERT INTO document_sections_fts(document_sections_fts, rowid, title, heading, text)
+  VALUES ('delete', old.id, old.title, old.heading, old.text);
+  INSERT INTO document_sections_fts(rowid, title, heading, text)
+  VALUES (new.id, new.title, new.heading, new.text);
+END;
+
+-- A section's vector, cached by CONTENT (the sha256 of its composed text) and model,
+-- never by a row id: a reindex that renumbers every row re-embeds nothing unchanged.
+CREATE TABLE IF NOT EXISTS section_embeddings (
+  content_hash TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  dims         INTEGER NOT NULL,
+  vector       BLOB NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (content_hash, model)
+);
+
 CREATE TABLE IF NOT EXISTS document_embeddings (
   doc_id       INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
   model        TEXT NOT NULL,
@@ -205,6 +259,8 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.executescript(
             "DROP TABLE IF EXISTS documents_fts;"
             "DROP TABLE IF EXISTS document_embeddings;"
+            "DROP TABLE IF EXISTS document_sections_fts;"
+            "DROP TABLE IF EXISTS document_sections;"
             "DROP TABLE IF EXISTS documents;"
         )
         conn.executescript(_SCHEMA)
@@ -445,12 +501,20 @@ def upsert_document(
          translated_json, _assets_to_column(assets), source, minutes, published,
          1 if (published and published_best_effort) else 0, ts, ts),
     )
-    conn.commit()
     row = conn.execute(
         "SELECT id FROM documents WHERE tenant_id = ? AND rel_path = ?",
         (tenant_id, rel_path),
     ).fetchone()
-    return int(row["id"])
+    doc_id = int(row["id"])
+    # P75: the document's sections are re-split from this body in the same commit.
+    from server import sections as sections_mod  # import cycle guard
+
+    sections_mod.replace_for_document(
+        conn, doc_id, format=format, title=title, markdown=markdown,
+        source=source, raw_html=raw_html,
+    )
+    conn.commit()
+    return doc_id
 
 
 def get_document(

@@ -317,10 +317,8 @@ def test_html_to_native_migration_breaks_no_link(client):
         conn.close()
     check("after a rebuild")
 
-    # The commit moved the file and the manifest followed it.
-    changed = _git(root, "show", "--no-renames", "--name-status", "--pretty=", "HEAD").stdout
-    assert f"D\tdocs/{old_rel}" in changed and f"A\tdocs/{new_rel}" in changed
-    assert "docs/.books/lab/guide.json" in changed
+    # The file moved on disk (no git publish: nothing is committed).
+    assert not (root / "docs" / old_rel).exists() and (root / "docs" / new_rel).is_file()
 
     # A chapter publish (book fields) is now an ordinary next version at the .md path;
     # a NEW html document may not take the migrated document's stem.

@@ -167,6 +167,7 @@ def _document_body(
     commit: bool = True,
     co_authored_by: str | None = None,
     extra: dict[str, Any] | None = None,
+    share: str | None = None,
 ) -> dict[str, Any]:
     """The JSON body of a publish (and of its dry run, `/api/documents/check`)."""
 
@@ -187,6 +188,8 @@ def _document_body(
         body["related"] = related
     if co_authored_by is not None:
         body["co_authored_by"] = co_authored_by
+    if share is not None:
+        body["share"] = share
     if extra:
         body.update(extra)
     return body
@@ -391,9 +394,13 @@ class KnowledgeClient:
         commit: bool = True,
         co_authored_by: str | None = None,
         extra: dict[str, Any] | None = None,
+        share: str | None = None,
         token: str | None = None,
     ) -> Any:
         """POST /api/documents -> 201 (the frozen consumer contract). Metered.
+
+        `share` (`members|link|public`) sets the item's sharing; omitted, a new item
+        starts at its project's default and an existing one keeps its state.
 
         `extra` carries the additive fields (P30: `format`, `summary`, `book`,
         `chapter`, `lang`, `translated_from`, `subject`, `new_version`, `rel_path`,
@@ -415,10 +422,36 @@ class KnowledgeClient:
             title=title, markdown=markdown, project=project, tags=tags,
             source_repo=source_repo, date=date, slug=slug, related=related,
             overwrite=overwrite, commit=commit, co_authored_by=co_authored_by, extra=extra,
+            share=share,
         )
         return self._request(
             "POST", "/api/documents", token=token, json=body, timeout=WRITE_TIMEOUT
         )
+
+    def share_set(
+        self,
+        *,
+        state: str,
+        document: str | None = None,
+        book: str | None = None,
+        project: str | None = None,
+        token: str | None = None,
+    ) -> Any:
+        """POST /api/share -> `{project, key, share: {state, kind, url}}`.
+
+        One document (by rel_path; a chapter's sharing is its book's) or one book (by
+        slug, in `project` or the key's own). `link` mints a link unless one is on;
+        `members`/`public` clear it. Unmetered.
+        """
+
+        body: dict[str, Any] = {"state": state}
+        if document is not None:
+            body["document"] = document
+        if book is not None:
+            body["book"] = book
+        if project is not None:
+            body["project"] = project
+        return self._request("POST", "/api/share", token=token, json=body, timeout=WRITE_TIMEOUT)
 
     def document_check(self, *, token: str | None = None, **fields: Any) -> Any:
         """POST /api/documents/check -> 200 `{ok, rel_path, version, format, ...}` (P31.S1).

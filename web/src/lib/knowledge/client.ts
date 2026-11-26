@@ -1,7 +1,10 @@
 import "server-only";
 
+import { cookies } from "next/headers";
+
 import { readKbApiEnv } from "@/lib/env";
 import { getActiveOrg, ORG_HEADER } from "@/lib/session";
+import { SHARE_COOKIE, SHARE_HEADER, shareHeaderValue } from "@/lib/sharing/cookie";
 
 // P12.S2 — the server-side knowledge API client: the ONE place the Next.js server
 // talks to knowledge-api (D-P12-2, the BFF boundary). Ported from vocky's P4.S2
@@ -86,12 +89,28 @@ export interface KbRequestOptions {
 async function authHeaders(
   options: KbRequestOptions,
 ): Promise<Record<string, string>> {
-  if (!options.token) return {};
+  const share = await shareHeader();
+  if (!options.token) return share;
   const org = options.org !== undefined ? options.org : await getActiveOrg();
   return {
+    ...share,
     Authorization: `Bearer ${options.token}`,
     ...(org ? { [ORG_HEADER]: org } : {}),
   };
+}
+
+/**
+ * The links this browser opened (`@/lib/sharing/cookie`), as `X-Share-Token`, on every call with or without a
+ * session: the API reads a Link item for whoever holds its live token, and ignores the header everywhere
+ * else. Outside a request (no cookie store), none.
+ */
+async function shareHeader(): Promise<Record<string, string>> {
+  try {
+    const value = shareHeaderValue((await cookies()).get(SHARE_COOKIE)?.value);
+    return value ? { [SHARE_HEADER]: value } : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Parse a JSON body, tolerating 204/empty (returns `undefined`). */

@@ -14,6 +14,7 @@ import { requestNonce } from "@/sikstack/shell/data";
 import {
   documentPhaseRows,
   withDocumentPhases,
+  withDocumentShare,
 } from "@/sikstack/reader/document/with-phases";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { ApiError } from "@/lib/knowledge/client";
@@ -166,7 +167,8 @@ async function render(
   ]);
   const org = loaded.kind === "reader" ? orgOf(loaded.reader.view) : null;
   // P61-e9: a member's way back to the phases the document was explained from, under its end.
-  return withDocumentPhases(
+  // P75: a member's sharing switch for the document, under its end.
+  const page = withDocumentPhases(
     renderDocument(loaded, {
       from: firstOf(query[FROM_PARAM]),
       org,
@@ -176,6 +178,7 @@ async function render(
     }),
     phases,
   );
+  return doc ? withDocumentShare(page, doc) : page;
 }
 
 /** The org's slug a document's own address names (`/@{org}/…`), for a visitor's way back. */

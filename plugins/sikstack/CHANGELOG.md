@@ -40,6 +40,46 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
 **Migration notes.** The first design check with a phone width downloads WebKit 18.2's driver (npm and network
 needed once). Offline, pass `--no-webkit`.
 
+## 0.10.1 — 2026-11-26
+
+- **`sikstack` in your own terminal.** Claude Code puts the plugin's `bin/` on the PATH of its own shell only, so
+  `sikstack link` (which asks for a workspace key at a prompt, and so needs a real terminal) was `command not found`
+  wherever the web told you to run it. `sikstack setup` now writes `~/.local/bin/sikstack`, a small script that runs
+  the version Claude Code has installed, read at each run, so it keeps working across updates. A file there that
+  setup did not write is left alone, and setup says when `~/.local/bin` is not on your PATH.
+- **A machine set up earlier gets it by itself:** the next session's start writes it once (marked in the plugin's
+  data folder as `terminal.json`), so a command you remove stays removed. No manual step.
+
+## 0.10.0 — 2026-11-26
+
+- **`/sikstack:explain` replaces `explain@sikstack` and the explain phase.** Explain is now a light skill inside
+  this plugin: a card of about 10 KB plus four references read on need (`book.md`, `blocks.md`, `publish.md`,
+  `fresh-eyes.md`). It writes in your session, on any repo, with or without a `.sikstack/` workspace:
+  - the code at HEAD first; the phases' records for the why when a workspace has them (`next`, `section`,
+    `cold search`, `cold fetch`); git log and PR bodies when it has none; a short web lookup only for a subject the
+    code does not hold. At a multi-repo host the scope is the host's repos.
+  - a short document by default, with as many diagrams as the subject needs (none is fine); a book only on
+    request, from a plan you confirm once, its chapters written in parallel, then one fresh-eyes reader over the
+    whole book and one editor across the chapters.
+  - one fresh-eyes read by an agent with none of the writer's context, then one fix; no second round.
+  - bodies cite code paths and PRs, never phase or slice ids; open work comes from the agenda's Proposed and Open
+    items.
+  - it publishes as Members with `knowledge save … --share members`; `knowledge share` changes who reads it.
+  - it sends `--share members` only for a new document or a new book's first chapter; a refresh, a next
+    chapter and a chapter's next version send none, so an item the operator shared keeps its state and its link.
+- **The engine has no explain route.** `create-phase` no longer creates or runs explain phases, and its research
+  route (the explain plugin's "research first" hand-back) is gone. `next` no longer prints `explain_unit=`;
+  `validate`, `phase rounds` and `slice finish` read `## Explain` in `intent.md` as nothing special.
+  `do-whole-phase` drops its explain references and playbook, and the reviews drop their `explain:` field.
+  `worktree start` in a nested install now always needs `--host-branch`: the detached host worktree an explain
+  phase used is no longer cut (a pair an older engine cut detached still validates and tears down).
+- **The self-host scaffold is gone** with the explain plugin (`templates/kb/`, its manifest and its parity
+  guard). Self-hosting runs from the platform repo itself.
+- **Migration notes:** uninstall the old plugin (`claude plugin uninstall explain@sikstack`, or the `/plugin`
+  panel). The `knowledge` CLI and its config (`~/.config/knowledge-kb/config.json`) stay as they are, so
+  `/sikstack:explain` publishes with the key you already have. Finish or drop any explain phase still active
+  before you update: its route is gone.
+
 ## 0.9.0 — 2026-11-26
 
 - **A published build lists the round's pages: `design-publish --page`.** Name each page the round made, by its

@@ -10,6 +10,7 @@ import { optionalIdentity } from "@/lib/auth-guards";
 import { loadBookOnce } from "@/lib/book/load";
 import type { BookView } from "@/lib/book/view";
 import { readBookSeed } from "@/lib/listen/seed";
+import { ShareControl } from "@/sikstack/reader/share-control";
 import { requestNonce } from "@/sikstack/shell/data";
 
 // The book page (sikstack Library, job 03 round 02, `## Build` § Page: book): `/@{org}/{project}/books/{book}`,
@@ -124,6 +125,14 @@ export default async function BookRoute({
         listen={listen}
         signInHref={view.signInHref}
       />
+      {view.share ? (
+        <div className="column is-narrow book-col book-share">
+          <ShareControl
+            target={{ kind: "book", project: view.project, book: view.slug }}
+            share={view.share}
+          />
+        </div>
+      ) : null}
     </BookFrame>
   );
 }

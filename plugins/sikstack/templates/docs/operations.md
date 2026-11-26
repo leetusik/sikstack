@@ -40,31 +40,12 @@ the operator, it never assumes. Remove the `Status:` line once the fields above 
 |---|---|---|---|
 | <NAME> | yes/no | <purpose> | <notes> |
 
-## Explain (/explain:explain)
+## Explain (/sikstack:explain)
 
-Explaining a topic, a change or a phase into your knowledge base is done by the
-**explain plugin** (`explain@sikstack`, beside `sikstack` in the same marketplace), not by this workspace. The plugin owns the skill, the CLI and the
-document API, so they stay in step. Install it once:
-
-    /plugin marketplace add leetusik/sikstack
-    /plugin install explain@sikstack
-
-then run `/explain:setup` once (connect to the hosted KB, or scaffold your own) and use
-`/explain:explain <topic>`. Every explain is its own **explain phase**, one per publishable
-unit: a standalone document by default, a book or one chapter of a book only when you ask. After
-one confirmation the phase is created **and** run, in its own worktree under `.claude/worktrees/`,
-and merged back by itself (a nested install names no host branch for it): one writer reads this
-repository's code and the records of the phases that built the subject, a critic on a second
-model checks the draft against them, and it is published private. An explain does no research of
-its own and covers only this repository's code; a subject no phase recorded is offered a research
-phase first. A book still stops for its outline sign-off and its acceptance gate. Plugin version
-0.10.0 or later is required. The writer runs on your session's permissions: auto mode needs
-nothing, and manual mode needs the rules the explain skill's §3.2 *Permissions, and the payload
-builder* prints, in `.claude/settings.local.json` (the plugin's README, *Explain: permissions*).
-To update: `/plugin marketplace update sikstack`, then update `explain@sikstack` from the
-`/plugin` panel's Installed tab (or, from a shell, `claude plugin update explain@sikstack`).
-The review never writes an explainer; it only reports
-`explain: not written — run /explain:explain P<N> for a document, or ask it for a book`.
+`/sikstack:explain <topic>` writes a short document from this repository's code, in the session:
+the code at HEAD first, the phases' records for the why when they exist, git log and PR bodies when
+they do not. A book asks once with its plan. It publishes to the sikstack Library as Members, with
+the `knowledge` CLI (`knowledge init` connects it once); `knowledge share` changes who reads it.
 
 ## Deployment
 

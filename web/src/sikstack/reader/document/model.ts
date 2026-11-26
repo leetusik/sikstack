@@ -1,6 +1,7 @@
 import { READER_DOCUMENT } from "@/content/reader-document";
 import type { Mark } from "@/sikstack/library/mark-row-model";
 import { decodeFrom, itemWayBack, type ListOrigin } from "@/lib/library/from";
+import { reachableWayBack } from "@/lib/library/way-out";
 import type { KbExplainedPhase } from "@/lib/knowledge/types";
 import { positionNear } from "@/lib/reader/note-list";
 import { phaseHref } from "@/lib/workspace/address";
@@ -44,6 +45,10 @@ export function foldSections<T>(
  * A visitor never gets a member's list (those would only bounce to sign in), and another org's or project's
  * list is not trusted (P63-fk.F4): the label always comes from the document's data. Null: nowhere to go back
  * to (a visitor on a document with no org).
+ *
+ * P75: a visitor the org's public library refuses (`orgLibrary` false: a link reader in an org with nothing
+ * Public) goes back to the sikstack home, `sikstack`, with no list to carry (`origin` null); see
+ * `@/lib/library/way-out`.
  */
 export function documentBack(p: {
   member: boolean;
@@ -59,14 +64,18 @@ export function documentBack(p: {
    * there, so the org reads the address's slug. With no project at all, no project's list is trusted.
    */
   names?: { project?: string | null; org?: string | null };
-}): { origin: ListOrigin; href: string; label: string } | null {
+  /** Whether the org's public library reads for this reader (P75); absent: true. */
+  orgLibrary?: boolean;
+}): { origin: ListOrigin | null; href: string; label: string } | null {
   const raw = typeof p.from === "string" && p.from !== "" ? p.from : null;
-  return itemWayBack(raw === null ? null : decodeFrom(raw), {
+  const back = itemWayBack(raw === null ? null : decodeFrom(raw), {
     member: p.member,
     orgs: [p.org],
     project: p.names?.project,
     orgName: p.names?.org,
   });
+  const out = reachableWayBack(back, p);
+  return out === back ? back : out && { origin: null, ...out };
 }
 
 // ---- what marks a document takes (OQ14: by format) -----------------------------------------------------

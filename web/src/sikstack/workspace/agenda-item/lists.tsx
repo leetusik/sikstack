@@ -11,7 +11,7 @@ import type { ItemView } from "./model";
  * The item's Phases panel (`AgendaItem.dc.html`; frame.md F39, F43, F45, FG5): its count, then one Workspace row a
  * linked phase in the backlog's order (id, the name as the row's link with the current slice under it while the
  * phase is not done, the status, `done/total` and the steps, every row's steps one width). With no phase and the
- * item not ended: the sentence and `/create-phase <item id>` in the Copy field, no count. Ended with no phase:
+ * item not ended: the sentence and `/sikstack:create-phase <item id>` in the Copy field, no count. Ended with no phase:
  * nothing (the page leaves the panel out).
  */
 export function PhasesPanel({

@@ -46,7 +46,7 @@ export function WaitRows({ tail }: { tail: string }) {
  * the head counts, and with no item and no phase one line that says so; one row a phase, at most five, newest first: the id,
  * the name as a link to the phase with its current slice under it, the status (F37), the count and
  * the steps (F39); the foot **See all in Workspace**. Not linked or never synced: the signed sentence,
- * `No workspace linked yet. Run <link command> in the project’s repo.`, the command built from the
+ * `No workspace linked yet. Run <link command> in a terminal, in the project’s repo, …`, the command built from the
  * page's `origin` and the `projectId`, with no count and no foot. Loading: three skeleton rows.
  */
 export function WorkspacePanel({

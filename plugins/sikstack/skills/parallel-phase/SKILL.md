@@ -15,17 +15,15 @@ A phase can run on its own branch in its own git worktree, driven from the sessi
 
 A linked checkout (`next` prints `store=cloud`) refuses `worktree start` and the other stream commands: run its phases on the default stream.
 
-**One exception: an explain phase (v86).** `create-phase`'s explain route starts every explain phase in its own worktree unless its `## Explain` says `worktree: no`; its one confirmation is the word. Its branch touches only its phase folder and `.sikstack/works/`, so it merges back by itself after its pass (below).
-
 The unit of worktree parallelism is the **phase**; slices inside it run one at a time, or together as `do-whole-phase`'s wave in the phase's own checkout. This skill covers start, adding a repo and status; **integration is the close's, stated once in `${CLAUDE_PLUGIN_ROOT}/skills/pr/reference/close.md`** (`close <P>`'s `merge` and `teardown` steps).
 
 ## 1. Worktree rules
 
-1. **When — only when asked**. `do-next-slice` / `do-whole-phase` run `worktree start <P>` when told to, never on their own initiative; `create-phase` never does (bar its explain route). A phase already stamped is entered without asking again.
-2. **Where.** `<repo>/.claude/worktrees/P<N>-<slug>` on branch `phase/P<N>-<slug>` (`--worktree`, `--slug` override); the engine puts `.claude/worktrees/` in `.git/info/exclude`, never `.gitignore`. **Nested:** a pair, the host worktree at that path on the operator-confirmed host branch (an explain: detached at the host base), with the workflow-state worktree at its `.sikstack/` on `phase/P<N>-<slug>`.
+1. **When — only when asked**. `do-next-slice` / `do-whole-phase` run `worktree start <P>` when told to, never on their own initiative; `create-phase` never does. A phase already stamped is entered without asking again.
+2. **Where.** `<repo>/.claude/worktrees/P<N>-<slug>` on branch `phase/P<N>-<slug>` (`--worktree`, `--slug` override); the engine puts `.claude/worktrees/` in `.git/info/exclude`, never `.gitignore`. **Nested:** a pair, the host worktree at that path on the operator-confirmed host branch, with the workflow-state worktree at its `.sikstack/` on `phase/P<N>-<slug>`.
 3. **The stamp commit.** The engine's commit `chore(works): opt <P> into parallel execution`, holds exactly the phase folder and the six generated `.sikstack/works/` files (`git commit --only -- <paths>`), stamping `execution: {mode: "parallel", branch, worktree}`; the branch is cut from it so both sides carry the stamp.
 4. **A dirty tree does not block it.** Everything else stays uncommitted in the default checkout; the worktree starts from the stamp commit.
-5. **What refuses**, before any write: not `planned`; an `execution` block; no git; a parallel stream; a merge or rebase in progress; the branch or path taken. Nested, also: no `--host-branch` on a non-explain phase, the host branch checked out elsewhere, an unresolvable host base.
+5. **What refuses**, before any write: not `planned`; an `execution` block; no git; a parallel stream; a merge or rebase in progress; the branch or path taken. Nested, also: no `--host-branch`, the host branch checked out elsewhere, an unresolvable host base.
 6. **Enter.** `EnterWorktree` with the printed path (nested: the host worktree), re-run `next` (`stream=phase/…`), work there. Membership is the current branch against the stamped `execution.branch`. Skills, agents and settings read through from the main checkout (never create `<host-wt>/.claude/`), and Claude Code reads the main checkout's `.claude/settings.local.json` from a worktree session, so its allow rules apply there.
 7. **The merge** is the close's integration (`${CLAUDE_PLUGIN_ROOT}/skills/pr/reference/close.md`), after `worktree gate <P>` opens.
 8. **Staying on `main` needs nothing.** `phase new --on-main` is a **retired no-op** (v43) that writes nothing. A phase still pinned with v42's `execution: {"mode": "default"}` keeps it, and `worktree start` refuses it; delete the block by hand to un-pin.
@@ -37,8 +35,6 @@ The unit of worktree parallelism is the **phase**; slices inside it run one at a
 Run `sikstack worktree start <P>` from the default stream, before the phase's first `slice start`, on the operator's word, then enter the printed path.
 
 **Nested:** read `repo convention`; propose a host branch name in that custom with no phase or slice IDs (the `Branches:` line `create-phase` confirmed, when there is one); the operator confirms it; it is the phase's PR branch (`pr branch` records it at `DECOMP`'s end). The base defaults to the host's default branch (`--host-base <ref>` to stack); `git fetch` first when the custom says fresh main (the engine never fetches). Then `worktree start <P> --host-branch <name> [--host-base <ref>]`.
-
-**An explain phase needs no host branch (v86).** With no `--host-branch` it cuts a detached host worktree at the host base (`host_branch=-`); it has nothing to integrate on the host.
 
 ## 3. Work
 
@@ -52,11 +48,9 @@ The review runs as `review-phase` says. A branch review edits no doc: the sectio
 
 ## 5. Integrate
 
-By the close alone: `close <P>`'s `merge` and `teardown` steps (`${CLAUDE_PLUGIN_ROOT}/skills/pr/reference/close.md`). Run in the worktree, the close first commits the pass on the branch itself (`commit-pass`, `--only` the phase folder and the generated `.sikstack/works/` files), so the gate reads it. `worktree gate <P>` is advice that exits 0: `GATE OPEN`, or `GATE CLOSED reason=…` (the branch not `done` with a `pass`, or a busy default stream unless `exemption=phase-folder-only (<n> paths)`); a closed gate is never merged past.
+By the close alone: `close <P>`'s `merge` and `teardown` steps (`${CLAUDE_PLUGIN_ROOT}/skills/pr/reference/close.md`). Nested, the teardown is `worktree teardown <P> --discard-ignored` when what it lists are caches. Run in the worktree, the close first commits the pass on the branch itself (`commit-pass`, `--only` the phase folder and the generated `.sikstack/works/` files), so the gate reads it. `worktree gate <P>` is advice that exits 0: `GATE OPEN`, or `GATE CLOSED reason=…` (the branch not `done` with a `pass`, or a busy default stream unless `exemption=phase-folder-only (<n> paths)`); a closed gate is never merged past.
 
-### An explain phase merges back by itself
-
-Right after its pass, with no stop, the close's `merge` and `teardown` steps (no host side for a detached host worktree; `worktree teardown <P> --discard-ignored` nested, for its `pages/` cache), then commit. **When it cannot merge** (a closed gate, something staged, a conflict outside the generated files): leave the branch `done` and unmerged, say so, and never unstage or discard; `next` on the default stream then prints `merge_ready=<P>:<branch>`, and whoever drives that stream integrates it at its next slice boundary.
+**When the merge cannot run** (a closed gate, something staged, a conflict outside the generated files): leave the branch `done` and unmerged, say so, and never unstage or discard; `next` on the default stream then prints `merge_ready=<P>:<branch>`, and whoever drives that stream integrates it at its next slice boundary.
 
 ### A reopened phase — a change request on its open PR
 
@@ -77,5 +71,5 @@ When `repo list` lists repos, a phase worktree is a **set**: the host worktree, 
 - Never merge a parallel phase whose `worktree gate` is closed, and never two phases into one quiet point at once; never merge from inside the worktree.
 - `worktree merge-finish` runs on the default stream, after the merge, never from a phase worktree.
 - Never hand-edit a generated file's conflict: take a side and regenerate.
-- Never `worktree start` a phase the operator did not ask about (an explain phase's confirmation is the asking), nor a pinned or in-flight one; never enter a path the engine did not print.
+- Never `worktree start` a phase the operator did not ask about, nor a pinned or in-flight one; never enter a path the engine did not print.
 - Pushes are the `pr` skill's alone (the draft, the close's landing, a fix round's push to an open PR); never push, open a PR or merge into any repo's default branch beyond them without the operator's word.

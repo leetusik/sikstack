@@ -10,7 +10,7 @@
 #
 # Cut with the installer (sikstack ships no installer: the plugin is the install, `sikstack init` makes the state):
 #   1-3 (retrofit, its idempotence, a foreign scripts/workflow.py), 4 (docs seeding over a docs system),
-#   6-7 (dual-apply and the built installer), 8 (--with-explain), 15-16 (--nested installs and their --update),
+#   6-7 (dual-apply and the built installer), 8 (an installer flag, retired), 15-16 (--nested installs and their --update),
 #   12 (the at-root worktree: there is no at-root workspace any more; the nested worktree is 11, 14, 17 and 28),
 #   and the install/--update/--to-multi-repo parts of 5, 17, 19, 23 and 25. Test 0's pins moved to
 #   tests/static_pins.py, less the installer's own; Test 29 is new (the finder, init, the hooks, the shipped text), and
@@ -105,7 +105,7 @@ print(f"statements={len(ast.parse(src).body)} failed={fails}")
 sys.exit(1 if fails else 0)
 PY
 ); t0_rc=$?
-if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 16 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
+if [ "$t0_rc" = 0 ]; then ok "the plugin's text pins hold ($(printf '%s\n' "$t0_out" | tail -1)): 17 skills and their invocation metadata, the skill directories (cores of 8,192 B or less, every named reference shipped), the playbooks, agents and contract wording, the contract's 4,096 B cap"
 else printf '%s\n' "$t0_out"; bad "a shipped text pin failed (lines above)"; fi
 
 # ---------------------------------------------------------------------------
@@ -873,22 +873,23 @@ printf '%s\n' "$gn" | grep -qx 'waiting_on_operator=P2' && printf '%s\n' "$gc" |
   && ok "a declared phase at its open acceptance gate reads as a stop: the running REVIEW is a barrier, never a wave's running or returned slice" \
   || bad "declared gate reads as a wave -- $gn / $gc"
 # v77: a decomposition that leaves a middle slice undeclared finishes with one advice: line naming it (it runs
-# alone); slice deps declares one, and slice finish prints the engine's parallel plan. An explain phase is exempt.
+# alone); slice deps declares one, and slice finish prints the engine's parallel plan. A `## Explain` intent is no exemption now.
 { rs phase new --phase P3 --name "Forced probe" --objective "forced declaration" && rs slice new --phase P3 --slice P3.S1 --name s1; } >/dev/null 2>&1 \
   || bad "forced-declaration probe: setup failed"
 fr=$(rs slice finish P3.DECOMP --outcome cut 2>&1); fr_rc=$?; fr_done=$(grep -c '"status": "done"' "$SW/works/phases/active/P3/slices/P3.DECOMP/slice.json")
 { rs slice deps P3.S1 --depends-on none && rs slice new --phase P3 --slice P3.S2 --name s2 --depends-on none \
   && rs slice new --phase P3 --slice P3.S3 --name s3 --depends-on P3.S1; } >/dev/null 2>&1 || bad "forced-declaration probe: declaring failed"
 fp=$(rs slice finish P3.DECOMP --outcome cut 2>&1); fp_rc=$?
-{ rs phase new --phase P4 --name "Explain probe" --objective "explain exempt" && printf '\n## Explain\n\n- subject: P3\n' >> "$SW/works/phases/active/P4/intent.md" \
-  && rs slice new --phase P4 --slice P4.S1 --name chapter; } >/dev/null 2>&1 || bad "forced-declaration probe: explain setup failed"
-rs slice finish P4.DECOMP --outcome cut >/dev/null 2>&1; fe_rc=$?
+{ rs phase new --phase P4 --name "Old explain probe" --objective "no exemption" && printf '\n## Explain\n\n- subject: P3\n' >> "$SW/works/phases/active/P4/intent.md" \
+  && rs slice new --phase P4 --slice P4.S1 --name chapter && rs slice new --phase P4 --slice P4.S2 --name chapter2; } >/dev/null 2>&1 || bad "forced-declaration probe: old-explain setup failed"
+fe=$(rs slice finish P4.DECOMP --outcome cut 2>&1); fe_rc=$?
 [ "$fr_rc" -eq 0 ] && [ "$fr_done" -eq 1 ] && [ "$(printf '%s\n' "$fr" | grep -c '^advice: ')" -eq 1 ] \
   && printf '%s\n' "$fr" | grep -q '^advice: P3.S1 is a middle slice left undeclared, so it runs alone: .*slice deps P3.S1 --depends-on' \
   && [ "$fp_rc" -eq 0 ] && ! printf '%s\n' "$fp" | grep -q '^advice:' && printf '%s\n' "$fp" | grep -qx 'parallel_plan=P3: S1 + S2 -> S3 -> REVIEW' \
   && printf '%s\n' "$fp" | grep -q '^parallel_rounds=3 rounds for 4 open slices; 2 run beside another' && [ "$fe_rc" -eq 0 ] \
-  && ok "a decomposition finishing over an undeclared middle slice prints one advice: line naming it, slice deps declares it, slice finish prints the engine's parallel plan, and an explain phase is exempt (v77)" \
-  || bad "declaration advice wrong (advice rc=$fr_rc, pass rc=$fp_rc, explain rc=$fe_rc) -- $fr / $fp"
+  && [ "$(printf '%s\n' "$fe" | grep -c '^advice: ')" -eq 2 ] && ! printf '%s\n' "$fe" | grep -qi 'explain' \
+  && ok "a decomposition finishing over an undeclared middle slice prints one advice: line naming it, slice deps declares it, slice finish prints the engine's parallel plan, and a phase whose intent.md still has ## Explain gets the same advice, with no explain exemption (v77; 0.10.0)" \
+  || bad "declaration advice wrong (advice rc=$fr_rc, pass rc=$fp_rc, old-explain rc=$fe_rc) -- $fr / $fp / $fe"
 
 # ---------------------------------------------------------------------------
 echo "== Test 10e: ids -- P<n>-<tail> minted with the next number beside P<n> and v73's P- tokens, an archived id is spent, two branches mint the same number and merge clean =="
@@ -1664,7 +1665,7 @@ c_out=$(dw check 2>&1); c_rc=$?
   && ok "check passes over a broken retired design record: nothing reads docs/reference/design/ any more" || bad "check read the retired design record (rc=$c_rc) -- $c_out"
 
 # ---------------------------------------------------------------------------
-echo "== Test 14: P28 nested engine -- .sikstack/.agentic-nested.json: host anchors, host-side phase scope, the paired worktree lifecycle (v86: an explain phase's detached pair), the convention gate, a malformed marker fails validate =="
+echo "== Test 14: P28 nested engine -- .sikstack/.agentic-nested.json: host anchors, host-side phase scope, the paired worktree lifecycle (0.10.0: no detached pair), the convention gate, a malformed marker fails validate =="
 # A host repo with one product commit and its workspace made by `sikstack init` at host/.sikstack/, its marker
 # rewritten below. Every command runs from the host root, the way a session does.
 newtmp NS
@@ -1787,29 +1788,18 @@ if [ "$td_rc" -eq 0 ] && [ -n "$nested_at" ] && [ -n "$host_at" ] && [ "$nested_
     && ! grep -q '"execution"' "$NW/works/phases/active/P1/phase.json" && ! nw worktree status 2>&1 | grep -q '^== P1'; then
   ok "paired worktree teardown --discard-ignored removes the nested worktree before the host worktree and keeps the host branch feat/side; it clears the execution block, so worktree status stops listing P1"
 else bad "paired teardown wrong (rc=$td_rc) -- $td_out"; fi
-# v86 (§9.4): an explain phase's pair goes detached without --host-branch -- no host branch is made, kept or deleted.
-{ nw phase new --phase P2 --name "Explain: probe" --objective "detached host" \
-    && printf '\n## Explain\n\n- unit: document\n' >> "$NW/works/phases/active/P2/intent.md"; } >/dev/null 2>&1 || bad "detached pair: could not create the explain phase"
-hb_before=$(git -C "$NH" branch --list | wc -l | tr -d ' ')
+# 0.10.0: the explain route is gone, so a phase whose intent.md still carries `## Explain` gets no detached pair:
+# worktree start with no --host-branch is refused like any phase's, and writes nothing.
+{ nw phase new --phase P2 --name "Old explain probe" --objective "no detached host" \
+    && printf '\n## Explain\n\n- unit: document\n' >> "$NW/works/phases/active/P2/intent.md"; } >/dev/null 2>&1 || bad "no detached pair: could not create the probe phase"
+hb_before=$(git -C "$NH" branch --list | wc -l | tr -d ' '); nhead_before=$(git -C "$NW" rev-parse HEAD)
 ps_out=$(nw worktree start P2 2>&1); ps_rc=$?
-HWT2=$(printf '%s\n' "$ps_out" | sed -n 's/^host_worktree=//p'); PBR2=$(printf '%s\n' "$ps_out" | sed -n 's/^branch=//p')
-if [ "$ps_rc" -eq 0 ] && printf '%s\n' "$ps_out" | grep -q '^host_branch=- (detached host worktree' && [ -d "$HWT2/.sikstack" ] \
-    && ! git -C "$HWT2" symbolic-ref -q HEAD >/dev/null 2>&1 && [ "$(git -C "$NH" branch --list | wc -l | tr -d ' ')" = "$hb_before" ] \
-    && python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["execution"]; assert e["host_branch"] is None and e["host_branch_created"] is False, e' "$NW/works/phases/active/P2/phase.json" \
-    && nw check --no-rebuild >/dev/null 2>&1; then
-  ok "nested worktree start of an explain phase with no --host-branch cuts a detached host worktree: host_branch null, no host branch made, validate passes"
-else bad "detached explain pair wrong (rc=$ps_rc) -- $ps_out -- $(nw check --no-rebuild 2>&1 | tail -3)"; fi
-PG="$HWT2/.sikstack/works/phases/active/P2/doc/pages"
-mkdir -p "$PG" && printf '*\n!.gitignore\n' > "$PG/.gitignore" && printf 'cached\n' > "$PG/p1.html" \
-  && git -C "$HWT2/.sikstack" add works/phases/active/P2/doc >/dev/null 2>&1 && git -C "$HWT2/.sikstack" commit -qm "dossier" >/dev/null 2>&1 \
-  && git -C "$NW" add -A >/dev/null 2>&1 && { git -C "$NW" commit -qm "default state" >/dev/null 2>&1; git -C "$NW" merge --no-ff -q -m "merge P2" "$PBR2" >/dev/null 2>&1; } \
-  || bad "detached pair: could not commit the dossier or merge $PBR2"
-td_out=$(nw worktree teardown P2 --discard-ignored 2>&1); td_rc=$?
-if [ "$td_rc" -eq 0 ] && printf '%s\n' "$td_out" | grep -q '^no host branch: the host worktree was detached' && printf '%s\n' "$td_out" | grep -q '^deleted 1 ignored' \
-    && [ ! -e "$HWT2" ] && [ "$(git -C "$NH" branch --list | wc -l | tr -d ' ')" = "$hb_before" ] \
-    && ! git -C "$NH" worktree list | grep -qF "$HWT2" && ! git -C "$NW" worktree list | grep -qF "$HWT2" && nw check --no-rebuild >/dev/null 2>&1; then
-  ok "the detached pair's teardown --discard-ignored drops the ignored pages/ and both worktrees and leaves no host branch"
-else bad "detached pair teardown wrong (rc=$td_rc) -- $td_out"; fi
+if [ "$ps_rc" -ne 0 ] && printf '%s\n' "$ps_out" | grep -q 'worktree start in a nested install needs --host-branch <name>' \
+    && ! printf '%s\n' "$ps_out" | grep -qi 'explain' && ! grep -q '"execution"' "$NW/works/phases/active/P2/phase.json" \
+    && [ "$(git -C "$NH" branch --list | wc -l | tr -d ' ')" = "$hb_before" ] && [ "$(git -C "$NW" rev-parse HEAD)" = "$nhead_before" ] \
+    && ! nw next 2>&1 | grep -q '^explain_unit=' && nw check --no-rebuild >/dev/null 2>&1; then
+  ok "nested worktree start with no --host-branch is refused for a phase whose intent.md still has ## Explain (no detached pair, nothing written), and next prints no explain_unit= (0.10.0)"
+else bad "old explain phase still gets a detached pair or an explain line (rc=$ps_rc) -- $ps_out"; fi
 
 # ---------------------------------------------------------------------------
 echo "== Test 17: multi-repo host -- init and repo add make the host (the repo registry with per-repo conventions, the repos hidden), phase scope reads each repo on its own, pr check never passes a repo with no body, and a worktree set refuses to tear down what it did not stamp and then retires clean =="
@@ -5506,7 +5496,7 @@ if command -v claude >/dev/null 2>&1; then
 else echo "note: claude CLI not installed; plugin validate skipped"; fi
 
 # ---------------------------------------------------------------------------
-echo "== Test 30: setup, the registration retry and the rules card -- setup registers {install_id, email, plugin_version} once per new email under one install id and sets only autoCompactWindow in the user settings; with the server down it finishes, marks the registration pending, and the next SessionStart hook run registers it and clears the mark; the card is the contract inside a .sikstack/ repo (at most 4,096 B) and one line elsewhere =="
+echo "== Test 30: setup, the registration retry and the rules card -- setup registers {install_id, email, plugin_version} once per new email under one install id and sets only autoCompactWindow in the user settings; it writes the terminal command, which runs the installed plugin's engine, and leaves a file it did not write alone; with the server down it finishes, marks the registration pending, and the next SessionStart hook run registers it and clears the mark; the card is the contract inside a .sikstack/ repo (at most 4,096 B) and one line elsewhere =="
 newtmp SUW; printf 'setup-smoke\n' > "$SUW/key"
 su_fake() {  # su_fake <name> [port]: a fake server logging into $SUW/<name>/, its port in $SUW/<name>.port; prints its PID
   python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$SUW/$1" --port-file "$SUW/$1.port" --key-file "$SUW/key" --project p --org o \
@@ -5514,7 +5504,7 @@ su_fake() {  # su_fake <name> [port]: a fake server logging into $SUW/<name>/, i
   _p=$!; for _ in $(seq 1 100); do [ -s "$SUW/$1.port" ] && break; sleep 0.1; done; echo "$_p"
 }
 su_reqs() { [ -f "$SUW/$1/requests.jsonl" ] && grep -c '"route": "installs"' "$SUW/$1/requests.jsonl" || echo 0; }
-su_setup() { CLAUDE_CONFIG_DIR="$SUW/cfg" SIKSTACK_SERVER="$1" python3 "$ENG" setup --email "$2" --data-dir "$3"; }
+su_setup() { HOME="$SUW/home" CLAUDE_CONFIG_DIR="$SUW/cfg" SIKSTACK_SERVER="$1" python3 "$ENG" setup --email "$2" --data-dir "$3"; }
 mkdir -p "$SUW/cfg" && printf '{\n  "model": "opus",\n  "permissions": {\n    "allow": [\n      "Bash(ls:*)"\n    ]\n  },\n  "enabledPlugins": {\n    "x@y": true\n  }\n}\n' > "$SUW/cfg/settings.json"
 cp "$SUW/cfg/settings.json" "$SUW/settings.before"
 su_up=$(su_fake up); SUS="http://127.0.0.1:$(cat "$SUW/up.port")"
@@ -5560,13 +5550,41 @@ su_id2=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["instal
   && ok "with the server down setup exits 0 and marks the registration pending; the next SessionStart hook run registers it once and clears the mark" \
   || bad "the pending registration -- rc=$su_rc state=$su_state/$su_state2 reqs=$su_n1/$su_nb hook=$su_h1 $(cat "$SUW/b1.txt")"
 # (c) a missing settings file is made with the one key; a bad email or an unsubstituted data folder is refused, unwritten.
-mkdir -p "$SUW/cfg2"; ( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) >/dev/null 2>&1
+mkdir -p "$SUW/cfg2"; ( cd "$SUW" && HOME="$SUW/home" CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) >/dev/null 2>&1
 su_bad=$( cd "$SUW" && python3 "$ENG" setup --email nope --data-dir "$SUW/data4" 2>&1; echo "rc=$?" )
 su_bad2=$( cd "$SUW" && python3 "$ENG" setup --email e@example.com --data-dir '${CLAUDE_PLUGIN_DATA}' 2>&1; echo "rc=$?" )
 [ "$(cat "$SUW/cfg2/settings.json")" = "$(printf '{\n  "autoCompactWindow": 500000\n}')" ] \
   && printf '%s\n' "$su_bad" | grep -q 'rc=2' && printf '%s\n' "$su_bad2" | grep -q 'rc=2' && [ ! -e "$SUW/data4" ] && [ ! -e "$SUW/\${CLAUDE_PLUGIN_DATA}" ] \
   && ok "setup makes a missing settings file with the one key, and refuses a bad email or an unsubstituted data folder with nothing written" \
   || bad "setup's edges -- $(cat "$SUW/cfg2/settings.json" 2>&1) / $su_bad / $su_bad2"
+# (e) the terminal command: written once into the scratch HOME's ~/.local/bin, executable, kept on a re-run; it runs the
+# engine of the plugin installed_plugins.json names, says how to install when none is, and a file setup did not write
+# stays as it was.
+su_term="$SUW/home/.local/bin/sikstack"
+mkdir -p "$SUW/cfg/plugins" && printf '{"version": 2, "plugins": {"sikstack@sikstack": [{"scope": "user", "installPath": "%s", "version": "0"}]}}\n' "$PLUGIN" > "$SUW/cfg/plugins/installed_plugins.json"
+su_run=$( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg" "$su_term" setup --help 2>&1; echo "rc=$?" )
+su_none=$( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg2" "$su_term" setup --help 2>&1; echo "rc=$?" )
+mkdir -p "$SUW/home2/.local/bin" && printf '#!/bin/sh\necho mine\n' > "$SUW/home2/.local/bin/sikstack"
+( cd "$SUW" && HOME="$SUW/home2" CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) > "$SUW/e1.txt" 2>&1
+grep -q '^terminal command: `sikstack` written to ~/.local/bin/sikstack; ' "$SUW/a1.txt" && grep -q '^terminal command: `sikstack` already in ~/.local/bin/sikstack (unchanged)' "$SUW/a2.txt" \
+  && [ -x "$su_term" ] && grep -q '^# sikstack-terminal-command' "$su_term" \
+  && printf '%s\n' "$su_run" | grep -q '^usage: sikstack setup' && printf '%s\n' "$su_run" | grep -q '^rc=0$' \
+  && printf '%s\n' "$su_none" | grep -q 'claude plugin install sikstack@sikstack' && printf '%s\n' "$su_none" | grep -q '^rc=127$' \
+  && grep -q '^terminal command: not written -- ~/.local/bin/sikstack exists and setup did not write it' "$SUW/e1.txt" \
+  && [ "$(cat "$SUW/home2/.local/bin/sikstack")" = "$(printf '#!/bin/sh\necho mine')" ] \
+  && [ -f "$SUW/data/terminal.json" ] \
+  && ok "setup writes the terminal command into ~/.local/bin (kept on a re-run), which runs the installed plugin's engine or says how to install it, and leaves a file it did not write alone" \
+  || bad "the terminal command -- run=[$su_run] none=[$su_none] $(grep '^terminal' "$SUW/a1.txt" "$SUW/a2.txt" "$SUW/e1.txt")"
+# (f) a machine set up before setup wrote the terminal command: the next SessionStart hook writes it once; once the
+# user removes it, later hook runs leave it removed; a data folder with no install gets nothing.
+mkdir -p "$SUW/data5" "$SUW/data6" && cp "$SUW/data/install.json" "$SUW/data5/install.json"
+su_once() { printf '{"source":"startup","cwd":"%s"}' "$SUW" | env -u CLAUDE_PROJECT_DIR HOME="$SUW/$2" CLAUDE_PLUGIN_DATA="$SUW/$1" python3 "$PLUGIN/hooks/session_start.py" >/dev/null 2>&1; }
+su_once data5 home5; su_o1=$([ -x "$SUW/home5/.local/bin/sikstack" ] && echo yes || echo no)
+rm -f "$SUW/home5/.local/bin/sikstack"; su_once data5 home5; su_o2=$([ -e "$SUW/home5/.local/bin/sikstack" ] && echo back || echo gone)
+su_once data6 home6; su_o3=$([ -e "$SUW/home6/.local/bin/sikstack" ] && echo written || echo none)
+[ "$su_o1" = yes ] && [ "$su_o2" = gone ] && [ "$su_o3" = none ] && [ -f "$SUW/data5/terminal.json" ] \
+  && ok "on a machine set up before it, the SessionStart hook writes the terminal command once, leaves it removed once the user removes it, and writes nothing without an install" \
+  || bad "the hook's terminal command -- first=$su_o1 after-removal=$su_o2 no-install=$su_o3"
 # (d) the card: the contract plus the start line inside a .sikstack/ repo (from a subfolder too), at most 4,096 B; one
 # line outside any workspace and one naming migrate above an old install; the hook never fails on bad input.
 mkhost "$SUW/repo" && mkdir -p "$SUW/repo/src/deep" "$SUW/none" "$SUW/old/workflow" && printf '{"schema": 1}\n' > "$SUW/old/workflow/.agentic-nested.json"
@@ -5764,7 +5782,7 @@ mkhost "$SIW/repo" && git -C "$SIW/repo/.sikstack" add -A && git -C "$SIW/repo/.
 # (a) not set up yet: refused, nothing written.
 si_none=$(si_eng repo sign-in --data-dir "$SIW/nodata" --no-browser --wait 1; echo "rc=$?")
 # (b) set up; a dirty workflow repo is refused before any request.
-( cd "$SIW/repo" && CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email s@example.com --data-dir "$SIW/data" ) >/dev/null 2>&1
+( cd "$SIW/repo" && HOME="$SIW/home" CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email s@example.com --data-dir "$SIW/data" ) >/dev/null 2>&1
 printf 'x\n' > "$SIW/repo/.sikstack/scratch.txt"
 si_dirty=$(si_eng repo sign-in --data-dir "$SIW/data" --no-browser --wait 1; echo "rc=$?")
 rm -f "$SIW/repo/.sikstack/scratch.txt"
@@ -5808,7 +5826,7 @@ grep -q '^rc=1' "$SIW/e-denied.txt" && grep -q 'declined on the connect page: no
   || bad "sign-in declined/expired -- $(cat "$SIW/e-denied.txt") / $(cat "$SIW/e-expired.txt")"
 # (f) feedback: a second install that never signed in sends; past the per-install limit one line; a path or the repo's
 # name is refused before any request.
-( cd "$SIW/repo2" && CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email t@example.com --data-dir "$SIW/data2" ) >/dev/null 2>&1
+( cd "$SIW/repo2" && HOME="$SIW/home" CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email t@example.com --data-dir "$SIW/data2" ) >/dev/null 2>&1
 si_fb() { ( cd "$SIW/repo2" && python3 "$ENG" feedback --data-dir "$SIW/data2" "$@" ) 2>&1; echo "rc=$?"; }
 si_f1=$(printf 'sign-in printed its code twice; expected once. plugin 1.0.0\n' | si_fb)
 si_f2=$(si_fb --message "a second report")
@@ -6140,7 +6158,7 @@ dl_r3=$(dl "$DLH" design-link --data-dir "$DLW/data" --no-browser --wait 1; echo
   || bad "worktree start or a replace refusal is wrong -- rc=$dl_wrc [$dl_r1] [$dl_r2] [$dl_r3] sent=$dl_n3/$dl_n4"
 # (f) the connect-page form, run in a phase's worktree of a second install: the new project is named after the main host
 # folder (never the worktree's), the key is kept, [design] lands in the main checkout's config.toml, never [cloud].
-( cd "$DL2" && CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
+( cd "$DL2" && HOME="$DLW/home" CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
 ( cd "$DL2T" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" design-link --data-dir "$DLW/data" --no-browser --wait 30 > "$DLW/f.txt" 2>&1; echo "rc=$?" >> "$DLW/f.txt" ) &
 dl_bg=$!
 for _ in $(seq 1 100); do grep -q '^code: ' "$DLW/f.txt" 2>/dev/null && break; sleep 0.1; done
@@ -6226,7 +6244,7 @@ rl_d2=$(rl repo design-builds); rl_drc2=$?
   || bad "design's 403 split -- rc=$rl_drc1/$rl_drc2 [$rl_d1] [$rl_d2]"
 # (e) sign-in --release on a second checkout.
 { mkhost "$RLW/rel" && git -C "$RLW/rel/.sikstack" add -A && git -C "$RLW/rel/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
-( cd "$RLW/rel" && CLAUDE_CONFIG_DIR="$RLW/cfg" SIKSTACK_SERVER="$RLS" python3 "$ENG" setup --email r@example.com --data-dir "$RLW/data" ) >/dev/null 2>&1
+( cd "$RLW/rel" && HOME="$RLW/home" CLAUDE_CONFIG_DIR="$RLW/cfg" SIKSTACK_SERVER="$RLS" python3 "$ENG" setup --email r@example.com --data-dir "$RLW/data" ) >/dev/null 2>&1
 rl_si() { rl rel sign-in --data-dir "$RLW/data" --no-browser --wait 1 "$@"; echo "rc=$?"; }
 rl_si > "$RLW/s1.txt"                          # plain: three fields, a pending code
 rl_si --release > "$RLW/s2.txt"                # not claimed yet: a new code, the not-connected line
@@ -6353,7 +6371,7 @@ printf '%s\n' "$bk_e1" | grep -qF "the request was blocked before it reached sik
   || bad "the echoed key -- leaked=[$bk_leak] [$bk_e1]"
 # (d) sign-in's start, its poll and feedback, each blocked.
 { mkhost "$BKW/si" && git -C "$BKW/si/.sikstack" add -A && git -C "$BKW/si/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
-( cd "$BKW/si" && CLAUDE_CONFIG_DIR="$BKW/cfg" SIKSTACK_SERVER="$BKS" python3 "$ENG" setup --email b@example.com --data-dir "$BKW/data" ) >/dev/null 2>&1
+( cd "$BKW/si" && HOME="$BKW/home" CLAUDE_CONFIG_DIR="$BKW/cfg" SIKSTACK_SERVER="$BKS" python3 "$ENG" setup --email b@example.com --data-dir "$BKW/data" ) >/dev/null 2>&1
 bk_si() { bk si sign-in --data-dir "$BKW/data" --no-browser --wait 1 "$@"; }
 bk_ctl '{"block": "sign-in"}'
 bk_s1=$(bk_si); bk_left1=$(ls "$BKW/data/sign-in" 2>/dev/null)

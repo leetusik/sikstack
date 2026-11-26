@@ -1,4 +1,8 @@
-"""Scoped git operations for the API write path.
+"""**No longer on the write path.** Library writes make no git commit or push since
+item sharing (``server/sharing.py``) replaced the git publish; the remaining callers
+are the ``server.reconcile`` CLI and ``scripts/merge_vocky.py``.
+
+Scoped git operations for the API write path.
 
 The API commits the documents it writes, staging **only the touched paths**
 (``git add -- docs/<rel_path> docs/index.md`` — never ``git add -A``). It pushes
@@ -17,8 +21,7 @@ after-response publish worker while holding ``WRITE_LOCK``, so an unbounded netw
 stage there would wedge every later write in the process.
 
 **Private projects (P34).** A tenant #1 project that is not ``public`` never
-publishes. The callers gate on visibility (``server/publish_gate.py``); this module
-adds a second, caller-independent guard with no database: a managed block in the
+publishes; this module adds a second, caller-independent guard with no database: a managed block in the
 checkout's own ``info/exclude`` (never a tracked file, which would publish the names)
 lists each private project's footprint, and ``add`` / ``remove`` refuse any path in
 it, and a ``docs/index.md`` that links into it, with ``GitError`` (fail closed: the

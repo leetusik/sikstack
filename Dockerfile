@@ -4,17 +4,14 @@
 # tzdata, and the pinned Python deps — never the application code or docs/.
 FROM python:3.12-slim
 
-# git: the API commits doc writes itself (server/gitops.py runs `git -C /repo`).
-# openssh-client: git ALONE CANNOT PUSH over an SSH remote — the `ssh` binary is
-# only a *Recommends* of git, and --no-install-recommends drops it (verified: the
-# python:3.12-slim base ships no `ssh`). The hosted deployment's push credential
-# is an SSH deploy key (origin git@github.com:…, driven by GIT_SSH_COMMAND), so
-# without this package KB_GIT_PUSH=true (publish-on-write) fails on every push —
-# and because push is best-effort, it fails SILENTLY (still 201, with
-# pushed:false + push_error) and nothing ever reaches Pages.
+# git + openssh-client: the API no longer commits or pushes a write (each item's
+# sharing replaced the git publish). They stay only for the publish's leftover
+# tools still in the image (the `server.reconcile` CLI and server/gitops.py);
+# retire them with those. git alone cannot push over SSH: `ssh` is only a
+# *Recommends* of git, which --no-install-recommends drops.
 # tzdata: NOT present in python:*-slim; without it TZ=Asia/Seoul silently falls
 # back to UTC and datetime.date.today() computes UTC dates — wrong file dates
-# around midnight KST. All three are load-bearing.
+# around midnight KST.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client tzdata \
     && rm -rf /var/lib/apt/lists/*
@@ -35,7 +32,7 @@ RUN uv export --frozen --no-dev --no-emit-project -o /tmp/req.txt \
 
 # System-level git config so the /repo bind mount cannot shadow it:
 #  - safe.directory: the container root differs from the mounted repo's owner.
-#  - identity: gitops.commit() needs a name/email or every commit fails.
+#  - identity: the leftover gitops.commit() needs a name/email to commit at all.
 RUN git config --system safe.directory /repo \
     && git config --system user.name "kb-api" \
     && git config --system user.email "kb-api@localhost"
