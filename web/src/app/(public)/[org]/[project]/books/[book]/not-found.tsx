@@ -7,6 +7,8 @@ import { requestNonce } from "@/sikstack/shell/data";
 import { StateBlock } from "@/sikstack/states";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { statePlace } from "@/lib/book/place";
+import { addressOrg } from "@/lib/library/way-out";
+import { orgLibraryReadsOnce } from "@/lib/library/way-out-read";
 import { REQUEST_PATH_HEADER } from "@/lib/next-path";
 
 // Book not found (`Book.dc.html`, presets Not found and Not found, visitor; frame.md F71): a missing book,
@@ -19,7 +21,11 @@ export default async function BookNotFound() {
     optionalIdentity(),
     requestNonce(),
   ]);
-  const place = statePlace(path, !!ctx);
+  // P75: a link reader in an org with nothing Public goes home to sikstack, not to "Library not found".
+  const orgLibrary = ctx
+    ? true
+    : await orgLibraryReadsOnce(addressOrg(path.split("/")[1] ?? ""));
+  const place = statePlace(path, !!ctx, orgLibrary);
   return (
     <BookFrame
       nonce={nonce}

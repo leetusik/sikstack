@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -38,6 +39,7 @@ import { Legacy, UiRoot } from "@/sikstack/ui";
 import { date } from "@/lib/format";
 import { readBridgeMessage, restoreMessage } from "@/lib/legacy/messages";
 import { withFrom } from "@/lib/library/from";
+import { readerHomeHref } from "@/lib/library/way-out";
 import { loginHref } from "@/lib/next-path";
 import {
   readerCookieString,
@@ -45,12 +47,7 @@ import {
   type TextSize,
   type ThemeChoice,
 } from "@/lib/reader-cookie";
-import {
-  LIBRARY_HREF,
-  publicLibraryHref,
-  readerHref,
-  signInToSaveHref,
-} from "@/lib/reader-href";
+import { readerHref, signInToSaveHref } from "@/lib/reader-href";
 import { saveBookmark, type BookmarkResult } from "@/lib/reader/actions";
 import { QUIET_MS } from "@/lib/reader/chrome";
 import type { LegacyMark } from "@/lib/reader/load";
@@ -58,7 +55,7 @@ import { newId } from "@/lib/reader/notes";
 import type { LegacyFrame, ReaderView, ReaderWrite } from "@/lib/reader/types";
 
 import { versionItems } from "../model";
-import { failedState } from "../reader-states";
+import { failedState, ReaderSegmentContext } from "../reader-states";
 import { ReaderFoot } from "../reader-foot";
 import { ReaderHead } from "../reader-head";
 import { DocumentNotes, runBookmarkWire } from "./document-notes";
@@ -169,6 +166,9 @@ export function DocumentOriginal({
   const router = useRouter();
   const pathname = usePathname();
   const member = view.member;
+  // P75: whether the org's public library reads for this reader (a link reader in an org with nothing Public:
+  // no), from the route's segment; no: the wordmark and the way back lead to the sikstack home.
+  const { orgLibrary } = useContext(ReaderSegmentContext);
   const target = view.target;
   const older = view.version < view.newest;
 
@@ -496,13 +496,14 @@ export function DocumentOriginal({
     member,
     from,
     org,
+    orgLibrary,
     names: { project: view.project, org: orgName },
   });
   const origin = back?.origin ?? null;
   const here = (version: number | null) =>
     withFrom(readerHref(target, { version }), from ? origin : null);
   const go = (href: string) => router.push(href);
-  const homeHref = member || !org ? LIBRARY_HREF : publicLibraryHref(org);
+  const homeHref = readerHomeHref({ member, org, orgLibrary });
   const fromTop = () => {
     scrollRef.current = { ...scrollRef.current, pill: false };
     setPill(false);

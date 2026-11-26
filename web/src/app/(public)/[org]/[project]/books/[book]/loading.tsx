@@ -5,6 +5,8 @@ import { BookFrame } from "@/components/book/book-frame";
 import { BookLoading } from "@/components/book/book-states";
 import { requestNonce } from "@/sikstack/shell/data";
 import { statePlace } from "@/lib/book/place";
+import { addressOrg } from "@/lib/library/way-out";
+import { orgLibraryReadsOnce } from "@/lib/library/way-out-read";
 import { REQUEST_PATH_HEADER } from "@/lib/next-path";
 import { getSession } from "@/lib/session";
 
@@ -17,7 +19,11 @@ export default async function BookLoadingRoute() {
     getSession(),
     requestNonce(),
   ]);
-  const place = statePlace(path, !!session);
+  // P75: a link reader in an org with nothing Public goes home to sikstack, not to "Library not found".
+  const orgLibrary = session
+    ? true
+    : await orgLibraryReadsOnce(addressOrg(path.split("/")[1] ?? ""));
+  const place = statePlace(path, !!session, orgLibrary);
   return (
     <BookFrame
       nonce={nonce}

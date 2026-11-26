@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -39,6 +40,7 @@ import {
 import { UiRoot } from "@/sikstack/ui";
 import { date } from "@/lib/format";
 import { withFrom, type ListOrigin } from "@/lib/library/from";
+import { readerHomeHref } from "@/lib/library/way-out";
 import { unitOfKey } from "@/lib/listen/book";
 import { useListen } from "@/lib/listen/store";
 import type { ListenSeed } from "@/lib/listen/types";
@@ -51,7 +53,6 @@ import {
 import {
   bookNotesHref,
   LIBRARY_HREF,
-  publicLibraryHref,
   readerHref,
   signInToSaveHref,
 } from "@/lib/reader-href";
@@ -77,6 +78,7 @@ import { OldBodyContext, type OldBodyValue } from "./old-root";
 import { ReaderEnd } from "./reader-end";
 import { ReaderFoot } from "./reader-foot";
 import { ReaderHead } from "./reader-head";
+import { ReaderSegmentContext } from "./reader-states";
 import { slotOf, slotWants } from "./slot";
 
 /**
@@ -128,6 +130,8 @@ export function ChapterReader({
   const book = view.book;
   const target = view.target;
   const member = view.member;
+  // P75: a link reader in an org with nothing Public goes home to sikstack, not to "Library not found".
+  const { orgLibrary } = useContext(ReaderSegmentContext);
 
   const [settings, setSettings] = useState<ReaderSettings>(view.settings);
   const [sheet, setSheet] = useState<SheetName | null>(null);
@@ -476,11 +480,11 @@ export function ChapterReader({
             back={book?.title ?? READER_FRAME.book}
             backShort={READER_FRAME.book}
             backHref={bookHrefNow}
-            homeHref={
-              member || target.kind !== "chapter"
-                ? LIBRARY_HREF
-                : publicLibraryHref(target.org)
-            }
+            homeHref={readerHomeHref({
+              member,
+              org: target.kind === "chapter" ? target.org : null,
+              orgLibrary,
+            })}
             tag={
               older
                 ? READER_FRAME.tag.olderVersion
