@@ -674,14 +674,36 @@ ENGINE_LOCAL_DIRS = (".git",)
 ENGINE_BACKLOG_RE = re.compile(r"^- sikstack version: `([^`\n]*)`", re.M)
 ENGINE_CHANGELOG_RE = re.compile(r"^## (\S+) — ", re.M)
 ENGINE_REFUSAL = ("sikstack {running} is older than sikstack {stamp}, which last wrote this workspace ({where}), so it "
-                  "writes nothing: restart Claude Code to load the updated plugin -- nothing was written (on a deliberate "
+                  "writes nothing: restart Claude Code to load the updated plugin, after updating it first if this machine's "
+                  "install is older (`claude plugin update sikstack@sikstack`) -- nothing was written (on a deliberate "
                   "rollback to {running}: set that file's version to \"{running}\" and commit it)")
 ENGINE_UNREADABLE = ("{where} is not {{\"version\": \"<version>\"}} ({why}), so sikstack {running} writes nothing -- "
                      "nothing was written (fix the file; to keep this engine: set its version to \"{running}\" and commit it)")
 ENGINE_WARNING = ("warning: sikstack {running} is older than sikstack {stamp}, which last wrote this workspace ({where}): "
-                  "this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin")
+                  "this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin, after "
+                  "updating it first if this machine's install is older (`claude plugin update sikstack@sikstack`)")
 _ENGINE = None
 _CHANGELOG = []  # [versions] once read (None: unreadable); empty: not read yet
+
+
+# The Migration notes an update owes (P85): every release after the workspace's last writer up to this engine that
+# carries a `**Migration notes**` line, newest first, walked in the CHANGELOG's order. The session-start hook prints
+# the block after the contract card (engine_session_notes, rooted by the hook, which has no verdict), and the first
+# command that raises the stamp prints the same block on stderr once it ends (engine_raised_notes). At most
+# ENGINE_NOTES_CAP characters, cut at whole lines with a pointer at the running plugin's CHANGELOG.md.
+ENGINE_NOTES_CAP = 2000
+ENGINE_NOTES_HEAD = ("sikstack updated from {old} to {new} in this workspace: the Migration notes below may need manual "
+                     "steps. Tell the operator, and run a step only on their word.")
+ENGINE_NOTES_NONE = "sikstack updated from {old} to {new}: no release in between needs a manual step."
+ENGINE_NOTES_CUT = "(cut to fit: the rest is under each release's Migration notes in {changelog})"
+ENGINE_NOTES_UNREAD = ("sikstack updated from {old} to {new}, but {changelog} could not be read: its Migration notes may "
+                       "need manual steps. Tell the operator, and run a step only on their word.")
+ENGINE_NOTES_UNKNOWN = ("this workspace has no record of the sikstack release that last wrote it ({new} now): the "
+                        "Migration notes in {changelog} may need manual steps. Tell the operator, and run a step only on "
+                        "their word.")
+ENGINE_NEWER_LINE = ("this workspace was last written by sikstack {stamp}, newer than this install's {running}: update the "
+                     "plugin (`claude plugin update sikstack@sikstack`), then restart Claude Code")
+ENGINE_NOTE_RE = re.compile(r"^- \*\*Migration notes(?::\*\*|\.\*\*|\*\*[:.])\s*(.*)$")
 
 
 def changelog_versions():
@@ -747,6 +769,100 @@ def _backlog_version(root: Path = None):
     return None
 
 
+def _pre_stamp_old(running: str, root: Path = None):
+    """With no stamp: the backlog line's version when it is a listed release before `running`, else None."""
+    line = _backlog_version(root)
+    relation = release_cmp(line, running) if line and line != "unknown" else None
+    order = changelog_versions()
+    listed = order is None or line in order
+    return line if relation is not None and relation < 0 and listed else None
+
+
+def _changelog_notes(text: str) -> dict:
+    """{version: its Migration notes text} for each CHANGELOG release that carries one (wrapped lines joined; a nested
+    list item kept on its own line)."""
+    notes, heads = {}, list(ENGINE_CHANGELOG_RE.finditer(text))
+    for n, head in enumerate(heads):
+        body = text[head.end():heads[n + 1].start() if n + 1 < len(heads) else len(text)].split("\n")
+        for i, line in enumerate(body):
+            match = ENGINE_NOTE_RE.match(line)
+            if not match:
+                continue
+            parts = [match.group(1).strip()]
+            for more in body[i + 1:]:
+                if not more.startswith(" ") or not more.strip():
+                    break
+                if more.lstrip().startswith("- "):
+                    parts.append("\n  " + more.strip())
+                else:
+                    parts[-1] += " " + more.strip()
+            notes[head.group(1)] = "".join(parts)
+            break
+    return notes
+
+
+def migration_notes(old, new: str) -> str:
+    """The block of Migration notes from release `old` (exclusive) up to `new`, ending in a newline."""
+    changelog = PLUGIN_ROOT / "CHANGELOG.md"
+    if old is None:
+        return ENGINE_NOTES_UNKNOWN.format(new=new, changelog=changelog) + "\n"
+    try:
+        text = changelog.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ENGINE_NOTES_UNREAD.format(old=old, new=new, changelog=changelog) + "\n"
+    order = ENGINE_CHANGELOG_RE.findall(text)
+    if old not in order:
+        return ENGINE_NOTES_UNKNOWN.format(new=new, changelog=changelog) + "\n"
+    span = order[order.index(new) if new in order else 0:order.index(old)]
+    found = _changelog_notes(text)
+    items = [f"- {version}: {found[version]}" for version in span if version in found]
+    if not items:
+        return ENGINE_NOTES_NONE.format(old=old, new=new) + "\n"
+    cut = ENGINE_NOTES_CUT.format(changelog=changelog)
+    lines = [ENGINE_NOTES_HEAD.format(old=old, new=new)] + "\n".join(items).split("\n")
+    if sum(len(line) + 1 for line in lines) <= ENGINE_NOTES_CAP:
+        return "\n".join(lines) + "\n"
+    kept, used = [], len(cut) + 1
+    for line in lines:
+        if used + len(line) + 1 > ENGINE_NOTES_CAP:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    return "\n".join(kept + [cut]) + "\n"
+
+
+def engine_session_notes(root: Path) -> str:
+    """What the session-start hook prints after the card for the workspace at `root`: the Migration notes when the
+    stamp (else the pre-stamp backlog line) is an older release than this engine, the update line when it is a later
+    one, else "" (an equal or unreadable stamp, or no running version)."""
+    running = installed_workspace_version()
+    if running is None:
+        return ""
+    stamp, why = read_engine_stamp(root)
+    if why is not None:
+        return ""
+    if stamp is None:
+        return migration_notes(_pre_stamp_old(running, root), running)
+    relation = release_cmp(stamp, running)
+    if relation is not None and relation > 0:
+        return ENGINE_NEWER_LINE.format(stamp=stamp, running=running) + "\n"
+    return migration_notes(stamp, running) if relation is not None and relation < 0 else ""
+
+
+def engine_raised_notes() -> None:
+    """Once the command ends, in the process that raised the stamp: the same Migration notes, on stderr, once."""
+    state = _ENGINE
+    if state is None or not state["raised"] or state.get("noted"):
+        return
+    state["noted"] = True
+    try:
+        block = migration_notes(*state["raised"])
+    except Exception:  # noqa: BLE001 - the notes never fail the command that raised
+        return
+    sys.stdout.flush()
+    sys.stderr.write(block)
+
+
 def engine_verdict() -> dict:
     """Take this process's verdict on the stamp, once (later calls return it unchanged)."""
     global _ENGINE
@@ -768,12 +884,8 @@ def engine_verdict() -> dict:
             elif relation < 0:
                 state["pending"], state["old"] = True, stamp
         else:  # no stamp yet: an older engine's backlog line, read before any rebuild rewrites it, seeds `old`
-            line = _backlog_version()
-            relation = release_cmp(line, running) if line and line != "unknown" else None
-            order = changelog_versions()
-            listed = order is None or line in order
             state["pending"] = True
-            state["old"] = line if relation is not None and relation < 0 and listed else None
+            state["old"] = _pre_stamp_old(running)
     _ENGINE = state
     return state
 

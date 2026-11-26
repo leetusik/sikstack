@@ -8,6 +8,11 @@ context.
   plus one line on how to start, at most 4,096 bytes. After a compaction the adapter's resume card follows it (one
   hook, so the order holds), and the two together stay within the HOOK_CAP characters Claude Code shows of a hook's
   stdout.
+- After the card, when the workspace's engine stamp (`works/engine.json`, else an older engine's backlog line) names
+  an older release than this plugin: the Migration notes of every release in between (the engine's
+  `engine_session_notes`, at most about 2,000 characters), or one line when the stamp names a later release (update
+  the plugin, then restart). Computed before the resume card, whose `next` may raise the stamp; the card and the
+  notes are the head `fit()` keeps whole. An equal stamp adds nothing.
 - Elsewhere: one line saying sikstack is installed and how to start (an old `workflow/` install above gets the
   `sikstack migrate` line instead).
 - First, outside a compaction, when setup left the registration pending in `$CLAUDE_PLUGIN_DATA`, it retries it once
@@ -58,6 +63,27 @@ def _walk(start):
 def card(state: Path) -> str:
     text = CONTRACT.read_text(encoding="utf-8").rstrip("\n")
     return f"{text}\n\n{START_LINE}\n"
+
+
+def notes(state: Path) -> str:
+    """The engine's notes block for the workspace at `state` ("" when there is none, or on any error). The engine's
+    store finds its root at import (and exits when there is none), so SIKSTACK_ROOT names `state` first and is put
+    back after."""
+    saved = os.environ.get("SIKSTACK_ROOT")
+    try:
+        os.environ["SIKSTACK_ROOT"] = str(state)
+        sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+        sys.dont_write_bytecode = True
+        import wf_store
+        block = wf_store.engine_session_notes(state)
+        return block if isinstance(block, str) else ""
+    except BaseException:  # noqa: BLE001 - a SystemExit from the store's import too: the card still prints
+        return ""
+    finally:
+        if saved is None:
+            os.environ.pop("SIKSTACK_ROOT", None)
+        else:
+            os.environ["SIKSTACK_ROOT"] = saved
 
 
 def resume_card(state: Path, raw: str) -> str:
@@ -112,6 +138,9 @@ def main() -> int:
     try:
         if found and found[0] == "state":
             out = card(found[1])
+            block = notes(found[1])  # before the resume card: its `next` may raise the stamp
+            if block:
+                out = f"{out}\n{block}"
             if source == "compact":
                 out = fit(out, resume_card(found[1], raw))
             sys.stdout.write(out)

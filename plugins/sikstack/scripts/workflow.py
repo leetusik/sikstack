@@ -123,7 +123,7 @@ import wf_feedback  # noqa: E402
 import wf_cloud  # noqa: E402
 from wf_store import (  # noqa: E402
     cmd_check, cmd_gate, cmd_next, cmd_parallel_plan, cmd_phase_archive, cmd_set_slice_status, DEPENDS_ON_HELP,
-    engine_verdict, engine_warn, finish_slice, NESTED, NESTED_MARKER, NESTED_PROBLEMS, new_phase, new_slice, normalize_id_args,
+    engine_raised_notes, engine_verdict, engine_warn, finish_slice, NESTED, NESTED_MARKER, NESTED_PROBLEMS, new_phase, new_slice, normalize_id_args,
     ONE_LINE_USAGE_COMMANDS, PAGE_BYTES, PHASE_ARG_HELP, phase_section, review_phase,
     REVIEW_VERDICTS, ROOT, rotate_backlog, set_phase_status, set_slice_deps, shown, SLICE_STOP_KINDS, start_slice,
     WORKFLOW_CMD,
@@ -442,13 +442,16 @@ def main(argv=None) -> int:
 
 def _warned(call, *call_args):
     """`call(*call_args)`, then the engine stamp's warning line when this process is stale and wrote nothing: after a
-    return or an exit with a code (check's), never after a refusal's message."""
+    return or an exit with a code (check's), never after a refusal's message. In the process that raised the stamp,
+    the Migration notes follow on stderr, once, however the command ended."""
     try:
         result = call(*call_args)
     except SystemExit as stop:
         if stop.code is None or isinstance(stop.code, int):
             engine_warn()
         raise
+    finally:
+        engine_raised_notes()
     engine_warn()
     return result
 

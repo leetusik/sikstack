@@ -20,8 +20,9 @@
 #   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release),
 #   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll),
 #   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes),
-#   Test 39 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33) and
-#   Test 40 (the engine stamp, works/engine.json: an older engine refuses to write, a newer one raises it).
+#   Test 39 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33),
+#   Test 40 (the engine stamp, works/engine.json: an older engine refuses to write, a newer one raises it) and
+#   Test 41 (the Migration notes after an update: the session-start hook's block and the first write's).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -6492,7 +6493,7 @@ es_set "$ES" 99.0.0; es_t0=$(es_tree "$ES"); es_bad=""
 for es_cmd in "phase new --phase P2 --name x --objective y" "slice status P1.DECOMP in_progress" "section P1 Now --append"; do
   es_o=$( cd "$ES" && printf -- '- a note\n' | env -u SIKSTACK_NO_OFFER python3 "$ENG" $es_cmd 2>&1 ); es_rc=$?  # shellcheck disable=SC2086
   { [ "$es_rc" = 1 ] && [ "$(printf '%s\n' "$es_o" | grep -c .)" = 1 ] \
-      && printf '%s\n' "$es_o" | grep -qF "sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json), so it writes nothing: restart Claude Code to load the updated plugin -- nothing was written (on a deliberate rollback to $ES_RUN: set that file's version to \"$ES_RUN\" and commit it)"; } \
+      && printf '%s\n' "$es_o" | grep -qF "sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json), so it writes nothing: restart Claude Code to load the updated plugin, after updating it first if this machine's install is older (\`claude plugin update sikstack@sikstack\`) -- nothing was written (on a deliberate rollback to $ES_RUN: set that file's version to \"$ES_RUN\" and commit it)"; } \
     || es_bad="$es_bad [$es_cmd rc=$es_rc: $es_o]"
 done
 [ -z "$es_bad" ] && [ "$es_t0" = "$(es_tree "$ES")" ] && [ -z "$(git -C "$ES" status --short)" ] \
@@ -6515,7 +6516,7 @@ es_ino=$(ls -i "$ES/works/backlog.md" | awk '{print $1}'); es_rbad=""
 for es_cmd in "next" "check --no-rebuild" "check"; do
   es_out=$( cd "$ES" && python3 "$ENG" $es_cmd 2>"$ESH/err.txt" ); es_rc=$?  # shellcheck disable=SC2086
   { [ "$es_rc" = 0 ] && [ -n "$es_out" ] && [ "$(grep -c . "$ESH/err.txt")" = 1 ] \
-      && grep -qx "warning: sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json): this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin" "$ESH/err.txt"; } \
+      && grep -qx "warning: sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json): this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin, after updating it first if this machine's install is older (\`claude plugin update sikstack@sikstack\`)" "$ESH/err.txt"; } \
     || es_rbad="$es_rbad [$es_cmd rc=$es_rc: $(cat "$ESH/err.txt")]"
 done
 [ -z "$es_rbad" ] && [ "$es_ino" = "$(ls -i "$ES/works/backlog.md" | awk '{print $1}')" ] && [ "$es_t0" = "$(es_tree "$ES")" ] \
@@ -6591,6 +6592,76 @@ es_mf99=$( cd "$ESW" && python3 "$ES99" worktree merge-finish 2>&1 ); es_mrc99=$
   && [ "$es_m1" = 0.98.0 ] && [ "$es_mrc99" = 0 ] && [ "$es_m2" = 0.99.0 ] \
   && ok "two sides raised differently (0.98.0 taken over 0.99.0): merge-finish by 0.98.0 refuses naming 0.99.0, and by 0.99.0 leaves 0.99.0" \
   || bad "merge-finish did not keep the later release -- taken $es_m0; 0.98.0 rc=$es_mrc98 ($es_mf98) -> $es_m1; 0.99.0 rc=$es_mrc99 -> $es_m2"
+
+# ---------------------------------------------------------------------------
+echo "== Test 41: the Migration notes after an update -- against a stamp of 0.8.0 the session-start hook prints, after the card, one block of the notes of each release after 0.8.0 (newest first, within HOOK_CAP); an equal stamp leaves the card byte-identical; a later stamp gets the update line; on compact the block shows once, before the resume card, and fit() keeps card and notes whole; the first command that raises the stamp prints the same block on stderr once (a --json stdout stays valid), the next none =="
+mn_hook() { printf '{"source":"%s","cwd":"%s"}' "$2" "$1" | env -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_DATA python3 "$PLUGIN/hooks/session_start.py"; }
+mn_set() { printf '{\n  "version": "%s"\n}\n' "$2" > "$1/.sikstack/works/engine.json" && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -qm "stamp $2"; }
+mn_card=$(python3 -c 'import sys; print(open(sys.argv[1]).read().rstrip("\n") + "\n\nThis repo has a sikstack workspace: start or continue with `/sikstack:sik-mode` (it reads `sikstack next`).")' "$PLUGIN/contract.md")
+newtmp MNH; mkhost "$MNH" >/dev/null 2>&1
+mn_eq=$(mn_hook "$MNH" startup; echo x); mn_eq=${mn_eq%x}
+[ "$mn_eq" = "$mn_card"$'\n' ] && ok "a stamp equal to the running version ($ES_RUN): the hook's output is the card alone, byte for byte" \
+  || bad "an equal stamp changed the hook's output: $(printf '%s' "$mn_eq" | tail -3)"
+mn_set "$MNH" 0.8.0 >/dev/null 2>&1
+mn_out=$(mn_hook "$MNH" startup; echo x); mn_out=${mn_out%x}
+mn_check() { python3 - "$1" "$2" "$ES_RUN" "$3" <<'PY'
+import sys
+text, card, running, want_resume = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "resume"
+head = f"sikstack updated from 0.8.0 to {running} in this workspace: the Migration notes below may need manual steps. Tell the operator, and run a step only on their word.\n"
+assert text.startswith(card + "\n\n" + head), text[len(card):len(card) + 300]
+block = text[len(card) + 2:].split("\ncompaction=done", 1)[0] if want_resume else text[len(card) + 2:]
+items = [line for line in block.splitlines()[1:] if line.startswith("- ")]
+assert items and items[0].startswith(f"- {running}: ") and any(i.startswith("- 0.9.0: ") for i in items), items
+assert not any(i.startswith(("- 0.8.0: ", "- 0.7.0: ")) for i in items), items
+assert text.count("sikstack updated from") == 1 and len(text) <= 10000, len(text)
+if want_resume:
+    assert "\ncompaction=done source=compact\n" in text and text.index("compaction=done") > text.index(head)
+PY
+}
+mn_check "$mn_out" "$mn_card" startup && ok "a stamp of 0.8.0: after the card, one block naming both versions lists the notes of the releases after 0.8.0 up to $ES_RUN, newest first, within HOOK_CAP" \
+  || bad "the startup notes block is wrong: $(printf '%s' "$mn_out" | tail -5)"
+mn_cmp=$(mn_hook "$MNH" compact; echo x); mn_cmp=${mn_cmp%x}
+mn_fit=$(python3 - "$PLUGIN" "$MNH/.sikstack" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + "/hooks")
+import session_start as ss
+state = Path(sys.argv[2]); head = ss.card(state) + "\n" + ss.notes(state)
+out = ss.fit(head, "".join(f"line {i} " + "x" * 90 + "\n" for i in range(200)))
+print(len(out) <= ss.HOOK_CAP and out.startswith(head) and "sikstack updated from 0.8.0" in head and out.rstrip("\n").endswith(ss.CUT_LINE))
+PY
+)
+mn_check "$mn_cmp" "$mn_card" resume && [ "$mn_fit" = True ] \
+  && ok "on compact the block shows once, after the card and before the resume card, within HOOK_CAP; an oversized resume card is cut by fit() with the card and the notes whole" \
+  || bad "the compact notes are wrong (fit: $mn_fit): $(printf '%s' "$mn_cmp" | grep -n 'updated from\|compaction=done')"
+mn_set "$MNH" 99.0.0 >/dev/null 2>&1
+mn_new=$(mn_hook "$MNH" startup; echo x); mn_new=${mn_new%x}
+[ "$mn_new" = "$mn_card"$'\n'$'\n'"this workspace was last written by sikstack 99.0.0, newer than this install's $ES_RUN: update the plugin (\`claude plugin update sikstack@sikstack\`), then restart Claude Code"$'\n' ] \
+  && ok "a stamp of a later release: one line after the card, update the plugin, then restart Claude Code" || bad "the newer-stamp line is wrong: $(printf '%s' "$mn_new" | tail -2)"
+# the first command that raises the stamp: the same block on stderr, once; the next prints none.
+mn_set "$MNH" 0.8.0 >/dev/null 2>&1
+mn_w1=$( cd "$MNH" && python3 "$ENG" phase new --phase P1 --name probe --objective o 2>"$MNH/err1.txt" ); mn_rc1=$?
+mn_w2=$( cd "$MNH" && python3 "$ENG" slice status P1.DECOMP in_progress 2>"$MNH/err2.txt" ); mn_rc2=$?
+mn_blk=$(printf '%s' "$mn_out" | python3 -c 'import sys; t = sys.stdin.read(); print(t[t.index("sikstack updated from"):], end="")')
+case "$mn_blk" in "sikstack updated from 0.8.0 to $ES_RUN in this workspace"*) ;; *) mn_blk="(no block: $mn_blk)" ;; esac
+[ "$mn_rc1" = 0 ] && [ "$mn_rc2" = 0 ] && printf '%s\n' "$mn_w1" | grep -q '^created phase P1' && [ "$(cat "$MNH/err1.txt")" = "$mn_blk" ] \
+  && [ ! -s "$MNH/err2.txt" ] && [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MNH/.sikstack/works/engine.json")" = "$ES_RUN" ] \
+  && ok "the first command that raises the stamp prints the hook's block on stderr once, after its own output; the stamp is $ES_RUN and the next command prints none" \
+  || bad "the first write's notes are wrong (rc $mn_rc1/$mn_rc2) -- [$(cat "$MNH/err1.txt")] [$(cat "$MNH/err2.txt")]"
+{ git -C "$MNH/.sikstack" add -A && git -C "$MNH/.sikstack" commit -qm work && mn_set "$MNH" 0.8.0; } >/dev/null 2>&1
+( cd "$MNH" && python3 - "$PLUGIN/scripts" >"$MNH/j_out.txt" 2>"$MNH/j_err.txt" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import workflow, wf_store
+wf_store.engine_verdict()
+wf_store.engine_mutation(wf_store.ROOT / "works" / "x")  # a write inside the boundary (a linked checkout's pull) raises it
+tokens = ["agenda", "--json"]
+args = workflow.build_parser().parse_args(tokens)
+sys.exit(workflow.with_offer(lambda: workflow.run(args, tokens), tokens))
+PY
+)
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$MNH/j_out.txt" 2>/dev/null && [ "$(cat "$MNH/j_err.txt")" = "$mn_blk" ] \
+  && ok "agenda --json in the process that raised: stdout is valid JSON, the block went to stderr" || bad "agenda --json after a raise: [$(head -c 300 "$MNH/j_out.txt")] [$(cat "$MNH/j_err.txt")]"
 
 # ---------------------------------------------------------------------------
 echo
