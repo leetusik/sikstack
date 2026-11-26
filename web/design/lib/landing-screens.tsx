@@ -1,14 +1,14 @@
 "use client";
 
-import { Landing } from "@/sikstack/landing/landing";
+import { Landing } from "../next/landing/landing";
 import { DESIGN_MARK } from "./mark";
 import { LANDING_STATES, type LandingState } from "./page-states";
 import { DESIGN_FEEDBACK_LIMIT } from "./send-feedback-actions";
 import { StatePage } from "./states";
 
 /**
- * The landing (production's `Landing`, with P83-8k.S1's design applied: its Connect section offers only the
- * plugin), in the states its route draws (`src/app/(marketing)/page.tsx`): signed out with the footer's feedback control (sikstack.com holds its key),
+ * The landing (the next `Landing`, `next/landing/`: production's, with the "sik" mark in its header and the
+ * open-source section before its footer), in the states its route draws (`src/app/(marketing)/page.tsx`): signed out with the footer's feedback control (sikstack.com holds its key),
  * signed in, and signed out where the server holds no key. The landing reads no API: its words are its data.
  */
 export function LandingRoute() {

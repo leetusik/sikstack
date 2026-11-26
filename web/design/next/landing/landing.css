@@ -1,0 +1,789 @@
+/* sikstack — the landing's own classes (job 06, round 01-landing, signed): `frame.css` sections 1 to 5,
+   value for value and name for name, including the command block's `.lp-cmd` and `.lp-cmd-value`,
+   which `Copy`'s block form (src/sikstack/frame/) emits. Section 6 (canvas only) is not built.
+   The changes, and nothing else (src/sikstack/styles/README.md):
+   - the whole sheet is one `@scope (.ui) to ([data-ui-legacy])` block;
+   - `.lp` is the first element inside the `UiRoot`, not the root itself (`UiRoot` takes no class, and
+     inside @scope a bare selector matches the root's descendants only), so every `.lp-*` selector is
+     unchanged;
+   - the canvas-only link-out notice (`.lp-out-anchor`, `.lp-out`, `.lp-out.is-up`) is not built: a
+     link out is a real link on the site.
+   Section 9, the install section, is job 09 (round 01-install-and-connect, signed).
+   Section 8 and the diagram's arrangement are job 08 (round 01-landing-diagram-feedback, signed):
+   `frame.css` section 8's `.lp-map-*` rules and the nine `@container lpmap (min-width: 48em)` rules
+   of `LandingMap.dc.html`, value for value and name for name.
+   Imported by src/sikstack/landing/landing.tsx, outside Tailwind; no theme variable is named here.
+   The next version (the "sik" mark and the open-source section's design): sections 10 and 11, at the end,
+   are new; every other rule is production's. Applied, this file replaces `src/sikstack/landing/landing.css`. */
+@scope (.ui) to ([data-ui-legacy]) {
+  /* 1 ── page: .ui.lp is the landing's root and its size container ─────────── */
+  .lp {
+    container: lp / inline-size;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--bg);
+  }
+  .lp-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .lp-main:focus {
+    outline: none;
+  }
+  .lp-main:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  /* a part: the gutters, then a .center column; a hairline over every part but the first */
+  .lp-part {
+    padding: var(--space-7) var(--gutter-narrow);
+    scroll-margin-top: var(--top-h);
+  }
+  .lp-part + .lp-part > .center {
+    padding-top: var(--space-7);
+    border-top: 1px solid var(--line);
+  }
+  .lp-part + .lp-part {
+    padding-top: 0;
+  }
+  /* the grid every part follows: the words, then the picture */
+  .lp-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .lp-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+  .lp-text p {
+    max-width: 60ch;
+  }
+  .lp-pic {
+    min-width: 0;
+  }
+  .lp-h1 {
+    font: 600 var(--fs-title)/var(--lh-title) var(--font);
+    overflow-wrap: normal;
+    text-wrap: balance;
+  }
+  .lp-h2 {
+    font: 600 var(--fs-title)/var(--lh-title) var(--font);
+  }
+  .lp-h3 {
+    font: 600 var(--fs-head)/var(--lh-head) var(--font);
+  }
+  .lp-lede {
+    color: var(--ink-2);
+    font-size: var(--fs-head);
+    line-height: var(--lh-head);
+  }
+  .lp-facts {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+  }
+  .lp-facts > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--line);
+  }
+  .lp-facts > li:last-child {
+    border-bottom: 1px solid var(--line);
+  }
+  .lp-main .link-row,
+  .lp-main .back {
+    text-align: start;
+  }
+  .lp-code-inline {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+  .lp-foot {
+    padding-top: 0;
+  }
+  .lp-foot > .center {
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  .lp-foot .lp-row {
+    align-items: center;
+  }
+  .lp-foot-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-2);
+    margin-left: calc(-1 * var(--space-3));
+  }
+  /* job 08 (round 01-landing-diagram-feedback, `## Build` 3c; `Landing.dc.html`): the footer's row, the
+     links, then Send feedback at the row's end, in the row's own look (F407: a .lp-link). Like the
+     wordmark, its text is on the column's edge and its wash outside it; it drops under the links, its
+     text on the column's left edge, when the row is too narrow (.split wraps). On the canvas
+     .lp-foot-send is a div around the control's mount; here it is a class on the button itself. */
+  .lp-foot-row {
+    align-self: stretch;
+  }
+  .lp-foot-send {
+    display: flex;
+    margin-inline: calc(-1 * var(--space-3));
+  }
+  .lp-facts > li {
+    text-wrap: pretty;
+  }
+  @container lp (min-width: 24em) {
+    .lp-h1 {
+      font-size: var(--fs-figure);
+      line-height: var(--lh-figure);
+    }
+  }
+  @container lp (min-width: 60em) {
+    .lp-part {
+      padding-block: var(--space-8);
+    }
+    .lp-part + .lp-part {
+      padding-top: 0;
+    }
+    .lp-part + .lp-part > .center {
+      padding-top: var(--space-8);
+    }
+    .lp-row {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      column-gap: var(--space-7);
+      align-items: baseline;
+    }
+    .lp-foot {
+      padding-block: 0 var(--space-6);
+    }
+    .lp-foot > .center {
+      padding-top: var(--space-6);
+    }
+  }
+  @container lp (min-width: 72em) {
+    .lp-part {
+      padding-inline: var(--gutter);
+    }
+  }
+
+  /* a link that reads as a nav item: 44 px, a hover wash, never a flood */
+  .lp-link {
+    display: inline-flex;
+    align-items: center;
+    min-width: var(--control-h);
+    min-height: var(--control-h);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-m);
+    background: transparent;
+    color: var(--ink);
+    font-weight: 500;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .lp-link:hover {
+    background: var(--hover);
+  }
+  /* the wordmark: the Shell's .mark, its text on the column's edge, its wash outside it */
+  .lp-mark {
+    margin-left: calc(-1 * var(--space-3));
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-m);
+  }
+
+  /* 2 ── header (LandingHeader.dc.html) ─────────────────────────────────── */
+  .lp-head {
+    container: lphead / inline-size;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    border-bottom: 1px solid transparent;
+  }
+  .lp-head.is-scrolled {
+    background: var(--surface);
+    border-bottom-color: var(--line);
+  }
+  .lp-head-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    align-items: baseline;
+    gap: 0 var(--space-2);
+    min-height: var(--top-h);
+    padding-inline: var(--gutter-narrow);
+  }
+  /* the row's content is the page's column: 1200 px at most inside the gutters, so the wordmark and the end sit on the parts' edges */
+  .lp-head .lp-head-row {
+    box-sizing: content-box;
+    width: auto;
+    max-width: var(--content-max);
+  }
+  .lp-nav,
+  .lp-head-end {
+    display: none;
+    align-items: baseline;
+  }
+  .lp-nav {
+    gap: 0;
+    margin-left: var(--space-4);
+  }
+  .lp-head-end {
+    gap: var(--space-2);
+    margin-left: auto;
+  }
+  /* Menu's text ends on the column's right edge, its wash outside it, as the wordmark's starts on the left: the two fit one row at 160 CSS px (320 at 200% text) */
+  .lp-menu-btn {
+    margin-left: auto;
+    margin-right: calc(-1 * var(--space-3));
+    padding-inline: var(--space-3);
+  }
+  .lp-menu-btn .chev {
+    transition: transform 120ms ease-out;
+  }
+  .lp-menu-btn[aria-expanded="true"] .chev {
+    margin-top: 3px;
+    transform: rotate(-135deg);
+  }
+  .lp-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--gutter-narrow) var(--space-4);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .lp-menu-list {
+    display: flex;
+    flex-direction: column;
+  }
+  .lp-menu-list > .lp-link {
+    margin-inline: calc(-1 * var(--space-3));
+  }
+  .lp-menu-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .lp-menu-actions > .btn {
+    width: 100%;
+  }
+  /* the skip link: the first stop of the page; out of sight until it has focus, then a band over the
+   whole header row on the header's own ground, the button on the column's edge, so no label is half covered */
+  .lp-skip-band {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 7;
+    height: var(--top-h);
+    background: inherit;
+  }
+  .lp-skip-band > .lp-head-row {
+    align-items: center;
+    height: 100%;
+  }
+  .lp-skip-band:not(:focus-within):not([data-shown="true"]) {
+    opacity: 0;
+    pointer-events: none;
+  }
+  @container lphead (min-width: 56em) {
+    .lp-nav,
+    .lp-head-end {
+      display: flex;
+    }
+    .lp-menu-btn,
+    .lp-menu {
+      display: none;
+    }
+  }
+  @container lphead (min-width: 72em) {
+    .lp-head-row,
+    .lp-menu {
+      padding-inline: var(--gutter);
+    }
+    .lp-head-row {
+      margin-inline: auto;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lp-menu-btn .chev {
+      transition: none;
+    }
+  }
+
+  /* 3 ── pictures of the product: the app's own panels, drawn as a picture (role="img") ── */
+  .lp-shot {
+    container: shot / inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+  .lp-shot-crumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    min-height: var(--control-h);
+    align-content: center;
+  }
+  .lp-shot-sep {
+    color: var(--ink-2);
+  }
+  .lp-shot-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .lp-pt {
+    font: 600 var(--fs-head)/var(--lh-head) var(--font);
+  }
+  .lp-list {
+    container-type: inline-size;
+  }
+  /* a phase: id, name, then its status and count (a line of their own under 30em of list) */
+  .lp-ph {
+    grid-template-columns: 3em minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+  .lp-ph > .lp-state {
+    grid-column: 1 / -1;
+  }
+  .lp-count {
+    font-variant-numeric: tabular-nums;
+  }
+  /* a document or a message: its words, then the figure at the end */
+  .lp-doc {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+  .lp-msg {
+    grid-template-columns: 2.5em minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+  .lp-msg > .lp-when {
+    grid-column: 2;
+  }
+  .lp-ag {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-2);
+  }
+  .lp-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-3);
+  }
+  /* the narrowest lists (320 and 390 at 200% text): a phase's id and a message's rating take a line of
+   their own, so a long word never runs out of a 3em-narrowed column */
+  @container (max-width: 16em) {
+    .lp-ph,
+    .lp-msg {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .lp-ph > .lp-state,
+    .lp-msg > .lp-when {
+      grid-column: auto;
+    }
+  }
+  @container (min-width: 30em) {
+    .lp-ph {
+      grid-template-columns: 3em minmax(0, 1fr) 10em;
+      row-gap: 0;
+    }
+    /* the status starts the column, the count ends it: each reads down the panel */
+    .lp-ph > .lp-state {
+      grid-column: auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .lp-count {
+      text-align: end;
+    }
+    .lp-doc {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: 0;
+    }
+    .lp-msg {
+      grid-template-columns: 2.5em minmax(0, 1fr) auto;
+      row-gap: 0;
+    }
+    .lp-msg > .lp-when {
+      grid-column: auto;
+    }
+    .lp-ag {
+      grid-template-columns: minmax(0, 1fr) 11em;
+      row-gap: 0;
+    }
+    /* the outcome: a phase's id in its own slot, so every status mark starts on one line */
+    .lp-outcome {
+      display: grid;
+      grid-template-columns: 3em minmax(0, 1fr);
+    }
+    .lp-outcome-st {
+      grid-column: 2;
+    }
+  }
+  @container shot (min-width: 36em) {
+    .lp-shot-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .lp-shot-wide {
+      grid-column: 1 / -1;
+    }
+  }
+  /* the reader: a document page with its tools, a highlight and a note */
+  .lp-tools {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-1);
+    margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3))
+      calc(-1 * var(--space-3)) auto;
+  }
+  .lp-read-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+  }
+  .lp-tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--control-h);
+    height: var(--control-h);
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-m);
+    color: var(--ink-2);
+    font-weight: 500;
+    line-height: 1;
+  }
+  .lp-read {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+  .lp-read-text {
+    max-width: 36rem;
+    font-size: var(--fs-head);
+    line-height: var(--lh-head);
+  }
+  .lp-read-text mark {
+    padding: 0 2px;
+    border-radius: var(--radius-xs);
+    background: var(--accent-tint);
+    color: var(--ink);
+  }
+  .lp-note {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-width: 36rem;
+    padding: var(--space-3);
+    border-radius: var(--radius-s);
+    background: var(--bg);
+  }
+  .lp-said {
+    font-size: var(--fs-head);
+    line-height: var(--lh-head);
+  }
+
+  /* 5 ── a command and its Copy button (LandingCode.dc.html): the system's copy field, its lines kept ── */
+  .lp-cmd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .lp-cmd-value {
+    flex: 1 1 12em;
+    min-width: 0;
+    margin: 0;
+    padding: calc(var(--space-3) - 1px) var(--space-3);
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    color: var(--ink);
+    font: 400 var(--fs-text)/var(--lh-text) var(--font-mono);
+    white-space: pre;
+    word-break: normal;
+  }
+
+  /* 8 ── the diagram's parts (frame.md F409): a box, a link (its line and its label), an end, the Coming mark ──
+     The landing arranges them; this section only draws them. .lp-map is the diagram's root and its size container.
+     A chain runs down the page under 48em of the diagram and across it from 48em. */
+  .lp-map {
+    container: lpmap / inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+  .lp-map-chain {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  /* a box: a part of sikstack is the app's panel; the agent, which is not sikstack's, is an ink edge on the ground */
+  .lp-map-box {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    text-wrap: pretty;
+  }
+  .lp-map-box.is-agent {
+    border-color: var(--ink);
+    background: transparent;
+  }
+  .lp-map-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    font: 600 var(--fs-head)/var(--lh-head) var(--font);
+  }
+  /* an end: who a chain starts from or ends with, as words alone, on the boxes' text edge and on a box name's line */
+  .lp-map-end {
+    padding: calc(var(--space-3) + 1px) calc(var(--space-4) + 1px);
+    font-weight: 500;
+    line-height: calc(var(--fs-head) * var(--lh-head));
+  }
+  .lp-map-label {
+    color: var(--ink-2);
+    font-size: var(--fs-meta);
+    line-height: var(--lh-meta);
+    text-wrap: balance;
+  }
+  /* a link, running down: its line 24 px in from the boxes' edge, its label beside the line */
+  .lp-map-link {
+    display: grid;
+    grid-template-columns: var(--space-4) minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: center;
+    min-height: var(--space-6);
+    margin-block: var(--space-1);
+    padding-left: var(--space-4);
+  }
+  .lp-map-link > .lp-map-label {
+    grid-column: 2;
+    grid-row: 1;
+    padding-block: var(--space-2);
+  }
+  /* the line: a 1.5 px stroke with the system's chevron as its head (the .back mark, turned); .is-both has a head at each end */
+  .lp-map-line {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: center;
+    align-self: stretch;
+    width: 0;
+    border-left: 1.5px solid var(--ink-2);
+  }
+  .lp-map-line::after,
+  .lp-map-line.is-both::before {
+    content: "";
+    position: absolute;
+    left: -0.75px;
+    width: 7px;
+    height: 7px;
+    border: solid var(--ink-2);
+    transform: translateX(-50%) rotate(45deg);
+  }
+  .lp-map-line::after {
+    bottom: 1.5px;
+    border-width: 0 1.5px 1.5px 0;
+  }
+  .lp-map-line.is-both::before {
+    top: 1.5px;
+    border-width: 1.5px 0 0 1.5px;
+  }
+  @container lpmap (min-width: 48em) {
+    .lp-map-chain {
+      flex-direction: row;
+      align-items: stretch;
+    }
+    .lp-map-chain > .lp-map-box {
+      flex: 1 1 0;
+    }
+    .lp-map-chain > .lp-map-end {
+      flex: none;
+      align-self: center;
+      padding-inline: 0;
+    }
+    /* a link, running across: its line on the boxes' middle, its label over the line; .is-down keeps a link running down */
+    .lp-map-chain > .lp-map-link:not(.is-down) {
+      flex: none;
+      grid-template-columns: minmax(var(--space-7), auto);
+      grid-template-rows: 1fr auto 1fr;
+      column-gap: 0;
+      min-height: 0;
+      margin: 0 var(--space-1);
+      padding-left: 0;
+    }
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-label {
+      grid-column: 1;
+      grid-row: 1;
+      align-self: end;
+      max-width: 10em;
+      padding: 0 var(--space-2) var(--space-1);
+      text-align: center;
+    }
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-line {
+      grid-column: 1;
+      grid-row: 2;
+      justify-self: stretch;
+      align-self: center;
+      width: auto;
+      height: 0;
+      margin-block: var(--space-1);
+      border-top: 1.5px solid var(--ink-2);
+      border-left: 0;
+    }
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-line::after,
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-line.is-both::before {
+      top: -0.75px;
+      bottom: auto;
+      left: auto;
+      transform: translateY(-50%) rotate(-45deg);
+    }
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-line::after {
+      right: 1.5px;
+    }
+    .lp-map-chain > .lp-map-link:not(.is-down) > .lp-map-line.is-both::before {
+      left: 1.5px;
+    }
+  }
+
+  /* The diagram's arrangement (LandingMap.dc.html's <style>, frame.md F434; its parts are section 8, F409).
+     One chain: Feedback, Workspace, the agent, Library. Under 48em of the diagram it runs down, as the frame draws a chain.
+     From 48em sikstack's three parts share a row and the agent sits under Workspace and Library, joined to both. */
+  @container lpmap (min-width: 48em) {
+    .lp-fit {
+      display: grid;
+      grid-template-columns:
+        minmax(0, 1fr) auto minmax(0, 1fr) var(--space-5)
+        minmax(0, 1fr);
+      grid-template-rows: auto auto auto;
+    }
+    .lp-fit > .lp-fit-feedback {
+      grid-area: 1 / 1;
+    }
+    .lp-fit > .lp-fit-to-workspace {
+      grid-area: 1 / 2;
+    }
+    .lp-fit > .lp-fit-workspace {
+      grid-area: 1 / 3;
+    }
+    .lp-fit > .lp-fit-library {
+      grid-area: 1 / 5;
+    }
+    .lp-fit > .lp-fit-to-agent {
+      grid-area: 2 / 3;
+    }
+    .lp-fit > .lp-fit-to-library {
+      grid-area: 2 / 5;
+    }
+    .lp-fit > .lp-fit-agent {
+      grid-area: 3 / 3 / 4 / 6;
+    }
+    /* the agent's link to the Library runs up here: the same line, its head at the top */
+    .lp-fit > .lp-fit-to-library > .lp-map-line::after {
+      top: 1.5px;
+      bottom: auto;
+      border-width: 1.5px 0 0 1.5px;
+    }
+  }
+
+  /* 9 ── the install section (job 09, round 01-install-and-connect, signed: `Landing.dc.html` and
+     `LandingInstall.dc.html`'s own rules, value for value). Three numbered steps, then how work starts: a step
+     is its number in a 1.5em column, then its heading and its command; the number shares the heading's first
+     baseline, every heading and command box starts on one left edge, the fourth row's number cell empty.
+     Groups 32 px apart, a heading and its command 12 px. */
+  .lp-inst-h2 {
+    text-wrap: balance;
+  }
+  .lpi {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+  .lpi-steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .lpi-step {
+    display: grid;
+    grid-template-columns: 1.5em minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: first baseline;
+    min-width: 0;
+  }
+  .lpi-n {
+    font: 600 var(--fs-head) / var(--lh-head) var(--font);
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  /* a command wraps inside its own box rather than scrolling, so a phone shows it whole: at its spaces
+     first, inside a word only when the word alone is wider than the box */
+  .lpi .lp-cmd-value {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* 10 ── the mark (`wordmark.tsx`): "sik" on an ink tile, then the rest of the name. The tile is drawn as the
+     app's avatar tile is (28 px, radius 4, ink under surface); its letters are the wordmark's own size and
+     weight, so the name still reads as one word, on one baseline. The tile's left edge is the column's. */
+  .lp-mark {
+    gap: var(--space-1);
+  }
+  .lp-sik {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-s);
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  /* 11 ── the open-source section: the ways to contribute, one row of links that wraps */
+  .lp-ways {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-5);
+  }
+}

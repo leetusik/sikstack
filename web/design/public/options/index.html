@@ -1,0 +1,323 @@
+<!doctype html>
+<!--
+  OPTIONS PAGE (sikstack template: templates/design/options.html). THROWN AWAY AFTER THE PICK.
+
+  The named decision: the "sik" mark, sikstack's logo for the favicon, the home-screen icon, the landing header and
+  the shared image. Three directions on one axis: the mark's ground and where the accent goes. Every direction is
+  the same three letters, lowercase, in IBM Plex Sans SemiBold (the house face), as live text on a ground a CSS box
+  draws: no SVG, no drawn artwork (TASTE.md: "Marks are drawn in CSS").
+
+  - The samples are the same markup under every direction; a direction is the [data-direction] token block below.
+  - The faces are production's own files (`web/public/fonts/plex/`), written into the build at production's
+    address by `app/fonts/plex/[file]/route.ts`.
+  - The colours are `src/sikstack/styles/tokens.css`'s roles, light and dark, by value (this page is outside `.ui`).
+  - The icons here are drawn by the browser from the same CSS the landing's mark uses. The icon files themselves
+    (PNG, ICO) are rasters of this drawing, made in the build slice; at 16 px their pixels can differ a little.
+  - After the pick: the landing's mark (`next/landing/wordmark.tsx`, `landing.css` section 10) takes the chosen
+    values and this folder (`public/options/`) and the font route are deleted.
+  - Framed (a viewer shows one direction per frame, ?direction=a|b|c): the bar is hidden and the page posts
+    { designHeight } to its parent on load and on resize, so the frame can take its height. Unframed, no change.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options: the sik mark</title>
+<style>
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: block;
+               src: url("/fonts/plex/IBMPlexSans-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-display: block;
+               src: url("/fonts/plex/IBMPlexSans-Medium.woff2") format("woff2"); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-display: block;
+               src: url("/fonts/plex/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+
+  /* ---- the directions: the mark's ground, its letters and the i's dot; then the same on the dark scheme ---- */
+  /* A: --accent and --on-accent. */
+  [data-direction="a"] {
+    --m-ground: #1d4ed8; --m-ink: #ffffff; --m-dot: #ffffff;
+    --m-ground-dark: #8fb0ff; --m-ink-dark: #0e1116; --m-dot-dark: #0e1116;
+  }
+  /* B: --ink and --surface (the app's avatar tile is drawn the same way). */
+  [data-direction="b"] {
+    --m-ground: #14171c; --m-ink: #ffffff; --m-dot: #ffffff;
+    --m-ground-dark: #e9ecf1; --m-ink-dark: #1c2027; --m-dot-dark: #1c2027;
+  }
+  /* C: --surface, --ink and, on the i's dot, --accent. In the header it has no tile (below). */
+  [data-direction="c"] {
+    --m-ground: #ffffff; --m-ink: #14171c; --m-dot: #1d4ed8;
+    --m-ground-dark: transparent; --m-ink-dark: #e9ecf1; --m-dot-dark: #8fb0ff;
+  }
+
+  /* ---- the page frame (options chrome: the same for every direction) ---- */
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1b1b1b; background: #e9e9e9; }
+  .bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+         padding: 12px 24px; background: #1b1b1b; color: #f2f2f2; }
+  .bar h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .bar .note { font-size: 12px; color: #b9b9b9; }
+  .switch { display: flex; gap: 4px; flex-wrap: wrap; }
+  .switch button { min-height: 32px; padding: 4px 12px; border: 1px solid #666; border-radius: 6px; background: transparent;
+                   color: #f2f2f2; font: inherit; cursor: pointer; }
+  .switch button[aria-pressed="true"] { background: #f2f2f2; color: #1b1b1b; border-color: #f2f2f2; }
+  .switch button:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+  .framed .bar { display: none; }
+  .why { margin: 0 24px; padding: 12px 0; font-size: 13px; color: #333; max-width: 72ch; }
+
+  .stage { padding: 0 24px 32px; display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+  .screen { display: flex; flex-direction: column; border: 1px solid #cfcfcf; border-radius: 10px; overflow: hidden; min-width: 0; background: #ffffff; }
+  .screen > :last-child { flex: 1 0 auto; }
+  .screen.share { max-width: 1202px; }
+  .screen .label { margin: 0; padding: 6px 12px; font: 12px system-ui, sans-serif; color: #555; background: #f2f2f2; border-bottom: 1px solid #ddd; }
+  .cap { margin: 0; font: 12px/16px system-ui, sans-serif; color: #555; }
+  @media (min-width: 900px) {
+    .stage { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+    .wide { grid-column: 1 / -1; }
+  }
+
+  /* ---- the mark: "sik", Plex Sans SemiBold, centred on its ground. --s is its side. ---- */
+  .sik { --s: 32px; --g: var(--m-ground); --i: var(--m-ink); --d: var(--m-dot);
+         display: inline-grid; place-items: center; flex: none; width: var(--s); height: var(--s);
+         border-radius: calc(var(--s) * 0.125); background: var(--g); color: var(--i);
+         font: 600 calc(var(--s) * 0.56)/1 "IBM Plex Sans", system-ui, sans-serif; letter-spacing: -0.01em;
+         -webkit-font-smoothing: antialiased; }
+  /* the letters have ascenders and no descenders: lifted so the block of them sits on the tile's middle */
+  .sik > span { display: block; padding-bottom: 0.04em; }
+  .sik b { font-weight: inherit; }
+  /* C: the i's dot in the accent, the stem in ink: one glyph, two colours, cut between the dot and the stem */
+  [data-direction="c"] .sik b { background: linear-gradient(var(--d) 0 37%, var(--i) 37%);
+         -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sik.s16 { --s: 16px; font-size: 9.5px; letter-spacing: 0; }
+  .sik.s32 { --s: 32px; font-size: 18.5px; }
+  .sik.s48 { --s: 48px; }
+  /* the home-screen icon: the file is a full square (no corners of its own); iOS cuts the corners */
+  .sik.s180 { --s: 180px; font-size: 96px; letter-spacing: -0.02em; border-radius: 40px; }
+  .sik.s60 { --s: 60px; font-size: 32px; letter-spacing: -0.02em; border-radius: 13.5px; }
+
+  /* ---- sample 1: the browser tab ---- */
+  .tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+  .chrome { --strip: #dee1e6; --tab: #ffffff; --text: #1f1f1f; --text-2: #474747;
+            display: grid; align-content: start; gap: 20px; padding: 16px 16px 20px; background: var(--tab); min-width: 0; }
+  .chrome.dark { --strip: #1f2023; --tab: #3c3d41; --text: #e3e3e3; --text-2: #c4c7c5; }
+  .strip { display: flex; align-items: end; gap: 2px; margin: -16px -16px 0; padding: 8px 8px 0; background: var(--strip); min-width: 0; }
+  .tab { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; max-width: 240px; height: 34px; padding: 0 12px;
+         border-radius: 8px 8px 0 0; color: var(--text-2); font: 12px/1 system-ui, sans-serif; }
+  .tab.on { background: var(--tab); color: var(--text); }
+  .tab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sizes { display: flex; align-items: end; gap: 24px; }
+  .size { display: grid; justify-items: center; gap: 8px; }
+  .chrome .cap { color: var(--text-2); }
+
+  /* ---- sample 2: the home screen ---- */
+  .home { display: flex; flex-wrap: wrap; align-items: end; align-content: start; gap: 32px; padding: 24px; background: #dfe3e8; }
+  .app { display: grid; justify-items: center; gap: 6px; }
+  .app .name { font: 500 12px/16px system-ui, -apple-system, sans-serif; color: #1b1b1b; }
+  .home .cap { align-self: end; }
+
+  /* ---- sample 3: the landing header (the product's own values: 56 px row, 44 px controls, radius 6) ---- */
+  .hd { --h-bg: #f2f4f7; --h-surface: #ffffff; --h-ink: #14171c; --h-edge: #7c8594; --h-accent: #1d4ed8;
+        container-type: inline-size; background: var(--h-bg); color: var(--h-ink);
+        font: 400 14px/20px "IBM Plex Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .hd.dark { --h-bg: #14171c; --h-surface: #1c2027; --h-ink: #e9ecf1; --h-edge: #7f8999; --h-accent: #8fb0ff; }
+  .hd.dark .sik { --g: var(--m-ground-dark); --i: var(--m-ink-dark); --d: var(--m-dot-dark); }
+  .hd.phone { max-width: 390px; border-right: 1px solid #cfcfcf; }
+  .hd + .hd { border-top: 1px solid #cfcfcf; }
+  .hd-row { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 16px; }
+  .hd-nav, .hd-end { display: none; align-items: center; }
+  .hd-nav { margin-left: 16px; }
+  .hd-end { gap: 8px; margin-left: auto; }
+  .hd-link { display: inline-flex; align-items: center; height: 44px; padding: 0 12px; font-weight: 500; line-height: 1; }
+  .hd-btn { display: inline-flex; align-items: center; height: 44px; padding: 0 16px; border: 1px solid var(--h-edge);
+            border-radius: 6px; background: var(--h-surface); font-weight: 500; line-height: 1; white-space: nowrap; }
+  .hd-btn.quiet { border-color: transparent; background: transparent; }
+  .hd-menu { display: inline-flex; align-items: center; gap: 8px; height: 44px; margin-left: auto; font-weight: 500; line-height: 1; }
+  .hd-menu::after { content: ""; width: 6px; height: 6px; margin-top: -3px; border-right: 1.5px solid var(--h-ink);
+                    border-bottom: 1.5px solid var(--h-ink); transform: rotate(45deg); opacity: 0.7; }
+  @container (min-width: 56em) {
+    .hd-row { padding: 0 32px; }
+    .hd-nav, .hd-end { display: flex; }
+    .hd-menu { display: none; }
+  }
+
+  /* the lockup: the tile holds "sik" and "stack" follows, one size, one weight, one baseline */
+  .lock { display: inline-flex; align-items: center; gap: 0.25em; color: var(--h-ink);
+          font: 600 16px/1 "IBM Plex Sans", system-ui, sans-serif; }
+  .lock .sik { width: 1.75em; height: 1.75em; border-radius: 0.25em; font-size: 1em; letter-spacing: 0; }
+  .lock .sik > span { padding-bottom: 0; }
+  /* C in the header: no tile; the wordmark as it is today, the i's dot in the accent */
+  [data-direction="c"] .lock { gap: 0; }
+  [data-direction="c"] .lock .sik { --i: var(--h-ink); --d: var(--h-accent); width: auto; height: auto; border-radius: 0; background: none; }
+
+  /* ---- sample 4: the shared image, 1200 x 630, every length in 1200ths of the frame's width ---- */
+  .og-fit { container-type: inline-size; max-width: 1200px; }
+  .og { --u: calc(100cqw / 1200); --h-ink: #14171c; --h-accent: #1d4ed8;
+        display: flex; flex-direction: column; justify-content: space-between; aspect-ratio: 1200 / 630;
+        padding: calc(88 * var(--u)) calc(96 * var(--u)); background: #f2f4f7; color: #14171c;
+        font-family: "IBM Plex Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .og .lock { font-size: calc(44 * var(--u)); align-self: flex-start; }
+  .og-words { display: flex; flex-direction: column; gap: calc(28 * var(--u)); max-width: calc(960 * var(--u)); }
+  .og-title { margin: 0; font-size: calc(68 * var(--u)); font-weight: 600; line-height: 1.15; }
+  .og-lede { margin: 0; font-size: calc(34 * var(--u)); line-height: 1.4; color: #4a5362; }
+
+  /* ---- the direction's values ---- */
+  .spec { display: grid; gap: 12px; padding: 16px; }
+  .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0; }
+  .tokens div { display: flex; gap: 8px; align-items: center; font-size: 12px; }
+  .tokens dt { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #cfcfcf; flex: none; }
+  .tokens dd { margin: 0; }
+  .spec p { margin: 0; font-size: 12px; color: #333; max-width: 72ch; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1 id="decision">Decision: <span data-decision>the “sik” mark (its ground, and where the accent goes)</span></h1>
+  <div class="switch" role="group" aria-labelledby="decision" data-switch></div>
+  <span class="note">Options page: thrown away after the pick.</span>
+</header>
+<p class="why" data-why></p>
+
+<main class="stage" data-direction="a">
+  <!-- Sample 1: the favicon in a browser's tab, at 16 px, then the 32 and 48 px sizes the .ico also holds. -->
+  <section class="screen" aria-label="Sample: the browser tab">
+    <p class="label">Browser tab · 16, 32 and 48 px</p>
+    <div class="tabs">
+      <div class="chrome">
+        <div class="strip">
+          <div class="tab on"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><span class="t">sikstack — One place for your project’s work with its coding agents</span></div>
+          <div class="tab"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><span class="t">Sign in · sikstack</span></div>
+        </div>
+        <div class="sizes">
+          <div class="size"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">16</p></div>
+          <div class="size"><span class="sik s32" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">32</p></div>
+          <div class="size"><span class="sik s48" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">48</p></div>
+        </div>
+      </div>
+      <div class="chrome dark">
+        <div class="strip">
+          <div class="tab on"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><span class="t">sikstack — One place for your project’s work with its coding agents</span></div>
+          <div class="tab"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><span class="t">Sign in · sikstack</span></div>
+        </div>
+        <div class="sizes">
+          <div class="size"><span class="sik s16" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">16</p></div>
+          <div class="size"><span class="sik s32" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">32</p></div>
+          <div class="size"><span class="sik s48" aria-hidden="true"><span>s<b>i</b>k</span></span><p class="cap">48</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sample 2: the iOS home-screen icon. The file is 180 px; a phone shows it at 60 pt over the site's name. -->
+  <section class="screen" aria-label="Sample: the home screen">
+    <p class="label">Home screen · 180 px</p>
+    <div class="home">
+      <span class="sik s180" aria-hidden="true"><span>s<b>i</b>k</span></span>
+      <div class="app"><span class="sik s60" aria-hidden="true"><span>s<b>i</b>k</span></span><span class="name">sikstack</span></div>
+      <p class="cap">The 180 px file, and as a phone shows it.</p>
+    </div>
+  </section>
+
+  <!-- Sample 3: the landing's header, on the light scheme, on the dark scheme, and at phone width. -->
+  <section class="screen wide" aria-label="Sample: the landing header">
+    <p class="label">Landing header · light, dark, phone</p>
+    <div class="hd">
+      <div class="hd-row">
+        <span class="lock" role="img" aria-label="sikstack"><span class="sik"><span>s<b>i</b>k</span></span><span>stack</span></span>
+        <span class="hd-nav"><span class="hd-link">Workspace</span><span class="hd-link">Library</span><span class="hd-link">Feedback</span><span class="hd-link">Connect</span></span>
+        <span class="hd-end"><span class="hd-btn quiet">Sign in</span><span class="hd-btn">Create account</span></span>
+        <span class="hd-menu">Menu</span>
+      </div>
+    </div>
+    <div class="hd dark">
+      <div class="hd-row">
+        <span class="lock" role="img" aria-label="sikstack"><span class="sik"><span>s<b>i</b>k</span></span><span>stack</span></span>
+        <span class="hd-nav"><span class="hd-link">Workspace</span><span class="hd-link">Library</span><span class="hd-link">Feedback</span><span class="hd-link">Connect</span></span>
+        <span class="hd-end"><span class="hd-btn quiet">Sign in</span><span class="hd-btn">Create account</span></span>
+        <span class="hd-menu">Menu</span>
+      </div>
+    </div>
+    <div class="hd phone">
+      <div class="hd-row">
+        <span class="lock" role="img" aria-label="sikstack"><span class="sik"><span>s<b>i</b>k</span></span><span>stack</span></span>
+        <span class="hd-menu">Menu</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sample 4: the shared image, today's layout (the name, the landing's title and its line) with the mark. -->
+  <section class="screen wide share" aria-label="Sample: the shared image">
+    <p class="label">Shared image · 1200 × 630</p>
+    <div class="og-fit">
+      <div class="og">
+        <span class="lock" role="img" aria-label="sikstack"><span class="sik"><span>s<b>i</b>k</span></span><span>stack</span></span>
+        <div class="og-words">
+          <p class="og-title">One place for your project’s work with its coding agents.</p>
+          <p class="og-lede">What your agents plan and run, what they write for you to read, and what your users said about it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The direction itself: its values, read from the CSS above. -->
+  <section class="screen wide" aria-label="This direction's values">
+    <p class="label">Values</p>
+    <div class="spec">
+      <dl class="tokens" data-tokens></dl>
+      <p>Letters: “sik”, lowercase, IBM Plex Sans SemiBold. Corners: 4 px on a 32 px tile, the same eighth of the side at 16 and 48; the 180 px file is a full square, and iOS cuts its corners.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+  // The directions: a key (its [data-direction] block above), a label, and one line on what it trades.
+  const DIRECTIONS = [
+    { key: "a", label: "A · Accent tile", why: "White letters on the accent blue, the manifest's theme colour: the easiest to find in a row of tabs. It puts a blue block in the header, where blue is otherwise kept for the primary action, links and what is live." },
+    { key: "b", label: "B · Ink tile", why: "Light letters on ink: quiet, and it spends no accent. It is drawn like the app's avatar tile, and a dark square is a common favicon; on a dark tab strip the tile fades and the letters carry it." },
+    { key: "c", label: "C · Live dot", why: "Ink letters on white, the i's dot in the accent; the header keeps today's text wordmark and only the dot turns blue. The smallest change. At 16 px the dot is two pixels, and on a white tab the tile has no edge." },
+  ];
+  // The first three are the icon files' and the light scheme's; the rest, the header's on the dark scheme.
+  const TOKENS = [["--m-ground", "Ground"], ["--m-ink", "Letters"], ["--m-dot", "The i's dot"],
+                  ["--m-ground-dark", "Ground, dark"], ["--m-ink-dark", "Letters, dark"], ["--m-dot-dark", "Dot, dark"]];
+  const stage = document.querySelector(".stage");
+  const sw = document.querySelector("[data-switch]");
+  const show = (key, push) => {
+    const d = DIRECTIONS.find((x) => x.key === key) || DIRECTIONS[0];
+    stage.dataset.direction = d.key;
+    document.querySelector("[data-why]").textContent = d.label + ": " + d.why;
+    for (const b of sw.children) b.setAttribute("aria-pressed", String(b.dataset.key === d.key));
+    const s = getComputedStyle(stage);
+    const v = (t) => s.getPropertyValue(t).trim();
+    // A dot in the letters' own colour is not a value of its own.
+    const shown = TOKENS.filter(([t]) => !t.startsWith("--m-dot") || v(t) !== v(t.replace("dot", "ink")));
+    document.querySelector("[data-tokens]").innerHTML = shown.map(([t, name]) =>
+      `<div><dt style="background:var(${t})"></dt><dd>${name} ${s.getPropertyValue(t).trim().replace("transparent", "none")}</dd></div>`).join("");
+    if (push) { const u = new URL(location.href); u.searchParams.set("direction", d.key); history.replaceState(null, "", u); }
+  };
+  for (const d of DIRECTIONS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = d.label; b.dataset.key = d.key;
+    b.addEventListener("click", () => show(d.key, true));
+    sw.append(b);
+  }
+  sw.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = DIRECTIONS.findIndex((d) => d.key === stage.dataset.direction);
+    const next = DIRECTIONS[(i + (e.key === "ArrowRight" ? 1 : DIRECTIONS.length - 1)) % DIRECTIONS.length];
+    show(next.key, true); sw.querySelector(`[data-key="${next.key}"]`).focus();
+  });
+  show(new URL(location.href).searchParams.get("direction"), false);
+
+  // Framed: hide the bar and tell the parent this page's height (a height is no secret; the parent checks the
+  // message's source and origin). Unframed, nothing here runs.
+  if (window.self !== window.top) {
+    document.documentElement.classList.add("framed");
+    let last = -1;
+    const post = () => {
+      const h = document.documentElement.scrollHeight;
+      if (h !== last) { last = h; window.parent.postMessage({ designHeight: h }, "*"); }
+    };
+    addEventListener("load", post);
+    new ResizeObserver(post).observe(document.body);
+    post();
+  }
+</script>
+</body>
+</html>
