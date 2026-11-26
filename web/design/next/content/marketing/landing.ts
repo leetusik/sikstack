@@ -20,7 +20,7 @@
 //
 // The next version (the "sik" mark and the open-source section's design). Applied, this file replaces
 // `src/content/marketing/landing.ts`. Two additions, and every other word is production's:
-// - `mark`: the wordmark's first syllable, the letters the mark's tile holds (`landing/wordmark.tsx`);
+// - `mark`: the wordmark's first syllable, the icon's letters; its i carries the accent dot (`landing/wordmark.tsx`);
 // - `openSource`: the section before the footer. The licence is the repo's `LICENSE` (MIT); the ways to
 //   contribute are the feedback control (its own words, `@/content/send-feedback`), the repo's issues and its
 //   pull requests; `CONTRIBUTING.md` is the repo's guide.
@@ -52,7 +52,7 @@ export const LANDING = {
     siteName: "sikstack",
   },
   wordmark: "sikstack",
-  /** The mark: the wordmark's first three letters, which the tile holds; the rest of the name follows it. */
+  /** The mark: the wordmark's first three letters, the icon's; the dot of its i is in the accent. */
   mark: "sik",
   header: {
     nav: "Landing",

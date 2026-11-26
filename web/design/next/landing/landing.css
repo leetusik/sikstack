@@ -762,21 +762,23 @@
     overflow-wrap: anywhere;
   }
 
-  /* 10 ── the mark (`wordmark.tsx`): "sik" on an ink tile, then the rest of the name. The tile is drawn as the
-     app's avatar tile is (28 px, radius 4, ink under surface); its letters are the wordmark's own size and
-     weight, so the name still reads as one word, on one baseline. The tile's left edge is the column's. */
-  .lp-mark {
-    gap: var(--space-1);
-  }
-  .lp-sik {
-    display: inline-grid;
-    place-items: center;
-    flex: none;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-s);
-    background: var(--ink);
-    color: var(--surface);
+  /* 10 ── the mark (`wordmark.tsx`, direction C, "Live dot"): the name as text, the dot of its i in the accent.
+     One glyph, two paints: the accent down to the cut between the dot and the stem, the ink under it (a hard
+     stop, no blend). The plain ink i is the base; the paint is on only where text can clip a background, and
+     off where backgrounds are dropped (print, forced colours), so the letter never goes missing. */
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    .lp-dot {
+      background: linear-gradient(var(--accent) 0 35.5%, var(--ink) 35.5%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    @media print, (forced-colors: active) {
+      .lp-dot {
+        background: none;
+        color: inherit;
+      }
+    }
   }
 
   /* 11 ── the open-source section: the ways to contribute, one row of links that wraps */

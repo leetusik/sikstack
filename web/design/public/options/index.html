@@ -13,8 +13,9 @@
   - The colours are `src/sikstack/styles/tokens.css`'s roles, light and dark, by value (this page is outside `.ui`).
   - The icons here are drawn by the browser from the same CSS the landing's mark uses. The icon files themselves
     (PNG, ICO) are rasters of this drawing, made in the build slice; at 16 px their pixels can differ a little.
-  - After the pick: the landing's mark (`next/landing/wordmark.tsx`, `landing.css` section 10) takes the chosen
-    values and this folder (`public/options/`) and the font route are deleted.
+  - THE PICK (the operator, 2026-11-26): C, "Live dot". It shows first, and the landing draws it
+    (`next/landing/wordmark.tsx`, `landing.css` section 10). This folder (`public/options/`) and the font route
+    stay until the build slice has made the icon files from direction C's values here, then both are deleted.
   - Framed (a viewer shows one direction per frame, ?direction=a|b|c): the bar is hidden and the page posts
     { designHeight } to its parent on load and on resize, so the frame can take its height. Unframed, no change.
 -->
@@ -84,11 +85,26 @@
   .sik > span { display: block; padding-bottom: 0.04em; }
   .sik b { font-weight: inherit; }
   /* C: the i's dot in the accent, the stem in ink: one glyph, two colours, cut between the dot and the stem */
-  [data-direction="c"] .sik b { background: linear-gradient(var(--d) 0 37%, var(--i) 37%);
+  /* (Plex's dot ends 32.7% down the letter's box and its stem starts at 38.5%; the cut is midway.) */
+  [data-direction="c"] .sik b { background: linear-gradient(var(--d) 0 35.5%, var(--i) 35.5%);
          -webkit-background-clip: text; background-clip: text; color: transparent; }
   .sik.s16 { --s: 16px; font-size: 9.5px; letter-spacing: 0; }
   .sik.s32 { --s: 32px; font-size: 18.5px; }
   .sik.s48 { --s: 48px; }
+  /* C at the tab sizes, two changes of its own.
+     1. On a light tab its white ground has no edge, so nothing there reads as a tile: the letters are sized to
+        the square, not to a tile's margin (10.5 px in 16 where A and B hold 9.5; the same ratio at 32 and 48).
+     2. The glyph's own dot would be 1.6 px across at 16, a blur of blue. The dot is drawn instead, an eighth of
+        the side across (a 2 px square in 16; a 4 and a 6 px disc in 32 and 48, round as Plex's dot is), on
+        whole pixels, a clear row over the stem. A browser places text and boxes by different rounding, so here
+        these three sizes are painted as the icon files will be, a raster with its pixels set (the script's PX
+        table and paintC); the letters under it are what shows until the face has loaded. */
+  [data-direction="c"] .sik.s16 { font-size: 10.5px; }
+  [data-direction="c"] .sik.s32 { font-size: 21px; letter-spacing: 0; }
+  [data-direction="c"] .sik.s48 { font-size: 31.5px; letter-spacing: 0; }
+  .sik > canvas { display: none; width: var(--s); height: var(--s); }
+  [data-direction="c"] .sik.px > span { display: none; }
+  [data-direction="c"] .sik.px > canvas { display: block; }
   /* the home-screen icon: the file is a full square (no corners of its own); iOS cuts the corners */
   .sik.s180 { --s: 180px; font-size: 96px; letter-spacing: -0.02em; border-radius: 40px; }
   .sik.s60 { --s: 60px; font-size: 32px; letter-spacing: -0.02em; border-radius: 13.5px; }
@@ -165,17 +181,19 @@
   .tokens dt { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #cfcfcf; flex: none; }
   .tokens dd { margin: 0; }
   .spec p { margin: 0; font-size: 12px; color: #333; max-width: 72ch; }
+  .spec [data-only] { display: none; }
+  [data-direction="c"] .spec [data-only="c"] { display: block; }
 </style>
 </head>
 <body>
 <header class="bar">
   <h1 id="decision">Decision: <span data-decision>the “sik” mark (its ground, and where the accent goes)</span></h1>
   <div class="switch" role="group" aria-labelledby="decision" data-switch></div>
-  <span class="note">Options page: thrown away after the pick.</span>
+  <span class="note">Picked: C · Live dot. This page goes once the icon files are made from it.</span>
 </header>
 <p class="why" data-why></p>
 
-<main class="stage" data-direction="a">
+<main class="stage" data-direction="c">
   <!-- Sample 1: the favicon in a browser's tab, at 16 px, then the 32 and 48 px sizes the .ico also holds. -->
   <section class="screen" aria-label="Sample: the browser tab">
     <p class="label">Browser tab · 16, 32 and 48 px</p>
@@ -262,6 +280,7 @@
     <div class="spec">
       <dl class="tokens" data-tokens></dl>
       <p>Letters: “sik”, lowercase, IBM Plex Sans SemiBold. Corners: 4 px on a 32 px tile, the same eighth of the side at 16 and 48; the 180 px file is a full square, and iOS cuts its corners.</p>
+      <p data-only="c">The 16, 32 and 48 px files, in their own pixels: letters 10.5, 21 and 31.5 px, their baseline on row 12, 24 and 36; the dot 2, 4 and 6 px across (a square at 2, a disc above), its foot 7, 13 and 19 px over the baseline, centred on the stem.</p>
     </div>
   </section>
 </main>
@@ -271,15 +290,17 @@
   const DIRECTIONS = [
     { key: "a", label: "A · Accent tile", why: "White letters on the accent blue, the manifest's theme colour: the easiest to find in a row of tabs. It puts a blue block in the header, where blue is otherwise kept for the primary action, links and what is live." },
     { key: "b", label: "B · Ink tile", why: "Light letters on ink: quiet, and it spends no accent. It is drawn like the app's avatar tile, and a dark square is a common favicon; on a dark tab strip the tile fades and the letters carry it." },
-    { key: "c", label: "C · Live dot", why: "Ink letters on white, the i's dot in the accent; the header keeps today's text wordmark and only the dot turns blue. The smallest change. At 16 px the dot is two pixels, and on a white tab the tile has no edge." },
+    { key: "c", label: "C · Live dot", why: "Ink letters on white, the i's dot in the accent; the header keeps today's text wordmark and only the dot turns blue. At the tab sizes the letters fill the square and the dot is drawn 2 px wide at 16 px; on a dark tab strip the ground is a white tile." },
   ];
+  // The operator's pick (2026-11-26): the direction shown when the address names none.
+  const PICKED = "c";
   // The first three are the icon files' and the light scheme's; the rest, the header's on the dark scheme.
   const TOKENS = [["--m-ground", "Ground"], ["--m-ink", "Letters"], ["--m-dot", "The i's dot"],
                   ["--m-ground-dark", "Ground, dark"], ["--m-ink-dark", "Letters, dark"], ["--m-dot-dark", "Dot, dark"]];
   const stage = document.querySelector(".stage");
   const sw = document.querySelector("[data-switch]");
   const show = (key, push) => {
-    const d = DIRECTIONS.find((x) => x.key === key) || DIRECTIONS[0];
+    const d = DIRECTIONS.find((x) => x.key === key) || DIRECTIONS.find((x) => x.key === PICKED);
     stage.dataset.direction = d.key;
     document.querySelector("[data-why]").textContent = d.label + ": " + d.why;
     for (const b of sw.children) b.setAttribute("aria-pressed", String(b.dataset.key === d.key));
@@ -290,7 +311,45 @@
     document.querySelector("[data-tokens]").innerHTML = shown.map(([t, name]) =>
       `<div><dt style="background:var(${t})"></dt><dd>${name} ${s.getPropertyValue(t).trim().replace("transparent", "none")}</dd></div>`).join("");
     if (push) { const u = new URL(location.href); u.searchParams.set("direction", d.key); history.replaceState(null, "", u); }
+    if (d.key === "c") paintC();
   };
+
+  // C at the tab sizes: the icon's pixels, set as the icon files will hold them. For each file's side: the
+  // letters' size, the baseline's row, the dot's side, and the dot's foot over the baseline (all in the file's px).
+  // At 16 the stem is under 2 px wide: its left edge goes on a pixel's edge, so one column of it is solid. At 32
+  // and 48 its middle does, so the dot overhangs it evenly.
+  const PX = { 16: { font: 10.5, base: 12, dot: 2, foot: 7, edge: true }, 32: { font: 21, base: 24, dot: 4, foot: 13 }, 48: { font: 31.5, base: 36, dot: 6, foot: 19 } };
+  // IBM Plex Sans SemiBold's i, in em: its stem's middle from its origin and half its width, and the height over
+  // the baseline of the gap between its stem (to 0.525) and its own dot (from 0.6), where the glyph is cut.
+  const I = { mid: 0.1375, half: 0.0675, cut: 0.5625 };
+  function paintC() {
+    if (!document.fonts.check('600 16px "IBM Plex Sans"')) return;
+    const css = getComputedStyle(stage), ink = css.getPropertyValue("--m-ink").trim(), dot = css.getPropertyValue("--m-dot").trim();
+    for (const tile of document.querySelectorAll(".sik.s16, .sik.s32, .sik.s48")) {
+      // A 2x screen shows a 16 px icon from the 32 px file: paint the file this screen would use.
+      const side = Number(tile.className.match(/\bs(\d+)\b/)[1]), p = Math.round(side * devicePixelRatio);
+      const spec = PX[p] || PX[side], k = PX[p] ? 1 : p / side, em = spec.font * k;
+      const c = tile.querySelector("canvas") || tile.appendChild(document.createElement("canvas"));
+      c.width = c.height = p;
+      const x = c.getContext("2d");
+      x.font = `600 ${em}px "IBM Plex Sans"`; x.textBaseline = "alphabetic"; x.fillStyle = ink;
+      const w = x.measureText("sik").width, iw = x.measureText("i").width, s = x.measureText("si").width - iw;
+      // The stem (its edge or its middle) on a pixel's edge, the nearest to where centring the three letters puts it.
+      const off = spec.edge ? I.half * em : 0;
+      const mid = Math.round((p - w) / 2 + s + I.mid * em - off) + off, x0 = mid - s - I.mid * em;
+      const base = Math.round(spec.base * k), d = Math.round(spec.dot * k), foot = Math.round(spec.foot * k);
+      x.fillText("sik", x0, base);
+      x.clearRect(x0 + s, 0, iw, Math.round(base - I.cut * em));   // the glyph's own dot goes
+      x.fillStyle = dot;
+      // the drawn dot takes its place: Plex's dot is round, so a disc; at 2 px a disc is a blur, so a square
+      const left = Math.round(mid - d / 2), top = base - foot - d;
+      if (d < 4) x.fillRect(left, top, d, d);
+      else { x.beginPath(); x.arc(left + d / 2, top + d / 2, d / 2, 0, 2 * Math.PI); x.fill(); }
+      tile.classList.add("px");
+    }
+  }
+  document.fonts.load('600 16px "IBM Plex Sans"').then(() => { if (stage.dataset.direction === "c") paintC(); });
+  addEventListener("resize", () => { if (stage.dataset.direction === "c") paintC(); });
   for (const d of DIRECTIONS) {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = d.label; b.dataset.key = d.key;

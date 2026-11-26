@@ -20,9 +20,9 @@ const SCROLLED_AT = 12;
  * (`.is-scrolled`). Signed in (P78, F8), **Dashboard** (secondary) stands in for Sign in and Create account,
  * in the bar and in the menu.
  *
- * The next version (the "sik" mark's design): the wordmark's link holds `Wordmark` (`./wordmark`), the mark's
- * tile and the rest of the name, in place of the name as plain text. Nothing else changes. Applied, this file
- * replaces `src/sikstack/landing/header.tsx`.
+ * The next version (the "sik" mark's design): the wordmark's link holds `Wordmark` (`./wordmark`), the name
+ * with the dot of its i in the accent, in place of the name as plain text. Nothing else changes. Applied, this
+ * file replaces `src/sikstack/landing/header.tsx`.
  */
 export function LandingHeader({ signedIn = false }: { signedIn?: boolean }) {
   const words = LANDING.header;
