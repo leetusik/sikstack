@@ -14,10 +14,11 @@ A nested install (`<host>/workflow/`, its own git repo; a single- or multi-repo 
 - `workflow/` becomes `.sikstack/` by a rename, so its history, its untracked files and the operator's own files inside
   go with it;
 - then one commit there: the engine's own copies leave (scripts/, adapters/, CLAUDE.workspace.md, the version file,
-  works/backlog.md, and each works/templates/ file v102 shipped unedited), executors.toml becomes config.toml's route
-  rows, an old `.hi2vi/link.json` becomes config.toml's [cloud] link, and the generated files are rebuilt by the plugin's
-  engine. The marker (with the repo registry) and every phase record stay byte for byte; only each active phase.md's
-  generated `## Slices` header line, which names the engine command, is rewritten by that rebuild;
+  and each works/templates/ file v102 shipped unedited), executors.toml becomes config.toml's route rows, an old
+  `.hi2vi/link.json` becomes config.toml's [cloud] link, and the generated files are rebuilt by the plugin's engine
+  (works/backlog.md, the old engine's view, is rewritten in place, and works/agenda.md is new). The marker (with the
+  repo registry) and every phase record stay byte for byte; only each active phase.md's generated `## Slices` header
+  line, which names the engine command, is rewritten by that rebuild;
 - the host's files: the `.git/info/exclude` block (`/workflow/` -> `/.sikstack/`, the installed skill and agent lines
   dropped once their files are gone), the `CLAUDE.local.md` block (the contract import and the `workflow/` command
   paths, for the plugin), the old installer's skill and agent copies under `.claude/` removed only where each still
@@ -54,7 +55,6 @@ OLD_HOOK = 'cd "$CLAUDE_PROJECT_DIR" && python3 workflow/adapters/claude_code/ad
 ROUTE_ROWS = ("high", "research", "design", "critic", "judge", "reader", "code", "mid", "explore")
 ALIASES = ("opus", "sonnet", "haiku", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "")
-GENERATED = ("works/backlog.md",)  # the old engine's rendered view; the plugin's is backlog.md beside works/
 ROOT_DOCS = ("docs/current", "docs/versions", "docs/reference", "docs/index.json")
 COMMIT_MSG = "chore(sikstack): move the workspace into .sikstack/ for the sikstack plugin"
 
@@ -360,7 +360,7 @@ def nested_plan(host: Path, old: Path) -> dict:
     plan = {"layout": "nested", "host": host, "old": old, "marker": marker}
     plan["multi"] = bool(marker.get("repos"))
     plan["commits"] = int((_mgit(old, "rev-list", "--count", "HEAD").stdout or "0").strip() or 0)
-    engine = [f for f in MANIFEST["engine_files"] + [MANIFEST["contract"], VERSION_FILE, *GENERATED] if (old / f).exists()]
+    engine = [f for f in MANIFEST["engine_files"] + [MANIFEST["contract"], VERSION_FILE] if (old / f).exists()]
     plan["engine_rm"] = engine
     shipped = MANIFEST["templates"]
     tmpl = old / "works" / "templates"
@@ -465,7 +465,7 @@ def print_plan(plan: dict, version) -> None:
         elif plan["link"]:
             print(f"- .hi2vi/link.json -> config.toml's [cloud] link ({plan['link'].get('server')} project "
                   f"{plan['link'].get('project_id')})")
-        print("- rebuild the generated files with the plugin's engine (backlog.md beside works/, works/state.json, "
+        print("- rebuild the generated files with the plugin's engine (works/backlog.md, works/agenda.md, works/state.json, "
               "works/index.json, each active phase.md's generated ## Slices header); the marker, the repo registry and "
               "every phase record stay byte for byte")
         print("the host's files:")
@@ -484,7 +484,7 @@ def print_plan(plan: dict, version) -> None:
     else:
         print(f"sikstack migrate: {host} holds an at-root install at v{version}")
         print(f"in {STATE_DIR}/ (a new git repo), one import commit naming {plan['source'] or 'the source commit'}:")
-        print("- copy works/ (less works/backlog.md and the version file" + (", and the unedited templates" if plan["tmpl_skip"] else "")
+        print("- copy works/ (less the old works/backlog.md, which the rebuild rewrites, and the version file" + (", and the unedited templates" if plan["tmpl_skip"] else "")
               + ")" + ("".join(f", {d}" for d in plan["docs"])))
         print(f"- write config.toml ({len(plan['routes'])} route override(s) from executors.toml), the marker and .gitattributes")
         print(f"- add /.sikstack/ to {_rel(plan['exclude'], host) if plan['exclude'] else '.git/info/exclude'}; nothing is "
@@ -613,7 +613,7 @@ def apply_nested(plan: dict) -> bool:
     # the generated files, by the plugin's engine, into the same commit
     check = _engine(host, state, "check")
     _mgit(state, "add", "-u")
-    for f in ("config.toml", "backlog.md"):
+    for f in ("config.toml", "works/backlog.md", "works/agenda.md"):
         if (state / f).exists():
             _mgit(state, "add", "--", f)
     commit = _mgit(state, "commit", "-q", "-m", COMMIT_MSG)

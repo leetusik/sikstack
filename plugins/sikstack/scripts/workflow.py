@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     def verbs(name: str, help: str):  # a verb's sub-verbs: main() names the command `<verb> <sub-verb>`
         return sub.add_parser(name, help=help).add_subparsers(dest="verb", required=True).add_parser
 
-    p = sub.add_parser("check", help="Rebuild the generated files (backlog.md, works/state.json, index.json, the dashboards, each phase.md's ## Slices block), then validate the workflow state; exit 1 on an invalid record. --no-rebuild validates only (CI, read-only callers)")
+    p = sub.add_parser("check", help="Rebuild the generated files (works/backlog.md, works/state.json, index.json, the dashboards, each phase.md's ## Slices block), then validate the workflow state; exit 1 on an invalid record. --no-rebuild validates only (CI, read-only callers)")
     p.add_argument("--no-rebuild", action="store_true", dest="no_rebuild", help="validate only: write nothing")
     p.set_defaults(func=cmd_check)
 

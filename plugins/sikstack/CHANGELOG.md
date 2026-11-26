@@ -10,6 +10,19 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.8.0 — 2026-11-26
+
+- **The two dashboards live in `works/`.** `backlog.md` and `agenda.md` are written to `.sikstack/works/`, beside
+  the state they are built from. The `.sikstack/` root keeps what you set (`config.toml`, `docs/`).
+  - `check`, and every command that rebuilds, removes the root copies 0.6.0 and 0.7.0 wrote. A phase branch cut
+    before the update that still carries them merges like any generated file: take either side, then run
+    `worktree merge-finish`.
+  - `migrate` rewrites the old engine's `works/backlog.md` in place instead of removing it, and its commit now
+    carries the new `works/agenda.md` too (since 0.6.0 that commit left the root `agenda.md` untracked).
+  - A new install's `.gitattributes` drops its `/agenda.md` line; `works/**` already covers both files.
+- **Migration notes:** nothing to run. The next command that rebuilds moves the files; commit the move in `.sikstack/`
+  with your next workflow-state commit (the two root files deleted, the two `works/` files added).
+
 ## 0.7.0 — 2026-11-25
 
 - **A local workspace publishes design builds: `sikstack design-link`.** `design-publish`, `design-builds` and
