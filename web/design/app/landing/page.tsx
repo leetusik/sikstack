@@ -1,4 +1,4 @@
-import { LANDING } from "../../next/content/marketing/landing";
+import { LANDING } from "@/content/marketing";
 import { LandingRoute } from "../../lib/landing-screens";
 
 // The landing (P83-8k.S1's design), production's `/` (`src/app/(marketing)/page.tsx`): the build's own `/` is its
