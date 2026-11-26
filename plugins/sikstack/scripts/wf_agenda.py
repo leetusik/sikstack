@@ -1,5 +1,5 @@
 """The agenda (agenda, agenda-*): agendas, each agenda's items (0.6.0: an entry file is an item, open, done or
-dismissed), Proposed, the split and the merge, the dashboard beside backlog.md, and agenda-fold, the one carry of an
+dismissed), Proposed, the split and the merge, the dashboard beside backlog.md in works/, and agenda-fold, the one carry of an
 older install's deferred jobs onto the agenda (retired in 0.3.0). Imports only wf_store."""
 from __future__ import annotations
 
@@ -446,7 +446,7 @@ def _entry_write(aid: str, kind: str, author: str, source: str, body: str, stamp
     return name
 
 
-# The agenda's generated views (P66 D2, D8): `agenda.md` beside backlog.md (0.6.0; works/agenda.md before) and
+# The agenda's generated views (P66 D2, D8): `works/agenda.md` beside works/backlog.md (0.8.0; at the root in 0.6.0) and
 # works/index.json's `agenda_counts` and `agenda`, both built at every rebuild from `agenda_index` -- the one answer
 # the sync and the web read. Each is a pure function of the agenda, item and phase files (no rebuild time in either),
 # so a rebuild with nothing changed rewrites the same bytes. An agenda of an unknown stored status is left out of both
@@ -491,8 +491,9 @@ def _agenda_thread_cell(row: dict) -> str:
 
 
 def rebuild_agenda_dashboard(counts: dict, rows: list, links: dict) -> None:
-    """agenda.md beside backlog.md (0.6.0), written on every rebuild, with no agenda too (the installer relies on
-    `rebuild` for it); a works/agenda.md an older engine left is removed (RETIRED_GENERATED_FILES). The signed parts
+    """works/agenda.md beside works/backlog.md (0.8.0), written on every rebuild, with no agenda too (the installer
+    relies on `rebuild` for it); the root agenda.md and backlog.md an older engine left are removed
+    (RETIRED_GENERATED_FILES). The signed parts
     and order (D2, D3; P72): Summary (the five counts), Proposed (by id, waiting for an accept or a drop), Open (Open
     and In progress, in the operator's order), Solved and dropped (newest first); every row with its items (how many
     are open, of how many, and the newest one's day). The note and the items' text are not shown: the detail is the
@@ -521,7 +522,7 @@ def rebuild_agenda_dashboard(counts: dict, rows: list, links: dict) -> None:
             f"| `{clean_cell(r['id'])}` | {r['shown_status']} | {clean_cell(r['title'])} | {clean_cell(r['outcome'] if r['status'] == 'solved' else r['reason'])} | {_agenda_day(r['changed_at'])} | {_agenda_thread_cell(r)} |"),
         "",
     ]
-    write_text(ROOT / "agenda.md", "\n".join(lines))
+    write_text(WORKS / "agenda.md", "\n".join(lines))
     for rel in RETIRED_GENERATED_FILES:
         try:
             (ROOT / rel).unlink()

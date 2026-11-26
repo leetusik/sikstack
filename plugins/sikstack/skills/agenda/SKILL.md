@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # agenda
 
-An **agenda** is one piece of work not being done now (`works/agenda/<AID>/`); it holds **items**, one file each under its `entries/`, each with a kind (note, issue, feedback, question, decision), an author (`person:` or `agent:`), a source (`phase:P7-k2`, `slice:P7-k2.S1`, `feedback:<id>`, `pr:<url>`), a date and a state: `open`, `done` or `dismissed`. `.sikstack/agenda.md`, beside `backlog.md`, is the generated dashboard. An agenda takes many phases; it never affects `next`.
+An **agenda** is one piece of work not being done now (`works/agenda/<AID>/`); it holds **items**, one file each under its `entries/`, each with a kind (note, issue, feedback, question, decision), an author (`person:` or `agent:`), a source (`phase:P7-k2`, `slice:P7-k2.S1`, `feedback:<id>`, `pr:<url>`), a date and a state: `open`, `done` or `dismissed`. `.sikstack/works/agenda.md`, beside `works/backlog.md`, is the generated dashboard. An agenda takes many phases; it never affects `next`.
 
 **Only the operator starts this skill, and it only suggests.** Nothing changes on your own reading: each change runs on the operator's word.
 
