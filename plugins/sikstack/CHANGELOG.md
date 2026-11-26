@@ -10,6 +10,16 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.10.1 — 2026-11-26
+
+- **`sikstack` in your own terminal.** Claude Code puts the plugin's `bin/` on the PATH of its own shell only, so
+  `sikstack link` (which asks for a workspace key at a prompt, and so needs a real terminal) was `command not found`
+  wherever the web told you to run it. `sikstack setup` now writes `~/.local/bin/sikstack`, a small script that runs
+  the version Claude Code has installed, read at each run, so it keeps working across updates. A file there that
+  setup did not write is left alone, and setup says when `~/.local/bin` is not on your PATH.
+- **A machine set up earlier gets it by itself:** the next session's start writes it once (marked in the plugin's
+  data folder as `terminal.json`), so a command you remove stays removed. No manual step.
+
 ## 0.10.0 — 2026-11-26
 
 - **`/sikstack:explain` replaces `explain@sikstack` and the explain phase.** Explain is now a light skill inside

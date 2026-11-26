@@ -12,6 +12,12 @@ it imports no other engine module (wf_store finds the state at import, or exits 
   hook retries once per session (`retry_pending`), clearing the mark when it lands.
 - `autoCompactWindow: 500000` in the user's Claude Code settings (`$CLAUDE_CONFIG_DIR/settings.json`, else
   `~/.claude/settings.json`), a setting a plugin cannot ship; nothing else in that file changes.
+- `sikstack` in the user's terminal: Claude Code puts the plugin's `bin/` on the PATH of its own shell only, so
+  setup writes `~/.local/bin/sikstack`, a small script that runs the `bin/sikstack` of the version Claude Code has
+  installed (read from `installed_plugins.json` at each run, so it outlives updates). A file there that setup did not
+  write is left alone. `link`, whose workspace key is typed at a prompt, runs from that terminal. A machine set up
+  before setup wrote it gets it once from the SessionStart hook (`terminal_once`); `<data-dir>/terminal.json` marks it
+  written, so a command the user removes stays removed.
 
 `sikstack feedback --data-dir <the plugin's data folder> [--message TEXT]` (the `/sikstack:feedback` skill, after the
 user's yes; the report from stdin when --message is not given) lives here too: it needs the install id and no
@@ -35,9 +41,26 @@ SERVER_ENV = "SIKSTACK_SERVER"
 SETUP_TIMEOUT = 5.0   # seconds: setup waits this long for the server, then marks the registration pending
 HOOK_TIMEOUT = 3.0    # the SessionStart retry's budget (the hook's own timeout is 15 s)
 INSTALL_FILE = "install.json"            # {"install_id", "created_at"}
+TERMINAL_FILE = "terminal.json"          # {"path", "at", "line"}: the terminal command was written once; the hook never writes it again
 REGISTRATION_FILE = "registration.json"  # {"state": "registered"|"pending", "email", "server", "plugin_version", "at", "error"?}
 AUTO_COMPACT_KEY = "autoCompactWindow"
 AUTO_COMPACT_VALUE = 500000
+PLUGIN_KEY = "sikstack@sikstack"
+TERMINAL_MARK = "# sikstack-terminal-command"  # the line that makes ~/.local/bin/sikstack setup's own to rewrite
+TERMINAL_SCRIPT = f"""#!/bin/sh
+{TERMINAL_MARK}: written by `sikstack setup`. Claude Code puts the plugin's bin/ on the PATH
+# of its own shell only; this runs the sikstack plugin Claude Code has installed now, whatever its version.
+plugins="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json"
+root=$(python3 -c 'import json, sys
+rows = json.load(open(sys.argv[1])).get("plugins", {{}}).get("{PLUGIN_KEY}") or []
+rows.sort(key=lambda row: row.get("scope") != "user")
+print(next(row["installPath"] for row in rows if row.get("installPath")))' "$plugins" 2>/dev/null)
+if [ -z "$root" ] || [ ! -x "$root/bin/sikstack" ]; then
+  echo "sikstack: Claude Code has no sikstack plugin installed ($plugins lists none): claude plugin install {PLUGIN_KEY}" >&2
+  exit 127
+fi
+exec "$root/bin/sikstack" "$@"
+"""
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 
@@ -421,6 +444,67 @@ def ensure_auto_compact(path: Path) -> str:
     return f"compaction window: set to 500k in {path} (nothing else there changed)"
 
 
+def terminal_path() -> Path:
+    return Path.home() / ".local" / "bin" / "sikstack"
+
+
+def _on_path(folder: Path) -> bool:
+    real = os.path.realpath(str(folder))
+    return any(part and os.path.realpath(os.path.expanduser(part)) == real
+               for part in os.environ.get("PATH", "").split(os.pathsep))
+
+
+def ensure_terminal_command(path: Path) -> str:
+    """Write the terminal command (TERMINAL_SCRIPT) at `path` unless a file setup did not write is there; one line."""
+    shown = str(path).replace(str(Path.home()), "~", 1)
+    try:
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            return f"terminal command: not written -- {shown} is not a file setup wrote (nothing was changed there)"
+        if path.exists():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if TERMINAL_MARK not in text:
+                return f"terminal command: not written -- {shown} exists and setup did not write it (nothing was changed there)"
+            if text == TERMINAL_SCRIPT and os.access(str(path), os.X_OK):
+                line = f"terminal command: `sikstack` already in {shown} (unchanged)"
+            else:
+                line = None
+        else:
+            line = None
+        if line is None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix=path.name)
+            try:
+                os.fchmod(fd, 0o755)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(TERMINAL_SCRIPT)
+                os.replace(tmp, str(path))
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            line = f"terminal command: `sikstack` written to {shown}; it runs the installed plugin's engine in any terminal"
+    except OSError as exc:
+        return f"terminal command: not written -- {shown}: {exc.strerror or exc}"
+    if not _on_path(path.parent):
+        line += f" -- {shown.rsplit('/', 1)[0]} is not on your PATH: add it to your shell profile to use it"
+    return line
+
+
+def terminal_once(data_dir) -> None:
+    """The SessionStart hook's part: on a machine set up before setup wrote the terminal command, write it once and
+    mark the data folder, so a command the user removes stays removed. Prints nothing and never raises."""
+    try:
+        folder = Path(data_dir)
+        if not (folder / INSTALL_FILE).is_file() or (folder / TERMINAL_FILE).exists():
+            return
+        path = terminal_path()
+        _write_json(folder / TERMINAL_FILE, {"path": str(path), "at": _now(), "line": ensure_terminal_command(path)})
+    except Exception:  # noqa: BLE001 - the session never waits on, or fails for, the terminal command
+        return
+
+
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
@@ -467,6 +551,9 @@ def setup_main(argv: list) -> int:
             print(f"registration: pending -- {server} did not take it ({why}); it registers itself at the next "
                   "session start, and setup is done")
     print(ensure_auto_compact(settings_path()))
+    line = ensure_terminal_command(terminal_path())
+    _write_json(data_dir / TERMINAL_FILE, {"path": str(terminal_path()), "at": _now(), "line": line})
+    print(line)
     print("next: /sikstack:sik-mode in a repo (it makes the workspace with sikstack init when there is none)")
     return 0
 

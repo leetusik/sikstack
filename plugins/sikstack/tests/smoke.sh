@@ -5462,7 +5462,7 @@ if command -v claude >/dev/null 2>&1; then
 else echo "note: claude CLI not installed; plugin validate skipped"; fi
 
 # ---------------------------------------------------------------------------
-echo "== Test 30: setup, the registration retry and the rules card -- setup registers {install_id, email, plugin_version} once per new email under one install id and sets only autoCompactWindow in the user settings; with the server down it finishes, marks the registration pending, and the next SessionStart hook run registers it and clears the mark; the card is the contract inside a .sikstack/ repo (at most 4,096 B) and one line elsewhere =="
+echo "== Test 30: setup, the registration retry and the rules card -- setup registers {install_id, email, plugin_version} once per new email under one install id and sets only autoCompactWindow in the user settings; it writes the terminal command, which runs the installed plugin's engine, and leaves a file it did not write alone; with the server down it finishes, marks the registration pending, and the next SessionStart hook run registers it and clears the mark; the card is the contract inside a .sikstack/ repo (at most 4,096 B) and one line elsewhere =="
 newtmp SUW; printf 'setup-smoke\n' > "$SUW/key"
 su_fake() {  # su_fake <name> [port]: a fake server logging into $SUW/<name>/, its port in $SUW/<name>.port; prints its PID
   python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$SUW/$1" --port-file "$SUW/$1.port" --key-file "$SUW/key" --project p --org o \
@@ -5470,7 +5470,7 @@ su_fake() {  # su_fake <name> [port]: a fake server logging into $SUW/<name>/, i
   _p=$!; for _ in $(seq 1 100); do [ -s "$SUW/$1.port" ] && break; sleep 0.1; done; echo "$_p"
 }
 su_reqs() { [ -f "$SUW/$1/requests.jsonl" ] && grep -c '"route": "installs"' "$SUW/$1/requests.jsonl" || echo 0; }
-su_setup() { CLAUDE_CONFIG_DIR="$SUW/cfg" SIKSTACK_SERVER="$1" python3 "$ENG" setup --email "$2" --data-dir "$3"; }
+su_setup() { HOME="$SUW/home" CLAUDE_CONFIG_DIR="$SUW/cfg" SIKSTACK_SERVER="$1" python3 "$ENG" setup --email "$2" --data-dir "$3"; }
 mkdir -p "$SUW/cfg" && printf '{\n  "model": "opus",\n  "permissions": {\n    "allow": [\n      "Bash(ls:*)"\n    ]\n  },\n  "enabledPlugins": {\n    "x@y": true\n  }\n}\n' > "$SUW/cfg/settings.json"
 cp "$SUW/cfg/settings.json" "$SUW/settings.before"
 su_up=$(su_fake up); SUS="http://127.0.0.1:$(cat "$SUW/up.port")"
@@ -5516,13 +5516,41 @@ su_id2=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["instal
   && ok "with the server down setup exits 0 and marks the registration pending; the next SessionStart hook run registers it once and clears the mark" \
   || bad "the pending registration -- rc=$su_rc state=$su_state/$su_state2 reqs=$su_n1/$su_nb hook=$su_h1 $(cat "$SUW/b1.txt")"
 # (c) a missing settings file is made with the one key; a bad email or an unsubstituted data folder is refused, unwritten.
-mkdir -p "$SUW/cfg2"; ( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) >/dev/null 2>&1
+mkdir -p "$SUW/cfg2"; ( cd "$SUW" && HOME="$SUW/home" CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) >/dev/null 2>&1
 su_bad=$( cd "$SUW" && python3 "$ENG" setup --email nope --data-dir "$SUW/data4" 2>&1; echo "rc=$?" )
 su_bad2=$( cd "$SUW" && python3 "$ENG" setup --email e@example.com --data-dir '${CLAUDE_PLUGIN_DATA}' 2>&1; echo "rc=$?" )
 [ "$(cat "$SUW/cfg2/settings.json")" = "$(printf '{\n  "autoCompactWindow": 500000\n}')" ] \
   && printf '%s\n' "$su_bad" | grep -q 'rc=2' && printf '%s\n' "$su_bad2" | grep -q 'rc=2' && [ ! -e "$SUW/data4" ] && [ ! -e "$SUW/\${CLAUDE_PLUGIN_DATA}" ] \
   && ok "setup makes a missing settings file with the one key, and refuses a bad email or an unsubstituted data folder with nothing written" \
   || bad "setup's edges -- $(cat "$SUW/cfg2/settings.json" 2>&1) / $su_bad / $su_bad2"
+# (e) the terminal command: written once into the scratch HOME's ~/.local/bin, executable, kept on a re-run; it runs the
+# engine of the plugin installed_plugins.json names, says how to install when none is, and a file setup did not write
+# stays as it was.
+su_term="$SUW/home/.local/bin/sikstack"
+mkdir -p "$SUW/cfg/plugins" && printf '{"version": 2, "plugins": {"sikstack@sikstack": [{"scope": "user", "installPath": "%s", "version": "0"}]}}\n' "$PLUGIN" > "$SUW/cfg/plugins/installed_plugins.json"
+su_run=$( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg" "$su_term" setup --help 2>&1; echo "rc=$?" )
+su_none=$( cd "$SUW" && CLAUDE_CONFIG_DIR="$SUW/cfg2" "$su_term" setup --help 2>&1; echo "rc=$?" )
+mkdir -p "$SUW/home2/.local/bin" && printf '#!/bin/sh\necho mine\n' > "$SUW/home2/.local/bin/sikstack"
+( cd "$SUW" && HOME="$SUW/home2" CLAUDE_CONFIG_DIR="$SUW/cfg2" SIKSTACK_SERVER="http://127.0.0.1:$su_gp" python3 "$ENG" setup --email d@example.com --data-dir "$SUW/data3" ) > "$SUW/e1.txt" 2>&1
+grep -q '^terminal command: `sikstack` written to ~/.local/bin/sikstack; ' "$SUW/a1.txt" && grep -q '^terminal command: `sikstack` already in ~/.local/bin/sikstack (unchanged)' "$SUW/a2.txt" \
+  && [ -x "$su_term" ] && grep -q '^# sikstack-terminal-command' "$su_term" \
+  && printf '%s\n' "$su_run" | grep -q '^usage: sikstack setup' && printf '%s\n' "$su_run" | grep -q '^rc=0$' \
+  && printf '%s\n' "$su_none" | grep -q 'claude plugin install sikstack@sikstack' && printf '%s\n' "$su_none" | grep -q '^rc=127$' \
+  && grep -q '^terminal command: not written -- ~/.local/bin/sikstack exists and setup did not write it' "$SUW/e1.txt" \
+  && [ "$(cat "$SUW/home2/.local/bin/sikstack")" = "$(printf '#!/bin/sh\necho mine')" ] \
+  && [ -f "$SUW/data/terminal.json" ] \
+  && ok "setup writes the terminal command into ~/.local/bin (kept on a re-run), which runs the installed plugin's engine or says how to install it, and leaves a file it did not write alone" \
+  || bad "the terminal command -- run=[$su_run] none=[$su_none] $(grep '^terminal' "$SUW/a1.txt" "$SUW/a2.txt" "$SUW/e1.txt")"
+# (f) a machine set up before setup wrote the terminal command: the next SessionStart hook writes it once; once the
+# user removes it, later hook runs leave it removed; a data folder with no install gets nothing.
+mkdir -p "$SUW/data5" "$SUW/data6" && cp "$SUW/data/install.json" "$SUW/data5/install.json"
+su_once() { printf '{"source":"startup","cwd":"%s"}' "$SUW" | env -u CLAUDE_PROJECT_DIR HOME="$SUW/$2" CLAUDE_PLUGIN_DATA="$SUW/$1" python3 "$PLUGIN/hooks/session_start.py" >/dev/null 2>&1; }
+su_once data5 home5; su_o1=$([ -x "$SUW/home5/.local/bin/sikstack" ] && echo yes || echo no)
+rm -f "$SUW/home5/.local/bin/sikstack"; su_once data5 home5; su_o2=$([ -e "$SUW/home5/.local/bin/sikstack" ] && echo back || echo gone)
+su_once data6 home6; su_o3=$([ -e "$SUW/home6/.local/bin/sikstack" ] && echo written || echo none)
+[ "$su_o1" = yes ] && [ "$su_o2" = gone ] && [ "$su_o3" = none ] && [ -f "$SUW/data5/terminal.json" ] \
+  && ok "on a machine set up before it, the SessionStart hook writes the terminal command once, leaves it removed once the user removes it, and writes nothing without an install" \
+  || bad "the hook's terminal command -- first=$su_o1 after-removal=$su_o2 no-install=$su_o3"
 # (d) the card: the contract plus the start line inside a .sikstack/ repo (from a subfolder too), at most 4,096 B; one
 # line outside any workspace and one naming migrate above an old install; the hook never fails on bad input.
 mkhost "$SUW/repo" && mkdir -p "$SUW/repo/src/deep" "$SUW/none" "$SUW/old/workflow" && printf '{"schema": 1}\n' > "$SUW/old/workflow/.agentic-nested.json"
@@ -5720,7 +5748,7 @@ mkhost "$SIW/repo" && git -C "$SIW/repo/.sikstack" add -A && git -C "$SIW/repo/.
 # (a) not set up yet: refused, nothing written.
 si_none=$(si_eng repo sign-in --data-dir "$SIW/nodata" --no-browser --wait 1; echo "rc=$?")
 # (b) set up; a dirty workflow repo is refused before any request.
-( cd "$SIW/repo" && CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email s@example.com --data-dir "$SIW/data" ) >/dev/null 2>&1
+( cd "$SIW/repo" && HOME="$SIW/home" CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email s@example.com --data-dir "$SIW/data" ) >/dev/null 2>&1
 printf 'x\n' > "$SIW/repo/.sikstack/scratch.txt"
 si_dirty=$(si_eng repo sign-in --data-dir "$SIW/data" --no-browser --wait 1; echo "rc=$?")
 rm -f "$SIW/repo/.sikstack/scratch.txt"
@@ -5764,7 +5792,7 @@ grep -q '^rc=1' "$SIW/e-denied.txt" && grep -q 'declined on the connect page: no
   || bad "sign-in declined/expired -- $(cat "$SIW/e-denied.txt") / $(cat "$SIW/e-expired.txt")"
 # (f) feedback: a second install that never signed in sends; past the per-install limit one line; a path or the repo's
 # name is refused before any request.
-( cd "$SIW/repo2" && CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email t@example.com --data-dir "$SIW/data2" ) >/dev/null 2>&1
+( cd "$SIW/repo2" && HOME="$SIW/home" CLAUDE_CONFIG_DIR="$SIW/cfg" SIKSTACK_SERVER="$SIS" python3 "$ENG" setup --email t@example.com --data-dir "$SIW/data2" ) >/dev/null 2>&1
 si_fb() { ( cd "$SIW/repo2" && python3 "$ENG" feedback --data-dir "$SIW/data2" "$@" ) 2>&1; echo "rc=$?"; }
 si_f1=$(printf 'sign-in printed its code twice; expected once. plugin 1.0.0\n' | si_fb)
 si_f2=$(si_fb --message "a second report")
@@ -6096,7 +6124,7 @@ dl_r3=$(dl "$DLH" design-link --data-dir "$DLW/data" --no-browser --wait 1; echo
   || bad "worktree start or a replace refusal is wrong -- rc=$dl_wrc [$dl_r1] [$dl_r2] [$dl_r3] sent=$dl_n3/$dl_n4"
 # (f) the connect-page form, run in a phase's worktree of a second install: the new project is named after the main host
 # folder (never the worktree's), the key is kept, [design] lands in the main checkout's config.toml, never [cloud].
-( cd "$DL2" && CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
+( cd "$DL2" && HOME="$DLW/home" CLAUDE_CONFIG_DIR="$DLW/cfg" SIKSTACK_SERVER="$DLS" python3 "$ENG" setup --email d@example.com --data-dir "$DLW/data" ) >/dev/null 2>&1
 ( cd "$DL2T" && XDG_CONFIG_HOME="$DLX" python3 "$ENG" design-link --data-dir "$DLW/data" --no-browser --wait 30 > "$DLW/f.txt" 2>&1; echo "rc=$?" >> "$DLW/f.txt" ) &
 dl_bg=$!
 for _ in $(seq 1 100); do grep -q '^code: ' "$DLW/f.txt" 2>/dev/null && break; sleep 0.1; done
@@ -6182,7 +6210,7 @@ rl_d2=$(rl repo design-builds); rl_drc2=$?
   || bad "design's 403 split -- rc=$rl_drc1/$rl_drc2 [$rl_d1] [$rl_d2]"
 # (e) sign-in --release on a second checkout.
 { mkhost "$RLW/rel" && git -C "$RLW/rel/.sikstack" add -A && git -C "$RLW/rel/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
-( cd "$RLW/rel" && CLAUDE_CONFIG_DIR="$RLW/cfg" SIKSTACK_SERVER="$RLS" python3 "$ENG" setup --email r@example.com --data-dir "$RLW/data" ) >/dev/null 2>&1
+( cd "$RLW/rel" && HOME="$RLW/home" CLAUDE_CONFIG_DIR="$RLW/cfg" SIKSTACK_SERVER="$RLS" python3 "$ENG" setup --email r@example.com --data-dir "$RLW/data" ) >/dev/null 2>&1
 rl_si() { rl rel sign-in --data-dir "$RLW/data" --no-browser --wait 1 "$@"; echo "rc=$?"; }
 rl_si > "$RLW/s1.txt"                          # plain: three fields, a pending code
 rl_si --release > "$RLW/s2.txt"                # not claimed yet: a new code, the not-connected line
@@ -6309,7 +6337,7 @@ printf '%s\n' "$bk_e1" | grep -qF "the request was blocked before it reached sik
   || bad "the echoed key -- leaked=[$bk_leak] [$bk_e1]"
 # (d) sign-in's start, its poll and feedback, each blocked.
 { mkhost "$BKW/si" && git -C "$BKW/si/.sikstack" add -A && git -C "$BKW/si/.sikstack" commit -q --allow-empty -m seed; } >/dev/null 2>&1
-( cd "$BKW/si" && CLAUDE_CONFIG_DIR="$BKW/cfg" SIKSTACK_SERVER="$BKS" python3 "$ENG" setup --email b@example.com --data-dir "$BKW/data" ) >/dev/null 2>&1
+( cd "$BKW/si" && HOME="$BKW/home" CLAUDE_CONFIG_DIR="$BKW/cfg" SIKSTACK_SERVER="$BKS" python3 "$ENG" setup --email b@example.com --data-dir "$BKW/data" ) >/dev/null 2>&1
 bk_si() { bk si sign-in --data-dir "$BKW/data" --no-browser --wait 1 "$@"; }
 bk_ctl '{"block": "sign-in"}'
 bk_s1=$(bk_si); bk_left1=$(ls "$BKW/data/sign-in" 2>/dev/null)

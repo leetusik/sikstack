@@ -105,6 +105,7 @@ def main() -> int:
             sys.dont_write_bytecode = True
             import wf_setup
             wf_setup.retry_pending(data_dir)
+            wf_setup.terminal_once(data_dir)
         except Exception:  # noqa: BLE001 - the card still prints
             pass
     cwd = hook.get("cwd")
