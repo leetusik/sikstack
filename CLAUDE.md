@@ -38,7 +38,7 @@ The Library and Feedback at <https://sikstack.com>: a document API, a web app, a
 
 Users install `sikstack@sikstack` from `.claude-plugin/marketplace.json` and pull an update only when its `version` changes: any change under `plugins/sikstack/**` bumps `plugins/sikstack/.claude-plugin/plugin.json`'s semver `version` and adds its entry to `plugins/sikstack/CHANGELOG.md`, in the same PR (CI checks the bump).
 
-`explain@sikstack` is on hold and off the marketplace. When it is offered again, any change under `plugins/explain/**` ships with a bump of `plugins/explain/.claude-plugin/plugin.json`'s `version`; its release checklist (parity, `claude plugin validate`, the scaffold rehearsal) is in `plugins/explain/README.md`.
+`explain@sikstack` is on hold and off the marketplace; the catalog's `"renames": {"explain": null}` turns existing installs off instead of failing to load (drop that entry when explain is listed again; `claude plugin validate` does not flag a listed name that also maps to `null`). When it is offered again, any change under `plugins/explain/**` ships with a bump of `plugins/explain/.claude-plugin/plugin.json`'s `version`; its release checklist (parity, `claude plugin validate`, the scaffold rehearsal) is in `plugins/explain/README.md`.
 
 ## Deploy
 
