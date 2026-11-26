@@ -55,6 +55,12 @@ def _flush(stream) -> None:
         pass
 
 
+def _engine_refused() -> bool:
+    """True when the engine stamp refused this run (an older engine than the workspace): by design, so no offer."""
+    state = getattr(sys.modules.get("wf_store"), "_ENGINE", None)
+    return bool(state and state.get("refused"))
+
+
 def with_offer(entry, tokens: list) -> int:
     """Run `entry()` (a command's whole run) and return its exit code, ending a refusal or an error with OFFER_LINE once."""
     nested = bool(os.environ.get(OFFER_ENV))
@@ -74,7 +80,7 @@ def with_offer(entry, tokens: list) -> int:
         traceback.print_exc()
         code = 1
     code = 0 if code is None else code
-    if code in OFFER_EXITS and not nested and _offers(tokens):
+    if code in OFFER_EXITS and not nested and _offers(tokens) and not _engine_refused():
         _flush(sys.stdout)
         print(OFFER_LINE, file=sys.stderr)
     return code
@@ -117,7 +123,7 @@ import wf_feedback  # noqa: E402
 import wf_cloud  # noqa: E402
 from wf_store import (  # noqa: E402
     cmd_check, cmd_gate, cmd_next, cmd_parallel_plan, cmd_phase_archive, cmd_set_slice_status, DEPENDS_ON_HELP,
-    finish_slice, NESTED, NESTED_MARKER, NESTED_PROBLEMS, new_phase, new_slice, normalize_id_args,
+    engine_verdict, engine_warn, finish_slice, NESTED, NESTED_MARKER, NESTED_PROBLEMS, new_phase, new_slice, normalize_id_args,
     ONE_LINE_USAGE_COMMANDS, PAGE_BYTES, PHASE_ARG_HELP, phase_section, review_phase,
     REVIEW_VERDICTS, ROOT, rotate_backlog, set_phase_status, set_slice_deps, shown, SLICE_STOP_KINDS, start_slice,
     WORKFLOW_CMD,
@@ -434,6 +440,19 @@ def main(argv=None) -> int:
     return run(args, tokens)
 
 
+def _warned(call, *call_args):
+    """`call(*call_args)`, then the engine stamp's warning line when this process is stale and wrote nothing: after a
+    return or an exit with a code (check's), never after a refusal's message."""
+    try:
+        result = call(*call_args)
+    except SystemExit as stop:
+        if stop.code is None or isinstance(stop.code, int):
+            engine_warn()
+        raise
+    engine_warn()
+    return result
+
+
 def run(args: argparse.Namespace, tokens: list) -> int:
     """Run one parsed command (`args.cmd`, `args.func`): the boundary every command crosses, the engine's own
     and the adapter's (adapters/claude_code/adapter.py calls this, in-process). In a linked checkout the cloud
@@ -446,14 +465,17 @@ def run(args: argparse.Namespace, tokens: list) -> int:
         # local mode: no link, so the command runs exactly as before; link, unlink and sync each take the lock
         # themselves and never run the begin step; the design API verbs and agenda-feedback list and dismiss touch no
         # workspace truth, so they need neither (agenda-feedback file writes an item: it crosses). Every typed phase / agenda / slice argument becomes its
-        # stored id here, once.
+        # stored id here, once. The engine stamp's verdict is taken here, before the command (sync takes it after its
+        # pull, in cloud_rebuild or the inbox step).
+        if args.cmd != "sync":
+            engine_verdict()
         normalize_id_args(args)
-        result = args.func(args)
+        result = _warned(args.func, args)
     else:  # cloud mode: a pull before the command, its batches after it; a stream command is refused first
         refused = cloud_refusal(args)
         if refused:
             raise SystemExit(refused)
-        result = cloud_run(args, tokens)  # the ids are resolved inside, against the pulled tree
+        result = _warned(cloud_run, args, tokens)  # the ids are resolved inside, against the pulled tree
     if isinstance(result, tuple):
         return 0
     return 0 if result is None else int(result or 0)

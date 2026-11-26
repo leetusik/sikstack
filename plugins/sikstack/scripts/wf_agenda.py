@@ -17,7 +17,7 @@ from wf_store import (  # noqa: E402
     _default_checkout_root, _git, _git_available, _ls_tree, _one_line_usage_errors, _phase_json_at_ref, _repo_prefix,
     _rev_parse, ACTIVE, AGENDA, agenda_folder_ids, AGENDA_ID_RE, AGENDA_KEYS, AGENDA_SHOWN, AGENDA_STATUSES,
     AGENDA_TITLE_MAX, AGENDA_TITLE_REFUSAL, AGENDA_WRITTEN, all_active_phases, append_event, ARCHIVE_FOLDER_ID_RE,
-    ARCHIVED, archived_phase_ids, clean_cell, current_stream, git_current_branch, HOST_ROOT, id_sort_key,
+    ARCHIVED, archived_phase_ids, clean_cell, current_stream, engine_mutation, git_current_branch, HOST_ROOT, id_sort_key,
     ID_TOKEN_ALPHABET, ID_TOKEN_PATTERN, MAIN_HOST, mint_id, NESTED, now_iso, PHASE_ARG_HELP, PHASE_ID_RE, phase_dirs,
     phase_execution, phase_in_flight, read_json, rebuild_index_and_state, resolve_id_ref, RETIRED_GENERATED_FILES, ROOT,
     shown, SLICE_ID_RE, WORKFLOW_CMD, WORKS, write_json, write_text,
@@ -525,6 +525,8 @@ def rebuild_agenda_dashboard(counts: dict, rows: list, links: dict) -> None:
     write_text(WORKS / "agenda.md", "\n".join(lines))
     for rel in RETIRED_GENERATED_FILES:
         try:
+            if (ROOT / rel).exists():
+                engine_mutation(ROOT / rel)
             (ROOT / rel).unlink()
         except FileNotFoundError:
             pass
@@ -1229,6 +1231,7 @@ def agenda_item_change(args: argparse.Namespace) -> None:
     for aid, name, ref, data in targets:
         path = AGENDA / aid / "entries" / name
         if verb == "delete":
+            engine_mutation(path)
             path.unlink()
         else:
             data.update(state=to_state, state_by=author, state_at=stamp)
@@ -1236,6 +1239,7 @@ def agenda_item_change(args: argparse.Namespace) -> None:
     for aid in had_items:
         folder = AGENDA / aid / "entries"
         if folder.is_dir() and not any(folder.iterdir()):
+            engine_mutation(folder)
             folder.rmdir()
     for aid, name, ref, data in targets:
         extra = {"kind": data.get("kind")} if verb == "delete" and isinstance(data, dict) else {}
@@ -1290,6 +1294,7 @@ def agenda_split(args: argparse.Namespace) -> None:
     new, stamp = item["id"], item["created_at"]
     for each in writes:
         _agenda_write(each, stamp)
+    engine_mutation(AGENDA / new / "entries")
     (AGENDA / new / "entries").mkdir(parents=True, exist_ok=True)
     for name in names:
         shutil.move(str(AGENDA / aid / "entries" / name), str(AGENDA / new / "entries" / name))
@@ -1348,9 +1353,11 @@ def agenda_merge(args: argparse.Namespace) -> None:
         _agenda_set_link(holder, into["id"])
     for aid, names in moves.items():
         for name in names:
+            engine_mutation(AGENDA / into["id"] / "entries")
             (AGENDA / into["id"] / "entries").mkdir(parents=True, exist_ok=True)
             shutil.move(str(AGENDA / aid / "entries" / name), str(AGENDA / into["id"] / "entries" / name))
         if (AGENDA / aid / "entries").is_dir() and not any((AGENDA / aid / "entries").iterdir()):
+            engine_mutation(AGENDA / aid / "entries")
             (AGENDA / aid / "entries").rmdir()
     stamp = now_iso()
     for item in froms:
@@ -1577,8 +1584,10 @@ def agenda_fold(args: argparse.Namespace) -> None:
                else {"reason": data.get("dropped_reason")})
         append_event("deferred_folded", deferred=job["id"], end=job["place"], title=data.get("title"), **end)
     if DEFERRED.exists():
+        engine_mutation(DEFERRED)
         shutil.rmtree(DEFERRED)
     if left_page.exists():
+        engine_mutation(left_page)
         left_page.unlink()
     rebuild_index_and_state()
     closed = len(jobs) - len(folded)
@@ -1939,6 +1948,7 @@ def agenda_delete(args: argparse.Namespace) -> None:
     for holder in holders:
         _agenda_set_link(holder, None)
     for item in items:
+        engine_mutation(AGENDA / item["id"])
         shutil.rmtree(AGENDA / item["id"])
     cleared = {item["id"]: [holder for holder in holders if holder["agenda"] == item["id"]] for item in items}
     kept = {item["id"]: [holder for holder in left if holder["agenda"] == item["id"]] for item in items}

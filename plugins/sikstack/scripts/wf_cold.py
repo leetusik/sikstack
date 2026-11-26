@@ -233,6 +233,7 @@ def hydrate(path: Path) -> bool:
 
 def _write_file(target: Path, data: bytes) -> None:
     """Write `data` to its own path whole (a temp file beside it, then a rename), as a plain writable file."""
+    wf_store.engine_mutation(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".tmp_", suffix=target.name)
     try:

@@ -8,6 +8,8 @@ nothing else):
 - `config.toml`, the operator's settings: the executor route rows, all commented at their defaults;
 - `.agentic-nested.json`, the marker that says the state is nested in the folder above (`host_root: ".."`);
 - `.gitattributes` (the event log merges by union);
+- `works/engine.json`, the engine stamp (`{"version": "<this plugin's version>"}`), in a new workspace only (an
+  existing one is stamped by its next write, so an older engine's backlog line still names where it came from);
 - one `/.sikstack/` line in the repo's `.git/info/exclude` (never `.gitignore`), plus `/<repo>/` for each repo a
   multi-repo host registers;
 then the generated files by `check`, and one commit in `.sikstack/` when git has an identity there."""
@@ -50,6 +52,15 @@ def _write_new(path: Path, text: str, made: list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     made.append(path)
+
+
+def _plugin_version():
+    """This plugin's version (`.claude-plugin/plugin.json`), or None when it cannot be read."""
+    try:
+        version = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return version.strip() if isinstance(version, str) and version.strip() else None
 
 
 def _exclude(repo: Path, lines: list) -> list:
@@ -95,6 +106,9 @@ def init_main(argv: list) -> int:
     made: list = []
     for rel in WORKS_DIRS:
         (state / rel).mkdir(parents=True, exist_ok=True)
+    version = _plugin_version()
+    if fresh and version is not None:  # the engine stamp (wf_store ENGINE_STAMP_REL), committed with the rest below
+        _write_new(state / "works" / "engine.json", json.dumps({"version": version}, indent=2) + "\n", made)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     _write_new(state / "works" / "events.jsonl",
                json.dumps({"ts": now, "type": "bootstrap", "project": top.name}, ensure_ascii=False) + "\n", made)

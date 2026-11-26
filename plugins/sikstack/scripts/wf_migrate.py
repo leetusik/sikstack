@@ -15,7 +15,8 @@ A nested install (`<host>/workflow/`, its own git repo; a single- or multi-repo 
   go with it;
 - then one commit there: the engine's own copies leave (scripts/, adapters/, CLAUDE.workspace.md, the version file,
   and each works/templates/ file v102 shipped unedited), executors.toml becomes config.toml's route rows, an old
-  `.hi2vi/link.json` becomes config.toml's [cloud] link, and the generated files are rebuilt by the plugin's engine
+  `.hi2vi/link.json` becomes config.toml's [cloud] link, `works/engine.json` (the engine stamp) is written at this
+  plugin's version, and the generated files are rebuilt by the plugin's engine
   (works/backlog.md, the old engine's view, is rewritten in place, and works/agenda.md is new). The marker (with the
   repo registry) and every phase record stay byte for byte; only each active phase.md's generated `## Slices` header
   line, which names the engine command, is rewritten by that rebuild;
@@ -48,6 +49,7 @@ MANIFEST = json.loads((Path(__file__).resolve().parent / "migrate_v102.json").re
 LAST_RELEASE = MANIFEST["version"]
 OLD_DIR, STATE_DIR, MARKER = "workflow", ".sikstack", ".agentic-nested.json"
 VERSION_FILE = "works/.workspace-version.json"
+STAMP_FILE = "works/engine.json"  # the plugin's engine stamp (wf_store ENGINE_STAMP_REL), never VERSION_FILE
 UPSTREAM = "https://github.com/leetusik/bootstrap_agentic_workspace.sh"
 LOCAL_BEGIN, LOCAL_END = "<!-- BEGIN agentic-workspace (nested) -->", "<!-- END agentic-workspace (nested) -->"
 EXCLUDE_BEGIN, EXCLUDE_END = "# BEGIN agentic-workspace (nested)", "# END agentic-workspace (nested)"
@@ -542,6 +544,17 @@ def _write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _stamp(state: Path) -> None:
+    """The engine stamp (wf_store ENGINE_STAMP_REL) at this plugin's version: the moved state is now this engine's."""
+    try:
+        version = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(version, str) and version.strip():
+        (state / "works").mkdir(parents=True, exist_ok=True)
+        _write(state / STAMP_FILE, json.dumps({"version": version.strip()}, indent=2) + "\n")
+
+
 def _engine(host: Path, state: Path, *args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "SIKSTACK_ROOT": str(state)}
     env.pop("WORKFLOW_CMD", None)
@@ -610,10 +623,11 @@ def apply_nested(plan: dict) -> bool:
             folder.rmdir()
     if isinstance(plan["settings"], str) and not plan["settings"].startswith("keep:"):
         _write(host / ".claude" / "settings.local.json", plan["settings"])
-    # the generated files, by the plugin's engine, into the same commit
+    # the engine stamp and the generated files, by the plugin's engine, into the same commit
+    _stamp(state)
     check = _engine(host, state, "check")
     _mgit(state, "add", "-u")
-    for f in ("config.toml", "works/backlog.md", "works/agenda.md"):
+    for f in ("config.toml", "works/backlog.md", "works/agenda.md", STAMP_FILE):
         if (state / f).exists():
             _mgit(state, "add", "--", f)
     commit = _mgit(state, "commit", "-q", "-m", COMMIT_MSG)
@@ -660,6 +674,7 @@ def apply_root(plan: dict) -> bool:
               "renames": {"skills": {}, "agents": {}}}
     (state / MARKER).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
     _mgit(state, "init", "-q")
+    _stamp(state)
     _exclude_hi2vi(state)
     ex = plan["exclude"]
     if ex is not None:

@@ -786,3 +786,91 @@ for _f in sorted((root / "scripts").glob("*.py")):
         _ua_sites.append(f"{_f.name}:{_fn.name}")
 assert sorted(_ua_sites) == ["wf_cloud.py:api_call", "wf_cloud.py:call", "wf_setup.py:post_json", "wf_setup.py:register"], _ua_sites
 assert 'return f"sikstack/{plugin_version()}"' in (root / "scripts/wf_setup.py").read_text(encoding="utf-8")
+# The engine stamp's guard (works/engine.json): a process older than the stamp writes nothing, so every raw write to the
+# workspace sits in a function that crosses the guard (engine_mutation or engine_write, in wf_store) or is named below
+# with why it may skip it. A raw write: shutil's move, rmtree and copies; os.replace, rename, remove, unlink, rmdir; a
+# path's unlink, rmdir, write_text, write_bytes, touch; open/fdopen for writing. A git runner that takes its subcommand
+# from a variable is a known one (the workspace's own repo goes through wf_store._git, which guards its mutations), and a
+# literal git mutation outside _git is allowed only where no workspace exists yet.
+_ENGINE_GUARD_FREE_MODULES = {"wf_init.py", "wf_migrate.py", "wf_setup.py"}  # before a workspace exists, or none at all
+_ENGINE_GUARD_ALLOW = {
+    "wf_store.py:_write_text_raw",  # write_text's body, behind engine_write
+    "wf_cloud.py:_cloud_write_bytes", "wf_cloud.py:_cloud_remove",  # sikstack's truth landing in a pull (judged after it)
+    "wf_cloud.py:clear_journal", "wf_cloud.py:_push", "wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink",
+    "wf_cloud.py:cloud_unlink_from_disk",  # CLOUD_DIR, the link's local bookkeeping
+    "wf_cloud.py:remove",  # the inbox applier's undo of a crashed entry: the tree put back as the entry found it
+    "wf_cloud.py:cloud_save_key", "wf_cloud.py:cloud_device_sign_in",  # the user's key file and sign-in's data dir
+    "wf_cold.py:keep", "wf_cold.py:_materialize", "wf_cold.py:cmd_cold_clear",  # .sikstack/cache/, the cold reads' cache
+    "wf_git.py:_parallel_start_nested",  # copies the host's CLAUDE.local.md into the host worktree (outside the workspace)
+    "wf_design.py:design_publish",  # packs the build into a temporary file (outside the workspace)
+}
+_ENGINE_GIT_RUNNERS = {  # subprocess git with a variable subcommand
+    "wf_store.py:_git",  # the workspace's runner: its mutations cross engine_mutation
+    "wf_agenda.py:_git_lines_in", "wf_git.py:_pr_generated_paths",  # cat-file and check-attr queries
+    "wf_git.py:_repo_git", "wf_design.py:_design_git",  # a product repo's reads (registry checks, design-sign)
+}
+_ENGINE_GIT_MUTATING = {"add", "am", "apply", "checkout", "cherry-pick", "clean", "commit", "gc", "init", "merge", "mv", "notes",
+                        "pull", "rebase", "reset", "restore", "revert", "rm", "stash", "switch", "tag", "update-ref", "worktree", "branch"}
+def _engine_mode(_args, _keywords):  # an open mode that writes (w, a, x or +)
+    _modes = [a for a in _args if isinstance(a, _ast.Constant)] + [k.value for k in _keywords if k.arg == "mode"]
+    return any(isinstance(m, _ast.Constant) and isinstance(m.value, str) and set(m.value) & set("wax+") for m in _modes)
+def _engine_raw_kind(_call):
+    _f = _call.func
+    if isinstance(_f, _ast.Attribute):
+        _recv = _f.value.id if isinstance(_f.value, _ast.Name) else None
+        if _recv == "shutil" and _f.attr in ("move", "rmtree", "copy", "copy2", "copyfile", "copytree"):
+            return f"shutil.{_f.attr}"
+        if _recv == "os" and _f.attr in ("replace", "rename", "remove", "unlink", "rmdir", "removedirs"):
+            return f"os.{_f.attr}"
+        if _recv == "os" and _f.attr == "fdopen":
+            return "os.fdopen" if _engine_mode(_call.args[1:2], _call.keywords) else None
+        if _recv != "os" and _f.attr in ("unlink", "rmdir", "write_text", "write_bytes", "touch"):
+            return f".{_f.attr}"
+        if _f.attr == "open" and _recv != "os" and _engine_mode(_call.args[:1], _call.keywords):
+            return ".open"
+    if isinstance(_f, _ast.Name) and _f.id == "open" and _engine_mode(_call.args[1:2], _call.keywords):
+        return "open"
+    return None
+def _engine_git_kind(_call):
+    _f = _call.func
+    if not (isinstance(_f, _ast.Attribute) and _f.attr == "run" and isinstance(_f.value, _ast.Name) and _f.value.id == "subprocess"):
+        return None
+    _argv = _call.args[0] if _call.args else None
+    if not (isinstance(_argv, _ast.List) and _argv.elts and isinstance(_argv.elts[0], _ast.Constant) and _argv.elts[0].value == "git"):
+        return None
+    _rest = list(_argv.elts[1:])
+    while _rest and isinstance(_rest[0], _ast.Constant) and str(_rest[0].value).startswith("-"):  # -C <dir>, --no-optional-locks
+        _rest = _rest[2:] if _rest[0].value == "-C" else _rest[1:]
+    if not _rest or not isinstance(_rest[0], _ast.Constant):
+        return "runner"
+    return "mutation" if _rest[0].value in _ENGINE_GIT_MUTATING else None
+_engine_bad, _engine_seen = [], set()
+def _engine_visit(_name, _src, _node, _fn):
+    for _child in _ast.iter_child_nodes(_node):
+        _inner = _child if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)) else _fn
+        if isinstance(_child, _ast.Call):
+            _key = f"{_name}:{_fn.name if _fn is not None else '<module>'}"
+            _raw, _git_kind = _engine_raw_kind(_child), _engine_git_kind(_child)
+            if _raw and _name not in _ENGINE_GUARD_FREE_MODULES:
+                _lines = _src.splitlines()[_fn.lineno - 1:_fn.end_lineno] if _fn is not None else []
+                _body = "\n".join(_lines)
+                if _key in _ENGINE_GUARD_ALLOW:
+                    _engine_seen.add(_key)
+                elif "engine_mutation(" not in _body and "engine_write(" not in _body:
+                    _engine_bad.append(f"{_key}:{_child.lineno} {_raw} writes outside the engine stamp's guard")
+            if _git_kind == "runner":
+                if _key in _ENGINE_GIT_RUNNERS:
+                    _engine_seen.add(_key)
+                elif _name not in _ENGINE_GUARD_FREE_MODULES:
+                    _engine_bad.append(f"{_key}:{_child.lineno} runs git with a variable subcommand outside the known runners")
+            if _git_kind == "mutation" and _name not in _ENGINE_GUARD_FREE_MODULES:
+                _engine_bad.append(f"{_key}:{_child.lineno} runs a git mutation outside wf_store._git")
+        _engine_visit(_name, _src, _child, _inner)
+for _f in sorted((root / "scripts").glob("*.py")) + [root / "adapters/claude_code/adapter.py"]:
+    _src = _f.read_text(encoding="utf-8")
+    _engine_visit(_f.name, _src, _ast.parse(_src), None)
+assert not _engine_bad, _engine_bad
+assert not (_ENGINE_GUARD_ALLOW | _ENGINE_GIT_RUNNERS) - _engine_seen, sorted((_ENGINE_GUARD_ALLOW | _ENGINE_GIT_RUNNERS) - _engine_seen)
+_store = (root / "scripts/wf_store.py").read_text(encoding="utf-8")
+assert 'ENGINE_STAMP_REL = "works/engine.json"' in _store
+assert _store.split("def rebuild_index_and_state() -> None:\n", 1)[1].startswith("    if engine_stale():")

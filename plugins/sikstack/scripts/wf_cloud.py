@@ -22,7 +22,8 @@ import wf_cold  # noqa: E402 -- the cache: the eviction keeps an archived phase.
 
 from wf_store import (  # noqa: E402
     _git, _git_available, _git_dir, _meter_ts, _one_line, _one_line_usage_errors, _worktree_entries, AGENDA,
-    AGENDA_ID_RE, all_active_phases, append_event, current_stream, GENERATED_FILES, HOST_ROOT, RETIRED_GENERATED_FILES,
+    AGENDA_ID_RE, all_active_phases, append_event, current_stream, engine_verdict, GENERATED_FILES, HOST_ROOT,
+    RETIRED_GENERATED_FILES,
     installed_workspace_version, NESTED, normalize_id_args, now_iso, phase_dirs, phase_in_flight, read_json,
     rebuild_index_and_state, require_slice, ROOT, shown, write_json, write_text,
 )
@@ -1559,6 +1560,7 @@ def cloud_fail_open(args: argparse.Namespace, line: str):
     """The hook's way past a cloud stop: the command runs on the disk as it is (its ids read from it), then the
     stop as a note."""
     normalize_id_args(args)
+    engine_verdict()
     wf_cold.LENIENT = True  # an evicted file with no valid cached copy reads as absent: no second wait on the network
     try:
         result = args.func(args)
@@ -1582,6 +1584,7 @@ def cloud_boundary(args: argparse.Namespace, tokens: list, fail_open: bool = Fal
             return cloud_fail_open(args, cloud_stop_line(exc, "begin"))
         raise SystemExit(cloud_stop_line(exc, "begin"))
     try:
+        engine_verdict()  # after the begin step's pull, before the command: the stamp sikstack holds is judged
         normalize_id_args(args)
         result = args.func(args)
     except SystemExit as stop:
@@ -1628,10 +1631,10 @@ CLOUD_KEY_PROMPT = "Paste a workspace key for this project (make one under Keys 
 # phase here, with no worktree streams (and so no reopened pair).
 CLOUD_STREAM_REFUSED = ("worktree start", "worktree add-repo", "worktree gate", "worktree merge-finish",
                         "worktree teardown", "phase reopen")
-# An unused install's truth set: only what a fresh install seeds (the five plain docs; an older install's
-# docs/index.json and v0001 versions). Joining sikstack from one replaces these.
+# An unused install's truth set: only what a fresh install seeds (the five plain docs, the engine stamp; an older
+# install's docs/index.json and v0001 versions). Joining sikstack from one replaces these.
 CLOUD_SEED_RE = re.compile(r"docs/README\.md|docs/current/(?:product|architecture|operations|qa|decisions)\.md|docs/index\.json"
-                           r"|docs/versions/[^/]+/v0001_bootstrap\.md|works/events\.jsonl")
+                           r"|docs/versions/[^/]+/v0001_bootstrap\.md|works/events\.jsonl|works/engine\.json")
 CLOUD_SHOWN_ROWS = 20
 
 
@@ -1721,7 +1724,9 @@ def mark_committed(args: argparse.Namespace) -> None:
 
 
 def cloud_rebuild(rels) -> None:
-    """The generated files after the disk took files from sikstack."""
+    """The generated files after the disk took files from sikstack. The engine stamp's verdict is taken here first,
+    so a stamp the pull just brought is the one judged (an older engine than it rebuilds nothing)."""
+    engine_verdict()
     rebuild_index_and_state()
 
 
@@ -2519,6 +2524,7 @@ def cloud_inbox_step(session: CloudSession) -> None:
     nothing pending. After a 409 the inbox is read again, so an entry another checkout took is not tried."""
     if session.inbox_pending == 0 or session.journal() is not None:
         return
+    engine_verdict()  # after the pull: an older engine than the stamp sikstack holds refuses each entry's write
     with CloudLock():
         parser, tried = None, set()
         while len(tried) < CLOUD_INBOX_MAX:

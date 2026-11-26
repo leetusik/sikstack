@@ -19,8 +19,9 @@
 #   Test 34 (the cold set in cloud mode, run after Test 23) and Test 35 (the cold reads and `sikstack cold`, after 34),
 #   Test 36 (the engine's agent behind the fake's Cloudflare gate, the 403 block reading and sign-in --release),
 #   Test 37 (an edge block in every form: Cloudflare's JSON problem, a page echoing the key, sign-in's start and poll),
-#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes) and
-#   Test 39 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33).
+#   Test 38 (agenda-feedback: the linked project's feedback onto the agenda, against the fake's triage routes),
+#   Test 39 (the design link of a local workspace, publishing from a phase's worktree, run after Test 33) and
+#   Test 40 (the engine stamp, works/engine.json: an older engine refuses to write, a newer one raises it).
 #
 # Usage:  bash plugins/sikstack/tests/smoke.sh        (alone in its shell call: never chained)
 # Exit 0 if every check passes; non-zero otherwise. Re-runnable; self-cleaning.
@@ -6463,6 +6464,133 @@ if grep -rqF "$AFK" "$AFH" "$AFO" "$AFW"/*.txt "$AFW/fake" 2>/dev/null || printf
   bad "the workspace key leaked into the tree, the output or the request log"
 fi
 kill "$AF_PID" 2>/dev/null; wait "$AF_PID" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+echo "== Test 40: the engine stamp (works/engine.json) -- init commits it; against a stamp of a later release a write refuses in one line (both versions, restart Claude Code, the rollback way out, no friction offer) with nothing written, in-process through workflow.run too, and next and check run with one warning line and no rebuild; a newer engine raises it at its first real change (not at a same-bytes rewrite) and records (old, new) once; with no stamp the backlog's version line seeds old by release order (2.1.0 before 0.3.0), never refusing; a worktree's start commit carries it, the gate's exemption counts it, and merge-finish keeps the later release of the two sides =="
+# es_copy <var> <version>: a copy of this plugin whose plugin.json says <version>, listed atop its CHANGELOG like a release.
+es_copy() { local _esd; newtmp _esd; cp -R "$PLUGIN/." "$_esd/"; python3 - "$_esd" "$2" <<'PY'
+import json, sys
+d, v = sys.argv[1:]
+p = f"{d}/.claude-plugin/plugin.json"; j = json.load(open(p)); old = j["version"]; j["version"] = v; open(p, "w").write(json.dumps(j, indent=2) + "\n")
+c = f"{d}/CHANGELOG.md"; t = open(c).read(); i = t.index(f"## {old} — ")
+newer = [u for u in ("0.98.0", "0.99.0") if u == v or (v == "0.99.0" and u == "0.98.0")]
+open(c, "w").write(t[:i] + "".join(f"## {u} — 2099-01-01\n\n- a later release.\n\n" for u in reversed(newer)) + t[i:])
+PY
+printf -v "$1" '%s' "$_esd/scripts/workflow.py"; }
+es_copy ES98 0.98.0; es_copy ES99 0.99.0
+ES_RUN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN/.claude-plugin/plugin.json")
+es_stamp() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$1/works/engine.json" 2>/dev/null || echo none; }
+es_set() { printf '{\n  "version": "%s"\n}\n' "$2" > "$1/works/engine.json" && git -C "$1" add works/engine.json && git -C "$1" commit -qm "stamp $2"; }
+es_tree() { ( cd "$1" && { git status --short; find works docs -type f -exec shasum {} +; } | sha_stdin ); }
+newtmp ESH; mkhost "$ESH" >/dev/null 2>&1; ES="$ESH/.sikstack"
+[ "$(es_stamp "$ES")" = "$ES_RUN" ] && [ "$(git -C "$ES" show HEAD:works/engine.json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$ES_RUN" ] \
+  && [ -z "$(git -C "$ES" status --short)" ] \
+  && ok "init writes works/engine.json at the plugin's version ($ES_RUN) and commits it with the workspace" || bad "init's stamp is wrong: $(es_stamp "$ES") / $(git -C "$ES" status --short)"
+# (a) an older engine than the stamp: each write refuses in one line and writes nothing.
+( cd "$ES" && python3 "$ENG" phase new --phase P1 --name probe --objective o >/dev/null && git add -A && git commit -qm p1 )
+es_set "$ES" 99.0.0; es_t0=$(es_tree "$ES"); es_bad=""
+for es_cmd in "phase new --phase P2 --name x --objective y" "slice status P1.DECOMP in_progress" "section P1 Now --append"; do
+  es_o=$( cd "$ES" && printf -- '- a note\n' | env -u SIKSTACK_NO_OFFER python3 "$ENG" $es_cmd 2>&1 ); es_rc=$?  # shellcheck disable=SC2086
+  { [ "$es_rc" = 1 ] && [ "$(printf '%s\n' "$es_o" | grep -c .)" = 1 ] \
+      && printf '%s\n' "$es_o" | grep -qF "sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json), so it writes nothing: restart Claude Code to load the updated plugin -- nothing was written (on a deliberate rollback to $ES_RUN: set that file's version to \"$ES_RUN\" and commit it)"; } \
+    || es_bad="$es_bad [$es_cmd rc=$es_rc: $es_o]"
+done
+[ -z "$es_bad" ] && [ "$es_t0" = "$(es_tree "$ES")" ] && [ -z "$(git -C "$ES" status --short)" ] \
+  && ok "against a stamp of 99.0.0, phase new, slice status and section --append each refuse in one line naming both versions, restart Claude Code and the rollback way out, exit 1, no friction offer, nothing written" \
+  || bad "a write against a later stamp did not refuse cleanly --$es_bad -- $(git -C "$ES" status --short)"
+es_o=$( cd "$ES" && python3 - "$PLUGIN/scripts" <<'PY' 2>&1
+import sys
+sys.path.insert(0, sys.argv[1])
+import workflow
+tokens = ["slice", "status", "P1.DECOMP", "in_progress"]
+args = workflow.build_parser().parse_args(tokens)
+args.cmd = f"{args.cmd} {args.verb}"
+print(f"rc={workflow.with_offer(lambda: workflow.run(args, tokens), tokens)}")
+PY
+)
+printf '%s\n' "$es_o" | grep -qx 'rc=1' && printf '%s\n' "$es_o" | grep -q "^sikstack $ES_RUN is older than sikstack 99.0.0, .*restart Claude Code" && [ "$es_t0" = "$(es_tree "$ES")" ] \
+  && ok "the same write run in-process through workflow.run (the adapter's path) refuses the same way, nothing written" || bad "the in-process write did not refuse: $es_o"
+# (b) reads still run: one warning line on stderr, no rebuild (the backlog keeps its inode).
+es_ino=$(ls -i "$ES/works/backlog.md" | awk '{print $1}'); es_rbad=""
+for es_cmd in "next" "check --no-rebuild" "check"; do
+  es_out=$( cd "$ES" && python3 "$ENG" $es_cmd 2>"$ESH/err.txt" ); es_rc=$?  # shellcheck disable=SC2086
+  { [ "$es_rc" = 0 ] && [ -n "$es_out" ] && [ "$(grep -c . "$ESH/err.txt")" = 1 ] \
+      && grep -qx "warning: sikstack $ES_RUN is older than sikstack 99.0.0, which last wrote this workspace (.sikstack/works/engine.json): this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin" "$ESH/err.txt"; } \
+    || es_rbad="$es_rbad [$es_cmd rc=$es_rc: $(cat "$ESH/err.txt")]"
+done
+[ -z "$es_rbad" ] && [ "$es_ino" = "$(ls -i "$ES/works/backlog.md" | awk '{print $1}')" ] && [ "$es_t0" = "$(es_tree "$ES")" ] \
+  && ok "against it, next, check --no-rebuild and check exit 0 with their output and one warning line, and rewrite no dashboard" || bad "a read against a later stamp is wrong --$es_rbad"
+es_set "$ES" "$ES_RUN"
+( cd "$ES" && python3 "$ENG" slice status P1.DECOMP in_progress >/dev/null 2>&1 ) && [ "$(es_stamp "$ES")" = "$ES_RUN" ] \
+  && ok "after the rollback edit the refusal names (the stamp set to the running version and committed), the write runs" || bad "the rollback way out did not work"
+git -C "$ES" add -A && git -C "$ES" commit -qm work
+# (c) a newer engine raises it at its first real change, once; a same-bytes rewrite alone raises nothing.
+es_drive() { ( cd "$ES" && python3 - "$1" "${@:2}" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import workflow, wf_store
+tokens = sys.argv[2:]
+args = workflow.build_parser().parse_args(tokens)
+if getattr(args, "verb", None):
+    args.cmd = f"{args.cmd} {args.verb}"
+code = workflow.with_offer(lambda: workflow.run(args, tokens), tokens)
+print(f"rc={code} raised={wf_store._ENGINE['raised']}")
+PY
+) 2>&1 | tail -1; }
+es_r1=$(es_drive "$(dirname "$ES98")" next); es_s1=$(es_stamp "$ES")
+es_r2=$(es_drive "$(dirname "$ES98")" slice status P1.DECOMP ready); git -C "$ES" add -A && git -C "$ES" commit -qm raised
+git -C "$ES" show HEAD~1:works/engine.json > "$ES/works/engine.json" && git -C "$ES" commit -qam "stamp back, the dashboards already the newer engine's"
+es_r3=$(es_drive "$(dirname "$ES98")" next); es_s3=$(es_stamp "$ES")
+[ "$es_r1" = "rc=0 raised=('$ES_RUN', '0.98.0')" ] && [ "$es_s1" = 0.98.0 ] && [ "$es_r2" = "rc=0 raised=None" ] \
+  && [ "$es_r3" = "rc=0 raised=None" ] && [ "$es_s3" = "$ES_RUN" ] && [ -z "$(git -C "$ES" status --short)" ] \
+  && ok "a newer engine's first next raises the stamp to its version and records (old, new) = ($ES_RUN, 0.98.0); its next command records nothing; a same-bytes rewrite alone raises nothing" \
+  || bad "the raise is wrong -- [$es_r1 stamp $es_s1] [$es_r2] [$es_r3 stamp $es_s3 status $(git -C "$ES" status --short)]"
+# (d) no stamp: the backlog's sikstack version line seeds old (release order), never refusing.
+es_cbad=""
+for es_case in "0.8.0:('0.8.0', '$ES_RUN')" "2.1.0:('2.1.0', '$ES_RUN')" "unknown:(None, '$ES_RUN')" "none:(None, '$ES_RUN')" "99.0.0:(None, '$ES_RUN')"; do
+  es_line=${es_case%%:*}; es_want=${es_case#*:}
+  newtmp ESN; mkhost "$ESN" >/dev/null 2>&1; ES="$ESN/.sikstack"
+  git -C "$ES" rm -q works/engine.json
+  if [ "$es_line" = none ]; then sed -i.bak '/^- sikstack version:/d' "$ES/works/backlog.md"
+  else sed -i.bak "s/^- sikstack version: .*/- sikstack version: \`$es_line\`/" "$ES/works/backlog.md"; fi
+  rm -f "$ES/works/backlog.md.bak"; git -C "$ES" add -A && git -C "$ES" commit -qm "line $es_line"
+  es_r=$(es_drive "$PLUGIN/scripts" phase new --phase P1 --name x --objective y)
+  [ "$es_r" = "rc=0 raised=$es_want" ] && [ "$(es_stamp "$ES")" = "$ES_RUN" ] || es_cbad="$es_cbad [$es_line: $es_r]"
+done
+es_order=$( cd "$ES" && python3 - "$PLUGIN/scripts" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import wf_store
+print(all(wf_store.release_cmp("2.1.0", v) < 0 for v in ("0.3.0", "0.4.0", "0.5.0", "0.5.1", "0.6.0", "0.7.0", "0.8.0", "0.8.1")))
+PY
+)
+[ -z "$es_cbad" ] && [ "$es_order" = True ] \
+  && ok "with no stamp a backlog line of 0.8.0 or 2.1.0 seeds old, unknown, no line or an unlisted 99.0.0 give None, none refuses, the stamp is written; 2.1.0 reads older than every 0.x release from 0.3.0 up" \
+  || bad "the pre-stamp fallback is wrong --$es_cbad (2.1.0 older than 0.3.0 up: $es_order)"
+# (e) a worktree phase: the start commit carries the stamp, the gate counts it, merge-finish keeps the later release.
+newtmp ESW; mkhost "$ESW" >/dev/null 2>&1; ES="$ESW/.sikstack"; printf '/.claude/\n' >> "$ESW/.git/info/exclude"
+git -C "$ES" rm -q works/engine.json && git -C "$ES" commit -qm "an older workspace, no stamp"
+( cd "$ES" && python3 "$ENG" phase new --phase P1 --name Side --objective o && python3 "$ENG" phase new --phase P2 --name Busy --objective o \
+  && python3 "$ENG" slice status P2.DECOMP in_progress && rm works/engine.json && git add -A && git commit -qm phases ) >/dev/null 2>&1
+es_ws=$( cd "$ESW" && python3 "$ENG" worktree start P1 --host-branch feat/side 2>&1 ); ESWT=$(printf '%s\n' "$es_ws" | sed -n 's/^host_worktree=//p'); ES_BR=$(printf '%s\n' "$es_ws" | sed -n 's/^branch=//p')
+git -C "$ES" show --name-only --format= HEAD | grep -qx works/engine.json && [ -z "$(git -C "$ES" status --short)" ] \
+  && ok "worktree start on a workspace with no stamp raises it and its stamp commit carries works/engine.json (the tree left clean)" \
+  || bad "the start commit lacks the stamp -- $(git -C "$ES" show --name-only --format= HEAD | tr '\n' ' ') / $(git -C "$ES" status --short)"
+( cd "$ESWT" && python3 "$ES98" slice status P1.DECOMP in_progress && git -C .sikstack add -A && git -C .sikstack commit -qm "P1 at 0.98.0" ) >/dev/null 2>&1
+es_g=$( cd "$ESW" && python3 "$ENG" worktree gate P1 2>&1 | grep '^exemption=' )
+git -C "$ES" diff --name-only main..."$ES_BR" | grep -qx works/engine.json && printf '%s\n' "$es_g" | grep -q '^exemption=phase-folder-only (' \
+  && ok "a branch changing only its phase folder, the generated files and works/engine.json reads exemption=phase-folder-only" || bad "the gate's exemption did not count the stamp: $es_g"
+( cd "$ES" && python3 "$ES99" agenda-add --title "main work" --author person:smoke && git add -A && git commit -qm "main at 0.99.0" ) >/dev/null 2>&1
+git -C "$ES" merge -q --no-ff -m "merge P1" "$ES_BR" >/dev/null 2>&1
+git -C "$ES" checkout -q --theirs -- works/engine.json
+for es_f in $(git -C "$ES" diff --name-only --diff-filter=U | grep -v '^works/engine.json$'); do git -C "$ES" checkout -q --ours -- "$es_f"; done
+git -C "$ES" add -A && git -C "$ES" commit -qm "merge P1 (the branch's stamp taken)"
+es_m0=$(es_stamp "$ES"); es_mf98=$( cd "$ESW" && python3 "$ES98" worktree merge-finish 2>&1 ); es_mrc98=$?; es_m1=$(es_stamp "$ES")
+es_mf99=$( cd "$ESW" && python3 "$ES99" worktree merge-finish 2>&1 ); es_mrc99=$?; es_m2=$(es_stamp "$ES")
+[ "$es_m0" = 0.98.0 ] && [ "$es_mrc98" = 1 ] && printf '%s\n' "$es_mf98" | grep -q '^sikstack 0.98.0 is older than sikstack 0.99.0, which last wrote this workspace (.sikstack/works/engine.json, on one side of the merge)' \
+  && [ "$es_m1" = 0.98.0 ] && [ "$es_mrc99" = 0 ] && [ "$es_m2" = 0.99.0 ] \
+  && ok "two sides raised differently (0.98.0 taken over 0.99.0): merge-finish by 0.98.0 refuses naming 0.99.0, and by 0.99.0 leaves 0.99.0" \
+  || bad "merge-finish did not keep the later release -- taken $es_m0; 0.98.0 rc=$es_mrc98 ($es_mf98) -> $es_m1; 0.99.0 rc=$es_mrc99 -> $es_m2"
 
 # ---------------------------------------------------------------------------
 echo

@@ -32,10 +32,10 @@ SEAMS = {
         'validate_agenda',
     ),
     "wf_cold": (
-        'archived_base_dirs',
+        'archived_base_dirs', 'CACHE_DIR',
     ),
     "wf_cloud": (
-        'cloud_commits_waiting_line', 'cloud_linked', 'cloud_store_line', 'COMMITTED_AT',
+        'CLOUD_DIR', 'cloud_commits_waiting_line', 'cloud_linked', 'cloud_store_line', 'COMMITTED_AT',
     ),
 }
 
@@ -649,7 +649,247 @@ def _cloud_undo_note(path: Path) -> None:
             _CLOUD_UNDO[key] = False  # unreadable: never restored blind (the undo's rescan names what is left)
 
 
+# The engine stamp: works/engine.json = {"version": "<plugin.json version>"}, the plugin release that last wrote this
+# workspace (a tracked truth file, synced in cloud mode; never works/.workspace-version.json, which migrate reads as an
+# install before v102). Its verdict is taken once per process, at the command boundary (workflow.run, and in a linked
+# checkout after the begin step's pull: cloud_rebuild, the inbox step, cloud_boundary, cloud_fail_open), before the
+# command runs, and kept in _ENGINE, which every workspace writer reads:
+# - stale (the stamp is a later release than this engine, or unreadable): the rebuild returns at once, a write that
+#   would change a file refuses in one line (ENGINE_REFUSAL, exit 1), a same-bytes write writes nothing, and a command
+#   that wrote nothing ends with one warning line on stderr (ENGINE_WARNING). No command is marked read or write.
+# - older or missing: the first real change of the process (bytes that differ, an event, a raw mutation) writes the
+#   stamp at this engine's version first, and records (old, new) in _ENGINE["raised"] for the Migration notes; `old` is
+#   the stamp, or with none the backlog's `sikstack version:` line read at the boundary (works/backlog.md, else the
+#   root backlog.md 0.6.0 and 0.7.0 wrote), else None. The fallback never refuses.
+# Order is release order: the running plugin's CHANGELOG.md headings (`## <version> — <date>`, newest first); a version
+# it does not list was written by a later release. Unreadable: a semver tuple compare. With no running version
+# (plugin.json unreadable) nothing is judged. Writes outside the workspace (the plugin's data, the scratchpad, init
+# before a workspace exists) and its local bookkeeping (ENGINE_LOCAL_DIRS, untracked) are never guarded. In the
+# default-checkout refresh (DEFAULT_REFRESH_ENV) the stamp is never raised and a stale verdict stays silent.
+ENGINE_STAMP_REL = "works/engine.json"
+# Never guarded: cloud mode's bookkeeping (wf_cloud CLOUD_DIR) and the cold reads' cache (wf_cold CACHE_DIR), both
+# excluded from git and bound through SEAMS, and the repo's git dir (a change to the repo itself is guarded where it is
+# made: _git's mutations and the worktree exclude line).
+ENGINE_LOCAL_DIRS = (".git",)
+ENGINE_BACKLOG_RE = re.compile(r"^- sikstack version: `([^`\n]*)`", re.M)
+ENGINE_CHANGELOG_RE = re.compile(r"^## (\S+) — ", re.M)
+ENGINE_REFUSAL = ("sikstack {running} is older than sikstack {stamp}, which last wrote this workspace ({where}), so it "
+                  "writes nothing: restart Claude Code to load the updated plugin -- nothing was written (on a deliberate "
+                  "rollback to {running}: set that file's version to \"{running}\" and commit it)")
+ENGINE_UNREADABLE = ("{where} is not {{\"version\": \"<version>\"}} ({why}), so sikstack {running} writes nothing -- "
+                     "nothing was written (fix the file; to keep this engine: set its version to \"{running}\" and commit it)")
+ENGINE_WARNING = ("warning: sikstack {running} is older than sikstack {stamp}, which last wrote this workspace ({where}): "
+                  "this command ran read-only and rebuilt nothing; restart Claude Code to load the updated plugin")
+_ENGINE = None
+_CHANGELOG = []  # [versions] once read (None: unreadable); empty: not read yet
+
+
+def changelog_versions():
+    """The running plugin's releases, newest first, from its CHANGELOG.md headings; None when it cannot be read."""
+    if not _CHANGELOG:
+        try:
+            text = (PLUGIN_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+            _CHANGELOG.append(ENGINE_CHANGELOG_RE.findall(text) or None)
+        except (OSError, UnicodeDecodeError):
+            _CHANGELOG.append(None)
+    return _CHANGELOG[0]
+
+
+def _semver(value):
+    match = re.fullmatch(r"v?(\d+(?:\.\d+)*)", value.strip()) if isinstance(value, str) else None
+    return tuple(int(n) for n in match.group(1).split(".")) if match else None
+
+
+def release_cmp(a: str, b: str):
+    """Negative when release `a` came before `b`, 0 when they are one, positive when `a` came after; None when it
+    cannot be told. By the running CHANGELOG's order (a version it does not list is a later release than every one
+    it does); with the CHANGELOG unreadable, or neither listed, by a semver tuple compare."""
+    if a == b:
+        return 0
+    order = changelog_versions()
+    if order:
+        ia = order.index(a) if a in order else None
+        ib = order.index(b) if b in order else None
+        if ia is not None and ib is not None:
+            return ib - ia
+        if ia is not None or ib is not None:
+            return 1 if ia is None else -1
+    sa, sb = _semver(a), _semver(b)
+    if sa is None or sb is None:
+        return None
+    return (sa > sb) - (sa < sb)
+
+
+def read_engine_stamp(root: Path = None):
+    """(version, why): the stamp's version, or (None, None) with no file, or (None, why) when it is unreadable."""
+    path = (root or ROOT) / ENGINE_STAMP_REL
+    if not path.is_file():
+        return None, None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"{exc.__class__.__name__}: {_one_line(str(exc))[:80]}"
+    version = data.get("version") if isinstance(data, dict) else None
+    if not isinstance(version, str) or not version.strip():
+        return None, "no version string"
+    return version.strip(), None
+
+
+def _backlog_version(root: Path = None):
+    """The `- sikstack version:` line of the backlog an older engine left (works/, else the root's), or None."""
+    for rel in ("works/backlog.md", "backlog.md"):
+        try:
+            match = ENGINE_BACKLOG_RE.search(((root or ROOT) / rel).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def engine_verdict() -> dict:
+    """Take this process's verdict on the stamp, once (later calls return it unchanged)."""
+    global _ENGINE
+    if _ENGINE is not None:
+        return _ENGINE
+    running = installed_workspace_version()
+    refreshing = bool(os.environ.get(DEFAULT_REFRESH_ENV))
+    state = {"running": running, "stamp": None, "why": None, "stale": False, "pending": False, "old": None,
+             "raised": None, "refused": False, "warned": False, "silent": refreshing, "raise_ok": not refreshing}
+    if running is not None:
+        stamp, why = read_engine_stamp()
+        state["stamp"], state["why"] = stamp, why
+        if why is not None:
+            state["stale"] = True
+        elif stamp is not None:
+            relation = release_cmp(stamp, running)
+            if relation is None or relation > 0:
+                state["stale"] = True
+            elif relation < 0:
+                state["pending"], state["old"] = True, stamp
+        else:  # no stamp yet: an older engine's backlog line, read before any rebuild rewrites it, seeds `old`
+            line = _backlog_version()
+            relation = release_cmp(line, running) if line and line != "unknown" else None
+            order = changelog_versions()
+            listed = order is None or line in order
+            state["pending"] = True
+            state["old"] = line if relation is not None and relation < 0 and listed else None
+    _ENGINE = state
+    return state
+
+
+def engine_stale() -> bool:
+    return _ENGINE is not None and _ENGINE["stale"]
+
+
+def engine_refusal(where: str = None) -> str:
+    where = where or shown(ROOT / ENGINE_STAMP_REL)
+    if _ENGINE["why"] is not None:
+        return ENGINE_UNREADABLE.format(where=where, why=_ENGINE["why"], running=_ENGINE["running"])
+    return ENGINE_REFUSAL.format(running=_ENGINE["running"], stamp=_ENGINE["stamp"], where=where)
+
+
+def engine_warn() -> None:
+    """The stale read's one warning line, on stderr, once per process (never after a refusal, never in the refresh)."""
+    state = _ENGINE
+    if state is None or not state["stale"] or state["refused"] or state["warned"] or state["silent"]:
+        return
+    state["warned"] = True
+    where = shown(ROOT / ENGINE_STAMP_REL)
+    if state["why"] is not None:
+        line = f"warning: {where} is unreadable ({state['why']}): this command ran read-only and rebuilt nothing"
+    else:
+        line = ENGINE_WARNING.format(running=state["running"], stamp=state["stamp"], where=where)
+    sys.stdout.flush()
+    print(line, file=sys.stderr)
+
+
+def _engine_in_scope(path) -> bool:
+    """True for a path inside the workspace (ROOT) and outside its local bookkeeping."""
+    try:
+        rel = Path(os.path.abspath(str(path))).relative_to(ROOT)
+    except ValueError:
+        return False
+    return not (rel.parts and rel.parts[0] in (CLOUD_DIR, CACHE_DIR) + ENGINE_LOCAL_DIRS)
+
+
+def engine_mutation(path=None) -> None:
+    """Every workspace writer calls this before it changes anything: a stale process refuses (exit 1), and the
+    process's first real change under a newer engine raises the stamp first. `path` None: a change to the
+    workspace's own git repo (a commit, a worktree, its exclude file)."""
+    state = _ENGINE
+    if state is None or (path is not None and not _engine_in_scope(path)):
+        return
+    if state["stale"]:
+        state["refused"] = True
+        raise SystemExit(engine_refusal())
+    if state["pending"] and state["raise_ok"]:
+        state["pending"] = False
+        old, new = state["old"], state["running"]
+        target = ROOT / ENGINE_STAMP_REL
+        if _CLOUD_UNDO is not None:
+            _cloud_undo_note(target)
+        _write_text_raw(target, json.dumps({"version": new}, indent=2) + "\n")
+        state["raised"] = (old, new)
+
+
+def engine_write(path: Path, text: str) -> bool:
+    """write_text's guard: False when the write must be skipped (a stale process writing the bytes already there)."""
+    state = _ENGINE
+    if state is None or not (state["stale"] or state["pending"]) or not _engine_in_scope(path):
+        return True
+    try:
+        same = path.is_file() and path.read_text(encoding="utf-8") == text
+    except (OSError, UnicodeDecodeError):
+        same = False
+    if same:
+        return not state["stale"]  # a same-bytes rewrite never raises the stamp, and a stale one writes nothing
+    engine_mutation(path)
+    return True
+
+
+def engine_resolve_merge(parents: list) -> None:
+    """`worktree merge-finish`: the stamp after a merge is the latest release of the disk's and the merged parents'
+    (a conflict in it was resolved by taking either side). One later than this engine refuses like any stale write;
+    else the stamp is raised now, to this engine's version, with `old` the latest the workspace held."""
+    state = _ENGINE
+    if state is None or state["running"] is None:
+        return
+    if state["stale"]:  # merge-finish regenerates, so an older engine than the stamp refuses it whole
+        state["refused"] = True
+        raise SystemExit(engine_refusal())
+    held = [v for v in [state["stamp"], *parents] if isinstance(v, str) and v.strip()]
+    latest = None
+    for version in held:
+        if latest is None or (release_cmp(version, latest) or 0) > 0:
+            latest = version
+    if latest is None:
+        return
+    relation = release_cmp(latest, state["running"])
+    if relation is None or relation > 0:
+        state.update(stale=True, stamp=latest, why=None, pending=False)
+        state["refused"] = True
+        raise SystemExit(engine_refusal(f"{shown(ROOT / ENGINE_STAMP_REL)}, on one side of the merge"))
+    if read_engine_stamp()[0] == state["running"]:
+        return
+    state.update(pending=True, old=latest)
+    engine_mutation(ROOT / ENGINE_STAMP_REL)
+    if state["raised"] and state["raised"][0] == state["raised"][1]:
+        state["raised"] = None  # the merged side already held this version: nothing was raised
+
+
+def stamp_works_files() -> tuple:
+    """What a worktree stamp commit carries besides the phase folder: STAMP_WORKS_FILES, plus the stamp once it exists."""
+    return STAMP_WORKS_FILES + ((ENGINE_STAMP_REL,) if (ROOT / ENGINE_STAMP_REL).is_file() else ())
+
+
 def write_text(path: Path, text: str, executable: bool = False) -> None:
+    if _ENGINE is not None and not engine_write(path, text):
+        return
+    _write_text_raw(path, text, executable)
+
+
+def _write_text_raw(path: Path, text: str, executable: bool = False) -> None:
     if _CLOUD_UNDO is not None:
         _cloud_undo_note(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -693,6 +933,7 @@ def write_json_stamped(path: Path, data: dict, key: str, stamp: str) -> dict:
 def append_event(event_type: str, **payload: object) -> None:
     event = {"ts": now_iso(), "type": event_type, **payload}
     path = WORKS / "events.jsonl"
+    engine_mutation(path)
     if _CLOUD_UNDO is not None:
         _cloud_undo_note(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2677,6 +2918,8 @@ def phase_section(args: argparse.Namespace) -> None:
 
 
 def rebuild_index_and_state() -> None:
+    if engine_stale():  # an older engine than the stamp rebuilds nothing (the command ends with one warning line)
+        return
     phases = all_active_phases()
     # Selection (pointer + operator halt) is scoped to this checkout's stream; the
     # dashboards below still list every active phase, parallel ones included.
@@ -3725,9 +3968,32 @@ def cmd_gate(args: argparse.Namespace) -> None:
         print(message)
 
 
+GIT_MUTATING = frozenset({"add", "am", "apply", "checkout", "cherry-pick", "clean", "commit", "gc", "init", "merge",
+                          "mv", "notes", "pull", "rebase", "reset", "restore", "revert", "rm", "stash", "switch", "tag",
+                          "update-ref"})
+GIT_WORKTREE_MUTATING = frozenset({"add", "lock", "move", "prune", "remove", "repair", "unlock"})
+GIT_BRANCH_MUTATING = frozenset({"-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "-f", "--force"})
+
+
+def git_mutates(cmd: list) -> bool:
+    """True for a git command that changes the repository (the engine stamp guards those in the workspace's repo)."""
+    words = [str(w) for w in cmd]
+    if not words:
+        return False
+    if words[0] == "worktree":
+        return len(words) > 1 and words[1] in GIT_WORKTREE_MUTATING
+    if words[0] == "branch":
+        return bool(GIT_BRANCH_MUTATING & set(words[1:])) or (len(words) > 1 and not words[1].startswith("-"))
+    return words[0] in GIT_MUTATING
+
+
 def _git(cmd: list, cwd=None, check: bool = True):
     """Run a git command in the workspace root. With `check`, a failure raises SystemExit
-    carrying git's own message, so every parallel-mode guard fails loudly and in one style."""
+    carrying git's own message, so every parallel-mode guard fails loudly and in one style. A command that changes
+    a repo (git_mutates: the workspace's own, or a product repo's branch or worktree, always part of a workspace
+    change) crosses the engine stamp's guard first, so an older engine than the stamp leaves no half-made branch."""
+    if _ENGINE is not None and git_mutates(cmd):
+        engine_mutation()
     try:
         proc = subprocess.run(["git", *cmd], cwd=str(cwd or ROOT), capture_output=True, text=True)
     except FileNotFoundError:
@@ -3800,6 +4066,7 @@ def _ensure_worktrees_excluded(cwd=None) -> None:
     if present & {l.strip() for l in existing.splitlines()}:
         return
     sep = "" if not existing or existing.endswith("\n") else "\n"
+    engine_mutation()
     exclude.parent.mkdir(parents=True, exist_ok=True)
     exclude.write_text(f"{existing}{sep}# agentic workspace: per-phase git worktrees cut by worktree start\n{line}\n", encoding="utf-8")
 
@@ -4316,6 +4583,7 @@ def _archive_one(pdir: Path, forced: bool) -> Path:
         "slices": [s["id"] for s in slices],
     }
     write_json(pdir / "archive_manifest.json", manifest)
+    engine_mutation(dest)
     shutil.move(str(pdir), str(dest))
     append_event("phase_archived", phase=phase_id, archive_path=str(dest.relative_to(ROOT)))
     return dest
@@ -4359,7 +4627,8 @@ def cmd_check(args: argparse.Namespace) -> None:
     validates only. A malformed nested marker is never rebuilt on: check validates and lists it."""
     if not args.no_rebuild and not (NESTED is not None and NESTED_PROBLEMS):
         rebuild_index_and_state()
-        print("rebuilt workflow")
+        if not engine_stale():  # an older engine than the stamp rebuilt nothing (its warning line says so)
+            print("rebuilt workflow")
     sys.exit(validate())
 
 
