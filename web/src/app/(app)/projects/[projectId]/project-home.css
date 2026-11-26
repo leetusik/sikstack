@@ -25,6 +25,11 @@
   .ph-end {
     margin-left: auto;
   }
+  /* the title's group gives way before the action does: on a phone its badge and date wrap inside it, beside
+     Make public or Make private, rather than the action dropping alone under the title */
+  .ph-title {
+    flex: 1 1 10em;
+  }
 
   /* the Workspace sentence's link command: an origin with a port makes a run longer than a phone's
      card, so it may break anywhere once it must; it wraps as before where it fits */

@@ -57,7 +57,9 @@
 .json > pre { width: max-content; min-width: 100%; margin: 0; padding: var(--space-3); color: var(--ink); font: 400 var(--fs-meta)/var(--lh-head) var(--font-mono); white-space: pre; word-break: normal; tab-size: 2; }
 
 /* 6 ── facts: label over value, in pairs that wrap (the Workspace ledger's F44); and text that keeps its line breaks ── */
-.facts.is-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--fact-min), 100%), 1fr)); gap: var(--space-4) var(--space-5); }
+/* never fewer than two pairs a line: under two of 12em (a phone) each pair takes half the line, so the details read as two
+   columns rather than one long column of mostly dashes */
+.facts.is-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--fact-min), calc((100% - var(--space-5)) / 2 - 1px)), 1fr)); gap: var(--space-4) var(--space-5); }
 .facts.is-grid > .fact > dd { min-width: 0; overflow-wrap: anywhere; }
 .facts.is-grid > .fact.is-wide { grid-column: 1 / -1; }
 .keep-lines { max-width: var(--measure); overflow-wrap: anywhere; white-space: pre-wrap; }

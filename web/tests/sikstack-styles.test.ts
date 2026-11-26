@@ -201,6 +201,15 @@ describe("the app's stylesheets and fonts", () => {
     ).toEqual([]);
   });
 
+  // P86, B2: beside a name that wraps, a Backlog id that could shrink lost width to its name, whose first line was
+  // then drawn over the id's end. The id keeps its own width.
+  it("keep the Backlog's id from shrinking beside its name", () => {
+    const css = stripComments(
+      read(join(styles, "workspace/backlog.css")),
+    ).replace(/\s+/g, " ");
+    expect(css).toMatch(/\.backlog-ref > \.ws-id \{ flex: none; \}/);
+  });
+
   it("name no Google font host", () => {
     for (const file of filesUnder(join(web, "src")).filter((f) =>
       /\.(css|tsx?)$/.test(f),

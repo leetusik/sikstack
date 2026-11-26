@@ -92,7 +92,7 @@ export function ProjectHead({
       <header className="page-top">
         <Back org={org} />
         <div className="page-head">
-          <div className="page-title">
+          <div className="page-title ph-title">
             <h1>{name}</h1>
             <Badge>
               {shown === "public" ? W.badge.public : W.badge.private}
@@ -144,7 +144,7 @@ export function ProjectHeadLoading({ org }: { org: string }) {
       <header className="page-top">
         <Back org={org} />
         <div className="page-head">
-          <div className="page-title">
+          <div className="page-title ph-title">
             <h1 aria-busy="true">
               <Skeleton width="7em" />
               <span className="sr-only">{PROJECT_HOME.loading}</span>
