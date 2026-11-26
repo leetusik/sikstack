@@ -428,7 +428,7 @@ describe("the Workspace head (F41, F40)", () => {
       '<section class="panel" aria-label="No workspace linked"><div class="block">',
     );
     expect(out).toContain(
-      '<p class="block-text">No workspace linked yet. Run this in the project’s repo.</p><div class="command">',
+      '<p class="block-text">No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from the project’s Keys when it asks.</p><div class="command">',
     );
     expect(out).toContain(`<span class="copy-value mono">${command}</span>`);
     expect(out).toContain('aria-label="Copy the link command"');

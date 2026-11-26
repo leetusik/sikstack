@@ -46,7 +46,7 @@ export const AGENDA_ITEM = {
   /** The Phases panel's count (FG5): `4 phases`. */
   phaseCount: (n: number) => plural(n, "phase"),
   /** The command that plans a phase for an agenda, in the Copy field (F45). */
-  command: (item: string) => `/create-phase ${item}`,
+  command: (item: string) => `/sikstack:create-phase ${item}`,
   copyCommand: "Copy the command",
   /** The not-found sentence's project when its name is not known (the canvas's own fallback). */
   thisProject: "this project",

@@ -29,10 +29,20 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   (cut with a pointer at the plugin's `CHANGELOG.md`). The first command that raises the stamp prints the same block
   on stderr once, so `--json` output stays valid. A stamp newer than the plugin gets one line instead: update the
   plugin, then restart Claude Code. With no record of the last release, one line points at `CHANGELOG.md`.
-- **Not covered: sessions started on 0.10.0 or earlier.** Their engine has no stamp check, so an older session left
+- **Not covered: sessions started on 0.10.1 or earlier.** Their engine has no stamp check, so an older session left
   running can still write a workspace a newer one stamped. Restart such sessions after updating.
 - **Migration notes:** nothing to run. The first command on 0.11.0 writes `works/engine.json`; commit it with your
   next workflow-state commit.
+
+## 0.10.1 — 2026-11-26
+
+- **`sikstack` in your own terminal.** Claude Code puts the plugin's `bin/` on the PATH of its own shell only, so
+  `sikstack link` (which asks for a workspace key at a prompt, and so needs a real terminal) was `command not found`
+  wherever the web told you to run it. `sikstack setup` now writes `~/.local/bin/sikstack`, a small script that runs
+  the version Claude Code has installed, read at each run, so it keeps working across updates. A file there that
+  setup did not write is left alone, and setup says when `~/.local/bin` is not on your PATH.
+- **A machine set up earlier gets it by itself:** the next session's start writes it once (marked in the plugin's
+  data folder as `terminal.json`), so a command you remove stays removed. No manual step.
 
 ## 0.10.0 — 2026-11-26
 

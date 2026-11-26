@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Set sikstack up on this machine, once: save the email, make the install id, register it, and set the session setting sikstack needs. Run it after installing the plugin, or again to change the email."
+description: "Set sikstack up on this machine, once: save the email, make the install id, register it, set the session setting sikstack needs, and put `sikstack` in your terminal. Run it after installing the plugin, or again to change the email."
 argument-hint: "[email]"
 allowed-tools: Bash(sikstack setup:*), Bash(claude plugin configure:*), Bash(echo:*)
 disable-model-invocation: true
@@ -24,5 +24,5 @@ One setup per machine. It needs no repo and no workspace, and nothing of your wo
    sikstack setup --email "<email>" --data-dir "${CLAUDE_PLUGIN_DATA}"
    ```
 
-   It keeps one install id in the data folder (a second run keeps it), registers `{install_id, email, plugin_version}` with the server (`https://sikstack.com`; the `SIKSTACK_SERVER` environment variable points it at another, such as a local stack), and sets `autoCompactWindow` to 500000 in your Claude Code user settings, changing nothing else there. When the server cannot be reached it still finishes: the registration is marked pending and the plugin's session-start hook registers it later.
-4. **Report** what it printed, in a few lines: the install id, whether the registration landed or is pending, and the settings line. Then the next step: `/sikstack:sik-mode` in a repo.
+   It keeps one install id in the data folder (a second run keeps it), registers `{install_id, email, plugin_version}` with the server (`https://sikstack.com`; the `SIKSTACK_SERVER` environment variable points it at another, such as a local stack), and sets `autoCompactWindow` to 500000 in your Claude Code user settings, changing nothing else there. It also writes `~/.local/bin/sikstack`, so `sikstack` runs in the user's own terminal too (Claude Code puts the plugin's commands on the PATH of its own shell only); `sikstack link`, which asks for a workspace key at a prompt, runs there. A file at that path setup did not write is left alone. When the server cannot be reached it still finishes: the registration is marked pending and the plugin's session-start hook registers it later.
+4. **Report** what it printed, in a few lines: the install id, whether the registration landed or is pending, the settings line and the terminal command line (with its PATH hint, when it gives one). Then the next step: `/sikstack:sik-mode` in a repo.

@@ -14,7 +14,7 @@ const PLACES: WsPlace[] = ["agenda", "backlog", "docs"];
  * `aria-current="page"`. While the page loads the line is a bar and the title and places stand.
  *
  * A workspace that has never synced, or is not linked, draws the title and one panel instead, and the page draws
- * nothing else: `Nothing has synced yet. …`, or `No workspace linked yet. Run this in the project’s repo.` with
+ * nothing else: `Nothing has synced yet. …`, or `No workspace linked yet. Run this in a terminal, …` with
  * the link command in the system's Copy field (mono, 28em at most). The page passes the command
  * (`PROJECT_HOME.workspace.run.command`); without one the sentence stands alone.
  *
