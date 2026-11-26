@@ -89,7 +89,7 @@ def test_a_tool_call_carries_the_bearer_the_same_way_on_both_forms(monkeypatch, 
         return {"request_id": "r1", "accepted_at": "t", "status": "accepted", "query": "q", "total": 0, "results": []}
 
     monkeypatch.setattr(upstream, "capture_feedback", fake_upstream)
-    monkeypatch.setattr(upstream, "search", fake_upstream)
+    monkeypatch.setattr(upstream, "search_sections", fake_upstream)
     tool, arguments = _TOOL_CALLS[path]
     auth = {"Authorization": key} if key else {}
 

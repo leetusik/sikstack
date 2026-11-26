@@ -1,5 +1,6 @@
-"""The FastMCP servers: the Library's ``search`` and ``fetch_document`` tools at
-``/mcp``, their result mapping, the ``/healthz`` route, the write-only Feedback
+"""The FastMCP servers: the Library's ``search`` (sections), ``fetch`` (a document or
+one section) and ``list_library`` tools at ``/mcp`` (contract v2; ``fetch_document``
+stays one version as a deprecated alias of ``fetch``), their result mapping, the ``/healthz`` route, the write-only Feedback
 endpoint at ``/feedback/mcp`` (its one tool lives in ``feedback.py``), and the
 assembled Streamable-HTTP ASGI ``app`` that serves both from one process.
 
@@ -61,7 +62,10 @@ def _strip_marks(text: str | None) -> str:
 
 
 def _citation_url(result: dict[str, Any]) -> str:
-    """The document's **public origin** for a clickable citation, or ``""``.
+    """``fetch``'s ``url``: the document's **public origin** for a citation, or ``""``.
+
+    (``search`` hits carry the reader URL that lands on their section since contract
+    v2; see ``_map_hit``.)
 
     The single reserved seam for citation URLs. The frozen ``/api/search`` response
     carries **no** origin field today (``source.repo`` is a repo name like
@@ -83,21 +87,26 @@ def _citation_url(result: dict[str, Any]) -> str:
 
 
 def _map_hit(result: dict[str, Any]) -> dict[str, Any]:
-    """Project one upstream ``/api/search`` result to the MCP search-hit contract.
+    """Project one upstream ``/api/sections/search`` hit to the MCP search-hit contract (v2).
 
-    Upstream shape (``server/search.py:_finalize``): ``{id, project, slug, date,
-    title, tags, rel_path, source_repo, created_at, updated_at, score, snippet,
-    signals}``. We surface the five agent-facing fields; ``id`` + ``rel_path`` are
-    the durable handles the later ``fetch_document`` tool (S2) and stable citations
-    key on.
+    Upstream shape (``server/search.py:search_sections``): ``{document: {id, rel_path,
+    title, project, book, chapter, lang}, anchor, heading, snippet, score, url}``. A hit
+    is one section: ``id``/``rel_path`` plus ``anchor`` are what ``fetch`` takes, and
+    ``url`` is the reader address that lands on the section (``…#<anchor>``).
     """
 
+    doc = result.get("document") or {}
     return {
-        "title": result.get("title", ""),
+        "title": doc.get("title", ""),
+        "heading": result.get("heading", ""),
+        "anchor": result.get("anchor", ""),
         "snippet": _strip_marks(result.get("snippet")),
-        "url": _citation_url(result),
-        "id": result.get("id"),
-        "rel_path": result.get("rel_path", ""),
+        "url": result.get("url") or "",
+        "id": doc.get("id"),
+        "rel_path": doc.get("rel_path", ""),
+        "project": doc.get("project", ""),
+        "book": doc.get("book"),
+        "chapter": doc.get("chapter"),
     }
 
 
@@ -134,7 +143,7 @@ def _map_document(
     text, and for a ``"native"`` chapter its native source (``_body_of``).
     """
 
-    return {
+    out = {
         "id": doc.get("id"),
         "rel_path": doc.get("rel_path", ""),
         "title": doc.get("title", ""),
@@ -147,6 +156,11 @@ def _map_document(
         "truncated": truncated,
         "total_chars": total_chars,
     }
+    section = doc.get("section")
+    if isinstance(section, dict):
+        out["anchor"] = section.get("anchor", "")
+        out["heading"] = section.get("heading", "")
+    return out
 
 
 def _clamp_limit(limit: int | None) -> int:
@@ -177,9 +191,11 @@ def _tool_error(exc: upstream.UpstreamError, *, kind: str = "search") -> ToolErr
 
     if exc.status == 401:
         return ToolError("unauthorized: missing/invalid bearer")
+    if kind == "library":
+        return ToolError(f"list_library failed: upstream returned HTTP {exc.status}")
     if kind == "fetch":
         if exc.status == 404:
-            return ToolError("not found: no document with that id/rel_path")
+            return ToolError("not found: no document with that id/rel_path (or no section with that anchor)")
         return ToolError(f"fetch failed: upstream returned HTTP {exc.status}")
     if exc.status == 400:
         # Malformed FTS query — surface the server's own detail so the agent can fix it.
@@ -195,7 +211,7 @@ async def run_search(
     authorization: str | None,
     transport: Any | None = None,
 ) -> dict[str, Any]:
-    """Core search: clamp, proxy ``/api/search`` (forwarding the bearer), map hits.
+    """Core search: clamp, proxy ``/api/sections/search`` (forwarding the bearer), map hits.
 
     Kept separate from the ``search`` tool wrapper so it is unit-testable with an
     ``httpx.MockTransport`` upstream and an explicit ``authorization`` value — no
@@ -204,7 +220,7 @@ async def run_search(
 
     clamped = _clamp_limit(limit)
     try:
-        raw = await upstream.search(
+        raw = await upstream.search_sections(
             base_url=config.api_base_url(),
             authorization=authorization,
             q=query,
@@ -219,6 +235,7 @@ async def run_search(
     results = [_map_hit(hit) for hit in raw.get("results", [])]
     return {
         "query": raw.get("query", query),
+        "mode": raw.get("mode", "bm25"),
         "total": raw.get("total", len(results)),
         "results": results,
     }
@@ -228,6 +245,7 @@ async def run_fetch_document(
     *,
     id: int | None = None,
     rel_path: str | None = None,
+    anchor: str | None = None,
     authorization: str | None,
     transport: Any | None = None,
 ) -> dict[str, Any]:
@@ -250,6 +268,7 @@ async def run_fetch_document(
             authorization=authorization,
             id=id,
             rel_path=rel_path,
+            anchor=anchor,
             timeout=config.UPSTREAM_TIMEOUT,
             transport=transport,
         )
@@ -258,6 +277,52 @@ async def run_fetch_document(
 
     markdown, truncated, total_chars = _truncate(_body_of(doc), config.FETCH_MAX_CHARS)
     return _map_document(doc, markdown=markdown, truncated=truncated, total_chars=total_chars)
+
+
+def _map_library(raw: dict[str, Any]) -> dict[str, Any]:
+    """Project ``/api/library`` to the ``list_library`` contract: books with their
+    chapters (each variant's ``id``/``rel_path``/``url``), plus loose documents."""
+
+    books = []
+    for b in raw.get("books", []):
+        books.append({
+            "project": b.get("project", ""),
+            "slug": b.get("slug", ""),
+            "title": b.get("title", ""),
+            "chapters": [
+                {
+                    "key": c.get("key", ""),
+                    "title": c.get("title"),
+                    "variants": [
+                        {k: v.get(k) for k in ("lang", "id", "rel_path", "title", "url")}
+                        for v in c.get("variants", [])
+                    ],
+                }
+                for c in b.get("chapters", [])
+            ],
+        })
+    documents = [
+        {k: d.get(k) for k in ("id", "rel_path", "project", "title", "date", "lang", "url")}
+        for d in raw.get("documents", [])
+    ]
+    return {"books": books, "documents": documents}
+
+
+async def run_list_library(
+    *, authorization: str | None, transport: Any | None = None
+) -> dict[str, Any]:
+    """Core ``list_library``: proxy ``/api/library`` (forwarding the bearer) and map it."""
+
+    try:
+        raw = await upstream.library(
+            base_url=config.api_base_url(),
+            authorization=authorization,
+            timeout=config.UPSTREAM_TIMEOUT,
+            transport=transport,
+        )
+    except upstream.UpstreamError as exc:
+        raise _tool_error(exc, kind="library") from exc
+    return _map_library(raw)
 
 
 def _body_of(doc: dict[str, Any]) -> str:
@@ -270,6 +335,9 @@ def _body_of(doc: dict[str, Any]) -> str:
     returns ``markdown`` exactly as before.
     """
 
+    section = doc.get("section")
+    if isinstance(section, dict):
+        return str(section.get("text") or "")
     if doc.get("format") == "native" and doc.get("source"):
         return str(doc["source"])
     return doc.get("markdown") or ""
@@ -298,11 +366,12 @@ def _inbound_authorization(ctx: Context | None) -> str | None:
 @mcp.tool(
     name="search",
     description=(
-        "Search the knowledge corpus scoped to your API key. Returns ranked hits, "
-        "each {title, snippet, url, id, rel_path}. `url` is the document's public "
-        "citation origin when one exists (empty otherwise). Use `id`/`rel_path` for "
-        "stable references. `project` optionally narrows to one project; `limit` "
-        "caps the result count."
+        "Search the Library scoped to your API key, by section. Returns ranked hits, "
+        "each {title, heading, anchor, snippet, url, id, rel_path, project, book, "
+        "chapter}: one section of a document. `url` is the reader address that lands "
+        "on that section. Pass `id` (or `rel_path`) and `anchor` to `fetch` to read "
+        "just that section. `project` optionally narrows to one project; `limit` caps "
+        "the result count."
     ),
 )
 async def search(
@@ -320,20 +389,38 @@ async def search(
     )
 
 
+_FETCH_DESCRIPTION = (
+    "Fetch one document by `id` OR `rel_path` (provide exactly one — from a `search` "
+    "hit or `list_library`). With `anchor` (a `search` hit's), only that section: "
+    "`markdown` is its text and `anchor`/`heading` name it. Returns {id, rel_path, "
+    "title, project, date, tags, url, format, markdown, truncated, total_chars"
+    "[, anchor, heading]}, size-capped: when `truncated` is true, `markdown` is the "
+    "first N characters and `total_chars` the full length. `format` is "
+    "`\"md\" | \"html\" | \"native\"`; a whole `\"html\"` doc returns its readable "
+    "text, a whole `\"native\"` chapter its native source (CommonMark with typed "
+    "blocks and ids)."
+)
+
+
+@mcp.tool(name="fetch", description=_FETCH_DESCRIPTION)
+async def fetch(
+    id: int | None = None,
+    rel_path: str | None = None,
+    anchor: str | None = None,
+    ctx: Context = None,  # injected by FastMCP; excluded from the tool's input schema
+) -> dict[str, Any]:
+    authorization = _inbound_authorization(ctx)
+    return await run_fetch_document(
+        id=id, rel_path=rel_path, anchor=anchor, authorization=authorization
+    )
+
+
 @mcp.tool(
     name="fetch_document",
     description=(
-        "Fetch one document's full markdown, size-capped, by `id` OR `rel_path` "
-        "(provide exactly one — use the `id`/`rel_path` from a `search` hit). "
-        "Returns {id, rel_path, title, project, date, tags, url, format, markdown, "
-        "truncated, total_chars}. When `truncated` is true, `markdown` is the first "
-        "N characters and `total_chars` is the full length — narrow with `search` "
-        "for the rest. `format` is `\"md\" | \"html\" | \"native\"`; for an "
-        "`\"html\"` doc (a standalone HTML explainer) `markdown` carries the "
-        "server-extracted readable text, and for a `\"native\"` chapter its native "
-        "source (CommonMark with typed blocks and ids; readable as markdown). "
-        "`url` is the document's public citation origin when one exists (empty "
-        "otherwise)."
+        "Deprecated alias of `fetch` (contract v1's name), kept for one contract "
+        "version: the whole document by `id` OR `rel_path`. Use `fetch`. "
+        + _FETCH_DESCRIPTION
     ),
 )
 async def fetch_document(
@@ -347,6 +434,21 @@ async def fetch_document(
         rel_path=rel_path,
         authorization=authorization,
     )
+
+
+@mcp.tool(
+    name="list_library",
+    description=(
+        "List the Library your API key reads: its books, each with its chapters in "
+        "order (each chapter's language variants carry `id`, `rel_path` and the reader "
+        "`url`), plus its loose documents ({id, rel_path, project, title, date, lang, "
+        "url}). Pass an `id` or `rel_path` to `fetch`."
+    ),
+)
+async def list_library(
+    ctx: Context = None,  # injected by FastMCP; excluded from the tool's input schema
+) -> dict[str, Any]:
+    return await run_list_library(authorization=_inbound_authorization(ctx))
 
 
 @mcp.custom_route("/healthz", methods=["GET"])

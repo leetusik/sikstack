@@ -54,6 +54,7 @@ from server import publish
 from server import sharing
 from server import reindex as reindex_mod
 from server import search as search_mod
+from server import sections as sections_mod
 from server import write_lock
 from server.accounts.auth import AuthError, auth_error_handler
 from server.native import NativeFormatError, parse_chapter, search_text
@@ -90,7 +91,8 @@ async def lifespan(app: FastAPI):
         print(
             f"[kb-api] startup reindex: indexed={report['indexed']} "
             f"removed={report['removed']} skipped={len(report['skipped'])} "
-            f"embedded={emb.get('embedded', 0)}",
+            f"embedded={emb.get('embedded', 0)} "
+            f"sections={report.get('sections', {}).get('count', 0)}",
             flush=True,
         )
     # Item sharing, day one: while item_shares holds no row at all, every existing
@@ -282,6 +284,9 @@ def _embed_task(*, db_file: Path, doc_id: int, title: str, markdown: str):
                 dims=len(vec),
                 vector=embeddings_mod.pack_vector(vec),
             )
+            # P75: the document's sections, content-hash cached (an unchanged section
+            # of a new version costs nothing).
+            sections_mod.sync_embeddings(conn, doc_id=doc_id)
         finally:
             conn.close()
 
@@ -406,6 +411,21 @@ def healthz(conn=Depends(get_conn)):
     }
 
 
+def _doc_or_section(conn, doc: dict, anchor: Optional[str]) -> dict:
+    """The single-document read: the whole document, or with ``anchor`` (P75) only that
+    section, as the document's metadata plus ``section: {anchor, heading, level,
+    position, text}`` and no body. An anchor the document does not have is a 404."""
+
+    if anchor is None:
+        return _public_doc(doc, include_markdown=True)
+    found = sections_mod.get_section(conn, int(doc["id"]), anchor)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail=f"no section {anchor!r} in document {doc['rel_path']!r}"
+        )
+    return {**_public_doc(doc, include_markdown=False), "section": found}
+
+
 @app.get("/api/documents")
 def list_documents(
     project: Optional[str] = None,
@@ -506,6 +526,7 @@ def get_document_version(
 @app.get("/api/documents/by-path/{rel_path:path}")
 def get_document_by_path(
     rel_path: str,
+    anchor: Optional[str] = None,
     ctx: ApiAuthContext = Depends(resolve_api_read),
     conn=Depends(get_conn),
 ):
@@ -514,19 +535,20 @@ def get_document_by_path(
     doc = db.get_document_by_path_or_alias(conn, rel_path, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document at rel_path {rel_path!r}")
-    return _public_doc(doc, include_markdown=True)
+    return _doc_or_section(conn, doc, anchor)
 
 
 @app.get("/api/documents/{doc_id}")
 def get_document(
     doc_id: int,
+    anchor: Optional[str] = None,
     ctx: ApiAuthContext = Depends(resolve_api_read),
     conn=Depends(get_conn),
 ):
     doc = db.get_document(conn, doc_id, tenant_id=_tenant_filter(ctx))
     if doc is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
-    return _public_doc(doc, include_markdown=True)
+    return _doc_or_section(conn, doc, anchor)
 
 
 @app.get("/api/search")
@@ -567,6 +589,118 @@ def search(
         "offset": offset,
         "results": out["results"],
     }
+
+
+async def _api_viewer(ctx: ApiAuthContext) -> "sections_mod.Viewer":
+    """A key reads its own org: every item, with reader URLs on the org's label. Legacy
+    mode (no tenant) addresses documents by id."""
+
+    if ctx.tenant_id is None:
+        return sections_mod.Viewer(member=True)
+    return await sections_mod.viewer_for(ctx.tenant_id, member=True)
+
+
+@app.get("/api/sections/search")
+async def search_sections(
+    request: Request,
+    q: str,
+    project: Optional[str] = None,
+    limit: int = Query(10, ge=1, le=50),
+    ctx: ApiAuthContext = Depends(resolve_api_read),
+):
+    """Section search (P75) for a key: the sections of its org that match ``q``, each
+    with its document, anchor, heading, snippet, score and the reader ``url`` that lands
+    on it (``search.search_sections``). Metered as a search."""
+
+    viewer = await _api_viewer(ctx)
+    conn = db.connect()
+    try:
+        out = search_mod.search_sections(
+            conn, q, tenant=_tenant_filter(ctx), project=project, limit=limit, viewer=viewer
+        )
+    finally:
+        conn.close()
+    request.state.usage = UsageHint(
+        tenant_id=ctx.tenant_id,
+        event_type=EVENT_SEARCH,
+        project_name=project,
+        project_id=ctx.project_id,
+        credential_id=ctx.credential_id,
+    )
+    return {"query": q, "mode": out["mode"], "total": out["total"], "limit": limit,
+            "results": out["results"]}
+
+
+@app.get("/api/library")
+async def library(ctx: ApiAuthContext = Depends(resolve_api_read)):
+    """A key's library (P75): its org's books with their chapters (and each chapter's
+    variants), plus its loose documents, as ``/app/orgs/{org}/library`` lists them for
+    a member. Every item carries its reader ``url``."""
+
+    viewer = await _api_viewer(ctx)
+    tid = _tenant_db_id(ctx)
+    conn = db.connect()
+    try:
+        books = []
+        for row in db.list_books(conn, tenant_id=tid):
+            found = db.get_book(conn, project=row["project"], slug=row["slug"], tenant_id=tid)
+            if found is None:
+                continue
+            books.append({
+                "project": found["project"],
+                "slug": found["slug"],
+                "title": found["title"],
+                "sub": found["sub"],
+                "kind": found["kind"],
+                "subject": found["subject"],
+                "description": found["description"],
+                "chapters": [
+                    {
+                        "key": ch["key"],
+                        "position": ch["position"],
+                        "title": ch["title"],
+                        "variants": [
+                            {
+                                "lang": v["lang"],
+                                "id": v["doc_id"],
+                                "rel_path": v["rel_path"],
+                                "title": v["title"],
+                                "version": v["version"],
+                                "format": v["format"],
+                                "url": sections_mod.reader_url(
+                                    viewer, doc_id=v["doc_id"], project=found["project"],
+                                    slug=v["slug"], anchor="", book=found["slug"],
+                                    chapter_key=ch["key"], lang=v["lang"],
+                                ),
+                            }
+                            for v in ch["variants"]
+                        ],
+                    }
+                    for ch in found["chapters"]
+                ],
+            })
+        documents = [
+            {
+                "id": d["id"],
+                "rel_path": d["rel_path"],
+                "project": d["project"],
+                "slug": d["slug"],
+                "title": d["title"],
+                "date": d["date"],
+                "format": d["format"] or "md",
+                "lang": d["lang"] or "en",
+                "version": int(d["version"] or 1),
+                "subject": d["subject"],
+                "tags": d["tags"],
+                "url": sections_mod.reader_url(
+                    viewer, doc_id=d["id"], project=d["project"], slug=d["slug"], anchor=""
+                ),
+            }
+            for d in db.list_loose_documents(conn, tenant_id=tid)
+        ]
+    finally:
+        conn.close()
+    return {"books": books, "documents": documents}
 
 
 class ReindexIn(BaseModel):
