@@ -6548,7 +6548,7 @@ es_r3=$(es_drive "$(dirname "$ES98")" next); es_s3=$(es_stamp "$ES")
   || bad "the raise is wrong -- [$es_r1 stamp $es_s1] [$es_r2] [$es_r3 stamp $es_s3 status $(git -C "$ES" status --short)]"
 # (d) no stamp: the backlog's sikstack version line seeds old (release order), never refusing.
 es_cbad=""
-for es_case in "0.8.0:('0.8.0', '$ES_RUN')" "2.1.0:('2.1.0', '$ES_RUN')" "unknown:(None, '$ES_RUN')" "none:(None, '$ES_RUN')" "99.0.0:(None, '$ES_RUN')"; do
+for es_case in "0.8.0:('0.8.0', '$ES_RUN')" "2.1.0:('2.1.0', '$ES_RUN')" "unknown:(None, '$ES_RUN')" "none:(None, '$ES_RUN')" "99.0.0:(None, '$ES_RUN')" "$ES_RUN:None"; do
   es_line=${es_case%%:*}; es_want=${es_case#*:}
   newtmp ESN; mkhost "$ESN" >/dev/null 2>&1; ES="$ESN/.sikstack"
   git -C "$ES" rm -q works/engine.json
@@ -6566,7 +6566,7 @@ print(all(wf_store.release_cmp("2.1.0", v) < 0 for v in ("0.3.0", "0.4.0", "0.5.
 PY
 )
 [ -z "$es_cbad" ] && [ "$es_order" = True ] \
-  && ok "with no stamp a backlog line of 0.8.0 or 2.1.0 seeds old, unknown, no line or an unlisted 99.0.0 give None, none refuses, the stamp is written; 2.1.0 reads older than every 0.x release from 0.3.0 up" \
+  && ok "with no stamp a backlog line of 0.8.0 or 2.1.0 seeds old, unknown, no line or an unlisted 99.0.0 give None, a line of $ES_RUN records nothing raised, none refuses, the stamp is written; 2.1.0 reads older than every 0.x release from 0.3.0 up" \
   || bad "the pre-stamp fallback is wrong --$es_cbad (2.1.0 older than 0.3.0 up: $es_order)"
 # (e) a worktree phase: the start commit carries the stamp, the gate counts it, merge-finish keeps the later release.
 newtmp ESW; mkhost "$ESW" >/dev/null 2>&1; ES="$ESW/.sikstack"; printf '/.claude/\n' >> "$ESW/.git/info/exclude"
@@ -6641,7 +6641,7 @@ kill "$ES_PID" 2>/dev/null; wait "$ES_PID" 2>/dev/null
   || bad "a stale linked next answered the inbox -- rc=$es_n1rc state=$es_s1 commits=$es_c1 stamp=$(es_stamp "$ES") ($(tail -2 "$ESF/n1.txt" | tr '\n' ' ')); current rc=$es_n2rc state=$es_s2 ($(tail -2 "$ESF/n2.txt" | tr '\n' ' '))"
 
 # ---------------------------------------------------------------------------
-echo "== Test 41: the Migration notes after an update -- against a stamp of 0.8.0 the session-start hook prints, after the card, one block of the notes of each release after 0.8.0 (newest first, within HOOK_CAP); an equal stamp leaves the card byte-identical; a later stamp gets the update line; on compact the block shows once, before the resume card, and fit() keeps card and notes whole; the first command that raises the stamp prints the same block on stderr once (a --json stdout stays valid), the next none =="
+echo "== Test 41: the Migration notes after an update -- against a stamp of 0.8.0 the session-start hook prints, after the card, one block of the notes of each release after 0.8.0 (newest first, within HOOK_CAP); an equal stamp leaves the card byte-identical; a later stamp gets the update line; on compact the block shows once, before the resume card, and fit() keeps card and notes whole; the first command that raises the stamp prints the same block on stderr once (a --json stdout stays valid), the next none; with no stamp a backlog line of the running release owes nothing (card alone, a silent first write), and the default-checkout refresh keeps an unstamped checkout's older line (0.9.0), whose notes its hook and first write then show =="
 mn_hook() { printf '{"source":"%s","cwd":"%s"}' "$2" "$1" | env -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_DATA python3 "$PLUGIN/hooks/session_start.py"; }
 mn_set() { printf '{\n  "version": "%s"\n}\n' "$2" > "$1/.sikstack/works/engine.json" && git -C "$1/.sikstack" add -A && git -C "$1/.sikstack" commit -qm "stamp $2"; }
 mn_card=$(python3 -c 'import sys; print(open(sys.argv[1]).read().rstrip("\n") + "\n\nThis repo has a sikstack workspace: start or continue with `/sikstack:sik-mode` (it reads `sikstack next`).")' "$PLUGIN/contract.md")
@@ -6709,6 +6709,41 @@ PY
 )
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$MNH/j_out.txt" 2>/dev/null && [ "$(cat "$MNH/j_err.txt")" = "$mn_blk" ] \
   && ok "agenda --json in the process that raised: stdout is valid JSON, the block went to stderr" || bad "agenda --json after a raise: [$(head -c 300 "$MNH/j_out.txt")] [$(cat "$MNH/j_err.txt")]"
+# no stamp, the backlog line already the running release: nothing is owed (no block in the hook or on the first write).
+newtmp MNA; mkhost "$MNA" >/dev/null 2>&1; git -C "$MNA/.sikstack" rm -q works/engine.json && git -C "$MNA/.sikstack" commit -qm "no stamp"
+mn_a=$(mn_hook "$MNA" startup; echo x); mn_a=${mn_a%x}
+( cd "$MNA" && python3 "$ENG" phase new --phase P1 --name probe --objective o >/dev/null 2>"$MNA/err.txt" ); mn_arc=$?
+[ "$(grep -c "^- sikstack version: \`$ES_RUN\`$" "$MNA/.sikstack/works/backlog.md")" = 1 ] && [ "$mn_a" = "$mn_card"$'\n' ] && [ "$mn_arc" = 0 ] && [ ! -s "$MNA/err.txt" ] \
+  && [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MNA/.sikstack/works/engine.json")" = "$ES_RUN" ] \
+  && ok "no stamp and a backlog line of $ES_RUN: the hook prints the card alone, byte for byte; the first write prints nothing and stamps $ES_RUN" \
+  || bad "an equal pre-stamp line raised an alarm -- hook [$(printf '%s' "${mn_a#"$mn_card"}" | head -c 200)] write rc=$mn_arc [$(cat "$MNA/err.txt")]"
+# a worktree write refreshes an unstamped default checkout whose line is 0.9.0: the refresh keeps 0.9.0 and writes no
+# stamp, so the default checkout's hook shows the notes from 0.9.0 and its first write prints them once.
+newtmp MNW; mkhost "$MNW" >/dev/null 2>&1; MNS="$MNW/.sikstack"; printf '/.claude/\n' >> "$MNW/.git/info/exclude"
+( cd "$MNS" && python3 "$ENG" phase new --phase P1 --name Side --objective o && git add -A && git commit -qm p1 ) >/dev/null 2>&1
+MNWT=$( cd "$MNW" && python3 "$ENG" worktree start P1 --host-branch feat/side 2>&1 | sed -n 's/^host_worktree=//p' )
+git -C "$MNS" rm -q works/engine.json && sed -i.bak "s/^- sikstack version: .*/- sikstack version: \`0.9.0\`/" "$MNS/works/backlog.md" \
+  && rm -f "$MNS/works/backlog.md.bak" && git -C "$MNS" add -A && git -C "$MNS" commit -qm "as 0.9.0 left it"
+( cd "$MNWT" && python3 "$ENG" slice status P1.DECOMP in_progress >/dev/null 2>&1 ); mn_wrc=$?
+mn_wl=$(grep -c "^- sikstack version: \`0.9.0\`$" "$MNS/works/backlog.md"); mn_wr=$(grep -c '`P1.DECOMP` | `in_progress`' "$MNS/works/backlog.md")
+mn_ws=no; [ -e "$MNS/works/engine.json" ] && mn_ws=yes
+mn_9=$( cd "$MNS" && python3 - "$PLUGIN/scripts" "$ES_RUN" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import wf_store
+sys.stdout.write(wf_store.migration_notes("0.9.0", sys.argv[2]))
+PY
+)
+mn_wh=$(mn_hook "$MNW" startup; echo x); mn_wh=${mn_wh%x}
+( cd "$MNW" && python3 "$ENG" agenda-add --title one --author person:smoke >/dev/null 2>"$MNW/err1.txt" ); mn_w1=$?
+( cd "$MNW" && python3 "$ENG" agenda-add --title two --author person:smoke >/dev/null 2>"$MNW/err2.txt" )
+[ -n "$MNWT" ] && [ "$mn_wrc" = 0 ] && [ "$mn_wr" = 1 ] && [ "$mn_wl" = 1 ] && [ "$mn_ws" = no ] \
+  && case "$mn_9" in "sikstack updated from 0.9.0 to $ES_RUN"*) true ;; *) false ;; esac \
+  && [ "$mn_wh" = "$mn_card"$'\n\n'"$mn_9"$'\n' ] && [ "$mn_w1" = 0 ] && [ "$(cat "$MNW/err1.txt")" = "$mn_9" ] && [ ! -s "$MNW/err2.txt" ] \
+  && [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MNS/works/engine.json")" = "$ES_RUN" ] \
+  && ok "a worktree write refreshes the unstamped default checkout (line 0.9.0): its line stays 0.9.0, unstamped; its hook shows the notes from 0.9.0; its first write prints them once and stamps $ES_RUN" \
+  || bad "the refresh erased the notes' start -- wt=$MNWT rc=$mn_wrc refreshed=$mn_wr line09=$mn_wl stamped=$mn_ws hook [$(printf '%s' "${mn_wh#"$mn_card"}" | head -c 200)] write rc=$mn_w1 [$(head -c 200 "$MNW/err1.txt")] [$(cat "$MNW/err2.txt")]"
+[ -n "$MNWT" ] && git -C "$MNW" worktree remove --force "$MNWT" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
 echo

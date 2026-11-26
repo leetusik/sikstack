@@ -663,12 +663,14 @@ def _cloud_undo_note(path: Path) -> None:
 # - older or missing: the first real change of the process (bytes that differ, an event, a raw mutation) writes the
 #   stamp at this engine's version first, and records (old, new) in _ENGINE["raised"] for the Migration notes; `old` is
 #   the stamp, or with none the backlog's `sikstack version:` line read at the boundary (works/backlog.md, else the
-#   root backlog.md 0.6.0 and 0.7.0 wrote), else None. The fallback never refuses.
+#   root backlog.md 0.6.0 and 0.7.0 wrote; pre_stamp_start), else None. The fallback never refuses. A line equal to
+#   this engine owes nothing: the stamp is raised silently (old == new records nothing) and the hook prints no block.
 # Order is release order: the running plugin's CHANGELOG.md headings (`## <version> — <date>`, newest first); a version
 # it does not list was written by a later release. Unreadable: a semver tuple compare. With no running version
 # (plugin.json unreadable) nothing is judged. Writes outside the workspace (the plugin's data, the scratchpad, init
 # before a workspace exists) and its local bookkeeping (ENGINE_LOCAL_DIRS, untracked) are never guarded. In the
-# default-checkout refresh (DEFAULT_REFRESH_ENV) the stamp is never raised and a stale verdict stays silent.
+# default-checkout refresh (DEFAULT_REFRESH_ENV) the stamp is never raised, a stale verdict stays silent, and on an
+# unstamped workspace the rebuilt backlog keeps the version its line held (backlog_version_line).
 ENGINE_STAMP_REL = "works/engine.json"
 # Never guarded: cloud mode's bookkeeping (wf_cloud CLOUD_DIR) and the cold reads' cache (wf_cold CACHE_DIR), both
 # excluded from git and bound through SEAMS, and the repo's git dir (a change to the repo itself is guarded where it is
@@ -772,13 +774,37 @@ def _backlog_version(root: Path = None):
     return None
 
 
-def _pre_stamp_old(running: str, root: Path = None):
-    """With no stamp: the backlog line's version when it is a listed release before `running`, else None."""
+def pre_stamp_start(running: str, root: Path = None) -> tuple:
+    """With no stamp, where the Migration notes start, from the backlog line an older engine left (the one derivation
+    the hook, the verdict and the raise share): ("older", X) for a listed release X before `running` (the notes from
+    X); ("equal", running) for the running release itself (nothing owed: the stamp is raised silently); ("unknown",
+    None) for no line, `unknown`, a version the running CHANGELOG does not list, or a later one (the pointer line)."""
     line = _backlog_version(root)
-    relation = release_cmp(line, running) if line and line != "unknown" else None
+    if not line or line == "unknown":
+        return "unknown", None
+    if line == running:
+        return "equal", running
     order = changelog_versions()
-    listed = order is None or line in order
-    return line if relation is not None and relation < 0 and listed else None
+    if order is not None and line not in order:
+        return "unknown", None
+    relation = release_cmp(line, running)
+    return ("older", line) if relation is not None and relation < 0 else ("unknown", None)
+
+
+def engine_may_raise() -> bool:
+    """False in a process that may not raise the stamp: the default-checkout refresh (DEFAULT_REFRESH_ENV)."""
+    return not os.environ.get(DEFAULT_REFRESH_ENV)
+
+
+def backlog_version_line():
+    """The version the rebuilt backlog's `sikstack version:` line shows (None: `unknown`): the running one in every
+    process that may raise the stamp, or once a stamp exists; in one that may not (the refresh) on an unstamped
+    workspace, the version the line already holds, so the older release the Migration notes start from survives."""
+    running = installed_workspace_version()
+    if engine_may_raise() or (ROOT / ENGINE_STAMP_REL).exists():
+        return running
+    held = _backlog_version()
+    return None if held in (None, "unknown") else held
 
 
 def _changelog_notes(text: str) -> dict:
@@ -845,7 +871,8 @@ def engine_session_notes(root: Path) -> str:
     if why is not None:
         return ""
     if stamp is None:
-        return migration_notes(_pre_stamp_old(running, root), running)
+        kind, old = pre_stamp_start(running, root)
+        return "" if kind == "equal" else migration_notes(old, running)
     relation = release_cmp(stamp, running)
     if relation is not None and relation > 0:
         return ENGINE_NEWER_LINE.format(stamp=stamp, running=running) + "\n"
@@ -872,7 +899,7 @@ def engine_verdict() -> dict:
     if _ENGINE is not None:
         return _ENGINE
     running = installed_workspace_version()
-    refreshing = bool(os.environ.get(DEFAULT_REFRESH_ENV))
+    refreshing = not engine_may_raise()
     state = {"running": running, "stamp": None, "why": None, "stale": False, "pending": False, "old": None,
              "raised": None, "refused": False, "warned": False, "silent": refreshing, "raise_ok": not refreshing}
     if running is not None:
@@ -888,7 +915,7 @@ def engine_verdict() -> dict:
                 state["pending"], state["old"] = True, stamp
         else:  # no stamp yet: an older engine's backlog line, read before any rebuild rewrites it, seeds `old`
             state["pending"] = True
-            state["old"] = _pre_stamp_old(running)
+            state["old"] = pre_stamp_start(running)[1]  # equal: old is the running release, so nothing is owed
     _ENGINE = state
     return state
 
@@ -977,7 +1004,7 @@ def engine_mutation(path=None) -> None:
         if _CLOUD_UNDO is not None:
             _cloud_undo_note(target)
         _write_text_raw(target, json.dumps({"version": new}, indent=2) + "\n")
-        state["raised"] = (old, new)
+        state["raised"] = (old, new) if old != new else None  # it already held this release: raised silently
 
 
 def engine_write(path: Path, text: str) -> bool:
@@ -1020,9 +1047,7 @@ def engine_resolve_merge(parents: list) -> None:
     if read_engine_stamp()[0] == state["running"]:
         return
     state.update(pending=True, old=latest)
-    engine_mutation(ROOT / ENGINE_STAMP_REL)
-    if state["raised"] and state["raised"][0] == state["raised"][1]:
-        state["raised"] = None  # the merged side already held this version: nothing was raised
+    engine_mutation(ROOT / ENGINE_STAMP_REL)  # a merged side already at this version: nothing is recorded raised
 
 
 def stamp_works_files() -> tuple:
@@ -3296,7 +3321,7 @@ def rebuild_backlog(phases: list, state: dict, index: dict) -> None:
     if state.get("stream"):  # only in a parallel-phase checkout; absent on the default stream
         lines.append(f"- Stream: `{clean_cell(state['stream'])}` (parallel phase checkout; the pointer above is scoped to it)")
     live = {}  # phase id -> (phase data, slices, where) for every phase streams_section read from elsewhere
-    version = installed_workspace_version()
+    version = backlog_version_line()
     lines += [
         f"- Proposed agendas: `{(index.get('agenda_counts') or {}).get('proposed', 0)}`",
         f"- Open agendas: `{sum((index.get('agenda_counts') or {}).get(key, 0) for key in ('open', 'in_progress'))}`",
