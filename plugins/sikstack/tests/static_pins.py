@@ -796,8 +796,10 @@ _ENGINE_GUARD_FREE_MODULES = {"wf_init.py", "wf_migrate.py", "wf_setup.py"}  # b
 _ENGINE_GUARD_ALLOW = {
     "wf_store.py:_write_text_raw",  # write_text's body, behind engine_write
     "wf_cloud.py:_cloud_write_bytes", "wf_cloud.py:_cloud_remove",  # sikstack's truth landing in a pull (judged after it)
-    "wf_cloud.py:clear_journal", "wf_cloud.py:_push", "wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink",
-    "wf_cloud.py:cloud_unlink_from_disk",  # CLOUD_DIR, the link's local bookkeeping
+    "wf_cloud.py:clear_journal", "wf_cloud.py:_push",  # CLOUD_DIR, the link's local bookkeeping
+    # CLOUD_DIR again, in commands whose stale refusal must come first: each is also in _ENGINE_FIRST below, which pins
+    # the verdict before its first effect, so this entry never hides the order.
+    "wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:cloud_unlink_from_disk",
     "wf_cloud.py:remove",  # the inbox applier's undo of a crashed entry: the tree put back as the entry found it
     "wf_cloud.py:cloud_save_key", "wf_cloud.py:cloud_device_sign_in",  # the user's key file and sign-in's data dir
     "wf_cold.py:keep", "wf_cold.py:_materialize", "wf_cold.py:cmd_cold_clear",  # .sikstack/cache/, the cold reads' cache
@@ -874,3 +876,45 @@ assert not (_ENGINE_GUARD_ALLOW | _ENGINE_GIT_RUNNERS) - _engine_seen, sorted((_
 _store = (root / "scripts/wf_store.py").read_text(encoding="utf-8")
 assert 'ENGINE_STAMP_REL = "works/engine.json"' in _store
 assert _store.split("def rebuild_index_and_state() -> None:\n", 1)[1].startswith("    if engine_stale():")
+# The order of a stale refusal: in a stale process it comes before any of the command's effects. Each function below has
+# effects past the workspace's guarded writers (a request that changes sikstack, CLOUD_DIR, the [cloud] or [design]
+# table, the key file, a sign-in, the inbox's answers), so every one of its effect calls (_ENGINE_EFFECTS) must have, as
+# its nearest earlier call in source order among the verdict calls and the pulls (begin, _pull, which may bring a
+# newer stamp), a verdict call. CloudSession.commit is on the list, so a call to it needs no verdict of its own.
+_ENGINE_VERDICTS = {"engine_verdict", "engine_refuse_stale"}
+_ENGINE_PULLS = {"begin", "_pull"}
+_ENGINE_EFFECTS = {"send", "_push", "evict", "settle_appends", "cloud_restore_cold", "rmtree", "cloud_drop_link",
+                   "cloud_write_link", "config_write_table", "cloud_save_key", "cloud_exclude", "write_back", "keep_held",
+                   "cloud_inbox_apply", "cloud_keep", "cloud_device_sign_in", "cloud_link_with", "_design_link_with",
+                   "_cloud_remove", "_git", "mkdir"}
+_ENGINE_FIRST = {  # file:function -> effect calls allowed before the verdict, each with why
+    "wf_cloud.py:cloud_link": {}, "wf_cloud.py:cloud_link_with": {}, "wf_cloud.py:cloud_sign_in": {},
+    "wf_cloud.py:cloud_unlink": {}, "wf_cloud.py:cloud_unlink_from_disk": {}, "wf_cloud.py:commit": {},
+    "wf_cloud.py:cloud_inbox_step": {}, "wf_design.py:design_link": {},
+    "wf_cloud.py:cloud_sync_run": {"_push": "the resend of a journaled batch: an earlier command's push, as it composed it"},
+}
+_order_bad = []
+for _key, _allowed in sorted(_ENGINE_FIRST.items()):
+    _file, _fname = _key.split(":")
+    _defs = [n for n in _ast.walk(_ast.parse((root / "scripts" / _file).read_text(encoding="utf-8")))
+             if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == _fname]
+    if len(_defs) != 1:
+        _order_bad.append(f"{_key}: {len(_defs)} definitions")
+        continue
+    _calls = sorted((c.lineno, c.col_offset, c.func.attr if isinstance(c.func, _ast.Attribute) else getattr(c.func, "id", ""))
+                    for c in _ast.walk(_defs[0]) if isinstance(c, _ast.Call))
+    _last, _effects = None, 0
+    for _line, _col, _name in _calls:
+        if _name in _ENGINE_VERDICTS or _name in _ENGINE_PULLS:
+            _last = _name
+        elif _name in _ENGINE_EFFECTS:
+            _effects += 1
+            if _last not in _ENGINE_VERDICTS and _name not in _allowed:
+                _order_bad.append(f"{_key}:{_line} {_name} runs before the engine stamp's verdict (last: {_last})")
+    if not _effects:
+        _order_bad.append(f"{_key}: no effect call left to order (update _ENGINE_FIRST)")
+assert not _order_bad, _order_bad
+assert {"wf_cloud.py:cloud_link_with", "wf_cloud.py:cloud_unlink", "wf_cloud.py:cloud_unlink_from_disk"} <= set(_ENGINE_FIRST)
+# The boundary: workflow.run takes the verdict before every command that runs outside the cloud boundary (the design and
+# feedback API verbs, link, sign-in) but sync and unlink, which take it after their pull (both on the list above).
+assert 'if args.cmd not in ("sync", "unlink"):\n            engine_verdict()' in (root / "scripts/workflow.py").read_text(encoding="utf-8")

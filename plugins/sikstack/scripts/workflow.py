@@ -468,9 +468,9 @@ def run(args: argparse.Namespace, tokens: list) -> int:
         # local mode: no link, so the command runs exactly as before; link, unlink and sync each take the lock
         # themselves and never run the begin step; the design API verbs and agenda-feedback list and dismiss touch no
         # workspace truth, so they need neither (agenda-feedback file writes an item: it crosses). Every typed phase / agenda / slice argument becomes its
-        # stored id here, once. The engine stamp's verdict is taken here, before the command (sync takes it after its
-        # pull, in cloud_rebuild or the inbox step).
-        if args.cmd != "sync":
+        # stored id here, once. The engine stamp's verdict is taken here, before the command (sync and an online
+        # unlink take it after their pull, before anything is sent: a stamp sikstack holds is judged too).
+        if args.cmd not in ("sync", "unlink"):
             engine_verdict()
         normalize_id_args(args)
         result = _warned(args.func, args)

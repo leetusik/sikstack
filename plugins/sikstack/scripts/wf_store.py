@@ -656,7 +656,10 @@ def _cloud_undo_note(path: Path) -> None:
 # command runs, and kept in _ENGINE, which every workspace writer reads:
 # - stale (the stamp is a later release than this engine, or unreadable): the rebuild returns at once, a write that
 #   would change a file refuses in one line (ENGINE_REFUSAL, exit 1), a same-bytes write writes nothing, and a command
-#   that wrote nothing ends with one warning line on stderr (ENGINE_WARNING). No command is marked read or write.
+#   that wrote nothing ends with one warning line on stderr (ENGINE_WARNING). No command is marked read or write, but
+#   the refusal comes before any of a command's effects, its remote and bookkeeping ones included: the commands with
+#   effects past these writers refuse up front (engine_refuse_stale), a linked command's commit step sends nothing,
+#   and the web inbox is left pending, never answered refused (sync and an online unlink judge after their pull).
 # - older or missing: the first real change of the process (bytes that differ, an event, a raw mutation) writes the
 #   stamp at this engine's version first, and records (old, new) in _ENGINE["raised"] for the Migration notes; `old` is
 #   the stamp, or with none the backlog's `sikstack version:` line read at the boundary (works/backlog.md, else the
@@ -892,6 +895,38 @@ def engine_verdict() -> dict:
 
 def engine_stale() -> bool:
     return _ENGINE is not None and _ENGINE["stale"]
+
+
+def engine_refuse_stale(where: str = None) -> None:
+    """Take the verdict now, and refuse a stale process here, in the one line a write gets. A command with effects past
+    the workspace's guarded writers calls it before the first of them: a request that changes sikstack, the link's
+    bookkeeping (CLOUD_DIR, the [cloud] or [design] table), the user's key file, an install's sign-in. Those are
+    link, sign-in, unlink (both forms), sync --keep and design-link (tests/static_pins.py pins each one's order)."""
+    state = engine_verdict()
+    if state["stale"]:
+        state["refused"] = True
+        raise SystemExit(engine_refusal(where or state.get("where")))
+
+
+def engine_judge_held(data, where: str) -> None:
+    """Fold a stamp held off this disk into the verdict: sikstack's copy, read before link joins a workspace there or
+    sync --keep resolves against it. One from a later release than this engine, or unreadable, makes the process
+    stale (named by `where`), so engine_refuse_stale then refuses; None (sikstack holds no stamp) changes nothing."""
+    state = engine_verdict()
+    if data is None or state["running"] is None or state["stale"]:
+        return
+    try:
+        parsed = json.loads(data.decode("utf-8") if isinstance(data, bytes) else data)
+        version = parsed.get("version") if isinstance(parsed, dict) else None
+        why = None if isinstance(version, str) and version.strip() else "no version string"
+    except (UnicodeDecodeError, ValueError) as exc:
+        version, why = None, f"{exc.__class__.__name__}: {_one_line(str(exc))[:80]}"
+    if why is not None:
+        state.update(stale=True, why=why, pending=False, where=where)
+        return
+    relation = release_cmp(version.strip(), state["running"])
+    if relation is None or relation > 0:
+        state.update(stale=True, stamp=version.strip(), why=None, pending=False, where=where)
 
 
 def engine_refusal(where: str = None) -> str:

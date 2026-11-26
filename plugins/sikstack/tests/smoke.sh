@@ -6467,7 +6467,7 @@ fi
 kill "$AF_PID" 2>/dev/null; wait "$AF_PID" 2>/dev/null
 
 # ---------------------------------------------------------------------------
-echo "== Test 40: the engine stamp (works/engine.json) -- init commits it; against a stamp of a later release a write refuses in one line (both versions, restart Claude Code, the rollback way out, no friction offer) with nothing written, in-process through workflow.run too, and next and check run with one warning line and no rebuild; a newer engine raises it at its first real change (not at a same-bytes rewrite) and records (old, new) once; with no stamp the backlog's version line seeds old by release order (2.1.0 before 0.3.0), never refusing; a worktree's start commit carries it, the gate's exemption counts it, and merge-finish keeps the later release of the two sides =="
+echo "== Test 40: the engine stamp (works/engine.json) -- init commits it; against a stamp of a later release a write refuses in one line (both versions, restart Claude Code, the rollback way out, no friction offer) with nothing written, in-process through workflow.run too, and next and check run with one warning line and no rebuild; a newer engine raises it at its first real change (not at a same-bytes rewrite) and records (old, new) once; with no stamp the backlog's version line seeds old by release order (2.1.0 before 0.3.0), never refusing; a worktree's start commit carries it, the gate's exemption counts it, and merge-finish keeps the later release of the two sides; in cloud mode the refusal comes before any effect: unlink --from-disk keeps .hi2vi/ and the link, and a linked next leaves the web inbox pending for a current engine =="
 # es_copy <var> <version>: a copy of this plugin whose plugin.json says <version>, listed atop its CHANGELOG like a release.
 es_copy() { local _esd; newtmp _esd; cp -R "$PLUGIN/." "$_esd/"; python3 - "$_esd" "$2" <<'PY'
 import json, sys
@@ -6592,6 +6592,53 @@ es_mf99=$( cd "$ESW" && python3 "$ES99" worktree merge-finish 2>&1 ); es_mrc99=$
   && [ "$es_m1" = 0.98.0 ] && [ "$es_mrc99" = 0 ] && [ "$es_m2" = 0.99.0 ] \
   && ok "two sides raised differently (0.98.0 taken over 0.99.0): merge-finish by 0.98.0 refuses naming 0.99.0, and by 0.99.0 leaves 0.99.0" \
   || bad "merge-finish did not keep the later release -- taken $es_m0; 0.98.0 rc=$es_mrc98 ($es_mf98) -> $es_m1; 0.99.0 rc=$es_mrc99 -> $es_m2"
+# (f) cloud mode: in a stale process the refusal comes before any of the command's effects. unlink --from-disk, offline,
+# refuses in one line with .hi2vi/ and the [cloud] table as they were (and runs after the rollback edit); against the
+# fake, a linked next whose pull brings a later stamp leaves a pending web add pending (never refused) and sends
+# nothing, and a current engine's next then applies it.
+newtmp ESC; mkhost "$ESC" >/dev/null 2>&1; ES="$ESC/.sikstack"
+set_link "$ES" "http://127.0.0.1:9"; mkdir -p "$ES/.hi2vi"; printf '{"head": 3, "files": {}}\n' > "$ES/.hi2vi/base.json"
+git -C "$ES" add -A && git -C "$ES" commit -qm "linked, offline"; es_set "$ES" 0.99.0
+es_u=$( cd "$ES" && python3 "$ENG" unlink --from-disk 2>&1 ); es_urc=$?
+es_kept=no; [ -f "$ES/.hi2vi/base.json" ] && grep -q '^\[cloud\]' "$ES/config.toml" && es_kept=yes
+es_set "$ES" "$ES_RUN"
+es_u2=$( cd "$ES" && python3 "$ENG" unlink --from-disk 2>&1 ); es_u2rc=$?
+( cd "$ES" && python3 "$ENG" next >/dev/null 2>&1 ); es_n3rc=$?
+[ "$es_urc" = 1 ] && [ "$(printf '%s\n' "$es_u" | grep -c .)" = 1 ] && printf '%s\n' "$es_u" | grep -q "^sikstack $ES_RUN is older than sikstack 0.99.0, " \
+  && [ "$es_kept" = yes ] && [ "$es_u2rc" = 0 ] && ! grep -q '^\[cloud\]' "$ES/config.toml" && [ "$es_n3rc" = 0 ] \
+  && ok "unlink --from-disk offline against a stamp of 0.99.0 refuses in one line with .hi2vi/ and the [cloud] table untouched; after the rollback edit it runs and next exits 0" \
+  || bad "a stale unlink --from-disk landed halfway -- rc=$es_urc ($es_u) kept=$es_kept; after the rollback rc=$es_u2rc ($es_u2), next rc=$es_n3rc"
+newtmp ESF; mkhost "$ESF/a" >/dev/null 2>&1; ES="$ESF/a/.sikstack"
+printf 'stamp-smoke-key\n' > "$ESF/key"; chmod 600 "$ESF/key"
+python3 "$PLUGIN/tests/fake_sikstack.py" --dir "$ESF/fake" --port-file "$ESF/port" --key-file "$ESF/key" \
+  --project proj-1 --org org-1 --lifetime 300 > "$ESF/fake.txt" 2>&1 &
+ES_PID=$!
+for _ in $(seq 1 100); do [ -s "$ESF/port" ] && break; sleep 0.1; done
+ESS="http://127.0.0.1:$(cat "$ESF/port" 2>/dev/null)"
+# es_fake <method> <path> [json]: a test-only request to the fake; prints the answer's JSON.
+es_fake() { python3 - "$ESS" "$@" <<'PY'
+import http.client, sys
+from urllib.parse import urlparse
+u = urlparse(sys.argv[1])
+conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+conn.request(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None, {"Content-Type": "application/json"})
+print(conn.getresponse().read().decode())
+PY
+}
+es_state() { es_fake GET /_fake/inbox | python3 -c 'import json, sys; print({e["id"]: e["state"] for e in json.load(sys.stdin)["entries"]}.get(sys.argv[1]))' "$1"; }
+printf 'stamp-smoke-key\n' | ( cd "$ES" && XDG_CONFIG_HOME="$ESF/xdg" python3 "$ENG" link "$ESS/projects/proj-1" ) > "$ESF/link.txt" 2>&1
+es_fake POST /_fake/write '{"path": "works/engine.json", "content": "{\n  \"version\": \"0.99.0\"\n}\n"}' >/dev/null
+es_id=$(es_fake POST /_fake/inbox '{"kind": "add", "minted_id": "A3-x2", "items": ["A3-x2"], "fields": {"title": "from the web"}}' | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])')
+es_m=$(grep -c '' "$ESF/fake/requests.jsonl")
+( cd "$ES" && XDG_CONFIG_HOME="$ESF/xdg" python3 "$ENG" next ) > "$ESF/n1.txt" 2>&1; es_n1rc=$?
+es_s1=$(es_state "$es_id"); es_c1=$(tail -n +"$((es_m + 1))" "$ESF/fake/requests.jsonl" | grep -c '/commit"')
+( cd "$ES" && XDG_CONFIG_HOME="$ESF/xdg" python3 "$ES99" next ) > "$ESF/n2.txt" 2>&1; es_n2rc=$?
+es_s2=$(es_state "$es_id")
+kill "$ES_PID" 2>/dev/null; wait "$ES_PID" 2>/dev/null
+[ "$es_n1rc" = 0 ] && [ "$es_s1" = pending ] && [ "$es_c1" = 0 ] && [ "$(es_stamp "$ES")" = 0.99.0 ] && grep -q "^warning: sikstack $ES_RUN is older than sikstack 0.99.0" "$ESF/n1.txt" \
+  && [ "$es_n2rc" = 0 ] && [ "$es_s2" = applied ] && [ -f "$ES/works/agenda/A3-x2/agenda.json" ] \
+  && ok "linked, the pull brings a stamp of 0.99.0: next exits 0 with the warning, sends no commit and leaves the web's pending add pending; a 0.99.0 engine's next then applies it" \
+  || bad "a stale linked next answered the inbox -- rc=$es_n1rc state=$es_s1 commits=$es_c1 stamp=$(es_stamp "$ES") ($(tail -2 "$ESF/n1.txt" | tr '\n' ' ')); current rc=$es_n2rc state=$es_s2 ($(tail -2 "$ESF/n2.txt" | tr '\n' ' '))"
 
 # ---------------------------------------------------------------------------
 echo "== Test 41: the Migration notes after an update -- against a stamp of 0.8.0 the session-start hook prints, after the card, one block of the notes of each release after 0.8.0 (newest first, within HOOK_CAP); an equal stamp leaves the card byte-identical; a later stamp gets the update line; on compact the block shows once, before the resume card, and fit() keeps card and notes whole; the first command that raises the stamp prints the same block on stderr once (a --json stdout stays valid), the next none =="
