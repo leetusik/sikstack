@@ -23,6 +23,15 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
 - **A stale build is caught at publish.** When the manifest names its source commit and the design folder sits in a
   git repo, a build made from another commit than that repo's `HEAD` is refused: build the folder again after the
   commit. A build made from uncommitted changes still publishes, with one `stale:` line saying so.
+- **Every design stop publishes to sikstack web, for every user.** `design-cowork`'s Show step now runs in one
+  order: commit the design folder, build, serve on loopback for the layout check, `design-publish --page …` (one per
+  page in the brief), then stop with the build's list page (`url=`) first in the report. A revise pass repeats it.
+  Publishing no longer waits for the operator's words, and it is still never a sign-off.
+  - With no design link yet, the first stop leads with `design-link`'s connect page and code; once connected, it
+    publishes. A local URL is reported only when the operator has no account or declines one, named as the fallback.
+  - A claude.ai canvas stays a copy made only when asked (or by the repo's `Design:` line), beside sikstack web.
+  - The skill's publishing detail moved to `design-cowork`'s `reference/publish.md`.
+  - `create-phase` tells the operator a design is published to sikstack web at every stop, not served locally.
 - **Migration notes:** nothing to run. A build made before the commit it should show is now refused; rebuild it.
 
 ## 0.8.0 — 2026-11-26

@@ -491,7 +491,7 @@ def add_design_parsers(sub) -> None:
                        f"unmarked or over a cap ({_mb(CAP_UNPACKED)} unpacked, {CAP_FILES:,} files, {_mb(CAP_COMPRESSED)} "
                        "compressed); prints the URL to open the build at (its viewer on sikstack; the build's own host is host=) "
                        "and whether it is private (a --data local/<name> recording)",
-                       description="Run only when the operator's words ask to publish; publishing is never a sign-off. "
+                       description="Run at every design stop (design-cowork's Show step); publishing is never a sign-off. "
                        "Every publish is a new build, kept beside the earlier ones. When the manifest names its source "
                        "commit and the folder sits in a git repo, a build made from another commit than that repo's HEAD "
                        "is refused (build again after the commit), and one made from uncommitted changes publishes with "
