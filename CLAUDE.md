@@ -8,12 +8,12 @@ The Library and Feedback at <https://sikstack.com>: a document API, a web app, a
 - `server/feedback_api.py` serves the Feedback REST surfaces over `server/feedback/` (domain, storage, the owner alert); dormant without `DATABASE_URL`.
 - `web/`: the Next.js web app (pnpm). `web/public/SKILL.md` is the explain skill served at `/SKILL.md`.
 - `cli/` (the `knowledge` CLI), `mcp-server/` (MCP over HTTP: `/mcp` for Library retrieval, `/feedback/mcp` for write-only Feedback capture), `tools/listen-runner/` (the Mac Listen runner, a LaunchAgent): each its own uv project with its own tests.
-- `plugins/explain/`: the explain plugin, `explain@sikstack`, on hold (`skills/explain`, `skills/setup`, `agents/explain-critic.md`) and `templates/kb/`, the self-host scaffold. `.claude-plugin/marketplace.json` lists it after `sikstack`; `.agents/skills/explain/SKILL.md` is the portable explain copy.
+- `plugins/explain/`: the explain plugin, `explain@sikstack`, on hold (`skills/explain`, `skills/setup`, `agents/explain-critic.md`) and `templates/kb/`, the self-host scaffold. It is off `.claude-plugin/marketplace.json` until it is offered; `.agents/skills/explain/SKILL.md` is the portable explain copy.
 - `deploy/`: the box's deploy scripts and nginx vhosts (the apex `sikstack.conf`, the design builds' hosts `sikstack-design.conf`; the old domain's `hi2vi.conf`, `knowledge.conf` and `vocky.conf` redirect only). `compose.prod.yml` is production; `compose.yml` is local.
 - `docs/`: the library's content root (the box writes tenant #1's projects under `docs/<project>/`), plus the MkDocs site sources the scaffold ships (`index.md`, `tags.md`, `graph.md`, `assets/`, `javascripts/`, `stylesheets/`, `mkdocs.yml`).
 - `scripts/`: the parity guards, the smokes and the book migration.
 - `skills/vocky-feedback/SKILL.md`: the Feedback capture skill, served at `/feedback/SKILL.md`.
-- `plugins/sikstack/`: the sikstack plugin, the workflow engine's source (`scripts/`, the Claude Code adapter in `adapters/claude_code/`, `skills/`, `agents/`, `hooks/`, `bin/`, `templates/`, `tests/`); listed first in `.claude-plugin/marketplace.json`. Its history came over from bootstrap_agentic_workspace.
+- `plugins/sikstack/`: the sikstack plugin, the workflow engine's source (`scripts/`, the Claude Code adapter in `adapters/claude_code/`, `skills/`, `agents/`, `hooks/`, `bin/`, `templates/`, `tests/`); the one plugin `.claude-plugin/marketplace.json` lists. Its history came over from bootstrap_agentic_workspace.
 
 ## Commands
 
@@ -36,9 +36,9 @@ The Library and Feedback at <https://sikstack.com>: a document API, a web app, a
 
 ## Release
 
-Users install `explain@sikstack` from `.claude-plugin/marketplace.json` and pull an update only when `plugins/explain/.claude-plugin/plugin.json`'s `version` changes, so any change under `plugins/explain/**` ships with a version bump. The release checklist (parity, `claude plugin validate`, the scaffold rehearsal) is in `plugins/explain/README.md`.
+Users install `sikstack@sikstack` from `.claude-plugin/marketplace.json` and pull an update only when its `version` changes: any change under `plugins/sikstack/**` bumps `plugins/sikstack/.claude-plugin/plugin.json`'s semver `version` and adds its entry to `plugins/sikstack/CHANGELOG.md`, in the same PR (CI checks the bump).
 
-The same holds for `sikstack@sikstack`: any change under `plugins/sikstack/**` bumps `plugins/sikstack/.claude-plugin/plugin.json`'s semver `version` and adds its entry to `plugins/sikstack/CHANGELOG.md`, in the same PR (CI checks the bump).
+`explain@sikstack` is on hold and off the marketplace. When it is offered again, any change under `plugins/explain/**` ships with a bump of `plugins/explain/.claude-plugin/plugin.json`'s `version`; its release checklist (parity, `claude plugin validate`, the scaffold rehearsal) is in `plugins/explain/README.md`.
 
 ## Deploy
 

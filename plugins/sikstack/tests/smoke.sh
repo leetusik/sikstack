@@ -5501,7 +5501,7 @@ su_diff=$(diff "$SUW/settings.before" "$SUW/cfg/settings.json" | grep '^[<>]')
 su_json=$(python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2])); a["autoCompactWindow"]=500000; print(a==b)' "$SUW/settings.before" "$SUW/cfg/settings.json")
 [ "$su_rc" = 0 ] && [ "$su_rc2" = 0 ] && [ "$su_rc3" = 0 ] && [ -n "$su_id" ] && [ "$su_id" = "$su_id3" ] && [ "$su_n2" = 1 ] && [ "$su_body" = ok ] \
   && grep -q '^registration: a@example.com registered with ' "$SUW/a1.txt" && grep -q 'already registered' "$SUW/a2.txt" \
-  && [ "$su_diff" = '>   "autoCompactWindow": 500000,' ] && [ "$su_json" = True ] && grep -q 'autoCompactWindow: already 500000' "$SUW/a2.txt" \
+  && [ "$su_diff" = '>   "autoCompactWindow": 500000,' ] && [ "$su_json" = True ] && grep -q '^compaction window: already 500k in ' "$SUW/a2.txt" && grep -q '^compaction window: set to 500k in ' "$SUW/a1.txt" && grep -qE '^install id: [0-9a-f-]{36} \(made now\)$' "$SUW/a1.txt" && grep -qE '^install id: [0-9a-f-]{36} \(kept\)$' "$SUW/a2.txt" \
   && [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$SUW/data/registration.json")" = registered ] \
   && ok "setup registers exactly {install_id, email, plugin_version} (no auth) once per new email under one install id, and adds only the autoCompactWindow line to the user settings" \
   || bad "setup with the server up -- rc=$su_rc/$su_rc2/$su_rc3 id=$su_id/$su_id3 reqs-after-rerun=$su_n2 body=$su_body diff=[$su_diff] json=$su_json $(cat "$SUW/a1.txt")"

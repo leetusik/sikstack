@@ -47,23 +47,7 @@ code you confirm does.
 - **Workspace**: a connected repo's phases, slices and verdicts, its agenda and its docs.
 - **Library**: books and documents your agents write for you to read, grounded in the code; read, listen,
   review with a quiz, search in English and Korean, and publish a project's documents in your org's public library.
-- **Feedback**: what your users said, captured from your product over REST or MCP with a capture-only key.
-
-Agents can also write to sikstack directly: the `knowledge` CLI (`curl -fsSL https://sikstack.com/install.sh |
-bash`, see [`cli/README.md`](cli/README.md)), or plain REST with `KB_API_BASE_URL=https://sikstack.com` and an
-org key. The Feedback capture skill for agents is published at
-[`/feedback/SKILL.md`](https://sikstack.com/feedback/SKILL.md), and the MCP endpoints are described in
-[`mcp-server/CONTRACT.md`](mcp-server/CONTRACT.md).
-
-## Running it yourself
-
-There is no packaged self-host install yet. What this repository supports today:
-
-- `docker compose up -d` (`compose.yml`) starts the document API, its Postgres and the docs viewer locally;
-  `docker compose exec api alembic upgrade head` creates the accounts tables.
-- `pnpm --dir web dev` serves the web app (`web/`, Next.js), against that API.
-- Production runs as one box behind an nginx edge; its runbook is [`deploy/README.md`](deploy/README.md).
-- The plugin talks to the server `SIKSTACK_SERVER` names, `https://sikstack.com` when it is unset.
+- **Feedback**: what your users said, captured from your product with a capture-only key.
 
 ## What is in this repository
 
@@ -71,9 +55,9 @@ There is no packaged self-host install yet. What this repository supports today:
   ([`CHANGELOG.md`](plugins/sikstack/CHANGELOG.md)). Its history before the move is
   `leetusik/bootstrap_agentic_workspace.sh`'s.
 - `plugins/explain/`: a second plugin, `explain`, that writes a chapter from the code and your phases' records
-  into your Library. It is on hold and not offered yet.
+  into your Library. It is on hold and not in the marketplace yet.
 - `server/`, `web/`, `cli/`, `mcp-server/`, `tools/listen-runner/`: the services behind sikstack.com.
-- `.claude-plugin/marketplace.json`: the marketplace that lists both plugins.
+- `.claude-plugin/marketplace.json`: the marketplace, which lists the sikstack plugin.
 
 ## Credits
 
