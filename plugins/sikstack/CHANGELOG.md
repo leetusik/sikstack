@@ -46,7 +46,7 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   widths (a fixed header over the first link or heading, a sticky one pulled over it, a foot bar over the last
   link, a lifted badge, a stray scrim beside an open disclosure, a 0 x 0 wrapper's text and two disabled labels
   fail; a header with its room kept, an open menu and a menu its trigger names by `aria-controls` pass), and on
-  WebKit 18.2 at 375 (B1's stat strip, and the fixed header over the first link) when its
+  WebKit 18.2 at 375 (a stat grid that is its own size container, and the fixed header over the first link) when its
   driver is installed (the smoke never downloads it). `canvas_shoot.mjs` shoots three widths.
 
 **Migration notes.** The first design check with a phone width downloads WebKit 18.2's driver (npm and network
