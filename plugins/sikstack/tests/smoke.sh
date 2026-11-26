@@ -5136,19 +5136,22 @@ if ! grep -q 'design_preview\|design_root\|```python' "$PLUGIN/agents/design-cri
     else ok "canvas.mjs's shots in a browser (playwright-cli absent: skipped)"; fi
     # 0.11.0: the layout check over fixture pages in a real browser (tests/check_fixtures.mjs serves them). In Chrome at
     # 1440, 768 and 375: two labels on one spot, two spans pulled together in one link and a fixed bar over a page that
-    # cannot scroll fail overlap; a skip link in an opacity-0 band, a fixed bar over scrolling text and an open menu do
-    # not. On WebKit 18.2 at 375 (only when its driver is already installed: nothing is downloaded here), B1's stat
-    # strip (an auto-fit grid that is its own size container) fails overlap, the same strip fixed passes, and Chrome
-    # passes both.
+    # cannot scroll fail overlap; so does what is painted and in the way at rest and cannot be moved off what it covers
+    # (a fixed header over the first link or heading, a sticky one pulled over it, a foot bar over the last link at the
+    # end of the scroll, a lifted badge, a stray scrim beside an open disclosure, a 0 x 0 wrapper's text, two disabled
+    # labels). A skip link in an opacity-0 band, a fixed bar over text the page scrolls out from under it, a header
+    # with its room kept, a sticky header in place and an open menu do not. On WebKit 18.2 at 375 (only when its
+    # driver is already installed: nothing is downloaded here), B1's stat strip (an auto-fit grid that is its own size
+    # container) fails overlap and Chrome passes it, the same strip fixed passes, and the fixed header fails as in Chrome.
     if command -v playwright-cli >/dev/null 2>&1; then
       ck_fx=$(node "$PLUGIN/tests/check_fixtures.mjs" chromium 2>&1); ck_fx_rc=$?
       [ "$ck_fx_rc" = 0 ] && [ "$ck_fx" = "chromium ok" ] \
-        && ok "the layout check in Chrome (fixtures): overlapping text of different elements fails, at 1440, 768 and 375; an opacity-0 skip link, a fixed bar over scrolling text and an open menu pass" \
+        && ok "the layout check in Chrome (fixtures), at 1440, 768 and 375: overlapping text of different elements fails, and so does an overlap no scroll or close moves off (a fixed header over the first link, a foot bar over the last, a lifted badge, a stray scrim beside an open disclosure); an opacity-0 skip link, a bar the page scrolls out from under, a header with its room kept and an open menu pass" \
         || bad "the layout check's fixtures in Chrome (rc=$ck_fx_rc) -- $(printf '%s' "$ck_fx" | head -4 | tr '\n' '|')"
       if CK_FILE="$PLUGIN/templates/design/check.mjs" node --input-type=module -e 'import { pathToFileURL } from "node:url"; const m = await import(pathToFileURL(process.env.CK_FILE).href); process.exit(m.webkitReady() ? 0 : 1);' 2>/dev/null; then
         ck_wkf=$(node "$PLUGIN/tests/check_fixtures.mjs" webkit 2>&1); ck_wkf_rc=$?
         [ "$ck_wkf_rc" = 0 ] && [ "$ck_wkf" = "webkit ok" ] \
-          && ok "the layout check on WebKit 18.2 (fixtures): B1's stat strip fails overlap at w=375 webkit only; the fixed strip passes" \
+          && ok "the layout check on WebKit 18.2 (fixtures): B1's stat strip fails overlap at w=375 webkit only; the fixed strip passes; a fixed header over the first link fails there too" \
           || bad "the layout check's fixtures on WebKit (rc=$ck_wkf_rc) -- $(printf '%s' "$ck_wkf" | head -4 | tr '\n' '|')"
       else ok "the layout check on WebKit 18.2 (its driver not installed here: skipped)"; fi
     else ok "the layout check's fixtures in a browser (playwright-cli absent: skipped)"; fi

@@ -65,9 +65,12 @@ It walks every page of the manifest (or the URLs given) and each state its widge
 cropped screenshot: console errors and failed requests, sideways overflow, clipped text, overlapping or covered
 controls, text drawn on top of other text, targets under 24 px. The phone width runs twice: in Chrome, and in WebKit
 18.2 with the iPhone 13 Mini profile (every iOS browser is WebKit, and this old one shows grid bugs newer builds
-hide); its failures read `w=375 webkit`. The WebKit driver, playwright-core 1.49.1, installs on first use into the
-user's cache (about 63 MiB, once; `SIKSTACK_WEBKIT_HOME` moves it); when it cannot be installed or launched the check
-stops with a driver error, and `--no-webkit` skips it on purpose. A brief that names fewer devices passes their
+hide); its failures read `w=375 webkit`. The WebKit driver, playwright-core 1.49.1 and its browser, installs on first
+use into one folder in the user's cache (a download of about 63 MiB, about 250 MB on disk, once;
+`SIKSTACK_WEBKIT_HOME` moves all of it); when it cannot be installed or launched the check stops with a driver error,
+and `--no-webkit` skips it on purpose. An overlap passes only under an opened menu or dialog, or under a fixed bar
+that some scroll position moves off what it covers: a header over the first line, a foot bar over the last at the
+end of the scroll, or a lifted badge over a link fails. A brief that names fewer devices passes their
 widths (`--widths 1440` for a desktop-only tool). Every run (a page, at one width, in one state)
 opens in a fresh browser context, so no state a run stores reaches the next, and a page with a state widget must
 show the state its run names, else `FAIL state` and that run is not measured. A clean build prints one `ok` line;

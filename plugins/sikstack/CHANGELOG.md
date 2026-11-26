@@ -20,22 +20,34 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
 - **The phone width also runs on WebKit.** Every width under 600 runs a second time in WebKit 18.2 with the
   iPhone 13 Mini profile, after Chrome's runs; its failures read `w=375 webkit`. This old WebKit is pinned because
   it shows a grid bug newer builds hide: an auto-fit grid that is its own size container lays out 0 px columns, and
-  its tiles land on one spot. The driver is playwright-core 1.49.1, installed on first use into the user's cache
-  (`~/Library/Caches/sikstack/` on a Mac, `~/.cache/sikstack/` elsewhere; about 63 MiB once;
-  `SIKSTACK_WEBKIT_HOME` moves it), never into a repo. When it cannot be installed or launched, the check stops with
+  its tiles land on one spot. The driver, playwright-core 1.49.1 and its WebKit build, installs on first use into
+  one folder in the user's cache (`~/Library/Caches/sikstack/playwright-core-1.49.1/` on a Mac,
+  `~/.cache/sikstack/…` elsewhere), the browser in its `browsers/` (`PLAYWRIGHT_BROWSERS_PATH`, for the install and
+  the launch), never into a repo or Playwright's shared cache; `SIKSTACK_WEBKIT_HOME` moves all of it. Once: a
+  download of about 63 MiB, about 250 MB on disk. When it cannot be installed or launched, the check stops with
   a driver error naming WebKit (exit 2) before measuring anything; `--no-webkit` skips it on purpose, and the `ok`
   line says so. The same page script runs on both drivers. On WebKit a page laid out wider than the phone (no
   `<meta name="viewport">`) fails `overflow`.
 - **Overlapping text fails `overlap`.** Two runs of text of different elements drawn on one spot fail, not only
-  overlapping controls: two labels on one grid cell, two spans pulled together inside one link. What is not painted
+  overlapping controls: two labels on one grid cell, two spans pulled together inside one link, a tooltip in a
+  0 x 0 wrapper over a heading, two disabled buttons' labels. A run is its text's own line boxes. What is not painted
   is skipped (an `opacity: 0` ancestor, such as a skip link's band before it has focus; `visibility: hidden`;
-  visually hidden text), and what lies over the page on purpose is not compared with what is under it, for text and
-  for controls: an open menu or dialog with its backdrop (a transparent dismiss scrim only while something is open),
-  and a fixed or sticky bar while the page scrolls out from under it. So an open org menu, and a landing's skip link
-  before it has focus, no longer fail `overlap`. Crops are taken at CSS pixels.
+  `display: none`; clipped away).
+- **An overlap passes only when the layer on top lies over the page on purpose and what it covers can be moved
+  off it**, for text and controls alike. An opened layer (a dialog or popover open, an `aria-modal` box, or the
+  out-of-flow popup of an `aria-expanded="true"` trigger, the one `aria-controls` names or the box right after it)
+  and its full-window backdrop pass: the reader closes them. A fixed header or foot bar passes only over what some
+  scroll position shows whole and clear of it, so a header over the page's first line, or a foot bar over its last
+  at the end of the scroll (measured there too), fails. A sticky bar is measured in its place at rest. A box lifted
+  by `z-index` with a fill, or a transparent scrim, is the page unless it is opened. So an open org menu, and a
+  landing's skip link before it has focus, do not fail `overlap`; a badge over a link does. Crops are taken at CSS
+  pixels.
 - **Tests.** `tests/check_fixtures.mjs` serves fixture pages and runs the check over them: in Chrome at the three
-  widths, and on WebKit 18.2 at 375 when its driver is installed (the smoke never downloads it). `canvas_shoot.mjs`
-  shoots three widths.
+  widths (a fixed header over the first link or heading, a sticky one pulled over it, a foot bar over the last
+  link, a lifted badge, a stray scrim beside an open disclosure, a 0 x 0 wrapper's text and two disabled labels
+  fail; a header with its room kept, an open menu and a menu its trigger names by `aria-controls` pass), and on
+  WebKit 18.2 at 375 (B1's stat strip, and the fixed header over the first link) when its
+  driver is installed (the smoke never downloads it). `canvas_shoot.mjs` shoots three widths.
 
 **Migration notes.** The first design check with a phone width downloads WebKit 18.2's driver (npm and network
 needed once). Offline, pass `--no-webkit`.
