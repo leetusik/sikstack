@@ -80,6 +80,16 @@ const miss = (error: unknown): never => {
   throw error;
 };
 
+/**
+ * The reader's own state is optional (P75): a signed-in reader of another org who opened the book by its link
+ * reads the book with no state (the reader-state routes answer their 404, and a lapsed session its 401), so
+ * those read as none; any other fault still throws.
+ */
+const noState = (error: unknown): null => {
+  if (error instanceof ApiError && [401, 403, 404].includes(error.status)) return null;
+  throw error;
+};
+
 /** The org segment of a canonical path (`/@{org}/…`), or the one asked for. */
 function canonicalOrg(book: KbBook, asked: string): string {
   const m = /^\/@([^/]+)\//.exec(book.canonical_path ?? "");
@@ -162,7 +172,7 @@ export async function loadBook(
   const [book, state]: [KbBook, KbReaderBook | null] = await Promise.all([
     getBook(token, org, project, bookSlug).catch(miss),
     token
-      ? getReaderBook(token, org, project, bookSlug).catch(miss)
+      ? getReaderBook(token, org, project, bookSlug).catch(noState)
       : Promise.resolve(null),
   ]);
   const owner = canonicalOrg(book, org);
@@ -390,6 +400,7 @@ export async function loadBook(
     title: book.title,
     viewer,
     signedIn,
+    share: viewer === "member" ? (book.share ?? null) : null,
     head: headOf({
       title: book.title,
       sub: book.sub?.trim() ?? "",

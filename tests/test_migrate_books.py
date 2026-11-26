@@ -23,7 +23,7 @@ from uuid import uuid4
 import pytest
 
 from tests.test_documents_api import _project, _signup, documents_client  # noqa: F401
-from tests.test_public_read import _set_public
+from tests.test_public_read import _fill, _set_public
 
 _SPEC = importlib.util.spec_from_file_location(
     "migrate_books", Path(__file__).resolve().parents[1] / "scripts" / "migrate_books.py"
@@ -113,13 +113,14 @@ def test_migration_binds_books_and_preserves_every_link(library, documents_clien
     email = f"op-{uuid4()}@example.com"
     session_headers, _tenant = _signup(client, email)
     monkeypatch.setenv("KB_OPERATOR_EMAIL", email)
-    # P34: tenant #1 commits only public projects, so both projects go public first.
+    # Both projects are public, so their items read Public (the link checks read them).
     for name in ("alpha", "beta"):
         _set_public(client, session_headers, _project(client, session_headers, name))
     org = f"org-{uuid4().hex[:10]}"
     assert client.patch("/app/tenant", json={"slug": org}, headers=session_headers).status_code == 200
     bearer = {"Authorization": f"Bearer {MASTER}"}
     assert client.post("/api/reindex", headers=bearer).status_code == 200
+    _fill(client)  # day one: the public projects' existing items read Public
 
     # /explain already placed a chapter in a mapped book: the migration must keep it.
     r = client.post("/api/documents", headers=bearer, json={
@@ -150,10 +151,9 @@ def test_migration_binds_books_and_preserves_every_link(library, documents_clien
     # resolving before and identical after (run() asserts both).
     assert first["checks"] == 6 * 3 + 1
 
-    # No document file was rewritten; the new commits touch only book manifests.
+    # No document file was rewritten, and nothing was committed (no git publish).
     assert _file_hashes(docs) == files_before
-    changed = _git(root, "diff", "--name-only", head_before, "HEAD").split()
-    assert changed and all(path.startswith("docs/.books/") for path in changed)
+    assert _git(root, "rev-parse", "HEAD").strip() == head_before
     # The tool only reads and PUTs books: never the publish endpoint.
     assert {m for m, p in calls if not p.startswith(("/api/books/",))} == {"GET"}
     assert all(p.startswith("/api/books/") for m, p in calls if m == "PUT")

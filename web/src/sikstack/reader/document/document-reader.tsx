@@ -68,6 +68,9 @@ import { ReaderFoot } from "../reader-foot";
 import { ReaderHead } from "../reader-head";
 import { slotOf, slotWants } from "../slot";
 import { DocumentBookmarks } from "./document-notes";
+import type { ItemShare, ShareTarget } from "@/lib/sharing/model";
+import { ShareControl } from "@/sikstack/reader/share-control";
+
 import { DocumentPhases } from "./document-phases";
 import {
   documentBack,
@@ -124,6 +127,8 @@ export interface DocumentReaderProps {
   listen?: ListenSeed | null;
   /** The phases the document was explained from (`phaseRows`, `withDocumentPhases`); none: nothing shows. */
   phases?: readonly DocPhaseRow[];
+  /** A member's sharing switch for this document (P75, `withDocumentShare`); absent: nothing shows. */
+  share?: { target: ShareTarget; share: ItemShare } | null;
   // The text (`ChapterBody`).
   children?: ReactNode;
 }
@@ -139,6 +144,7 @@ export function DocumentReader({
   timeZone,
   listen = null,
   phases = [],
+  share = null,
   children,
 }: DocumentReaderProps) {
   const router = useRouter();
@@ -502,6 +508,7 @@ export function DocumentReader({
                         onDismiss={() => setAsking(false)}
                       />
                       <DocumentPhases rows={phases} />
+                      {share ? <ShareControl target={share.target} share={share.share} /> : null}
                     </article>
                   </main>
                 </div>

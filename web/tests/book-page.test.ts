@@ -241,6 +241,7 @@ function view(): BookView {
     back: { href: "/library", label: "Library" },
     homeHref: "/library",
     signInHref: "/login",
+    share: null,
   };
 }
 

@@ -226,8 +226,8 @@ def test_annotation_reads_carry_the_callers_own_card_status(rv):
     client, _, _ = rv
     a, a_tenant, pid = _member(client, "cs")
     b, _ = _signup(client, f"cs2-{uuid4()}@example.com")
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
-    _, doc = _doc(a_tenant, "lab", "lantern")
+    doc_id, doc = _doc(a_tenant, "lab", "lantern")
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     key = _key(a_tenant, "lab", doc)
     mine = _highlight(client, a, key)
     theirs = _highlight(client, b, key)
@@ -253,8 +253,8 @@ def test_unreadable_cards_are_hidden_and_writes_404(rv):
     client, _, _ = rv
     a, a_tenant, pid = _member(client, "ua")
     b, _ = _signup(client, f"ub-{uuid4()}@example.com")
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
     doc_id, doc = _doc(a_tenant, "lab", "lantern")
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     key = _key(a_tenant, "lab", doc)
     _answer(client, b, key, "q1", got=False)
     ann = _highlight(client, b, key)
@@ -265,8 +265,8 @@ def test_unreadable_cards_are_hidden_and_writes_404(rv):
     # Another user's card ids are the constant 404.
     assert _rate(client, a, ids[0], "good").status_code == 404
 
-    # Private: nothing in the queue, the counts or by book; every write is a 404.
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "private"}, headers=a).status_code == 200
+    # Members-only: nothing in the queue, the counts or by book; every write is a 404.
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "members"}, headers=a).status_code == 200
     q = _queue(client, b)
     assert q["cards"] == [] and q["next_due_at"] is None and q["limit_reached"] is None
     assert (q["counts"]["due"], q["counts"]["new_highlights"], q["counts"]["by_book"]) == (0, 0, [])
@@ -276,7 +276,7 @@ def test_unreadable_cards_are_hidden_and_writes_404(rv):
                             json={"status": "suspended"}).status_code == 404
 
     # Access returns: the cards come back unchanged.
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     assert len(_queue(client, b)["cards"]) == 2
 
     # The document is deleted: its cards go with it.

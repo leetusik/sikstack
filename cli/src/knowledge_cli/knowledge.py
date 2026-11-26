@@ -569,10 +569,8 @@ def cmd_save(args: argparse.Namespace) -> int:
             f"the server never answered the save ({lost_reply}), but the document "
             f"IS there — verified by reading {payload.get('rel_path')} back. Nothing "
             "was re-sent, so there is no duplicate and no extra version. The write "
-            "is durable; any publishing to the remote is the server's own background "
-            "work and does not need you. What follows is that read-back document, "
-            "not the lost write response, so it carries no `url`, `committed` or "
-            "`push_pending` field."
+            "is durable. What follows is that read-back document, not the lost write "
+            "response, so it carries no `url` or `share` field."
         )
 
     for line in native.warning_lines(payload):
@@ -588,6 +586,8 @@ def cmd_save(args: argparse.Namespace) -> int:
     # write responses), so a recovered save prints no url rather than a guessed one.
     if payload.get("url"):
         print(f"  url:  {payload.get('url')}")
+    if payload.get("share"):
+        print(f"  share: {payload.get('share')}  (change it: knowledge share {payload.get('rel_path')} members|link|public)")
     print(f"  read: knowledge read {payload.get('id')}")
     if payload.get("assigned_ids"):
         print(f"  ids assigned by the server: {len(payload['assigned_ids'])}")
@@ -704,6 +704,7 @@ def _publish_fields(args: argparse.Namespace, *, verb: str) -> dict[str, Any]:
         "overwrite": args.overwrite,
         "co_authored_by": args.co_authored_by,
         "extra": extra,
+        "share": args.share,
     }
 
 
@@ -889,6 +890,42 @@ def cmd_read(args: argparse.Namespace) -> int:
     return 0
 
 
+SHARE_STATES = ("members", "link", "public")
+
+
+def cmd_share(args: argparse.Namespace) -> int:
+    """Set who reads one document or one book: members, link or public.
+
+    TARGET is a document's rel_path (as `knowledge list` prints it, with its `/` and
+    extension) or a book's slug (in --project, else this repo's project). A chapter
+    has no sharing of its own: naming one sets its book's. `link` prints the link
+    anyone can read signed out; turning it off (members or public) kills that link,
+    and turning it on again makes a new one.
+    """
+
+    target = args.target
+    is_document = "/" in target
+    project = None
+    if not is_document:
+        project = validate_project(args.project or default_project(), derived=not args.project)
+    with KnowledgeClient(args.base_url, token=api_token()) as client:
+        payload = api_call(
+            client.share_set,
+            state=args.state,
+            document=target if is_document else None,
+            book=None if is_document else target,
+            project=project,
+        )
+    if emit(payload, args.json):
+        return 0
+    share = payload.get("share") or {}
+    what = "book" if share.get("kind") == "book" else "document"
+    print(f"{what} {payload.get('key')} ({payload.get('project')}): {share.get('state')}")
+    if share.get("url"):
+        print(f"  link: {share['url']}")
+    return 0
+
+
 def cmd_projects(args: argparse.Namespace) -> int:
     """List the projects you have saved documents under, with counts."""
 
@@ -993,6 +1030,15 @@ def _add_publish_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--date", metavar="YYYY-MM-DD", help="document date (default: today)")
     p.add_argument(
         "--overwrite", action="store_true", help="replace an existing document at the same path"
+    )
+    p.add_argument(
+        "--share",
+        choices=SHARE_STATES,
+        help=(
+            "who reads it: members (your org), link (anyone with its link) or public; "
+            "a chapter sets its book's. Default: a new item starts at its project's default, "
+            "an existing one keeps its state"
+        ),
     )
     p.add_argument(
         "--format",
@@ -1127,6 +1173,22 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     _add_json(p)
     p.set_defaults(func=cmd_read)
+
+    p = sub.add_parser(
+        "share",
+        help="Set who reads a document or book: members, link or public",
+        description=cmd_share.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "target",
+        metavar="TARGET",
+        help="a document's rel_path (project/YYYY-MM-DD-slug.md) or a book's slug",
+    )
+    p.add_argument("state", choices=SHARE_STATES, help="members, link or public")
+    p.add_argument("--project", help="a book's project (default: this repo's)")
+    _add_json(p)
+    p.set_defaults(func=cmd_share)
 
     p = sub.add_parser(
         "projects",

@@ -211,17 +211,23 @@ export type ProjectCopy = typeof PROJECT;
 export const PROJECT_HOME = {
   head: {
     back: (org: string): string => `Back to ${org}`,
-    badge: { public: "Public", private: "Private" },
+    /**
+     * P75: a project's visibility is only the default its NEW documents and books start at; each item keeps its
+     * own sharing (Members, Anyone with the link, Public), set from the reader.
+     */
+    badge: { public: "New items public", private: "New items members only" },
     created: (when: string): string => `Created ${when}`,
     makePublic: "Make public",
     makePrivate: "Make private",
     saving: "Saving…",
     failed: "Could not update visibility. Try again.",
+    defaultNote:
+      "Sets only what new documents and books start as. Each one keeps its own sharing, changed from the reader.",
     toast: {
       public: (name: string): string =>
-        `${name} is now public. Anyone with the link can read its documents.`,
+        `New documents and books in ${name} now start public. Existing ones keep their sharing.`,
       private: (name: string, org: string): string =>
-        `${name} is now private. Only ${org} can read its documents.`,
+        `New documents and books in ${name} now start for ${org} members only. Existing ones keep their sharing.`,
     },
   },
   workspace: {

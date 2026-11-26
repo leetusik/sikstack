@@ -118,9 +118,9 @@ def test_isolation_another_users_rows_are_404(reader):
     client, _ = reader
     a, a_tenant = _signup(client, f"ra-{uuid4()}@example.com")
     b, _ = _signup(client, f"rb-{uuid4()}@example.com")
-    pid = _project(client, a, "pub")
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
-    _, doc = _seed(a_tenant, "pub", "shared")
+    _project(client, a, "pub")
+    doc_id, doc = _seed(a_tenant, "pub", "shared")
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     ids = _fill(client, a, a_tenant, "pub", doc)
 
     # B reads the same public document and sees none of A's state.
@@ -157,14 +157,14 @@ def test_visibility_private_hides_and_delete_purges(reader):
     client, engine = reader
     a, a_tenant = _signup(client, f"va-{uuid4()}@example.com")
     b, _ = _signup(client, f"vb-{uuid4()}@example.com")
-    pid = _project(client, a, "pub")
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
+    _project(client, a, "pub")
     doc_id, doc = _seed(a_tenant, "pub", "lantern")
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     _fill(client, a, a_tenant, "pub", doc)
     ids = _fill(client, b, a_tenant, "pub", doc)
 
-    # The project turns private: B's reads omit it, B's writes are 404; A still reads.
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "private"}, headers=a).status_code == 200
+    # The document turns Members-only: B's reads omit it, B's writes are 404; A still reads.
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "members"}, headers=a).status_code == 200
     assert client.get(f"/app/reader/docs/{a_tenant}/pub/{doc}", headers=b).status_code == 404
     assert client.get("/app/reader/continue", headers=b).json()["items"] == []
     assert client.get("/app/reader/library", headers=b).json()["docs"] == []
@@ -177,7 +177,7 @@ def test_visibility_private_hides_and_delete_purges(reader):
     assert client.get(f"/app/reader/docs/{a_tenant}/pub/{doc}", headers=a).status_code == 200
 
     # Access returns: the rows were kept, hidden, and come back unchanged.
-    assert client.patch(f"/app/projects/{pid}", json={"visibility": "public"}, headers=a).status_code == 200
+    assert client.put(f"/app/documents/{doc_id}/share", json={"state": "public"}, headers=a).status_code == 200
     back = client.get(f"/app/reader/docs/{a_tenant}/pub/{doc}", headers=b).json()
     assert back["position"]["fraction"] == 0.4 and len(back["bookmarks"]) == 1
     assert len(client.get("/app/reader/continue", headers=b).json()["items"]) == 1

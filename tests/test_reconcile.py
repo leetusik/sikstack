@@ -12,8 +12,8 @@ Postgres for the core cases):
   back from the documents database, and is tracked again in one commit;
 * ``--dry-run`` writes nothing, and the CLI refuses, changing nothing, when the
   registry cannot be read (unknown never means "unpublish everything");
-* the visibility toggle runs it for a tenant #1 project (Postgres-gated, like
-  ``tests/test_private_publish``).
+* the visibility toggle no longer runs it (item sharing made the toggle only new
+  items' default; the CLI stays for a one-off repair).
 """
 from __future__ import annotations
 
@@ -223,7 +223,11 @@ def test_dry_run_writes_nothing_and_the_cli_refuses_an_unreadable_registry(
     assert _snapshot(root) == before
 
 
-def test_the_toggle_mirrors_a_tenant_one_project(documents_client, tmp_path, monkeypatch):  # noqa: F811
+def test_the_toggle_no_longer_touches_git(documents_client, tmp_path, monkeypatch):  # noqa: F811
+    """The visibility toggle is only new items' default now (item sharing): it runs no
+    reconcile, makes no commit and answers no ``publish`` key. The reconcile CLI above
+    stays for an operator's one-off repair."""
+
     client, _ = documents_client
     root = _repo(tmp_path / "kb")
     monkeypatch.setenv("KB_ROOT", str(root))
@@ -236,32 +240,11 @@ def test_the_toggle_mirrors_a_tenant_one_project(documents_client, tmp_path, mon
     monkeypatch.setenv("KB_OPERATOR_EMAIL", email)
     name = "toggle-fixture"
     pid = _project(client, session, name)
-
-    def toggle(visibility):
+    head = _git(root, "rev-parse", "HEAD")
+    for visibility in ("public", "private", "public"):
         res = client.patch(f"/app/projects/{pid}", json={"visibility": visibility}, headers=session)
         assert res.status_code == 200, res.text
+        assert res.json() == {"project": res.json()["project"]}  # no "publish" key
         assert res.json()["project"]["visibility"] == visibility
-        return res.json()["publish"]
-
-    assert toggle("public")["action"] == reconcile.NONE  # nothing on disk yet
-    r = client.post("/api/documents", headers={"Authorization": f"Bearer {MASTER}"}, json={
-        "title": "Shown", "markdown": "# Shown\n\nBody.\n", "project": name,
-        "tags": ["t", "u"], "source_repo": name, "date": "2026-01-01", "slug": "shown",
-    })
-    assert r.status_code == 201 and r.json()["committed"] is True, r.text
-    rel = r.json()["rel_path"]
-
-    off = toggle("private")
-    assert (off["action"], off["committed"], off["error"]) == (reconcile.UNPUBLISH, True, None)
-    assert off["push_pending"] is False  # KB_GIT_PUSH is off
-    assert name not in _git(root, "log", "-1", "--format=%B")
-    assert _git(root, "ls-files", "--", f"docs/{name}") == ""
-    assert (root / "docs" / rel).is_file()
-    assert gitops.private_projects(root) == [name]
-    assert f"]({name}/" not in (root / "docs" / "index.md").read_text(encoding="utf-8")
-
-    on = toggle("public")
-    assert (on["action"], on["committed"], on["error"]) == (reconcile.PUBLISH, True, None)
-    assert f"docs/{rel}" in _git(root, "ls-files", "--", f"docs/{name}").split()
-    assert f"]({rel})" in _git(root, "show", "HEAD:docs/index.md")  # rebuilt from the DB
+    assert _git(root, "rev-parse", "HEAD") == head
     assert gitops.private_projects(root) == []

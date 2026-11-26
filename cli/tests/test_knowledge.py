@@ -62,6 +62,16 @@ class FakeApi:
                     "existing_title": DOC["title"],
                 }})
             return httpx.Response(201, json={**DOC, "url": "http://site.test/x/", "committed": False})
+        if (method, path) == ("POST", "/api/share"):
+            if body.get("document") == "myrepo/nope.md":
+                return httpx.Response(404, json={"detail": "no document at rel_path 'myrepo/nope.md'"})
+            kind = "doc" if "document" in body else "book"
+            url = "http://site.test/s/" + "t" * 32 if body["state"] == "link" else None
+            key = (body.get("document") or "").rsplit("/", 1)[-1][:-3] or body.get("book")
+            return httpx.Response(200, json={
+                "project": body.get("project") or "myrepo", "key": key,
+                "share": {"state": body["state"], "kind": kind, "url": url},
+            })
         if method == "GET" and path.startswith("/api/documents/"):
             if self.absent:
                 return httpx.Response(404, json={"detail": f"no document at {path}"})
@@ -404,3 +414,38 @@ def test_check_exit_codes_are_the_verdict(home, repo, tmp_path, monkeypatch, cap
     assert check() == 2
     answers.append(httpx.ConnectError("connection refused"))
     assert check() == 2
+
+
+# --- item sharing ----------------------------------------------------------------
+
+
+def test_save_sends_share_only_when_asked(home, api, repo, tmp_path):
+    doc = tmp_path / "note.md"
+    doc.write_text("# A note\n\nbody\n")
+    assert run("save", str(doc), "--tag", "a,b") == 0
+    assert "share" not in api.calls[0][3]  # the project's default decides
+    assert run("save", str(doc), "--tag", "a,b", "--share", "members") == 0
+    assert api.calls[1][3]["share"] == "members"
+    with pytest.raises(SystemExit):
+        run("save", str(doc), "--tag", "a,b", "--share", "everyone")
+
+
+def test_share_names_a_document_by_path_and_a_book_by_slug(home, api, repo, capsys):
+    assert run("share", "myrepo/2026-07-17-a-note.md", "link") == 0
+    method, path, bearer, body = api.calls[0]
+    assert (method, path, bearer) == ("POST", "/api/share", f"Bearer {VK}")
+    assert body == {"state": "link", "document": "myrepo/2026-07-17-a-note.md"}
+    out = capsys.readouterr().out
+    assert "document 2026-07-17-a-note (myrepo): link" in out
+    assert "  link: http://site.test/s/" in out
+
+    assert run("share", "guide", "public") == 0
+    assert api.calls[1][3] == {"state": "public", "book": "guide", "project": "myrepo"}
+    assert run("share", "guide", "members", "--project", "other") == 0
+    assert api.calls[2][3]["project"] == "other"
+    assert "link:" not in capsys.readouterr().out
+
+
+def test_share_of_a_missing_document_is_a_sentence(home, api, repo, capsys):
+    assert run("share", "myrepo/nope.md", "public") != 0
+    assert "no document" in capsys.readouterr().err

@@ -44,10 +44,16 @@ ssh oracle-cloud "sudo grep '^KB_API_TOKEN=' /opt/knowledge/.env"
 
 ---
 
-## 2. SSH deploy key — the publish-on-write push credential
+## 2. SSH deploy key — the box's git credential
 
-The box's api container commits **and pushes** each write to `origin/main`
-(`KB_GIT_PUSH=true`), so it needs a write-capable git credential. We use a
+> **Since item sharing (P75), no Library write commits or pushes** (`server/sharing.py`
+> gates reads; `KB_GIT_PUSH` is no longer read by the write path). The key stays: Production
+> Deploy's reconcile (`deploy/deploy.sh`) fetches `origin/main` with it, and the
+> `python -m server.reconcile --push` repair CLI still pushes. A read-only key would serve
+> the deploy alone; dropping write access waits until that CLI is retired.
+
+The box's api container used to commit **and push** each write to `origin/main`
+(`KB_GIT_PUSH=true`), so it needed a write-capable git credential. We use a
 **repo-scoped SSH deploy key**: smaller blast radius than a personal PAT, and no
 expiry to babysit.
 
