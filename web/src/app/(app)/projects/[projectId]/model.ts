@@ -80,7 +80,7 @@ export interface WorkspaceRun {
 
 /**
  * The Workspace panel's signed sentence for a project whose workspace is not linked or has never
- * synced: its first sentence, then `Run <command> in the project’s repo.`. Without an origin or a
+ * synced: its first sentence, then `Run <command> in a terminal, in the project’s repo, …`. Without an origin or a
  * project id the second sentence is left out rather than drawn with a guessed address.
  */
 export function workspaceWords(

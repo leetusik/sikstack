@@ -122,7 +122,7 @@ export const WS_HEAD = {
   nav: "Workspace",
   unlinked: {
     label: "No workspace linked",
-    text: "No workspace linked yet. Run this in the project’s repo.",
+    text: "No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from the project’s Keys when it asks.",
     copy: "Copy the link command",
   },
   never: {
@@ -310,7 +310,7 @@ export const WS_GLOSSARY = {
   /** A value that does not apply, or a date that has not happened (F42). */
   none: "—",
   sentences: {
-    noPhase: "No phase yet. Run this in the project’s repo to plan one.",
+    noPhase: "No phase yet. Run this in Claude Code, in the project’s repo, to plan one.",
     cleared: (date: string) => `Cleared on ${date}.`,
     decisionAsked: (date: string) => `Decision asked ${date}`,
     everyPhaseDone: "Every linked phase is done.",
