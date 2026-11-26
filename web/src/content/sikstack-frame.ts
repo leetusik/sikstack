@@ -52,7 +52,7 @@ export const KEYS = {
   revoke: "Revoke",
   revokeLabel: (label: string) => `Revoke key ${label}`,
   empty: {
-    org: "No org keys yet. Create one to send documents and feedback from anywhere.",
+    org: "No org keys yet. Create one to send documents and feedback to this org.",
     project:
       "No keys yet. Create one to send documents and feedback to this project.",
   },

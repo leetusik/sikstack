@@ -1,18 +1,21 @@
 // The public landing at `/`: every word and link it shows (job 06, round 01-landing, signed; its
 // `## Build` and the ledger F250 to F264). The page (src/sikstack/landing/) holds no copy of its own.
 //
+// Applied, this file is `src/content/marketing/landing.ts`. P83-8k.S1's design (the landing offers only the Claude
+// Code plugin): `connect` is the plugin's sign-in in place of the CLI install, the two variables and the org key;
+// `how.label`, `how.agent.line` and `feedback.text` no longer name Codex, REST or MCP; `LANDING_LINKS.mintOrgKey`
+// is gone with the link that used it. Every other word is production's.
+//
 // - The picture's data is the frame's fixture F13, verbatim (platform's phases, documents, feedback and
 //   counts; times as of its "now", Nov 15, 2026, 10:00), and the landing's made-up items F261.
-// - The commands come from the retired landing content (the install line of its hero terminal, the two
-//   variable names of its `~/.zshenv` snippet); the token is the record's visible fake `vk_…`.
-// - The record's GitHub placeholder is operator decision D5: the repository for guides and repositories and the
-//   footer's GitHub.
+// - The record's GitHub placeholder is operator decision D5: the install's plugin link and the footer's GitHub.
 // - `how` (the diagram's section) is job 08, round 01-landing-diagram-feedback, signed: its `## Build`
 //   3a and 3b, verbatim, less the Workspace's Coming mark (job 09).
 // - `install` (the install section, between the Workspace and the Library) is job 09, round
 //   01-install-and-connect, signed: its `## Build` *The landing's block (S5)*; the commands are the fixture's
-//   `SKX.commands`, literal. Job 09 also drops the Workspace's Coming mark everywhere it showed and the
-//   Connect section's Claude Code part (`connect.claude`, `connect.skill`, `connect.plugin`).
+//   `SKX.commands`, literal. Job 09 also drops the Workspace's Coming mark everywhere it showed.
+// - `connect` (P83-8k.S1): the plugin's `/sikstack:sign-in` and its connect page, in the words of
+//   `plugins/sikstack/skills/sign-in/SKILL.md` (the code to check, the Connect button).
 // - Not said here (F262): a price, tiers, the retrieval API, figures, logos, quotes.
 
 const REPO = "https://github.com/leetusik/sikstack";
@@ -20,8 +23,6 @@ const REPO = "https://github.com/leetusik/sikstack";
 export const LANDING_LINKS = {
   signIn: "/login",
   createAccount: "/signup",
-  /** Org home's Org API keys head (`id="org-keys-head"`); sign-in comes first. */
-  mintOrgKey: "/dashboard#org-keys-head",
   /** A signed-in visitor's way on (P78, F8): the header and the hero lead here instead of sign-in. */
   dashboard: "/dashboard",
 } as const;
@@ -135,14 +136,14 @@ export const LANDING = {
     title: "How the parts fit together",
     text: "Feedback becomes work in the Workspace; finished work becomes documents in the Library.",
     label:
-      "How the parts of sikstack fit together. Feedback is what your users said; a piece of it becomes an agenda item in the Workspace. Your coding agent, Claude Code, Codex or any agent that speaks REST, works the agenda, and the Workspace syncs from the agent’s workspace. The agent writes what it made to the Library, as books and documents for you to read.",
+      "How the parts of sikstack fit together. Feedback is what your users said; a piece of it becomes an agenda item in the Workspace. Your coding agent, Claude Code with the sikstack plugin, works the agenda, and the Workspace syncs from the agent’s workspace. The agent writes what it made to the Library, as books and documents for you to read.",
     feedback: { name: "Feedback", line: "What your users said" },
     toWorkspace: "A piece becomes an agenda item",
     workspace: { name: "Workspace", line: "The agenda and its phases" },
     toAgent: "Works the agenda",
     agent: {
       name: "Your coding agent",
-      line: "Claude Code, Codex, any agent that speaks REST",
+      line: "Claude Code, with the sikstack plugin",
     },
     toLibrary: "Writes what it made",
     library: { name: "Library", line: "Books and documents" },
@@ -252,7 +253,7 @@ export const LANDING = {
   },
   feedback: {
     title: "Feedback",
-    text: "What your users said, captured from your product with a Capture only key, over REST or MCP. Search it, read it, and send a piece to the Workspace: it becomes an agenda item.",
+    text: "What your users said, captured from your product with a Capture only key. Search it, read it, and send a piece to the Workspace: it becomes an agenda item.",
     picture: {
       label:
         "A piece of feedback on platform, rated 2 of 5, sent to the Workspace, where it is on the agenda.",
@@ -263,24 +264,18 @@ export const LANDING = {
       sent: "Sent Nov 13",
     },
   },
+  /** The plugin's way to sikstack (P83-8k.S1): sign in from the repo, then confirm on the connect page. */
   connect: {
-    title: "Connect your agent",
-    text: "Your agents write to sikstack over REST, with a key from your org.",
-    guides: { label: "Guides and repositories on GitHub", href: REPO },
-    install: {
-      title: "Install",
-      what: "Install command",
-      command: "curl -fsSL https://sikstack.com/install.sh | bash",
+    title: "Connect Claude Code",
+    text: "Sign in from a repo, and the plugin sends its work to sikstack.",
+    signIn: {
+      title: "Sign in, in the repo",
+      what: "Sign-in command",
+      command: "/sikstack:sign-in",
     },
-    env: {
-      title: "Two variables",
-      textBefore: "For any agent that speaks REST. Put them in ",
-      path: "~/.zshenv",
-      textAfter: ", with an org key from the app.",
-      what: "The two variables",
-      command:
-        'export KB_API_BASE_URL="https://sikstack.com"\nexport KB_API_TOKEN="vk_…"',
-      mintOrgKey: "Mint an org key",
+    confirm: {
+      title: "Confirm on the web",
+      text: "Check that the page shows the same code, sign in or create an account, and press Connect.",
     },
   },
   footer: {

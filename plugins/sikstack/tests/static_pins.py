@@ -86,10 +86,10 @@ assert "Invocation is not the gate; confirmation is." in create_phase
 for required in ("`build-after`", "`design-only`", "`paired`", "## Design Style",
                  # v43: creation says nothing about worktrees and only relays the hint -- it never pins and never starts one.
                  # 2.0.0: the design is drafted in the product repo's design folder and signed at its URL; no mockup question.
-                 "built and served at a local URL you click through", "an older `Mockup:` line is ignored",
+                 "built and published to sikstack web at every stop, where you click through it", "an older `Mockup:` line is ignored",
                  "Say nothing about worktrees", "Relay that hint; never act on it", "## The QA-sweep route"):
     assert required in create_phase, required
-for gone in ("## The docs-phase route", "docs-debt", "--consolidates", "## Doc impact"):
+for gone in ("## The docs-phase route", "docs-debt", "--consolidates", "## Doc impact", "served at a local URL"):
     assert gone not in create_phase, gone
 assert "`Drafter: fable` or `Drafter: opus`" in create_phase and "A critic runs only if the operator asks for one." in create_phase
 for gone in ("Mockup: requested", "Mockup: on request", "canvas", "in-product mockup"):
@@ -263,12 +263,27 @@ for required in (
     "`npm install -g @playwright/cli@0.1.25`", "`playwright-cli install-browser chrome-for-testing`",
     "`playwright-cli kill-all`", "**How to call it.** Plainly", "send a password's `fill` to `/dev/null`",
     "`playwright-cli` blocks `file:` URLs", "**When the design never drew it**", "**Signing a design is not accepting the product**",
-    # 2.1.0: publishing runs only on the operator's words and is never a sign-off; the critic judges from --shots tiles.
-    "`sikstack design-publish --folder <folder> [--repo <name>]`", "Never publish unasked, and a publish is never a sign-off.",
+    # 0.9.0: every design stop publishes to sikstack web, in one order: commit, build, serve for the layout check,
+    # design-publish --page, stop with url= first; publishing is the default and never a sign-off. The critic
+    # judges from --shots tiles.
+    "**Show.** Every draft, in this order:", "1. **Commit** the design folder (the draft commit).",
+    "The commit comes before the build: `design-publish` refuses a build made from another commit than the repo's HEAD.",
+    "2. **Build and serve** with the folder's own commands on a free loopback port, for the layout check only.",
+    "3. **Publish** to sikstack web: `sikstack design-publish --folder <folder> [--repo <name>] --page '<entry or route>'`",
+    "one `--page` per page in play in `brief.md` (the brief names each page by its entry or route), each value quoted (a bracketed route is a shell glob), and the manifest's `options.entry` when the round made the options page.",
+    "[--repo <name>] --page '<entry or route>' …` (each value quoted) uploads",
+    "The options page shows there only when the round names its entry (`options.entry` in `out/manifest.json`); a round that made only the options names only that.",
+    "4. **Stop** `pending --stop-kind wave`. The report leads with `url=`",
+    "A revise pass follows the same order: a new commit, a new build, a new publish.",
+    "Publishing is the default at every stop, for every user; a publish is never a sign-off.",
     "`--shots <slice folder>/shots`", "[--shots <dir>]",
     # 0.7.0: a local workspace publishes with a design link set with the operator; sharing stays a member's act on
-    # the viewer (the engine never turns it on), and the key is never asked for.
-    "`sikstack design-link --data-dir \"${CLAUDE_PLUGIN_DATA}\"`", "never ask for a key", "The workspace stays local.",
+    # the viewer (the engine never turns it on), and the key is never asked for. 0.9.0: with no link yet, the first
+    # stop leads with the connect page and code; a local URL is only the no-account fallback.
+    "**No link yet.**", "`sikstack design-link --data-dir \"${CLAUDE_PLUGIN_DATA}\" --no-browser`",
+    "the stop's report leads with the connect page and the code", "Once they have connected, publish and report `url=`.",
+    "**The local URL is only the fallback.**", "only when the operator has no account or declines one", "named as the fallback",
+    "never ask for a key", "The workspace stays local.",
     "sharing is turned on in that viewer, by a member, and the share link copied there is what a teammate with no account opens",
     # 0.7.0: design-link leaves [design] uncommitted (the operator's call), and --folder needs a build this checkout sees.
     "`design-link` leaves the `[design]` table uncommitted in the main checkout's `config.toml`; the operator commits it or not",
@@ -280,7 +295,7 @@ assert "linked checkouts only" not in design  # 0.7.0: a local workspace publish
 # the retired canvas flow's words stay out of every other file of the skill.
 _cc_key = "${CLAUDE_PLUGIN_ROOT}/skills/design-cowork/reference/claude-canvas.md"
 _cc = " ".join(LIVE[_cc_key].split())
-for required in ("to sikstack web by default; to a claude.ai canvas when they ask for one or the repo's `Design:` line says `publish: claude.ai` (`reference/claude-canvas.md`)",
+for required in ("A claude.ai canvas is a second copy, made only when they ask for one or the repo's `Design:` line says `publish: claude.ai` (`reference/claude-canvas.md`); sikstack web is still published at every stop beside it.",
                  "`canvas.mjs` walks the same runs into a claude.ai canvas copy"):
     assert required in design, required
 for required in ("The design folder stays the source.", "the engine never does", "offer sikstack web",
@@ -300,6 +315,24 @@ for gone in ("Artifact", "Design canvas", "Design System Artifact", "DesignSync"
              "design-migrate", "critic+judge", "the judge", "PENDING #", "Mockup: requested", "canvas.json", "handoff.md", "frame pass",
              "in-product mockup route"):
     assert gone not in design, gone
+# 0.9.0: publishing no longer waits for the operator's words, outside the claude.ai canvas (which stays asked for).
+for gone in ("Never publish unasked", "Publish only when their words ask to", "publish when they ask", "served at a local URL"):
+    assert gone not in design, gone
+_cw = " ".join((root / "skills/do-whole-phase/reference/co-work.md").read_text(encoding="utf-8").split())
+for required in ("commit the design folder (the draft commit), build, serve on loopback, run the layout check, then "
+                 "`sikstack design-publish --folder <design folder> [--repo <name>] --page '<entry or route>'`",
+                 "each value quoted, and the options page's entry when the round made it",
+                 "with `url=` first in your report", "`design-publish` refuses a build made from another commit",
+                 "A revise pass adds a commit, a build, a publish and a stop."):
+    assert required in _cw, ("co-work.md", required)
+assert "with the URL and the screenshots" not in _cw
+# F1 (0.9.0): an unquoted --page value is a shell glob on zsh for a bracketed route ("no matches found"), so no skill
+# text writes the bare form.
+for _name, _text in (("design-cowork", design), ("co-work.md", _cw)):
+    assert "--page <entry or route>" not in _text, (_name, "unquoted --page")
+_wd = " ".join((root / "scripts/wf_design.py").read_text(encoding="utf-8").split())
+assert "Run at every design stop (design-cowork's Show step); publishing is never a sign-off." in _wd
+assert "Run only when the operator's words ask to publish" not in _wd
 raw_design = (root / "skills/design-cowork/SKILL.md").read_text()
 front = raw_design.split("---\n", 2)[1]
 allowed = next(ln for ln in front.splitlines() if ln.startswith("allowed-tools:"))

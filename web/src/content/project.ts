@@ -257,8 +257,7 @@ export const PROJECT_HOME = {
     /** A document's reading time, as the board draws it (`6 min`). */
     minutes: (n: number): string => `${n} min`,
     all: "See all in Library",
-    empty:
-      "No documents yet. An agent publishes them with one of this project’s API keys.",
+    empty: "No documents yet. They appear here when your agents write them.",
     failed: "Documents did not load.",
     retry: "Try again",
   },

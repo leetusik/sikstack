@@ -36,6 +36,8 @@ The Library and Feedback at <https://sikstack.com>: a document API, a web app, a
 
 Users install `sikstack@sikstack` from `.claude-plugin/marketplace.json` and pull an update only when its `version` changes, so any change under `plugins/sikstack/**` (the explain skill included) bumps `plugins/sikstack/.claude-plugin/plugin.json`'s semver `version` and adds its entry to `plugins/sikstack/CHANGELOG.md`, in the same PR (CI checks the bump).
 
+The catalog's `"renames": {"explain": null}` turns an installed `explain@sikstack` (the old separate plugin) off instead of failing to load; keep it while old installs may exist (`claude plugin validate` does not flag it).
+
 ## Deploy
 
 Production is the box's checkout at `/opt/knowledge`, deployed only by dispatching the `Production Deploy` workflow from `main` (`.github/workflows/deploy-production.yml` → `deploy/oracle-production-deploy-remote.sh`). It reconciles the checkout with `origin/main`, rebuilds, migrates and health-gates the services. Never change code or containers on the box by hand: the deploy refuses a dirty tracked tree. The Listen runner on the Mac is installed by `tools/listen-runner/install.sh`, not by the deploy.

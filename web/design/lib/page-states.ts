@@ -81,6 +81,9 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
   { key: "options", label: "Options", from: `${VIEW}:236 options side by side · recording design.details (manifest options)` },
   { key: "shared", label: "Shared", from: `${VIEW}:202 share on, Copy · recording design.details (share.on)` },
   { key: "private", label: "Private", from: `${VIEW}:198 one line · recording design.shareRefused (409)` },
+  { key: "round", label: "A round's build", from: `${VIEW} roundPages, the options hidden (roundShowsOptions), the whole design's link · data/sample/states/design-round.json (manifest round)` },
+  { key: "options-only", label: "A round of the options", from: `${VIEW} optionsOnly (roundPages []) · data/sample/states/design-options-round.json (round: the options entry)` },
+  { key: "every-page", label: "Every page", from: `${VIEW} scope="all", the options and every page · …/design/[build]/pages/page.tsx · data/sample/states/design-round.json` },
   { key: "gone", label: "Gone", from: `${VIEW}:293 DesignBuildGone · recording design.gone (404)` },
 ]);
 
@@ -157,3 +160,17 @@ export const INVITE_STATES = pageStates("Invite", [
   { key: "member", label: "Already a member", from: `${ORG}/invite.tsx:181 phase member` },
   { key: "expired", label: "Expired, revoked or used", from: `${ORG}/invite.tsx:193 phase expired (one state for the three)` },
 ]);
+
+// ── The landing (P83-8k.S1's design, applied: its Connect section offers only the plugin): production's route
+// branches, drawn by production's `Landing` and its header.
+const MKT = "src/app/(marketing)/page.tsx";
+const LP = "src/sikstack/landing/landing.tsx";
+const LP_HEAD = "src/sikstack/landing/header.tsx";
+
+/** The landing (`/`): who reads it, and whether the server holds the feedback control's key. */
+export const LANDING_STATES = pageStates("Landing", [
+  { key: "signed-out", label: "Signed out", from: `${MKT}:30 signedIn false, :31 key held (as on sikstack.com) · ${LP}:58 Create account, Sign in; :442 Send feedback · ${LP_HEAD}:65 Sign in, Create account` },
+  { key: "signed-in", label: "Signed in", from: `${MKT}:18 optionalIdentity, :30 signedIn true · ${LP}:58 Open dashboard · ${LP_HEAD}:65 Dashboard` },
+  { key: "no-feedback-key", label: "No feedback key", from: `${MKT}:31 feedback.configured false · ${LP}:442 the footer's links alone` },
+]);
+export type LandingState = (typeof LANDING_STATES.list)[number]["key"];
