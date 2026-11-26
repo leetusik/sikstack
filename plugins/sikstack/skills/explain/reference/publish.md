@@ -15,9 +15,9 @@ One org key serves every repo: each document goes to the project you name (by de
 
 ## Check, then save
 
-Write the body to a scratch file (`body.md`: no front matter, no `# H1`), then dry-run it with the same flags you will publish with. `check` writes nothing; exit 1 lists every refused line: fix them all and check again.
+Write the body to a scratch file (`body.md`: no front matter, no `# H1`), then dry-run it with the same flags you will publish with (`check` needs the 2 to 5 tags too). `check` writes nothing; exit 1 lists every refused line: fix them all and check again.
 
-    knowledge check body.md --format native --title "<Title>" --project <project>
+    knowledge check body.md --format native --title "<Title>" --project <project> --tag <tag> --tag <tag>
 
     knowledge save body.md --format native --share members --json \
       --title "<Title>" --summary "<one-line lede>" --tag <tag> --tag <tag> \
