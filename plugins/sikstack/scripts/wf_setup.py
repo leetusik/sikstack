@@ -393,17 +393,17 @@ def ensure_auto_compact(path: Path) -> str:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{\n  \"autoCompactWindow\": 500000\n}\n", encoding="utf-8")
-        return f"autoCompactWindow: set to 500000 in {path} (a new file)"
+        return f"compaction window: set to 500k in {path} (a new file)"
     try:
         text = path.read_text(encoding="utf-8")
         data = json.loads(text)
     except (OSError, ValueError) as exc:
-        return (f"autoCompactWindow: not set -- {path} is not readable JSON ({exc.__class__.__name__}); add "
+        return (f"compaction window: not set -- {path} is not readable JSON ({exc.__class__.__name__}); add "
                 "\"autoCompactWindow\": 500000 to it yourself (nothing was changed there)")
     if not isinstance(data, dict):
-        return f"autoCompactWindow: not set -- {path} is not a JSON object (nothing was changed there)"
+        return f"compaction window: not set -- {path} is not a JSON object (nothing was changed there)"
     if data.get(AUTO_COMPACT_KEY) == AUTO_COMPACT_VALUE:
-        return f"autoCompactWindow: already 500000 in {path} (unchanged)"
+        return f"compaction window: already 500k in {path} (unchanged)"
     new = _settings_edit(text, data)
     mode = path.stat().st_mode & 0o777
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_", suffix=path.name)
@@ -418,7 +418,7 @@ def ensure_auto_compact(path: Path) -> str:
         except OSError:
             pass
         raise
-    return f"autoCompactWindow: set to 500000 in {path} (nothing else there changed)"
+    return f"compaction window: set to 500k in {path} (nothing else there changed)"
 
 
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -447,7 +447,7 @@ def setup_main(argv: list) -> int:
         return 2
     data_dir = Path(raw)
     ident, made = install_id(data_dir)
-    print(f"install id: {ident} ({'made now' if made else 'kept'}; {data_dir / INSTALL_FILE})")
+    print(f"install id: {ident} ({'made now' if made else 'kept'})")
     version = plugin_version()
     reg = _read_json(data_dir / REGISTRATION_FILE) or {}
     if reg.get("state") == "registered" and reg.get("email") == email and reg.get("server") == server:

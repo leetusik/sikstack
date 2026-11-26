@@ -15,7 +15,7 @@ export const PROJECT_LIBRARY = {
   /** Nothing to read: two sentences, each a line of its own (F328). A visitor's is the first alone. */
   nothing: {
     member: (name: string): string => `No books or documents in ${name} yet.`,
-    how: "An agent publishes them with a project API key.",
+    how: "They appear here when your agents write them.",
     visitor: (name: string): string => `Nothing to read in ${name} yet.`,
   },
   notFound: {

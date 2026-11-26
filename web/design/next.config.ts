@@ -48,6 +48,8 @@ const config: NextConfig = {
     // Relative targets resolve from this folder.
     resolveAlias: {
       "@/lib/workspace/actions": "./lib/actions.ts",
+      // The feedback control's server actions (the landing's footer), answered in the browser.
+      "@/lib/send-feedback/actions": "./lib/send-feedback-actions.ts",
       "design-recording": `./${path.relative(here, recording).split(path.sep).join("/")}`,
     },
   },

@@ -47,15 +47,10 @@ describe("the landing's links", () => {
       expect(text.includes("[GITHUB URL]"), path).toBe(false);
   });
 
-  it("send guides, the install's plugin link and the footer's GitHub to the repository", () => {
-    expect(LANDING.connect.guides.href).toBe(REPO);
+  it("send the install's plugin link and the footer's GitHub to the repository", () => {
     expect(LANDING.install.repo.href).toBe(REPO);
     expect(LANDING.footer.github.href).toBe(REPO);
-    expect(WORDS.filter((w) => w.includes("github.com"))).toEqual([
-      REPO,
-      REPO,
-      REPO,
-    ]);
+    expect(WORDS.filter((w) => w.includes("github.com"))).toEqual([REPO, REPO]);
   });
 
   it("are written only in the content module, never in the page's code", () => {
@@ -97,26 +92,45 @@ describe("the landing's words (F262)", () => {
   });
 });
 
-describe("the commands (the product's content, carried over)", () => {
-  // Pinned from the retired content/marketing (HERO_TERMINAL's first line and ZSHENV_EXPORT_BASE)
-  // before it was rewritten; the token is the record's visible fake (F261).
-  it("keep the install command and the two variable names", () => {
-    expect(LANDING.connect.install.command).toBe(
-      "curl -fsSL https://sikstack.com/install.sh | bash",
+describe("Connect (the plugin's sign-in, the only way to link Claude Code)", () => {
+  const html = renderToStaticMarkup(createElement(Landing));
+  const main = html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+  const at = main.indexOf('id="connect"');
+  const block = at < 0 ? "" : main.slice(at, main.indexOf("</section>", at));
+
+  it("says its words: sign in from the repo, then confirm on the web", () => {
+    expect(LANDING.connect).toEqual({
+      title: "Connect Claude Code",
+      text: "Sign in from a repo, and the plugin sends its work to sikstack.",
+      signIn: {
+        title: "Sign in, in the repo",
+        what: "Sign-in command",
+        command: "/sikstack:sign-in",
+      },
+      confirm: {
+        title: "Confirm on the web",
+        text: "Check that the page shows the same code, sign in or create an account, and press Connect.",
+      },
+    });
+    expect(block).toContain("Connect Claude Code</h2>");
+    expect(block).toContain('<h3 class="lp-h3">Sign in, in the repo</h3>');
+    expect(block).toContain(
+      '<pre class="lp-cmd-value" tabindex="0" aria-label="Sign-in command"><code>/sikstack:sign-in</code></pre>',
     );
-    expect(LANDING.connect.env.command).toBe(
-      'export KB_API_BASE_URL="https://sikstack.com"\nexport KB_API_TOKEN="vk_…"',
-    );
+    expect(block).toContain('<h3 class="lp-h3">Confirm on the web</h3>');
+    expect(block).not.toMatch(/<a\b/);
   });
 
-  it("drop the Claude Code part of Connect (job 09): no explain skill on the landing", () => {
-    expect(Object.keys(LANDING.connect)).toEqual([
-      "title",
-      "text",
-      "guides",
-      "install",
-      "env",
-    ]);
+  it("offers no other path: no CLI install, no API variables, no other agent, REST or MCP", () => {
+    const off = [/install\.sh/, /KB_API/, /codex/i, /speaks REST/i, /\bMCP\b/, /org key/i];
+    for (const re of off) {
+      expect(WORDS.filter((w) => re.test(w)), String(re)).toEqual([]);
+      expect(re.test(main), `markup ${re}`).toBe(false);
+    }
+    expect("mintOrgKey" in LANDING_LINKS).toBe(false);
+  });
+
+  it("keeps the explain skill off the landing (job 09)", () => {
     expect(WORDS.filter((w) => /explain/i.test(w))).toEqual([]);
   });
 });

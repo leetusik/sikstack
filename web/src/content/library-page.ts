@@ -37,7 +37,7 @@ export const LIBRARY_PAGE = {
       ? "1 project has nothing to read yet."
       : `${num(n)} projects have nothing to read yet.`,
   nothing:
-    "No books or documents yet. An agent publishes them with an org API key.",
+    "No books or documents yet. They appear here when your agents write them.",
   failed: "The library did not load.",
   retry: "Try again",
   loading: "Loading…",
@@ -101,7 +101,7 @@ export const DOCS = {
   deleteLabel: (title: string): string => `Delete document ${title}`,
   deleteFailed: "Could not delete this document. Try again.",
   loading: "Loading…",
-  empty: "No documents yet. An agent publishes them with a project’s API key.",
+  empty: "No documents yet. They appear here when your agents write them.",
   none: (q: string, scope: string | null): string =>
     `No document${scope ? ` of ${scope}` : ""} contains “${q}”.`,
   failed: "Documents did not load.",

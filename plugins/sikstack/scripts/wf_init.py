@@ -138,5 +138,5 @@ def init_main(argv: list) -> int:
     if committed is False:
         print(f"note: no commit in {STATE_DIR}/ (git has no identity there); commit it yourself: git -C {STATE_DIR} add -A && "
               f"git -C {STATE_DIR} commit -m \"chore(sikstack): start the workspace\"")
-    print("next: sikstack next")
+    print("next: /sikstack:sik-mode, to start the first phase")
     return 0
