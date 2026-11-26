@@ -220,10 +220,10 @@ describe("the head's actions by the item's state (F303, F309)", () => {
     });
     expect(buttons(html).primary).toEqual([]);
     expect(html).toContain(
-      "No phase yet. Run this in the project’s repo to plan one.",
+      "No phase yet. Run this in Claude Code, in the project’s repo, to plan one.",
     );
     expect(html).toContain(
-      '<span class="copy-value mono">/create-phase A7-m3</span>',
+      '<span class="copy-value mono">/sikstack:create-phase A7-m3</span>',
     );
 
     for (const [state, fact] of [
