@@ -4,7 +4,7 @@ The review's procedure is the `review-phase` skill, the executor's; this file is
 
 **Before you dispatch it**, run `sikstack-adapter meter --phase <P>` and compare the spend with `topics/breakdown.md`'s `## Estimate`; past about one and a half times it, set the slice `pending --stop-kind decision --on-words "<what each answer does>"` and STOP (a go-on, with its new figure, goes on `## Decisions`, so it never asks twice). Do the same before a fix pass.
 
-**Plan it** (`sikstack-adapter route <P>.REVIEW`, the high row) naming: `phase scope <P>`'s output, `topics/walkthrough.md` to run line by line, `next`'s `pr_branch=` lines and the `pathspec=` line(s), and the code reader: dispatched by the review executor itself, or `code reader: n/a (0 product files)`, or `code reader: skipped (operator: "<their words>")` (only the operator's own words skip it, for this round). An explain phase's review is planned from `reference/explain-review.md`.
+**Plan it** (`sikstack-adapter route <P>.REVIEW`, the high row) naming: `phase scope <P>`'s output, `topics/walkthrough.md` to run line by line, `next`'s `pr_branch=` lines and the `pathspec=` line(s), and the code reader: dispatched by the review executor itself, or `code reader: n/a (0 product files)`, or `code reader: skipped (operator: "<their words>")` (only the operator's own words skip it, for this round).
 
 ## On its verdict
 

@@ -27,7 +27,7 @@ def _pay(rel):  # an old payload/ path, mapped into the plugin
     return root / rel
 root = Path(sys.argv[1])
 skills = {p.parent.name for p in (root / "skills").glob("*/SKILL.md")}
-assert len(skills) == 16, len(skills)  # 0.5.0: archive-phase retired (rotate-backlog and `phase archive <P>` archive); 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
+assert len(skills) == 17, len(skills)  # 0.9.0: explain added; 0.5.0: archive-phase retired (rotate-backlog and `phase archive <P>` archive); 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
 assert not skills & {"defer-job", "deferred", "promote-deferred"}, skills
 def engine_src():  # the engine's source: every module, payload/scripts/*.py (the shell's engine_src)
     return "".join(f.read_text(encoding="utf-8") for f in sorted((root / "scripts").glob("*.py")))
@@ -47,10 +47,10 @@ for name in ("design-cowork", "do-whole-phase"):
 for gone in ("AGENTS.md", ".agents", ".codex"):
     assert not (root / gone).exists(), gone
 # 0.5.0: review-phase alone carries both markers (path-only: its executor reads it by path); commit and pr stay model-invocable for the spoken ask.
-model_invocable = {"create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route", "commit", "pr"}
-# 0.5.0: the `/` menu holds the 9 skills a person types; these 7 are the agents' and carry `user-invocable: false`.
+model_invocable = {"explain", "create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route", "commit", "pr"}
+# 0.5.0: the `/` menu holds the skills a person types (10 since 0.9.0's explain); these 7 are the agents' and carry `user-invocable: false`.
 agent_only = {"commit", "pr", "review-phase", "parallel-phase", "read-code", "executor-route", "design-cowork"}
-assert len(skills) == 16 and len(agent_only) == 7 and agent_only <= set(skills), sorted(skills)
+assert len(skills) == 17 and len(agent_only) == 7 and agent_only <= set(skills), sorted(skills)
 for name in sorted(skills):
     body = (root / "skills" / name / "SKILL.md").read_text()
     front = body.split("\n---\n", 1)[0]
@@ -97,73 +97,57 @@ for gone in ("Mockup: requested", "Mockup: on request", "canvas", "in-product mo
 for gone in ("ask which design tool", "Design tool: drafter", "Design tool: claude-design",
              "DesignSync", "design-deck", "design-register", "sign on the cards", "the drafted cards"):
     assert gone not in create_phase, gone
-assert "## The explain route" in create_phase and "## Explain" in create_phase
-for ref in ("explain-decomposition.md", "explain-chapter.md", "explain-review.md"):
-    assert f"${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/reference/{ref}" in LIVE and f"${CLAUDE_PLUGIN_ROOT}/skills/do-next-slice/reference/{ref}" not in LIVE, ref
-POINTER = "not written — run /explain:explain P<N> for a document, or ask it for a book"
-for rel in ("claude/skills/do-whole-phase/playbooks/review.md", "claude/skills/review-phase/SKILL.md"):
-    assert POINTER in _pay(rel).read_text(encoding="utf-8"), rel
-OLD_POINTER = "run /explain:explain P<N> for one chapter, or create an explain phase for a book"
-for p in [*_shipped("*.md"), root / "templates/docs/operations.md"]:
-    assert OLD_POINTER not in p.read_text(encoding="utf-8"), p
-for p in [*_shipped("*.md"), root / "templates/docs/operations.md"]:
-    t = p.read_text(encoding="utf-8")
-    assert "run /explain for this phase" not in t and "run /explain:explain for this phase" not in t, p
-assert "must-cover" in create_phase and "0.10.0" in create_phase and "**A confirmed proposal.**" in create_phase
-assert "- **unit**:" in create_phase and "- **phases**:" in create_phase and "- phases: P30, P33-n3" in create_phase
-assert "**no `run:` line and no `mode:` line**" in create_phase
-assert "- run: full" not in create_phase and "- mode: codebase" not in create_phase
-assert "## The research route" in create_phase and "Research: <subject>" in create_phase
-assert "--kind research --risk high" in create_phase and "**If the request carries a `Research: <subject>` block**" in create_phase
-_chapter = (root / "skills/do-whole-phase/reference/explain-chapter.md").read_text(encoding="utf-8")
-assert "explain:explain-critic" in _chapter and "kind: chapter" in _chapter and "trace-<key>.md" in _chapter
-assert "**`model: sonnet`** when span 1 ran on an Opus model" in _chapter and "`model: opus`" in _chapter
-assert "answers-<key>.md" in _chapter and "scratch: works/" not in _chapter
-_decomp = (root / "skills/do-whole-phase/reference/explain-decomposition.md").read_text(encoding="utf-8")
-assert "installed_plugins.json" in _decomp and "pages/.gitignore" in _decomp and "**0.10.0 or later**" in _decomp
-assert "and dispatch no agent, `sikstack:Explore` included" in (root / "skills/do-whole-phase/playbooks/explain.md").read_text(encoding="utf-8")
-for p in [*_shipped("*.md"), root / "templates/docs/operations.md"]:
-    _t = p.read_text(encoding="utf-8")
-    for gone in ("knowledge:web-researcher", "knowledge:code-researcher", "knowledge:gap-reviewer",
-                 "knowledge:verifier", "no-research", "D0b: the preflight", "STOPPED: evidence gate",
-                 "*Explain: permissions and the search cap*"):
-        assert gone not in _t, (str(p), gone)
-assert "**The explain carve-out" in (root / "skills/do-whole-phase/playbooks/explain.md").read_text(encoding="utf-8")
-assert not (root / "agents/explain-critic.md").exists()
-for required in ("every unit is a phase", "one confirmation", "Explain — confirm once; then it runs to publish.",
-                 "start an explain from the main checkout", "`visibility: private` is absolute",
-                 "The literal `unit` line", "**The required set, per unit:**", "- worktree: yes",
-                 "- outline sign-off: off", "worktree start <P>` (nested: with no `--host-branch`",
-                 "in **`auto`**", "--stop-kind decision", "operator-action", "**with no `unit` line**",
-                 "§9.2 *The evidence for a book (an explain phase)*", "§3.2 *Permissions, and the payload builder*",
-                 "**The acceptance gate, per unit:**", "**An explain phase is the one exception:**"):
-    assert required in create_phase, required
-for gone in ("A single chapter is not a phase", "**A book is a phase, and this route makes one.**"):
+# 0.9.0: explain left the phase machinery. /sikstack:explain writes in the session; the engine has no explain route.
+for gone in ("## The explain route", "## The research route", "## Explain", "Research: <subject>", "/explain:explain", "explain_unit"):
     assert gone not in create_phase, gone
-_d = (root / "skills/do-whole-phase/reference/decomposition.md").read_text(encoding="utf-8")
-assert "declares by its unit" in _d and "explain chapter: published private; a v2 is cheap" in _d
-assert "always takes `--require` (the operator reads the book)" not in _d
-_review = (root / "skills/do-whole-phase/reference/explain-review.md").read_text(encoding="utf-8")
-for _txt, _pins in (
-    (_decomp, ("## A document or a chapter", "works/phases/active/P<N>/doc/", "doc/pages/.gitignore",
-               "--kind implementation --risk high --order 10", "## Run stops (every unit)",
-               "feedback re-runs DECOMP from the dossier", "explain document: published private; a v2 is cheap",
-               "outline sign-off: on", "under `## The book`", "§3.4 *D1: the evidence*", "`## Drawn from`")),
-    (_chapter, ("## A document or a chapter: its one write slice", "mode: critique · kind: document",
-                "`doc/answers.md`", "works/phases/active/P<N>/doc/body.md")),
-    (_review, ("## Plan a document's or a chapter's review", "/api/documents/by-path/<rel_path>",
-               "/app/orgs/<org>/<project>/<slug>", "**Otherwise, the API read-back,**", "A chapter's order check",
-               "§8 *D9: the report*", "§9.1 *The book suggestion*", "(*An explain phase merges back by itself*)",
-               "`book/research/answers-<key>.md`", "every `## Gaps` line of `doc/evidence.md`")),
-):
-    for _p in _pins:
-        assert _p in _txt, _p
-    assert "all eleven fields are present" not in _txt
-assert _chapter.count("title: <") >= 2 and "title: <" in _chapter.split("kind: document", 1)[1], "title:"
-assert "titled `P<N>: <phase name>`" not in create_phase and "taught twice" not in _review
+for _k, _v in LIVE.items():
+    if _k == "${CLAUDE_PLUGIN_ROOT}/skills/explain/SKILL.md" or _k.startswith("${CLAUDE_PLUGIN_ROOT}/skills/explain/"):
+        continue
+    for gone in ("/explain:explain", "explain@sikstack", "explain-critic", "explain_unit", "explain_phase", "explain-decomposition",
+                 "explain-chapter", "explain-review", "playbooks/explain.md", "an explain phase", "## Explain"):
+        assert gone not in _v, (_k, gone)
+for p_ in [*_shipped("*.md"), root / "templates/docs/operations.md"]:
+    _t = p_.read_text(encoding="utf-8")
+    for gone in ("/explain:explain", "explain@sikstack", "explain:explain-critic", "/explain:setup"):
+        assert gone not in _t, (str(p_), gone)
+for gone in ("reference/explain-decomposition.md", "reference/explain-chapter.md", "reference/explain-review.md", "playbooks/explain.md"):
+    assert not (root / "skills/do-whole-phase" / gone).exists(), gone
+assert not (root / "agents/explain-critic.md").exists()
+_ex = (root / "skills/explain/SKILL.md").read_text(encoding="utf-8")
+assert len(_ex.encode("utf-8")) <= 12000, len(_ex.encode("utf-8"))
+_ex_front = _ex.split("\n---\n", 1)[0]
+assert _ex.startswith("---\nname: explain\n") and '\ndescription: "' in _ex_front, "explain frontmatter"
+assert "disable-model-invocation" not in _ex_front and "user-invocable" not in _ex_front
+for required in ("**Sources, in this order:**", "**The code at HEAD.**", "`sikstack next`", "`sikstack section <P> [<section>]`",
+                 "`sikstack cold search <text>`", "`sikstack cold fetch", "`gh pr view <n>`", "`sikstack repo list`",
+                 "`sikstack agenda`", "`sikstack agenda-show <agenda>`", "**Proposed** and **Open** items",
+                 "## The situations", "A change note", "A translation", "Answer in chat. No document.", "A refresh of a document",
+                 "A chapter added to a book", "**Diagrams are not a rule.**", "**A document runs straight away.**", "**A book asks once:**",
+                 "**English**", "**Each section stands alone.**", "never phase or slice ids", "`.sikstack/` paths",
+                 "## The fresh-eyes read, then one fix", "There is no second round", "--format native --share members", "**Members**",
+                 "`knowledge share <document|book> members|link|public`", "`reference/book.md`", "`reference/blocks.md`",
+                 "`reference/publish.md`", "`reference/fresh-eyes.md`"):
+    assert required in _ex, ("explain card", required)
+assert "deferred/" not in _ex and "deferred job" not in _ex
+_ex_named = set(_re.findall(r"`reference/([\w.-]+\.md)`", _ex))
+_ex_shipped = {k.rsplit("/", 1)[1] for k in LIVE if k.startswith("${CLAUDE_PLUGIN_ROOT}/skills/explain/reference/")}
+assert _ex_named == _ex_shipped == {"book.md", "blocks.md", "publish.md", "fresh-eyes.md"}, sorted(_ex_named ^ _ex_shipped)
+_bk = (root / "skills/explain/reference/book.md").read_text(encoding="utf-8")
+for required in ("**The reader and the end goal:**", "**goal:**", "**owns:**", "**assumes:**", "**leaves:**", "**terms:**",
+                 "**One term list:**", "**A voice note:**", "## 2. Chapters on background agents",
+                 "## 3. One fresh-eyes reader, the whole book in order", "## 4. One editor across the chapters", "**last**",
+                 "## 5. Publish together"):
+    assert required in _bk, ("book.md", required)
+_fe = (root / "skills/explain/reference/fresh-eyes.md").read_text(encoding="utf-8")
+for required in ("`general-purpose`", "any model", "Never paste your notes", "one findings file", "you never edit the draft"):
+    assert required.lower() in _fe.lower(), ("fresh-eyes.md", required)
+_pub = (root / "skills/explain/reference/publish.md").read_text(encoding="utf-8")
+for required in ("knowledge init", "uv tool install git+https://github.com/leetusik/sikstack#subdirectory=cli", "--format native --share members",
+                 "--new-version --rel-path", "--book <book-slug> --chapter <key>", "knowledge share <document rel_path | book slug> members|link|public"):
+    assert required in _pub, ("publish.md", required)
 codex_prose = {n for n in skills if "Codex" in skill_dir_text(n)}
 assert codex_prose <= {"update-workspace"}, sorted(codex_prose)
-assert "explain" not in skills, skills
+assert "explain" in skills, skills  # 0.9.0: /sikstack:explain
 for name in ("do-whole-phase",):
     body = skill_dir_text(name)
     for required in (
@@ -249,8 +233,6 @@ _pbd = (root / "skills/do-whole-phase/playbooks/decompose.md").read_text(encodin
 for required in ("their sets (files, regenerated files, numbered sequences, runtime resources) are disjoint",
                  "never on `DECOMP2`, `REVIEW` or a `co-work` slice"):
     assert required in _pbd, ("decompose.md", required)
-_rel = "${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/reference/explain-decomposition.md"
-assert _rel in LIVE and "[--depends-on" not in LIVE[_rel], _rel
 import re
 design = " ".join(skill_dir_text("design-cowork").split())
 for required in (
@@ -380,19 +362,15 @@ for required in ("Worktree rules", "**When — only when asked**", "retired no-o
 for gone in ("runs in its own worktree by default", "enters its worktree at **first execution**",
              "the do-* skills do this for you"):
     assert gone not in parallel, gone
-for required in ("**One exception: an explain phase (v86).**", "### An explain phase merges back by itself",
-                 "**An explain phase needs no host branch (v86).**", "`exemption=phase-folder-only (<n> paths)`",
+for required in ("`exemption=phase-folder-only (<n> paths)`",
                  "`merge_ready=<P>:<branch>`", "`worktree teardown <P> --discard-ignored`",
-                 "the main checkout's `.claude/settings.local.json`",
-                 "(an explain phase's confirmation is the asking)"):
+                 "the main checkout's `.claude/settings.local.json`"):
     assert required in parallel, required
 _w = " ".join((root / "skills/do-whole-phase/reference/worktree.md").read_text(encoding="utf-8").split())
 _c = (root / "skills/do-whole-phase/SKILL.md").read_text(encoding="utf-8")
-assert "**One exception: an explain phase (v86).**" in _w
-assert "merge_ready=" in _w and "merge_ready=" in _c and "(an explain: its confirmation asked)" in _c
+assert "merge_ready=" in _w and "merge_ready=" in _c and "only on the operator's word, or when" in _c
 _ww = " ".join((root / "skills/do-whole-phase/reference/worktree.md").read_text(encoding="utf-8").split())
-for required in ("**An explain phase merges back by itself, with no stop.**", "**When the automatic merge cannot run**",
-                 "**The closing report** of an explain run comes last", "`worktree teardown <P> --discard-ignored`"):
+for required in ("**When the merge cannot run**", "`worktree teardown <P> --discard-ignored`"):
     assert required in _ww, required
 review = (root / "skills/review-phase/SKILL.md").read_text()
 for required in ("## The review, in order", "`walkthrough`", "`## Operator Runtime`", "`## Regression Checklist`",
@@ -476,14 +454,13 @@ for _stem, _required in (
     ("decompose", ("**Finish line first:**", "no QA slice by default", "`slice new", "phase rounds <P>", "`spends money: no`",
                    "each co-work slice's one connected group with its critique level", "A fractional `--order`")),
     ("wave", ("**Write no `phase.md`.**", "**Run no engine command that writes**", "`deferred: whole-tree`")),
-    ("explain", ("**The explain carve-out.**", "and dispatch no agent, `sikstack:Explore` included")),
 ):
     for _r in _required:
         assert _r in _pb[_stem], (_stem, _r)
 _caps = {"do-whole-phase": 49000, "do-next-slice": 2500, "create-phase": 12500, "review-phase": 12000,
          "read-code": 3600, "executor-route": 1500, "commit": 2800}
 _size = lambda n: sum(len(v.encode("utf-8")) for k, v in LIVE.items()
-                      if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{n}/") and not k.rsplit("/", 1)[1].startswith("explain-"))
+                      if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{n}/"))
 for _n, _cap in _caps.items():
     assert _size(_n) <= _cap, (_n, _size(_n), _cap)
 assert sum(_size(_n) for _n in _caps) <= 85000, sum(_size(_n) for _n in _caps)
@@ -501,7 +478,7 @@ assert "dispatched by the review executor itself" in _ro and "`review-phase` ski
 for _gone in ("## The code reader, before the review", "route --code"):
     assert _gone not in _ro, _gone
 for _n in _caps:
-    _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/") and "/explain-" not in k)
+    _txt = "\n".join(v for k, v in LIVE.items() if k.startswith(f"${CLAUDE_PLUGIN_ROOT}/skills/{_n}/"))
     for _gone in ("docs phase", "docs-phase", "docs-debt", "doc_impact", "doc_versions", "Doc impact list"):
         assert _gone not in _txt, (_n, _gone)
 _s6 = ("parallel-phase", "pr", "update-workspace", "rotate-backlog", "retrofit", "agenda")
@@ -566,9 +543,6 @@ for _base in ("skills", "agents", "contract.md", "templates"):
             # name-keyed field or a rule matching the anonymized `name` label.
             for _gone in ("Agent's Chrome browser name", "whose `name` is", "connected under that name"):
                 assert _gone not in _t, (str(_f.relative_to(root)), _gone)
-_er = (root / "skills/do-whole-phase/reference/explain-review.md").read_text(encoding="utf-8")
-assert "**The instrument** is `playwright-cli`, the agent's own browser" in _er
-assert "`state-load`s the manifest's saved sign-in file" in _er
 explore = (root / "agents/Explore.md").read_text()
 explore_fm = explore.split("---\n", 2)[1]
 assert "tools: Read, Grep, Glob\n" in explore_fm and "omitClaudeMd: true\n" in explore_fm

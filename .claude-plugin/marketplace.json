@@ -3,17 +3,12 @@
   "owner": {
     "name": "leetusik"
   },
-  "description": "sikstack: a phase-and-slice workflow for Claude Code that works with no account. The sikstack plugin, and the explain plugin.",
+  "description": "sikstack: a phase-and-slice workflow for Claude Code that works with no account, with /sikstack:explain for documents in the sikstack Library.",
   "plugins": [
     {
       "name": "sikstack",
       "source": "./plugins/sikstack",
       "description": "A phase-and-slice workflow for Claude Code: plan a phase, run each slice on its own executor, review it, and walk it before it lands. State lives in your repo's hidden .sikstack/ folder; no setup and no server needed to start."
-    },
-    {
-      "name": "explain",
-      "source": "./plugins/explain",
-      "description": "Explain what code in your repo does, a code change in it, or a subject a research phase covered, as a native chapter — Markdown with typed blocks for diagrams, figures, callouts and a quiz — in your own knowledge base, written only from the code and what your workspace's phases recorded, a research phase's findings included, with no research of its own. Whenever the records lack what the reader needs (a subject no phase covers, code or not, or a covered subject that rests on outside basics no record states), it offers a research phase first, your own \"research first\" is always honoured, and the explain's confirmation comes back by itself when that research passes. It runs as an explain phase in a workflow workspace (v96 or later): one confirmation, then one writer, one critic and a private publish; a book's chapters are written at once. One setup skill connects the hosted KB or scaffolds your own."
     }
   ]
 }

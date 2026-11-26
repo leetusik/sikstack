@@ -29,23 +29,16 @@ web/design/* | *
 *CHANGELOG.md | *
 
 # Compatibility reads of old names: the old hosts (they only redirect, and a client never follows
-# a redirect, so the CLI and the explain resolver read a saved old host as sikstack.com, and the
+# a redirect, so the CLI reads a saved old host as sikstack.com, and the
 # skills say so), the request headers an older engine or web build sends, the box's older env names.
 mcp-server/CONTRACT.md | old public host `knowledge\.hi2vi\.com`
 skills/vocky-feedback/SKILL.md | old `vocky\.hi2vi\.com`|old apex `hi2vi\.com`
 web/public/feedback/SKILL.md | old `vocky\.hi2vi\.com`|old apex `hi2vi\.com`
 cli/src/knowledge_cli/config.py | knowledge\.hi2vi\.com|old apex hi2vi\.com
 cli/tests/test_config.py | hi2vi\.com
-.agents/skills/explain/SKILL.md | knowledge\.hi2vi\.com
-plugins/explain/skills/explain/SKILL.md | knowledge\.hi2vi\.com
-web/public/SKILL.md | knowledge\.hi2vi\.com
-tests/test_explain_resolver.py | hi2vi\.com
 server/accounts/auth.py | X-Hi2vi-|named hi2vi before sikstack
-plugins/explain/templates/kb/server/accounts/auth.py | X-Hi2vi-|named hi2vi before sikstack
 server/workspace_api.py | ``X-Hi2vi-\*`` names are read the same
-plugins/explain/templates/kb/server/workspace_api.py | ``X-Hi2vi-\*`` names are read the same
 tests/test_workspace_store.py | X-Hi2vi-
-plugins/explain/templates/kb/tests/test_workspace_store.py | X-Hi2vi-
 web/src/lib/send-feedback/config.ts | HI2VI_FEEDBACK_|product was hi2vi before sikstack
 web/tests/send-feedback.test.ts | HI2VI_FEEDBACK_
 
@@ -65,15 +58,10 @@ mcp-server/CONTRACT.md | OpenClaw|For hi2vi, whose|single hi2vi|hi2vi P18\.S5
 mcp-server/scripts/e2e_smoke.py | OpenClaw
 mcp-server/src/knowledge_mcp/config.py | OpenClaw
 server/api_auth.py | live hi2vi agent
-plugins/explain/templates/kb/server/api_auth.py | live hi2vi agent
 server/config.py | hi2vi content agent
-plugins/explain/templates/kb/server/config.py | hi2vi content agent
 server/main.py | the hi2vi agent runs server-side
-plugins/explain/templates/kb/server/main.py | the hi2vi agent runs server-side
 server/reindex.py | hi2vi corpus
-plugins/explain/templates/kb/server/reindex.py | hi2vi corpus
 server/seed.py | ``hi2vi``, ``hi2vi_web``
-plugins/explain/templates/kb/server/seed.py | ``hi2vi``, ``hi2vi_web``
 
 # The signed design system's folder in the workspace that drew it (`design-system/hi2vi/`).
 web/src/sikstack/* | design-system/hi2vi

@@ -1,8 +1,0 @@
-.DS_Store
-site/
-.cache/
-/data/
-__pycache__/
-*.py[co]
-.venv/
-.env

@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # do-next-slice
 
-One slice of the `do-whole-phase` loop, then stop. Read `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/SKILL.md` and follow it for exactly one slice: its reads, its modes (`auto`, `gate`, `plan only`), its stops (`WAITING ON OPERATOR` stops you before anything starts), its special slices and its references, read by path from `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/reference/` (`dispatch.md`, `verdicts.md`, `decomposition.md`, `review.md`, `co-work.md`, `worktree.md`, `wave.md`, `explain-*.md`).
+One slice of the `do-whole-phase` loop, then stop. Read `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/SKILL.md` and follow it for exactly one slice: its reads, its modes (`auto`, `gate`, `plan only`), its stops (`WAITING ON OPERATOR` stops you before anything starts), its special slices and its references, read by path from `${CLAUDE_PLUGIN_ROOT}/skills/do-whole-phase/reference/` (`dispatch.md`, `verdicts.md`, `decomposition.md`, `review.md`, `co-work.md`, `worktree.md`, `wave.md`).
 
 What differs from the whole-phase loop:
 
