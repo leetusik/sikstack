@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | local <dir> | api [other] | expect | feature <name> | status | down
+# sikstack local verification stack: doctor | up | signin [other] | seed | workspace <dir> | local <dir> | api [other] | expect | feature <name> | webkit | status | down
 #
 # Runs the whole product on loopback without touching the checkout: a throwaway
 # postgres:17 container, the API on the host (scratch KB_ROOT, KB_GIT_COMMIT=false),
@@ -517,6 +517,27 @@ expect() { # text...: wait up to 15 s for the page to show every text
   done
 }
 
+WEBKIT_CORE="1.49.1" # its WebKit build v2104 (Safari 18.2): old enough to show what iOS 18 Safari draws
+webkit() { # phone|tablet <path> [name] [measure.js]: one page in WebKit 18.2, signed in, shot into the evidence
+  load_state
+  local device="${1:-}" path="${2:-}" name="${3:-}" measure="${4:-}" pin="$_tmp/sikstack-verify/webkit-$WEBKIT_CORE"
+  case "$device" in phone|tablet) ;; *) die "usage: $0 webkit phone|tablet <path> [name] [measure.js]" ;; esac
+  [ -n "$path" ] || die "usage: $0 webkit phone|tablet <path> [name] [measure.js]"
+  [ -n "${WEB_PID:-}" ] || die "not up: run '$0 up' first"
+  if [ ! -f "$pin/node_modules/playwright-core/package.json" ]; then # one pinned copy for every home, outside the checkout
+    say "webkit: installing playwright-core@$WEBKIT_CORE in $pin"
+    mkdir -p "$pin" && npm install --prefix "$pin" --no-save --no-audit --no-fund "playwright-core@$WEBKIT_CORE" >/dev/null 2>&1 \
+      || die "npm install playwright-core@$WEBKIT_CORE failed"
+  fi
+  node "$pin/node_modules/playwright-core/cli.js" install webkit >/dev/null 2>&1 || die "WebKit for playwright-core@$WEBKIT_CORE failed to install"
+  [ -n "$name" ] || name="webkit-$device-$(printf '%s' "$path" | tr -c 'A-Za-z0-9' '-' | sed 's/^-*//; s/-*$//')"
+  local auth="$EV/auth-state.json"; [ -f "$auth" ] || { say "webkit: no saved sign-in ($auth): the page opens signed out"; auth=""; }
+  local out
+  out=$(PWCORE="$pin/node_modules/playwright-core" node "$SKILL_DIR/webkit.mjs" "$device" "$WEB$path" "$EV/$name.png" "$auth" ${measure:+"$measure"}) \
+    || die "webkit: the page did not open"
+  say "webkit: $out"
+}
+
 feature() { # name: run the Drive block of features/<name>.md
   load_state
   local f="$SKILL_DIR/features/$1.md"
@@ -595,7 +616,8 @@ case "${1:-}" in
   seed) seed ;;
   expect) shift; load_state; expect "$@" ;;
   feature) shift; [ $# -ge 1 ] || die "usage: $0 feature <name>"; for n in "$@"; do feature "$n" || exit 1; done ;;
+  webkit) shift; webkit "$@" ;;
   status) status ;;
   down) down ;;
-  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | local <dir> | api [other] <method> <path> [json] | expect <text>... | feature <name>... | status | down"; exit 2 ;;
+  *) echo "usage: $0 doctor | up [evidence-dir] | signin [other] | seed | workspace <dir> | local <dir> | api [other] <method> <path> [json] | expect <text>... | feature <name>... | webkit phone|tablet <path> [name] [measure.js] | status | down"; exit 2 ;;
 esac

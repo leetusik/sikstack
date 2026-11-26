@@ -187,6 +187,16 @@
 .nav-pill { display: flex; flex: 1; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; padding: 0 var(--space-3); border-radius: var(--radius-m); line-height: 1; }
 .nav-item:hover .nav-pill { background: var(--hover); color: var(--ink); }
 .nav-item[aria-current="page"] .nav-pill { background: var(--ink); color: var(--surface); font-weight: 600; }
+/* a phone: one row that scrolls sideways, never a grid of rows (P86, U1). The Shell keeps the current tab in view
+   and marks the sides that have more (`data-more-start`, `data-more-end`), which fade out. */
+@container app (max-width: 47.99em) {
+  .rail { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail > .nav-item { flex: 1 0 auto; }
+  .rail[data-more-end] { mask-image: linear-gradient(to left, transparent, var(--ink) var(--space-6)); }
+  .rail[data-more-start] { mask-image: linear-gradient(to right, transparent, var(--ink) var(--space-6)); }
+  .rail[data-more-start][data-more-end] { mask-image: linear-gradient(to right, transparent, var(--ink) var(--space-6), var(--ink) calc(100% - var(--space-6)), transparent); }
+}
 
 @container top (max-width: 40em) {
   .menu-anchor { position: static; }
@@ -319,10 +329,22 @@
 .table td.at-end, .table th.at-end { padding-right: var(--space-2); text-align: right; }
 .table td.at-end { padding-block: 0; }
 /* the keys table declares its columns, so they hold while it loads and whatever the keys are (frame.md F21) */
-.table.is-keys { table-layout: fixed; min-width: 60em; }
+/* 48em, the width under which it stacks (`.table-stack`): no width between that and its panel scrolls it sideways (P86, U3) */
+.table.is-keys { table-layout: fixed; min-width: 48em; }
 .table.is-keys th { width: 14%; }
 .table.is-keys th:first-child { width: 17%; }
 .table.is-keys th:nth-child(4) { width: 13%; }
+/* a tablet: under the old 60em, until it stacks, the cells keep 8 px a side (the row's ends keep theirs) and the
+   columns are shared out for the key's prefix, Capture only and Revoke, so no value runs into the next (P86, U3) */
+@container tstack (min-width: 48em) and (max-width: 59.99em) {
+  .table.is-keys th, .table.is-keys td { padding-inline: var(--space-2); }
+  .table.is-keys th:first-child, .table.is-keys td:first-child { padding-left: var(--space-4); }
+  .table.is-keys th { width: 13%; }
+  .table.is-keys th:first-child { width: 16%; }
+  .table.is-keys th:nth-child(2) { width: 18%; }
+  .table.is-keys th:nth-child(3), .table.is-keys th:last-child { width: 14%; }
+  .table.is-keys th:nth-child(4) { width: 12%; }
+}
 
 /* field */
 .field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
@@ -355,7 +377,9 @@ textarea.input { height: auto; min-height: calc(2 * var(--control-h)); padding-b
 .usage { display: flex; flex-wrap: wrap; gap: var(--space-5); }
 .usage-window { flex: 3 1 30em; }
 .usage-stock { flex: 1 1 10em; }
-.usage-window .stats { container-type: inline-size; }
+/* the size container is the group, never the grid itself: inside its own size container WebKit 18 resolves the grid's
+   `min(10em, 100%)` to 0, and every column with it (P86, B1: the tiles drawn on one spot) */
+.usage-window { container-type: inline-size; }
 @container (max-width: 29.99em) {
   .usage-window .stat:nth-child(3) { grid-column: 1 / -1; }
 }

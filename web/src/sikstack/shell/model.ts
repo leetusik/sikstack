@@ -266,6 +266,39 @@ export function nonceFromCsp(
   return m ? m[1] : undefined;
 }
 
+/**
+ * The rail on a phone is one row that scrolls sideways (P86, U1). Which of its sides hide tabs: the
+ * Shell marks each (`data-more-start`, `data-more-end`) and the bundle fades that side out. A pixel of
+ * rounding is no tab.
+ */
+export function railMore(
+  scrollLeft: number,
+  clientWidth: number,
+  scrollWidth: number,
+): { start: boolean; end: boolean } {
+  return {
+    start: scrollLeft > 1,
+    end: scrollLeft + clientWidth < scrollWidth - 1,
+  };
+}
+
+/**
+ * Where the rail scrolls so its current tab is in view, clear of a side's fade (`pad`): `null` when it
+ * already is. `left` is the tab's start along the rail's scrolled content.
+ */
+export function railScrollFor(
+  scrollLeft: number,
+  clientWidth: number,
+  left: number,
+  width: number,
+  pad: number,
+): number | null {
+  if (left - pad < scrollLeft) return Math.max(0, left - pad);
+  if (left + width + pad > scrollLeft + clientWidth)
+    return left + width + pad - clientWidth;
+  return null;
+}
+
 /** The avatar's letter: the email's first letter, upper case (F30). */
 export function initialOf(email: string): string {
   return (email.trim().charAt(0) || "?").toUpperCase();

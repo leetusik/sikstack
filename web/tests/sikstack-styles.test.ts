@@ -175,6 +175,32 @@ describe("src/sikstack", () => {
 });
 
 describe("the app's stylesheets and fonts", () => {
+  // P86, B1: inside its own size container WebKit 18 resolves a grid's `min(10em, 100%)` to 0, and every
+  // column with it (the usage tiles drawn on one spot on an iPhone). The container is a wrapper, never the grid.
+  it("make no grid whose columns lean on 100% its own size container", () => {
+    const subject = (selector: string) =>
+      selector.trim().split(/\s+|>/).filter(Boolean).pop() ?? "";
+    const containers = new Map<string, string>();
+    const grids = new Map<string, string>();
+    for (const file of filesUnder(join(web, "src")).filter((f) =>
+      f.endsWith(".css"),
+    )) {
+      for (const m of stripComments(read(file)).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const [, prelude, body] = m;
+        for (const sel of prelude.split(",")) {
+          if (/(^|;|\s)container(-type)?\s*:/.test(body))
+            containers.set(subject(sel), `${file}: ${sel.trim()}`);
+          if (/grid-template-columns\s*:[^;]*100%/.test(body))
+            grids.set(subject(sel), `${file}: ${sel.trim()}`);
+        }
+      }
+    }
+    const both = [...grids.keys()].filter((s) => containers.has(s));
+    expect(
+      both.map((s) => `${grids.get(s)} / ${containers.get(s)}`),
+    ).toEqual([]);
+  });
+
   it("name no Google font host", () => {
     for (const file of filesUnder(join(web, "src")).filter((f) =>
       /\.(css|tsx?)$/.test(f),

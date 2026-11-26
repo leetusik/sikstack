@@ -12,9 +12,24 @@
   .orghome-pair > .stack > :last-child {
     flex: 1 0 auto;
   }
-  /* the projects table's declared columns (FG9); a stacked table (`.table-stack`, P78 F14) drops the width */
+  /* the projects table's declared columns (FG9); a stacked table (`.table-stack`, P78 F14) drops the width. 48em is
+     the width under which it stacks: no width between that and its panel scrolls it sideways (P86, U2) */
   .orghome-projects {
     table-layout: fixed;
-    min-width: 57em;
+    min-width: 48em;
+  }
+  /* a tablet: under the old 57em, until it stacks, the cells keep 8 px a side (the row's ends keep theirs), so a
+     date of another year (`Dec 9, 2025`) still fits its column */
+  @container tstack (min-width: 48em) and (max-width: 56.99em) {
+    .orghome-projects th,
+    .orghome-projects td {
+      padding-inline: var(--space-2);
+    }
+    .orghome-projects :is(th, td):first-child {
+      padding-left: var(--space-4);
+    }
+    .orghome-projects :is(th, td):last-child {
+      padding-right: var(--space-4);
+    }
   }
 }

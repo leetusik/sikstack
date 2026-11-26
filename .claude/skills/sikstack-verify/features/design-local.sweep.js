@@ -1,7 +1,7 @@
 async page => {
   // The design-local sweep (run it with `playwright-cli -s=<guest> --raw run-code --filename=<copy>`, after replacing
   // __LINK__ with the build's share link and __SHOTS__ with the evidence folder). A signed-out browser holding only the
-  // share link walks the build by click at 1440 and 390: every page from the front page's links, then every state
+  // share link walks the build by click at 1440 and 375: every page from the front page's links, then every state
   // from that page's "Design states" bar. A modal state (a `showModal()` dialog) makes the bar inert, so an open
   // `dialog:modal` is closed with its own Cancel before the next pick; a busy one (its Cancel disabled, Escape refused,
   // as while a request runs) cannot be, so the next state is clicked from the front page's state links. It records
@@ -29,7 +29,7 @@ async page => {
     return "cancel";
   };
   const state = () => new URL(page.url()).searchParams.get("state");
-  for (const [w, h] of [[1440, 900], [390, 844]]) {
+  for (const [w, h] of [[1440, 900], [375, 812]]) {
     await page.setViewportSize({ width: w, height: h });
     const size = { width: w, pages: [] };
     await page.goto(origin + "/");

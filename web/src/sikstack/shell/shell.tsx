@@ -24,6 +24,8 @@ import {
   projectIdOf,
   projectSwitchHref,
   railFor,
+  railMore,
+  railScrollFor,
   reviewCount,
   showsProjectFilter,
   type RailItem,
@@ -52,6 +54,8 @@ const ORG_HOME = "/dashboard";
 const NEW_ORG = "/orgs/new";
 /** The account page (P78, F10): the account menu's link, before Sign out. */
 const ACCOUNT_PAGE = "/account";
+/** The fade at a phone rail's side (the bundle's `--space-6`): the current tab is scrolled clear of it. */
+const RAIL_FADE = 32;
 /** The rail's words, the org form's Members with them. */
 const RAIL_WORDS = { ...SHELL.rail, members: ORG_SHELL.members };
 
@@ -82,6 +86,7 @@ export function Shell({
   const [query, setQuery] = useState("");
   const [seenPath, setSeenPath] = useState(pathname);
   const signingOut = useRef(false);
+  const railRef = useRef<HTMLElement>(null);
 
   // A new address closes any open menu (React's "adjust state while rendering", no effect).
   if (seenPath !== pathname) {
@@ -109,6 +114,40 @@ export function Shell({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
+
+  // On a phone the rail is one row that scrolls sideways (P86, U1): each arrival scrolls the current tab
+  // into view, and the sides that hide tabs are marked for their fade, on every scroll and resize.
+  useEffect(() => {
+    const nav = railRef.current;
+    if (!nav) return;
+    const mark = () => {
+      const more = railMore(nav.scrollLeft, nav.clientWidth, nav.scrollWidth);
+      nav.toggleAttribute("data-more-start", more.start);
+      nav.toggleAttribute("data-more-end", more.end);
+    };
+    const current = nav.querySelector<HTMLElement>('[aria-current="page"]');
+    if (current && nav.scrollWidth > nav.clientWidth) {
+      const box = nav.getBoundingClientRect();
+      const tab = current.getBoundingClientRect();
+      const to = railScrollFor(
+        nav.scrollLeft,
+        nav.clientWidth,
+        tab.left - box.left + nav.scrollLeft,
+        tab.width,
+        RAIL_FADE,
+      );
+      if (to !== null) nav.scrollLeft = to;
+    }
+    mark();
+    nav.addEventListener("scroll", mark, { passive: true });
+    const resize =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(mark);
+    resize?.observe(nav);
+    return () => {
+      nav.removeEventListener("scroll", mark);
+      resize?.disconnect();
+    };
+  }, [pathname]);
 
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     closeMenuOnEscape(event, open !== null, () => set(null));
@@ -344,7 +383,7 @@ export function Shell({
           </div>
         </div>
       </header>
-      <nav className="rail" aria-label={SHELL.sections}>
+      <nav className="rail" aria-label={SHELL.sections} ref={railRef}>
         {rail.items.map((item) => (
           <RailEntry key={item.key} item={item} />
         ))}
