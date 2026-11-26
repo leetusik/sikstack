@@ -121,13 +121,13 @@ def run(*argv):
     return main.main(["--base-url", "http://api.test", *argv])
 
 
-# --- T1: the write lands where /explain:explain would put it -----------------
+# --- T1: the write lands where /sikstack:explain would put it ----------------
 
 
 def test_save_uses_the_repo_name_and_a_frontmatter_free_body(home, api, repo, tmp_path):
-    """project = the repo root's basename, verbatim (explain/SKILL.md:160).
+    """project = the repo root's basename, verbatim (`/sikstack:explain`'s default too).
 
-    The CLI and the plugin write the same corpus with the same key; if they
+    The CLI and the skill write the same corpus with the same key; if they
     partition it differently, one repo's notes end up split across two projects.
     """
 

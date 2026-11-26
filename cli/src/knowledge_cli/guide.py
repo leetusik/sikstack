@@ -111,8 +111,8 @@ into the config file for you and **never prints, logs, or echoes it** — not on
 success, not in an error message. You never copy-paste it. If the config is lost, mint
 a new one (`knowledge init --new-key`); the old plaintext is unrecoverable by design.
 
-This `vk_` in `api.token` is also the exact key the `/explain:explain` Claude Code
-plugin reads. Writing it here is what lets that plugin write to the same hosted
+This `vk_` in `api.token` is also the key `/sikstack:explain` publishes with: that
+Claude Code skill publishes through this CLI, so it writes to the same hosted
 knowledge base with no extra setup.
 
 ## 4. Save a document
@@ -129,9 +129,9 @@ knowledge base with no extra setup.
   rule the CLI checks before sending, so `--tag Auth`, `--tag "web api"`, and fewer
   than 2 or more than 5 tags are each rejected with a sentence rather than a raw 422.
   Tags are repeatable and comma-splittable (`--tag a,b` == `--tag a --tag b`).
-- **The project defaults to the git repo's directory name**, verbatim — exactly what
-  `/explain:explain` uses, so the CLI and the plugin file one repo's notes under the
-  same project. Override with `--project`. Outside a git repo it falls back to the
+- **The project defaults to the git repo's directory name**, verbatim — the
+  same default `/sikstack:explain` uses, so both file a repo's notes under one
+  project. Override with `--project`. Outside a git repo it falls back to the
   project `init` configured, then to `default`. Any name is fine — the server
   get-or-creates the project on first save, so you never pre-create one. If the repo's
   directory name is not a usable project name (a space in it, say), the CLI stops and
@@ -225,9 +225,10 @@ write can never silently degrade into a stray local file.
 
     knowledge config      # print the resolved state (status, base URL, token shape)
 
-`knowledge config` prints exactly the keys the `/explain:explain` resolver would
-see, with the token reduced to its shape (`vk_…last4`) — never its value. Exit 0 means
-a usable knowledge base is configured; exit 1 means unconfigured or broken.
+`knowledge config` prints exactly the keys `knowledge save` resolves (the old
+explain plugin's `KB_*` set), with the token reduced to its shape (`vk_…last4`) —
+never its value. Exit 0 means a usable knowledge base is configured; exit 1 means
+unconfigured or broken.
 
 Point the CLI at another service with `--base-url URL`, the `$KB_API_BASE_URL` env
 var, or the config's `api.base_url` (in that precedence). A local stack listens on
@@ -236,12 +237,12 @@ var, or the config's `api.base_url` (in that precedence). A local stack listens 
 ## 8. One hazard — `$KB_API_TOKEN`
 
 `$KB_API_TOKEN`, if set, overrides the config's `api.token` for `/api/*` commands —
-that precedence is the plugin seam's, not the CLI's invention. But it is **not** an
+that precedence is the config seam's, not the CLI's invention. But it is **not** an
 innocent override: if its value is the server's master bearer, an exact match
-short-circuits to **tenant #1**, whose writes are public — they update the canonical
-git-published `docs/` tree, commit, and push to the live website. Someone who exported
-`$KB_API_TOKEN` for the plugin and forgot has a shell where every `knowledge save`
-publishes. If you did not mean to write to the public corpus, **unset `$KB_API_TOKEN`**
+short-circuits to **tenant #1**, the operator's own library, where a new item in a
+public project starts **Public** (anyone can read it). Someone who exported
+`$KB_API_TOKEN` once and forgot has a shell where every `knowledge save` writes
+there. If you did not mean to write to the operator's library, **unset `$KB_API_TOKEN`**
 and let the CLI use your own key. The CLI warns on stderr whenever the env var is
 displacing a configured key.
 """

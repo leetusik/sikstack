@@ -27,7 +27,7 @@ def _pay(rel):  # an old payload/ path, mapped into the plugin
     return root / rel
 root = Path(sys.argv[1])
 skills = {p.parent.name for p in (root / "skills").glob("*/SKILL.md")}
-assert len(skills) == 17, len(skills)  # 0.9.0: explain added; 0.5.0: archive-phase retired (rotate-backlog and `phase archive <P>` archive); 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
+assert len(skills) == 17, len(skills)  # 0.10.0: explain added; 0.5.0: archive-phase retired (rotate-backlog and `phase archive <P>` archive); 1.0.0: update-workspace and retrofit retired with the installer; sik-mode, setup, sign-in and feedback added; 0.3.0: defer-job, deferred and promote-deferred retired with deferred jobs
 assert not skills & {"defer-job", "deferred", "promote-deferred"}, skills
 def engine_src():  # the engine's source: every module, payload/scripts/*.py (the shell's engine_src)
     return "".join(f.read_text(encoding="utf-8") for f in sorted((root / "scripts").glob("*.py")))
@@ -48,7 +48,7 @@ for gone in ("AGENTS.md", ".agents", ".codex"):
     assert not (root / gone).exists(), gone
 # 0.5.0: review-phase alone carries both markers (path-only: its executor reads it by path); commit and pr stay model-invocable for the spoken ask.
 model_invocable = {"explain", "create-phase", "design-cowork", "sik-mode", "parallel-phase", "read-code", "executor-route", "commit", "pr"}
-# 0.5.0: the `/` menu holds the skills a person types (10 since 0.9.0's explain); these 7 are the agents' and carry `user-invocable: false`.
+# 0.5.0: the `/` menu holds the skills a person types (10 since 0.10.0's explain); these 7 are the agents' and carry `user-invocable: false`.
 agent_only = {"commit", "pr", "review-phase", "parallel-phase", "read-code", "executor-route", "design-cowork"}
 assert len(skills) == 17 and len(agent_only) == 7 and agent_only <= set(skills), sorted(skills)
 for name in sorted(skills):
@@ -97,7 +97,7 @@ for gone in ("Mockup: requested", "Mockup: on request", "canvas", "in-product mo
 for gone in ("ask which design tool", "Design tool: drafter", "Design tool: claude-design",
              "DesignSync", "design-deck", "design-register", "sign on the cards", "the drafted cards"):
     assert gone not in create_phase, gone
-# 0.9.0: explain left the phase machinery. /sikstack:explain writes in the session; the engine has no explain route.
+# 0.10.0: explain left the phase machinery. /sikstack:explain writes in the session; the engine has no explain route.
 for gone in ("## The explain route", "## The research route", "## Explain", "Research: <subject>", "/explain:explain", "explain_unit"):
     assert gone not in create_phase, gone
 for _k, _v in LIVE.items():
@@ -147,7 +147,7 @@ for required in ("knowledge init", "uv tool install git+https://github.com/leetu
     assert required in _pub, ("publish.md", required)
 codex_prose = {n for n in skills if "Codex" in skill_dir_text(n)}
 assert codex_prose <= {"update-workspace"}, sorted(codex_prose)
-assert "explain" in skills, skills  # 0.9.0: /sikstack:explain
+assert "explain" in skills, skills  # 0.10.0: /sikstack:explain
 for name in ("do-whole-phase",):
     body = skill_dir_text(name)
     for required in (

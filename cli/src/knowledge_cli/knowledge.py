@@ -112,10 +112,9 @@ def repo_root(start: str | None = None) -> str | None:
 def default_project() -> str:
     """The project a `save` lands in when `--project` is not given.
 
-    **The repo's root directory name, verbatim** — which is what
-    `plugins/explain/skills/explain/SKILL.md:160` tells `/explain:explain` to use. The CLI
-    and the plugin write the same corpus with the same key, so they must partition
-    it the same way; a CLI that defaulted to something else would scatter one
+    **The repo's root directory name, verbatim** — the same default
+    `/sikstack:explain` names for a document. The CLI and the skill write the same
+    corpus with the same key, so they must partition it the same way; a CLI that defaulted to something else would scatter one
     repo's notes across two project names depending on which tool wrote them.
 
     Outside a git repo there is no repo name to use, so fall back to the project
@@ -149,17 +148,16 @@ def default_source_repo() -> str:
 def api_token() -> str:
     """The bearer for `/api/*`: `$KB_API_TOKEN` first, then the config's `api.token`.
 
-    That precedence is the **seam's**, not this CLI's invention
-    (`explain/SKILL.md:96-109`), and `knowledge config` already reports the env var
+    That precedence is the **seam's** (the old explain plugin's resolver had it),
+    not this CLI's invention, and `knowledge config` already reports the env var
     as the effective token — ignoring it here would make the CLI contradict its own
     debug command.
 
     But `$KB_API_TOKEN` is **not** a generic token override, and that is worth a
     warning: `server/api_auth.py:142-149` short-circuits an *exact* match to
-    **tenant #1**, and a tenant-#1 write is `is_public` — it writes the canonical
-    git-published `docs/` tree, updates the public Recent index, commits, and
-    pushes to the live website (`main.py:448-459,486-515`). Someone who exported it
-    for the plugin and forgot has a shell where every `knowledge save` publishes.
+    **tenant #1**, the operator's own library, where a new item in a public project
+    starts Public (`server/sharing.py`, `default_for`). Someone who exported it once
+    and forgot has a shell where every `knowledge save` writes there.
     So: honor it, and say so when it is displacing a key of your own.
     """
 
@@ -282,7 +280,7 @@ def read_body(source: str) -> str:
     """The document body, from a file or stdin (`-`).
 
     Never from an argument: a document is long and would blow past the shell's argv
-    limit; `explain/SKILL.md:164-166` builds a temp file for exactly this reason.
+    limit; `/sikstack:explain` writes its draft to a file for exactly this reason.
     """
 
     if source == "-":
@@ -507,8 +505,8 @@ def cmd_save(args: argparse.Namespace) -> int:
     the API writes the frontmatter itself. Tags are required, 2-5 of them, in
     lowercase-kebab.
 
-    The project defaults to this git repo's directory name, which is exactly what
-    `/explain:explain` uses — so both tools file a repo's notes together.
+    The project defaults to this git repo's directory name, the same default
+    `/sikstack:explain` uses — so both file a repo's notes together.
 
     The only command here that writes, and so the only one that has to be careful
     about *not being answered*: if the POST goes out and the reply is lost, the

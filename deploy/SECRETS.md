@@ -47,7 +47,7 @@ ssh oracle-cloud "sudo grep '^KB_API_TOKEN=' /opt/knowledge/.env"
 ## 2. SSH deploy key — the box's git credential
 
 > **Since item sharing (P75), no Library write commits or pushes** (`server/sharing.py`
-> gates reads; `KB_GIT_PUSH` is no longer read by the write path). The key stays: Production
+> gates reads; nothing reads `KB_GIT_PUSH`, and `compose.prod.yml` no longer sets it). The key stays: Production
 > Deploy's reconcile (`deploy/deploy.sh`) fetches `origin/main` with it, and the
 > `python -m server.reconcile --push` repair CLI still pushes. A read-only key would serve
 > the deploy alone; dropping write access waits until that CLI is retired.

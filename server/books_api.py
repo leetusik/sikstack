@@ -17,9 +17,10 @@ the manifests in ``server/books.py`` are the truth):
   durable public identity, backing the reader URL ``/@{org}/{project}/books/{book}``.
   ``org`` is the org slug, or the tenant id for a tenant without one (P30.S11,
   OQ26 — the graph's and reader state's rule, parsed UUID first).
-  Optional-identity: a member of the org reads it whatever the project's
-  visibility; anyone else only when the project is **public**. Every miss (legacy
-  mode, no such org, no such project or book, a private project) is the one
+  Optional-identity: a member of the org reads it whatever its sharing; anyone
+  else only when the book is Public, or with its live link (``server.sharing``).
+  Every miss (legacy mode, no such org, no such project or book, a book they may
+  not read) is the one
   identical 404 — never a 403 — exactly like ``/app/orgs/{org}/{project}/{slug}``.
   It is four segments after the org, so it cannot collide with that 3-segment
   document route.
@@ -152,15 +153,15 @@ async def resolve_book_by_slug(
     share: tuple[str, ...] | None = Depends(sharing.share_token_header),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
-    """One book by org (slug or tenant id) + project + book slug, gated by visibility.
+    """One book by org (slug or tenant id) + project + book slug, gated by its sharing.
 
     Resolution: Postgres org slug or tenant id -> tenant -> the tenant-scoped book
     row. ``canonical_path`` names the slug when the tenant has one, so a member who
     arrived on the tenant-id path can be sent on to the pretty one. A member
-    of that tenant reads it whatever the project's visibility; any other caller,
-    anonymous or cross-org, only when the owning project is ``public``. Every miss
-    is the same 404 detail, so a private project and a nonexistent one look
-    identical.
+    of that tenant reads it whatever its sharing; any other caller, anonymous or
+    cross-org, only when the book is Public or the request holds its live link
+    (``sharing.readable``). Every miss is the same 404 detail, so a book they may
+    not read and a nonexistent one look identical.
     """
 
     if config.database_url() is None:

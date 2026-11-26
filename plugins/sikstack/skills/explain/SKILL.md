@@ -74,7 +74,7 @@ Before publishing, dispatch one fresh-eyes reader (`reference/fresh-eyes.md`): a
 
 ## Publishing
 
-Keep the draft, the findings and any images in a scratch folder outside the repo (`mktemp -d`); explain writes nothing into the repo or the workspace. Check the body with `knowledge check`, then publish with `knowledge save … --format native --share members` (`reference/publish.md`). Explain always publishes as **Members**: only the org can read it. To change who can read it afterwards, the operator runs `knowledge share <document|book> members|link|public`, or uses the reader's share switch; never change it unasked. With no CLI or no key, `reference/publish.md` says how to install and connect, and the draft stays on disk until then.
+Keep the draft, the findings and any images in a scratch folder outside the repo (`mktemp -d`); explain writes nothing into the repo or the workspace. Check the body with `knowledge check`, then publish a new document (or a new book's first chapter) with `knowledge save … --format native --share members`. A refresh or a next chapter sends no `--share`, so the item keeps its sharing; `reference/publish.md` has the full rule. A new item starts as **Members**: only the org can read it. To change who can read it afterwards, the operator runs `knowledge share <document|book> members|link|public`, or uses the reader's share switch; never change it unasked. With no CLI or no key, `reference/publish.md` says how to install and connect, and the draft stays on disk until then.
 
 ## The report
 

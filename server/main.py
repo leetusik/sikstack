@@ -26,6 +26,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
+from starlette.concurrency import run_in_threadpool
 
 from server import app_api
 from server import assets as assets_mod
@@ -632,13 +633,19 @@ async def search_sections(
     on it (``search.search_sections``). Metered as a search."""
 
     viewer = await _api_viewer(ctx)
-    conn = db.connect()
-    try:
-        out = search_mod.search_sections(
-            conn, q, tenant=_tenant_filter(ctx), project=project, limit=limit, viewer=viewer
-        )
-    finally:
-        conn.close()
+
+    def _run() -> dict:
+        conn = db.connect()
+        try:
+            return search_mod.search_sections(
+                conn, q, tenant=_tenant_filter(ctx), project=project, limit=limit, viewer=viewer
+            )
+        finally:
+            conn.close()
+
+    # The query embed is a blocking HTTP round-trip and the scans are sync SQLite: run
+    # them off the single worker's event loop, as the sync document search runs.
+    out = await run_in_threadpool(_run)
     request.state.usage = UsageHint(
         tenant_id=ctx.tenant_id,
         event_type=EVENT_SEARCH,
@@ -658,68 +665,73 @@ async def library(ctx: ApiAuthContext = Depends(resolve_api_read)):
 
     viewer = await _api_viewer(ctx)
     tid = _tenant_db_id(ctx)
-    conn = db.connect()
-    try:
-        books = []
-        for row in db.list_books(conn, tenant_id=tid):
-            found = db.get_book(conn, project=row["project"], slug=row["slug"], tenant_id=tid)
-            if found is None:
-                continue
-            books.append({
-                "project": found["project"],
-                "slug": found["slug"],
-                "title": found["title"],
-                "sub": found["sub"],
-                "kind": found["kind"],
-                "subject": found["subject"],
-                "description": found["description"],
-                "chapters": [
-                    {
-                        "key": ch["key"],
-                        "position": ch["position"],
-                        "title": ch["title"],
-                        "variants": [
-                            {
-                                "lang": v["lang"],
-                                "id": v["doc_id"],
-                                "rel_path": v["rel_path"],
-                                "title": v["title"],
-                                "version": v["version"],
-                                "format": v["format"],
-                                "url": sections_mod.reader_url(
-                                    viewer, doc_id=v["doc_id"], project=found["project"],
-                                    slug=v["slug"], anchor="", book=found["slug"],
-                                    chapter_key=ch["key"], lang=v["lang"],
-                                ),
-                            }
-                            for v in ch["variants"]
-                        ],
-                    }
-                    for ch in found["chapters"]
-                ],
-            })
-        documents = [
-            {
-                "id": d["id"],
-                "rel_path": d["rel_path"],
-                "project": d["project"],
-                "slug": d["slug"],
-                "title": d["title"],
-                "date": d["date"],
-                "format": d["format"] or "md",
-                "lang": d["lang"] or "en",
-                "version": int(d["version"] or 1),
-                "subject": d["subject"],
-                "tags": d["tags"],
-                "url": sections_mod.reader_url(
-                    viewer, doc_id=d["id"], project=d["project"], slug=d["slug"], anchor=""
-                ),
-            }
-            for d in db.list_loose_documents(conn, tenant_id=tid)
-        ]
-    finally:
-        conn.close()
-    return {"books": books, "documents": documents}
+
+    def _run() -> dict:
+        conn = db.connect()
+        try:
+            books = []
+            for row in db.list_books(conn, tenant_id=tid):
+                found = db.get_book(conn, project=row["project"], slug=row["slug"], tenant_id=tid)
+                if found is None:
+                    continue
+                books.append({
+                    "project": found["project"],
+                    "slug": found["slug"],
+                    "title": found["title"],
+                    "sub": found["sub"],
+                    "kind": found["kind"],
+                    "subject": found["subject"],
+                    "description": found["description"],
+                    "chapters": [
+                        {
+                            "key": ch["key"],
+                            "position": ch["position"],
+                            "title": ch["title"],
+                            "variants": [
+                                {
+                                    "lang": v["lang"],
+                                    "id": v["doc_id"],
+                                    "rel_path": v["rel_path"],
+                                    "title": v["title"],
+                                    "version": v["version"],
+                                    "format": v["format"],
+                                    "url": sections_mod.reader_url(
+                                        viewer, doc_id=v["doc_id"], project=found["project"],
+                                        slug=v["slug"], anchor="", book=found["slug"],
+                                        chapter_key=ch["key"], lang=v["lang"],
+                                    ),
+                                }
+                                for v in ch["variants"]
+                            ],
+                        }
+                        for ch in found["chapters"]
+                    ],
+                })
+            documents = [
+                {
+                    "id": d["id"],
+                    "rel_path": d["rel_path"],
+                    "project": d["project"],
+                    "slug": d["slug"],
+                    "title": d["title"],
+                    "date": d["date"],
+                    "format": d["format"] or "md",
+                    "lang": d["lang"] or "en",
+                    "version": int(d["version"] or 1),
+                    "subject": d["subject"],
+                    "tags": d["tags"],
+                    "url": sections_mod.reader_url(
+                        viewer, doc_id=d["id"], project=d["project"], slug=d["slug"], anchor=""
+                    ),
+                }
+                for d in db.list_loose_documents(conn, tenant_id=tid)
+            ]
+        finally:
+            conn.close()
+        return {"books": books, "documents": documents}
+
+    # Sync SQLite reads: off the single worker's event loop.
+    return await run_in_threadpool(_run)
 
 
 class ReindexIn(BaseModel):

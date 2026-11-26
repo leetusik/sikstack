@@ -930,7 +930,7 @@ def _nested_execution_problems(phase_id: str, execution: dict) -> list:
     nested install; `base_branch` comes with them there, and is otherwise only type-checked (a root
     stamp of it is additive). `worktree` is the nested worktree: `<host_worktree>/<workflow>` while
     both are set. A block without any of them (every at-root block, and a legacy one) is untouched.
-    v86 (§9.4): `host_branch` may be null -- a DETACHED host worktree (cut by an engine before 0.9.0 for an old phase kind) -- and then
+    v86 (§9.4): `host_branch` may be null -- a DETACHED host worktree (cut by an engine before 0.10.0 for an old phase kind) -- and then
     `host_branch_created` must be false and the block carries no `repos` (a set needs a host branch)."""
     problems = []
     present = [k for k in NESTED_EXECUTION_HOST_KEYS if k in execution]

@@ -888,7 +888,7 @@ fe=$(rs slice finish P4.DECOMP --outcome cut 2>&1); fe_rc=$?
   && [ "$fp_rc" -eq 0 ] && ! printf '%s\n' "$fp" | grep -q '^advice:' && printf '%s\n' "$fp" | grep -qx 'parallel_plan=P3: S1 + S2 -> S3 -> REVIEW' \
   && printf '%s\n' "$fp" | grep -q '^parallel_rounds=3 rounds for 4 open slices; 2 run beside another' && [ "$fe_rc" -eq 0 ] \
   && [ "$(printf '%s\n' "$fe" | grep -c '^advice: ')" -eq 2 ] && ! printf '%s\n' "$fe" | grep -qi 'explain' \
-  && ok "a decomposition finishing over an undeclared middle slice prints one advice: line naming it, slice deps declares it, slice finish prints the engine's parallel plan, and a phase whose intent.md still has ## Explain gets the same advice, with no explain exemption (v77; 0.9.0)" \
+  && ok "a decomposition finishing over an undeclared middle slice prints one advice: line naming it, slice deps declares it, slice finish prints the engine's parallel plan, and a phase whose intent.md still has ## Explain gets the same advice, with no explain exemption (v77; 0.10.0)" \
   || bad "declaration advice wrong (advice rc=$fr_rc, pass rc=$fp_rc, old-explain rc=$fe_rc) -- $fr / $fp / $fe"
 
 # ---------------------------------------------------------------------------
@@ -1665,7 +1665,7 @@ c_out=$(dw check 2>&1); c_rc=$?
   && ok "check passes over a broken retired design record: nothing reads docs/reference/design/ any more" || bad "check read the retired design record (rc=$c_rc) -- $c_out"
 
 # ---------------------------------------------------------------------------
-echo "== Test 14: P28 nested engine -- .sikstack/.agentic-nested.json: host anchors, host-side phase scope, the paired worktree lifecycle (0.9.0: no detached pair), the convention gate, a malformed marker fails validate =="
+echo "== Test 14: P28 nested engine -- .sikstack/.agentic-nested.json: host anchors, host-side phase scope, the paired worktree lifecycle (0.10.0: no detached pair), the convention gate, a malformed marker fails validate =="
 # A host repo with one product commit and its workspace made by `sikstack init` at host/.sikstack/, its marker
 # rewritten below. Every command runs from the host root, the way a session does.
 newtmp NS
@@ -1788,7 +1788,7 @@ if [ "$td_rc" -eq 0 ] && [ -n "$nested_at" ] && [ -n "$host_at" ] && [ "$nested_
     && ! grep -q '"execution"' "$NW/works/phases/active/P1/phase.json" && ! nw worktree status 2>&1 | grep -q '^== P1'; then
   ok "paired worktree teardown --discard-ignored removes the nested worktree before the host worktree and keeps the host branch feat/side; it clears the execution block, so worktree status stops listing P1"
 else bad "paired teardown wrong (rc=$td_rc) -- $td_out"; fi
-# 0.9.0: the explain route is gone, so a phase whose intent.md still carries `## Explain` gets no detached pair:
+# 0.10.0: the explain route is gone, so a phase whose intent.md still carries `## Explain` gets no detached pair:
 # worktree start with no --host-branch is refused like any phase's, and writes nothing.
 { nw phase new --phase P2 --name "Old explain probe" --objective "no detached host" \
     && printf '\n## Explain\n\n- unit: document\n' >> "$NW/works/phases/active/P2/intent.md"; } >/dev/null 2>&1 || bad "no detached pair: could not create the probe phase"
@@ -1798,7 +1798,7 @@ if [ "$ps_rc" -ne 0 ] && printf '%s\n' "$ps_out" | grep -q 'worktree start in a 
     && ! printf '%s\n' "$ps_out" | grep -qi 'explain' && ! grep -q '"execution"' "$NW/works/phases/active/P2/phase.json" \
     && [ "$(git -C "$NH" branch --list | wc -l | tr -d ' ')" = "$hb_before" ] && [ "$(git -C "$NW" rev-parse HEAD)" = "$nhead_before" ] \
     && ! nw next 2>&1 | grep -q '^explain_unit=' && nw check --no-rebuild >/dev/null 2>&1; then
-  ok "nested worktree start with no --host-branch is refused for a phase whose intent.md still has ## Explain (no detached pair, nothing written), and next prints no explain_unit= (0.9.0)"
+  ok "nested worktree start with no --host-branch is refused for a phase whose intent.md still has ## Explain (no detached pair, nothing written), and next prints no explain_unit= (0.10.0)"
 else bad "old explain phase still gets a detached pair or an explain line (rc=$ps_rc) -- $ps_out"; fi
 
 # ---------------------------------------------------------------------------

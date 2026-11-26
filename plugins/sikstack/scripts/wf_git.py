@@ -1419,7 +1419,7 @@ def _parallel_teardown_nested(args: argparse.Namespace, pdir: Path, data: dict, 
         print(f"each repo branch follows its repo's own custom (repo convention --repo <name>): integrate it there; "
               f"the engine pushed, opened and merged nothing")
     if not host_branch:
-        print("no host branch: the host worktree was detached (cut by an engine before 0.9.0), so there is no branch to keep or delete")
+        print("no host branch: the host worktree was detached (cut by an engine before 0.10.0), so there is no branch to keep or delete")
     if host_branch and not delete_host_branch:
         if host_branch_exists:
             print(f"kept host branch {host_branch}: {keep_reason}")
@@ -1708,7 +1708,7 @@ def parallel_status(args: argparse.Namespace) -> None:
         if NESTED is not None:  # P35: the host half of the pair, as stamped at worktree start
             detached = "host_branch" in execution and execution.get("host_branch") is None and "host_worktree" in execution
             if execution.get("host_branch") or detached:
-                if detached:  # a pair an engine before 0.9.0 cut detached
+                if detached:  # a pair an engine before 0.10.0 cut detached
                     print("  host_branch=- (detached host worktree)")
                 else:
                     print(f"  host_branch={execution['host_branch']}" + (" (created by worktree start)" if execution.get("host_branch_created") else " (reused)"))

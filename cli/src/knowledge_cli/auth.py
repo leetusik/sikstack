@@ -3,8 +3,8 @@
 `init` is the headline: it runs the whole `scripts/onboarding_smoke.py` sequence
 for a real person — signup-or-login -> project -> mint a `vk_` key -> **write the
 config seam** — and that last step is the payoff. The moment `api.token=vk_...`
-lands in `$XDG_CONFIG_HOME/knowledge-kb/config.json`, `/explain:explain` starts
-writing to the hosted service with zero code change.
+lands in `$XDG_CONFIG_HOME/knowledge-kb/config.json`, `knowledge save` (and so
+`/sikstack:explain`, which publishes through it) writes to the hosted service.
 
 Three rules shape every line here:
 
@@ -44,7 +44,7 @@ from .errors import CliError
 # The hosted service. A brand-new user with no config must reach it, not
 # localhost — so this differs from `config.DEFAULT_API_BASE_URL` on purpose. The
 # two answer different questions: `config.resolve()` reports what an *existing*
-# config says (and must mirror the plugin skill exactly, localhost default and
+# config says (a port of the old skill's resolver, localhost default and
 # all); this is the *onboarding target* for a fresh one. It lives here, beside
 # `resolve_base_url()`, because `main` imports this module and so cannot be
 # imported back.
@@ -273,7 +273,8 @@ def stored_session_token() -> str:
 def stored_api_token() -> str:
     """The non-expiring `vk_` key in `api.token`, or `""`. **Literal, not resolved.**
 
-    This is the key `/explain:explain` reads, and the one `/api/*` commands ride.
+    This is the key `/sikstack:explain` publishes with (through `knowledge save`),
+    and the one `/api/*` commands ride.
     Literal on purpose, same as `stored_session_token`: callers that need the seam's
     *effective* token (`$KB_API_TOKEN` first) must apply that precedence themselves
     and say so, because the env var is not an innocent override — see
@@ -286,7 +287,7 @@ def stored_api_token() -> str:
 def stored_project() -> str:
     """The project `init` configured for this machine, or `""` when unknown.
 
-    An **additive** key (`api.project`), invisible to the plugin skill's resolver,
+    An **additive** key (`api.project`), invisible to the old skill's resolver,
     which reads exactly four keys and ignores the rest — the same trick `auth.*`
     plays. Every config written before P13.S3 lacks it, so `""` means "unknown",
     never "none".
@@ -324,7 +325,7 @@ def resolve_base_url(explicit: str | None) -> str:
 
 
 def _legacy_checkout_active() -> bool:
-    """Is the pre-config-file convention what `/explain:explain` uses today?"""
+    """Is the pre-config-file convention what the resolver uses today?"""
 
     root = os.path.join(os.path.expanduser("~"), *config.LEGACY_ROOT_PARTS)
     return os.path.isfile(os.path.join(root, "mkdocs.yml"))
@@ -341,15 +342,15 @@ def _warn_before_first_write() -> None:
 
     A config file is **authoritative** once it exists: the resolver never falls
     through to `~/projects/personal/knowledge` for keys the file omits
-    (`explain/SKILL.md:55-63`). That is the safety property that stops a remote KB
+    (`config.resolve()`). That is the safety property that stops a remote KB
     degrading into a stray local write — but for someone already using the legacy
-    convention it silently changes where `/explain:explain` writes. Silent is
+    convention it silently changes where `knowledge save` writes. Silent is
     the only unacceptable part, so: warn.
     """
 
     if not os.path.isfile(config.config_path()) and _legacy_checkout_active():
         note(
-            f"creating {config.config_path()} — /explain:explain will read it "
+            f"creating {config.config_path()} — knowledge (and /sikstack:explain through it) will read it "
             "instead of falling back to your ~/projects/personal/knowledge checkout"
         )
 
@@ -359,7 +360,7 @@ def _save_session(base_url: str, token: str, email: str) -> None:
 
     `auth.*` is invisible to the skill's resolver, which reads exactly four keys
     and ignores everything else (S1's differential test pins that indifference) —
-    so this stays backward-compatible with a `/explain:setup`-written config.
+    so this stays backward-compatible with a config the old `/explain:setup` wrote.
     `api.base_url` is written too because a session is only meaningful against the
     server that issued it, and that is where the CLI already looks for the base.
     """
@@ -428,7 +429,7 @@ def cmd_logout(args: argparse.Namespace) -> int:
     """Revoke the session server-side, then forget it locally.
 
     **Leaves `api.token` alone.** The `vk_` key is a separate, non-expiring
-    credential that `/explain:explain` depends on; logging out of the control
+    credential that `/sikstack:explain` publishes with; logging out of the control
     plane must not silently break the user's knowledge writes. Revoking a key is a
     separate, explicit act.
     """
@@ -440,8 +441,8 @@ def cmd_logout(args: argparse.Namespace) -> int:
     with KnowledgeClient(args.base_url) as client:
         plane_call(args.base_url, client.auth_logout, token=token)
     # `config.save()` deep-merges and has no removal path, so absence is written as
-    # JSON null — the same convention /explain:setup already uses for api.token
-    # (setup/SKILL.md:203). The resolver reads null as "no value".
+    # JSON null — the same convention the old /explain:setup used for api.token.
+    # The resolver reads null as "no value".
     config.save({"auth": {"session_token": None}})
     print("logged out (your api.token is untouched — saved knowledge keeps working)")
     return 0
@@ -496,8 +497,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     The one command a new user needs, and safe to re-run: an existing account logs
     in, an existing project is reused, and an existing key is kept. What it writes
     is a **remote-only** config — no `kb_root` — which is the safety property that
-    keeps `/explain:explain` from ever degrading a failed remote write into a
-    stray local file.
+    keeps a failed remote write from ever degrading into a stray local file.
     """
 
     base_url = args.base_url
@@ -579,7 +579,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     )
     print(f"config: {path} (0600)")
 
-    # Verify through the resolver the plugin skill actually uses, rather than
+    # Verify through the resolver `knowledge save` actually uses, rather than
     # trusting the write: this is the seam's whole point, so prove it resolves.
     resolved = config.resolve()
     if resolved.status != "configured" or not resolved.api_token:
@@ -595,14 +595,14 @@ def cmd_init(args: argparse.Namespace) -> int:
         # and cannot remove a key, and destroying someone's local checkout setting
         # is not init's call to make.
         note(
-            f"your config still has kb_root={resolved.kb_root}, so /explain:explain "
-            "may write locally if the API is unreachable; remove it to go remote-only"
+            f"your config still has kb_root={resolved.kb_root}, which only the old explain "
+            "plugin read (knowledge and /sikstack:explain publish remotely); remove it to go remote-only"
         )
     # CLI and web share one accounts plane (POST /auth/signup · /auth/login), so
     # the same email + password that just onboarded this machine also logs into the
     # web UI. base_url-aware because a self-hosted service has its own origin.
     print(f"web login: {base_url}/login (same email + password)")
-    print("done — /explain:explain now writes to this knowledge base")
+    print("done — /sikstack:explain now publishes to this knowledge base")
     return 0
 
 

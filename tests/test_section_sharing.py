@@ -83,3 +83,52 @@ def test_a_workspace_key_is_refused(documents_client):
     ws = {"Authorization": f"Bearer {res.json()['key']}"}
     assert client.get("/api/sections/search", params={"q": "x"}, headers=ws).status_code == 403
     assert client.get("/api/library", headers=ws).status_code == 403
+
+
+def _healthz_while(client, path, key):
+    """Seconds ``/healthz`` waits while ``path`` is in flight on another thread."""
+
+    import threading
+    import time
+
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("r", client.get(path, headers=key)))
+    t.start()
+    time.sleep(0.3)
+    t0 = time.monotonic()
+    hz = client.get("/healthz")
+    waited = time.monotonic() - t0
+    t.join()
+    assert hz.status_code == 200 and out["r"].status_code == 200, out["r"].text
+    return waited
+
+
+def test_section_search_and_library_keep_the_event_loop_free(documents_client, monkeypatch):
+    """The API runs one worker: a slow embed or a slow SQLite read in either route must
+    not hold ``/healthz`` (or any other request) behind it."""
+
+    import time
+
+    from server import config, embeddings
+
+    client, _ = documents_client
+    headers, _tenant, _org_slug, key = _org(client)
+    _project(client, headers, "lab")
+    _post(client, key, _doc("lab", "zz", markdown=_body("zebra")))
+
+    def slow_embed(texts, kind="document", **kw):
+        time.sleep(2.0)
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+    monkeypatch.setattr(config, "embeddings_enabled", lambda: True)
+    monkeypatch.setattr(embeddings, "embed_texts", slow_embed)
+    assert _healthz_while(client, "/api/sections/search?q=zebra", key) < 0.1
+
+    real = db.list_loose_documents
+
+    def slow_list(*a, **kw):
+        time.sleep(2.0)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(db, "list_loose_documents", slow_list)
+    assert _healthz_while(client, "/api/library", key) < 0.1

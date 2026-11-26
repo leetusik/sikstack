@@ -17,8 +17,8 @@ URL) — 422 on a malformed/reserved value, 409 when another tenant holds it.
 
 Org-level writes are the org owner's alone (``require_owner``, a **403** for a
 ``member``): the slug claim, the org key mint and revoke and a project's visibility
-here (publishing is an org act: a public project's documents go into the public git
-history), the name, the invites and the members in ``server.orgs_api``. A member
+here (publishing is an org act: a public project's new items start Public, and
+making an item Public is the owner's too, ``server.sharing``), the name, the invites and the members in ``server.orgs_api``. A member
 keeps the rest of the project-level work: projects and their keys.
 
 Ported from vocky ``app_api.py`` (Starlette → FastAPI): body binding and path
