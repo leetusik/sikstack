@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
+import { DEFAULT_WIDTHS, viewportHeight } from "../templates/design/check.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const canvas = path.resolve(process.argv[2] ?? path.join(here, "..", "templates", "design", "canvas.mjs"));
@@ -89,8 +90,8 @@ try {
       for (const f of a.shots) shot[`${name}@${/--w(\d+)\./.exec(f)[1]}`] = readPng(readFileSync(path.join(out, "shots", f)));
     }
     const tinted = ([r, g, b]) => b > 200 && r < 170 && g < 170, red = ([r, g, b]) => r > 200 && g < 60 && b < 60, green = ([r, g, b]) => g > 200 && r < 60 && b < 60;
-    for (const w of [1440, 390]) {
-      const vh = w < 600 ? 844 : 900, s = (n) => shot[`${n}@${w}`];
+    for (const w of DEFAULT_WIDTHS) {
+      const vh = viewportHeight(w), s = (n) => shot[`${n}@${w}`];
       if (!s("lazy") || !red(s("lazy").at(100, 6100))) problems.push(`lazy@${w}: the lazy image 6000 px down is not drawn (${s("lazy")?.at(100, 6100)})`);
       if (!s("lazy") || !green(s("lazy").at(100, 6300))) problems.push(`lazy@${w}: the lazy iframe 6200 px down is not drawn (${s("lazy")?.at(100, 6300)})`);
       const o = s("overlay");
@@ -104,7 +105,7 @@ try {
       if (l.h >= 12000 || l.h < 7900) problems.push(`long@${w}: shot ${l.h} px, not cut near 8000`);
       if (board.long.h < 32 + l.h || board.long.h > 8000) problems.push(`long@${w}: its artboard (${board.long.h} px) clips the shot (${l.h} px under a 32 px caption)`);
     }
-    if (!/ cut=2 /.test(run.text)) problems.push(`the summary does not count the two cut shots: ${run.text.split("\n")[0]}`);
+    if (!new RegExp(` cut=${DEFAULT_WIDTHS.length} `).test(run.text)) problems.push(`the summary does not count the ${DEFAULT_WIDTHS.length} cut shots: ${run.text.split("\n")[0]}`);
     code = problems.length ? 1 : 0;
     for (const p of problems) console.log(p);
     if (!problems.length) console.log("shoot ok");

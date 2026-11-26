@@ -2,7 +2,7 @@
 
 **Reach it:** `/connect?code=<code>`, the page `/sikstack:sign-in` opens from Claude Code. A code comes from the API, never the web: register an install (`POST /api/installs`) and start a sign-in for it (`POST /api/installs/sign-in`), both unauthenticated, with curl against the API `run.sh status` prints. `{"release": true}` on a start frees an install another account claimed (`/sikstack:sign-in release`): the claim is cleared, the install's older codes end, the answer carries `released`.
 
-**Drive it:** the test account (`$SESSION`) reads a code (ready: the account once, right under Connect, with "Use another account") and Connects it, which claims the install. The second account (`$SESSION-other`, `run.sh signin other`) reads a new code: `other`, naming `/sikstack:sign-in release`. A `release: true` start answers `released: true`; the older code reads expired; the second account Connects the released code and the install is its. Last, "Use another account" signs the second account out and lands on the same code, signed out. Ready and `other` are shot at 1440 and 390, each checked for no sideways overflow.
+**Drive it:** the test account (`$SESSION`) reads a code (ready: the account once, right under Connect, with "Use another account") and Connects it, which claims the install. The second account (`$SESSION-other`, `run.sh signin other`) reads a new code: `other`, naming `/sikstack:sign-in release`. A `release: true` start answers `released: true`; the older code reads expired; the second account Connects the released code and the install is its. Last, "Use another account" signs the second account out and lands on the same code, signed out. Ready and `other` are shot at 1440 and 375, each checked for no sideways overflow.
 
 ```bash drive
 OTHER="$SESSION-other"
@@ -26,9 +26,9 @@ see() { # session, then texts: wait up to 15 s for the page to show each
   done
 }
 must() { [ $# -eq 3 ] || { echo "FAIL must takes 3 arguments, got $#"; return 1; }; [ "$2" = "$3" ] && echo "ok   $1" || { echo "FAIL $1: got '$2', want '$3'"; return 1; }; }
-shots() { # name: 1440 and 390, each checked for sideways overflow, then back to 1440
+shots() { # name: 1440 and 375, each checked for sideways overflow, then back to 1440
   local w
-  for w in 1440 390; do
+  for w in 1440 375; do
     pw resize "$w" 900
     sleep 1
     must "$1 at $w has no sideways overflow" "$(js '() => document.documentElement.scrollWidth <= document.documentElement.clientWidth' "${S:-$SESSION}")" true
@@ -98,9 +98,9 @@ see "$OTHER" "Sign in to connect this install and see its work on the web." "Cre
 must "still the same code" "$(js '() => new URLSearchParams(location.search).get("code")' "$OTHER" | tr -d '"')" "$CODE5"
 must "signed out: no account line" "$(js '() => document.body.innerText.includes("Signed in as")' "$OTHER")" false
 S="$OTHER" pw screenshot --filename="$EV/connect-after-use-another.png"
-S="$OTHER" pw resize 390 900
-S="$OTHER" pw screenshot --filename="$EV/connect-after-use-another-390.png" --full-page
+S="$OTHER" pw resize 375 900
+S="$OTHER" pw screenshot --filename="$EV/connect-after-use-another-375.png" --full-page
 pw screenshot --filename="$EV/connect.png"
 ```
 
-**Proof:** every `must` prints `ok` and every `see` is seen; `connect-ready-{1440,390}.png` show the account under Don't connect / Connect with "Use another account" and the facts panel without it; `connect-other-{1440,390}.png` show the sentence with `/sikstack:sign-in release` in the mono face; `connect-released-connected.png` the second account's Connect after the release; `connect-after-use-another{,-390}.png` the same code signed out. The second account's saved sign-in ends signed out (the next `signin other` logs in again).
+**Proof:** every `must` prints `ok` and every `see` is seen; `connect-ready-{1440,375}.png` show the account under Don't connect / Connect with "Use another account" and the facts panel without it; `connect-other-{1440,375}.png` show the sentence with `/sikstack:sign-in release` in the mono face; `connect-released-connected.png` the second account's Connect after the release; `connect-after-use-another{,-375}.png` the same code signed out. The second account's saved sign-in ends signed out (the next `signin other` logs in again).

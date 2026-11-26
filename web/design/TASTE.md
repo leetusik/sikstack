@@ -17,6 +17,10 @@ tokens and components say the rest: `src/sikstack/styles/tokens.css`, `@/sikstac
 2. **Not wordy, not generated-looking.** "too much descriptive, ai slob like design." The operator, at the
    mood-directions round of the foundations design (quoted in the signed round's handoff, below); and of two signed
    rounds: "too long and fat", "only remove the descriptive texts. leave only essential ones."
+3. **Every page fits a desktop (1440), a tablet (768) and a phone (375, the iPhone 13 mini, in Safari).**
+   - "our design, if the product is for not only pc but all the tablet and mobile, should contain it on the design.
+     and for the mobile, make sure minimum px 375 fits well(iphone 13 mini width), if it fits with mini, will fit any
+     other." The operator, 2026-11-26, at the intake of the phones-and-tablets work.
 
 ## The look (the signed foundations, "Instrument")
 

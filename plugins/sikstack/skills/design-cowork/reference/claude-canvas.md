@@ -2,7 +2,7 @@
 
 The design folder stays the source. On the operator's ask, or when the repo's `Design:` line says
 `publish: claude.ai`, its screens also go onto a claude.ai Design canvas. There is one artboard per page and state,
-holding its 1440 and 390 full-page shots side by side. Teammates open the canvas in claude.ai and comment on its
+holding its 1440, 768 and 375 full-page shots side by side (Chrome's; the layout check runs WebKit). Teammates open the canvas in claude.ai and comment on its
 artboards. The clickable build stays the sikstack web viewer's share link.
 
 Only a session with the Artifact tool can publish to claude.ai, and the engine never does. Without the tool, say so

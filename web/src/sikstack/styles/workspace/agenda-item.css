@@ -29,6 +29,11 @@
   .agendaitem-actions {
     margin-left: auto;
   }
+  /* when the group wraps (a phone), each of its lines fills the row, so no button is left alone at the end of a
+     ragged line; where the group fits one line it has no room to give and nothing grows */
+  .agendaitem-actions > .cluster > .btn {
+    flex: 1 1 auto;
+  }
   /* while a form is open the form's own buttons act and the head's step aside: they keep their width, so a title beside them wraps as before, and no height, so their own line under a narrow title closes */
   .agendaitem-away {
     visibility: hidden;
@@ -75,6 +80,12 @@
   .thread-body { max-width: var(--measure); }
   .thread-body.ws-prose { white-space: pre-line; }
   .thread-body > .ws-prose-block { white-space: normal; }
+  /* an item's quiet buttons (Done, Dismiss, Delete) on a phone: 12 px a side, and their first label on the body's
+     edge, so the three keep one line beside each other */
+  @container app (max-width: 47.99em) {
+    .thread-entry > .cluster { margin-left: calc(-1 * var(--space-3)); }
+    .thread-entry > .cluster > .btn-quiet { padding-inline: var(--space-3); }
+  }
   /* a body and the note are Markdown (`Md`): its blocks as the renderer draws them, a paragraph's lines as written */
   .thread-body > .md-wrap, .agendaitem-long > dd > .md-wrap { white-space: normal; }
   .thread-body .md p, .agendaitem-long .md p { white-space: pre-line; }

@@ -4,7 +4,7 @@
 
 `run.sh workspace <dir>` makes that checkout: a scratch repo with a `sikstack init` workspace (the branch's engine), linked to the test account's project `sikstack` by a workspace key it mints through the API and hands to `link` on stdin. The key stays in the home's XDG folder (0700, its file 0600), which `down` removes. `run.sh signin other` signs a second account (its own org, a member of nothing here) into `$SESSION-other`; `run.sh api <method> <path> [json]` calls the API as the test account. Every build is made in a scratch copy of `web/` (deleted when the block ends), never in the design folder itself.
 
-**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the printed URL (the build's viewer) and the bare build host (a 403 linking to it); the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 390; a round's build (`--page` twice): its viewer's two rows and count with no options section, its link to every page (the options and every page) and back; a build without a round at its every-page address (back reads "Pages"); an options-only round (`--page <options entry>`): the options and the link to every page.
+**Drive it:** publish four builds (one with the plugin's options page, one from a `design/data/local/` recording, one carrying a test script, one to delete) and an oversized folder; then the printed URL (the build's viewer) and the bare build host (a 403 linking to it); the viewer's pages, states and options; a non-member, a share link on and off; the private build; the test script against the member's session; the size cap and `design-delete`; the list and the viewer at 1440 and 375; a round's build (`--page` twice): its viewer's two rows and count with no options section, its link to every page (the options and every page) and back; a build without a round at its every-page address (back reads "Pages"); an options-only round (`--page <options entry>`): the options and the link to every page.
 
 ```bash drive
 OTHER="$SESSION-other"; GUEST="$SESSION-guest"
@@ -235,9 +235,9 @@ pw click 'role=button[name="Copy share link to System"]'
 PAGE_LINK=$(js '() => navigator.clipboard.readText()' | tr -d '"')
 case "$LINK" in "$(host "$OPT")/_share/"*) ;; *) echo "share link not on the build's host"; exit 1 ;; esac
 [ "$PAGE_LINK" = "$LINK?next=%2Fsystem%2F" ] || { echo "the System copy link is not the share link to /system/"; exit 1; }
-pw resize 390 844
+pw resize 375 812
 allframes
-shot 08-viewer-shared-390 --full-page
+shot 08-viewer-shared-375 --full-page
 pw resize 1440 900
 playwright-cli -s="$GUEST" close >/dev/null 2>&1 || true
 playwright-cli -s="$GUEST" open --config="$EV/cli.config.json" >>"$EV/drive.log" 2>&1
@@ -359,8 +359,8 @@ gone=$(playwright-cli -s="$SESSION" --raw run-code "async page => { const r = aw
 page=$(visit "$SESSION" "$VIEW/$DEL")
 must "the viewer says the deleted build is gone" "$page" '"Build not found" in d["text"]'
 
-# 8. The list and the viewer at 1440 and 390, for the walkthrough beside the signed design's screenshots.
-for size in "1440 900" "390 844"; do
+# 8. The list and the viewer at 1440 and 375, for the walkthrough beside the signed design's screenshots.
+for size in "1440 900" "375 812"; do
   pw resize $size
   pw goto "$VIEW"
   see "$(shows "3 builds")"
@@ -369,11 +369,11 @@ for size in "1440 900" "390 844"; do
   see "$(shows "3 directions")"
   allframes
   shot "08-viewer-${size%% *}" --full-page
-  if [ "${size%% *}" = 390 ]; then # Chromium paints a cross-origin frame only near the viewport: a full-page shot
-    for i in 0 1 2; do             # at 390 leaves the lower directions blank, so each gets its own shot in view
+  if [ "${size%% *}" = 375 ]; then # Chromium paints a cross-origin frame only near the viewport: a full-page shot
+    for i in 0 1 2; do             # at 375 leaves the lower directions blank, so each gets its own shot in view
       js "() => { document.querySelectorAll('iframe')[$i].scrollIntoView(); return true; }" >/dev/null
       sleep 1
-      shot "08-viewer-390-direction-$((i + 1))"
+      shot "08-viewer-375-direction-$((i + 1))"
     done
   fi
   noerrors
@@ -384,7 +384,7 @@ done
 #    options page) and links once to the whole design; that link lands on the build's every-page list (the options
 #    page's three directions, framed as on the viewer, then every manifest page; its way back "This round", the
 #    round's list). A round row and a row only the every-page list holds each open their page on the build's host. A
-#    build without a round has the every-page list too, its way back "Pages". Screenshots at 1440 and 390.
+#    build without a round has the every-page list too, its way back "Pages". Screenshots at 1440 and 375.
 WS_ROUTE='/projects/[projectId]/workspace'; DB_ROUTE='/projects/[projectId]/design/[build]'
 out=$(sk design-publish --folder "$SCR/options" --page "$WS_ROUTE" --page "$DB_ROUTE"); printf '%s\n' "$out" >>"$EV/publish.log"
 RND=$(printf '%s\n' "$out" | sed -n 's/^published=\([a-z0-9]*\) .*/\1/p')
@@ -395,7 +395,7 @@ must "the round's manifest names the two pages' entries, in the manifest's order
   '[p["route"] for p in d["manifest"]["pages"] if p["entry"] in d["manifest"]["round"]["pages"]] == ["'"$WS_ROUTE"'", "'"$DB_ROUTE"'"] and len(d["manifest"]["round"]["pages"]) == 2'
 ALL=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])["manifest"]["pages"]))' "$rm")
 rows() { js '() => JSON.stringify([...document.querySelectorAll(".design-pages > .design-page > a")].map(a => a.textContent))' | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()))'; }
-for size in "1440 900" "390 844"; do
+for size in "1440 900" "375 812"; do
   pw resize $size
   pw goto "$VIEW/$RND"
   see "$(shows "This round")" "$(shows "2 pages")" "$(shows "The whole design · $ALL pages")" \
@@ -422,7 +422,7 @@ see "location.pathname === '/projects/$PROJECT/design/$RND/pages'" "$(shows "Eve
 pw reload
 allframes
 noerrors
-for size in "1440 900" "390 844"; do
+for size in "1440 900" "375 812"; do
   pw resize $size
   shot "09-every-page-${size%% *}" --full-page
 done
@@ -475,4 +475,4 @@ pw screenshot --filename="$EV/design-service.png"
 echo "design-service: PASS"
 ```
 
-**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-01-printed-url.png` (the URL `design-publish` printed, opened by the member: the viewer), `design-service-01-bare-host.png` (the build's own host without a ticket: a 403 whose one link is the viewer), `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|390>.png`, `design-service-08-viewer-<1440|390>.png` and `design-service-08-viewer-shared-390.png`; `design-service-09-round-<1440|390>.png` (a `--page` build's viewer: the round's two pages with their states first under the header, no options section, and the link to the whole design), `design-service-09-options-round-1440.png` (an options-only round: the directions, "The options above", the link to the whole design) `design-service-09-every-page-<1440|390>.png` (that build's every-page list: the three directions, then every page) and `design-service-09-every-page-no-round-1440.png` (a build without a round: its every-page list, its way back "Pages"); `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.
+**Proof:** the block ends `design-service: PASS`, each step's `ok` line in the log above it. In `$EV`: `design-service-01-printed-url.png` (the URL `design-publish` printed, opened by the member: the viewer), `design-service-01-bare-host.png` (the build's own host without a ticket: a 403 whose one link is the viewer), `design-service-02-options.png` (the three directions side by side, full height, no bar), `design-service-02-page-<n>.png` (each manifest page, a state picked), `design-service-03-guest-system.png` (a signed-out browser on System by its copy link), `design-service-04-private.png`, `design-service-08-list-<1440|375>.png`, `design-service-08-viewer-<1440|375>.png` and `design-service-08-viewer-shared-375.png`; `design-service-09-round-<1440|375>.png` (a `--page` build's viewer: the round's two pages with their states first under the header, no options section, and the link to the whole design), `design-service-09-options-round-1440.png` (an options-only round: the directions, "The options above", the link to the whole design) `design-service-09-every-page-<1440|375>.png` (that build's every-page list: the three directions, then every page) and `design-service-09-every-page-no-round-1440.png` (a build without a round: its every-page list, its way back "Pages"); `attack.json` (the script's own results and every response it caused, with the cookies each request carried) and `attack-web.log` (the app's answers to its posts: 403, or 415 for a content type the route refuses first; the JSON and server-action posts never sent, stopped at the browser's preflight); `publish.log`, `pages.tsv`, `console.log`. The linked checkout is `$EV/design-ws` (no key in it). A run takes about two minutes, most of it the two design builds.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The canvas copy: shoots a served design build and writes a PLAN for a claude.ai Design canvas. The plan gives one
-// artboard per page and state, holding its 1440 and 390 shots side by side. The design folder stays the source; the
+// artboard per page and state, holding its 1440, 768 and 375 shots side by side. The design folder stays the source; the
 // canvas is a copy of its screens for teammates to comment on. This script never writes the canvas's files and never
 // publishes. The Artifact tool takes canvas files only when the session writes them with its own file tool, so the
 // orchestrator copies each artboard's text from the plan, by design-cowork's reference/claude-canvas.md. Run it as
@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DriverError, READ_STATE, discoverStep, makeDriver, pagesFromManifest, plan } from "./check.mjs";
+import { DEFAULT_WIDTHS, DriverError, READ_STATE, discoverStep, makeDriver, pagesFromManifest, plan, viewportHeight } from "./check.mjs";
 
 export const USAGE = `usage: node canvas.mjs --base <url> --manifest <out/manifest.json> --out <dir> [--pages <name,name>] [--widths <w,w>] [--title <text>] [--format png|jpeg]
        node canvas.mjs --plan-only <shots dir> --manifest <out/manifest.json> --out <dir> [--pages …] [--widths …] [--title …]
@@ -34,7 +34,7 @@ export const USAGE = `usage: node canvas.mjs --base <url> --manifest <out/manife
   --manifest   the build's manifest; its pages are shot
   --out        the folder for shots/ and plan.json
   --pages      only these pages, by their manifest names (default: all)
-  --widths     comma-separated widths, side by side in each artboard (default: 1440,390)
+  --widths     comma-separated widths, side by side in each artboard (default: 1440,768,375)
   --title      the canvas's title (default: Design screens)
   --format     png (default) or jpeg (quality 85), for a build whose PNG total passes about 120 MB
   --plan-only  shoot nothing: plan from the PNG shots already in this folder
@@ -227,14 +227,14 @@ function main(argv) {
   const usage = (msg) => { console.error(`canvas: ${msg}`); return 2; };
   const planOnly = opt("--plan-only"), outArg = opt("--out"), base = opt("--base"), manifestPath = opt("--manifest");
   const only = opt("--pages"), title = opt("--title", "Design screens"), format = opt("--format", "png");
-  const widths = (opt("--widths", "1440,390") ?? "").split(",").map(Number).filter((n) => n > 0);
+  const widths = (opt("--widths", DEFAULT_WIDTHS.join(",")) ?? "").split(",").map(Number).filter((n) => n > 0);
   if (args.length) return usage(`unexpected ${args[0]}\n${USAGE}`);
   if (!outArg) return usage(`--out is required\n${USAGE}`);
   const out = path.resolve(outArg);
   if (!manifestPath) return usage(`--manifest is required\n${USAGE}`);
   if (!planOnly && !base) return usage(`--base is required to shoot (or --plan-only <shots dir>)\n${USAGE}`);
   if (!planOnly && !/^https?:\/\//.test(base)) return usage(`--base must be an http(s) server (playwright-cli blocks file:); serve the folder first`);
-  if (!widths.length) return usage(`--widths takes comma-separated widths, e.g. 1440,390`);
+  if (!widths.length) return usage(`--widths takes comma-separated widths, e.g. ${DEFAULT_WIDTHS.join(",")}`);
   if (format !== "png" && format !== "jpeg") return usage(`--format is png or jpeg`);
   let pages;
   try { pages = pagesFromManifest(JSON.parse(readFileSync(manifestPath, "utf8"))); } catch (e) { return usage(`cannot read the manifest ${manifestPath}: ${e.message}`); }
@@ -267,7 +267,7 @@ function main(argv) {
     mkdirSync(path.join(out, "shots"), { recursive: true });
     rmSync(path.join(out, "plan.json"), { force: true });
     const run = (step, file) => runCode(RUN.replace("__CFG__", JSON.stringify({ url: step.url, width: step.width, expect: step.expect,
-      discover: !!step.discover, file, type: format, maxH: SHOT_MAX, vh: step.width < 600 ? 844 : 900 })), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
+      discover: !!step.discover, file, type: format, maxH: SHOT_MAX, vh: viewportHeight(step.width) })), `${step.url} w=${step.width}${step.state ? ` state=${step.state}` : ""}`);
     let driverErr = null;
     const fails = [];
     try {

@@ -15,6 +15,9 @@
 .backlog-wait .backlog-ref > span { min-width: 0; text-box: trim-both cap alphabetic; }
 /* a long word in a name breaks inside its link (as wide as its text), never pushing the page sideways */
 .backlog-ref > span { overflow-wrap: anywhere; }
+/* the id keeps its own width: beside a name that wraps, the row shrinks the name, never the id under it (an id that
+   shrank let the name's first line draw over its end) */
+.backlog-ref > .ws-id { flex: none; }
 /* an id and its name. Under 20em of row width (a 320 px phone, enlarged text): the id over the name, one line step apart,
    as a Workspace row does, so a long word has the whole line */
 .backlog-wait .backlog-ref > span:not(:last-child) { text-box-trim: trim-start; }

@@ -175,6 +175,41 @@ describe("src/sikstack", () => {
 });
 
 describe("the app's stylesheets and fonts", () => {
+  // P86, B1: inside its own size container WebKit 18 resolves a grid's `min(10em, 100%)` to 0, and every
+  // column with it (the usage tiles drawn on one spot on an iPhone). The container is a wrapper, never the grid.
+  it("make no grid whose columns lean on 100% its own size container", () => {
+    const subject = (selector: string) =>
+      selector.trim().split(/\s+|>/).filter(Boolean).pop() ?? "";
+    const containers = new Map<string, string>();
+    const grids = new Map<string, string>();
+    for (const file of filesUnder(join(web, "src")).filter((f) =>
+      f.endsWith(".css"),
+    )) {
+      for (const m of stripComments(read(file)).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const [, prelude, body] = m;
+        for (const sel of prelude.split(",")) {
+          if (/(^|;|\s)container(-type)?\s*:/.test(body))
+            containers.set(subject(sel), `${file}: ${sel.trim()}`);
+          if (/grid-template-columns\s*:[^;]*100%/.test(body))
+            grids.set(subject(sel), `${file}: ${sel.trim()}`);
+        }
+      }
+    }
+    const both = [...grids.keys()].filter((s) => containers.has(s));
+    expect(
+      both.map((s) => `${grids.get(s)} / ${containers.get(s)}`),
+    ).toEqual([]);
+  });
+
+  // P86, B2: beside a name that wraps, a Backlog id that could shrink lost width to its name, whose first line was
+  // then drawn over the id's end. The id keeps its own width.
+  it("keep the Backlog's id from shrinking beside its name", () => {
+    const css = stripComments(
+      read(join(styles, "workspace/backlog.css")),
+    ).replace(/\s+/g, " ");
+    expect(css).toMatch(/\.backlog-ref > \.ws-id \{ flex: none; \}/);
+  });
+
   it("name no Google font host", () => {
     for (const file of filesUnder(join(web, "src")).filter((f) =>
       /\.(css|tsx?)$/.test(f),
