@@ -111,7 +111,7 @@ async def get_book(
     return {
         **_app_book(found),
         "canonical_path": _book_canonical_path(org_label(ctx.tenant), project, book),
-        "share": await _member_book_share(ctx.tenant.id, project, book),
+        "share": await _member_book_share(ctx.tenant.id, ctx.user.id, project, book),
     }
 
 
@@ -123,17 +123,24 @@ async def set_book_share(
     ctx: AuthContext = Depends(require_user),
     conn=Depends(get_conn),
 ) -> dict[str, object]:
-    """A member sets a book's sharing (it covers every chapter) -> ``{share}``."""
+    """A member sets a book's sharing (it covers every chapter) -> ``{share}``.
+
+    ``public`` is the org owner's (a member's is a **403**); ``link`` and ``members``
+    are any member's.
+    """
 
     found = db.get_book(conn, project=project, slug=book, tenant_id=str(ctx.tenant.id))
     if found is None or config.database_url() is None:
         raise HTTPException(status_code=404, detail=_NO_SUCH_BOOK_DETAIL)
+    can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
+    if body.state == sharing.PUBLIC and not can:
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
     record = await get_accounts_service().get_or_create_project(ctx.tenant.id, project)
     try:
         share = await sharing.set_share(record.id, sharing.KIND_BOOK, book, body.state)
     except sharing.SharingError:
         raise HTTPException(status_code=503, detail="could not change the sharing; try again")
-    return {"share": sharing.share_json(share, sharing.KIND_BOOK)}
+    return {"share": sharing.share_json(share, sharing.KIND_BOOK, can_publish=can)}
 
 
 @router.get("/app/orgs/{org}/{project}/books/{book}")
@@ -176,19 +183,24 @@ async def resolve_book_by_slug(
         # name), only past the visibility gate: a visitor's way back reads its name.
         "org": {"slug": tenant.slug, "name": tenant.name},
         # The book's sharing (it covers its chapters), for a member only.
-        "share": await _member_book_share(tenant.id, project, book) if is_member else None,
+        "share": (
+            await _member_book_share(tenant.id, ctx.user.id, project, book) if is_member else None
+        ),
     }
 
 
-async def _member_book_share(tenant_id: UUID, project: str, book: str) -> dict | None:
+async def _member_book_share(
+    tenant_id: UUID, user_id: UUID, project: str, book: str
+) -> dict | None:
     try:
+        can = await sharing.may_publish(tenant_id, user_id)
         record = await get_accounts_service().get_project_by_name(tenant_id, project)
         if record is None:
-            return sharing.share_json(sharing.NO_ROW, sharing.KIND_BOOK)
+            return sharing.share_json(sharing.NO_ROW, sharing.KIND_BOOK, can_publish=can)
         share = await sharing.get_share(record.id, sharing.KIND_BOOK, book)
     except Exception:  # noqa: BLE001 - the read still answers; the switch shows nothing
         return None
-    return sharing.share_json(share, sharing.KIND_BOOK)
+    return sharing.share_json(share, sharing.KIND_BOOK, can_publish=can)
 
 
 _NO_SUCH_LIBRARY_DETAIL = "no library at that address"

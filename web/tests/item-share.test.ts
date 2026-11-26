@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   parseShareCookie,
@@ -6,7 +8,12 @@ import {
   shareHeaderValue,
   withShareToken,
 } from "@/lib/sharing/cookie";
-import { asShareTarget, sharePath, shareChangeRefusal } from "@/lib/sharing/model";
+import { SHARING } from "@/content/sharing";
+import { asShareTarget, mayChooseShare, sharePath, shareChangeRefusal, type ItemShare } from "@/lib/sharing/model";
+import { ShareControl } from "@/sikstack/reader/share-control";
+
+// The switch's server action never runs here: the switch is only drawn.
+vi.mock("@/lib/sharing/actions", () => ({ setItemShare: vi.fn() }));
 
 const T = (c: string) => c.repeat(32);
 
@@ -45,7 +52,43 @@ describe("a share change", () => {
   it("maps the API's refusals to the switch's words", () => {
     expect(shareChangeRefusal(404)).toEqual({ ok: false, reason: "not-found" });
     expect(shareChangeRefusal(401)).toEqual({ ok: false, reason: "signed-out" });
+    expect(shareChangeRefusal(403)).toEqual({ ok: false, reason: "owner-only" });
     expect(shareChangeRefusal(503)).toEqual({ ok: false, reason: "failed" });
     expect(shareChangeRefusal(null)).toEqual({ ok: false, reason: "failed" });
+  });
+});
+
+describe("who may make an item Public", () => {
+  const member: ItemShare = { state: "members", kind: "doc", url: null, can_publish: false };
+  const owner: ItemShare = { ...member, can_publish: true };
+  const target = { kind: "doc", docId: 7 } as const;
+
+  // The buttons in the switch's order (Members, Link, Public): whether each is disabled.
+  function disabled(share: ItemShare): boolean[] {
+    const html = renderToStaticMarkup(createElement(ShareControl, { target, share }));
+    return [...html.matchAll(/<button[^>]*>/g)].map((m) => / disabled=""/.test(m[0]));
+  }
+
+  it("is the owner's: a member may choose Link and Members only", () => {
+    expect(mayChooseShare(member, "public")).toBe(false);
+    expect(mayChooseShare(member, "link")).toBe(true);
+    expect(mayChooseShare(member, "members")).toBe(true);
+    expect(mayChooseShare(owner, "public")).toBe(true);
+    // An older API's answer, with no flag, leaves the choice to the API.
+    expect(mayChooseShare({ state: "members", kind: "doc", url: null }, "public")).toBe(true);
+  });
+
+  it("draws a member's Public off, with the one line that says why", () => {
+    expect(disabled(member)).toEqual([false, false, true]);
+    expect(renderToStaticMarkup(createElement(ShareControl, { target, share: member }))).toContain(
+      SHARING.ownerPublishes,
+    );
+  });
+
+  it("draws all three for an owner, and no such line", () => {
+    expect(disabled(owner)).toEqual([false, false, false]);
+    expect(renderToStaticMarkup(createElement(ShareControl, { target, share: owner }))).not.toContain(
+      SHARING.ownerPublishes,
+    );
   });
 });

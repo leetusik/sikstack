@@ -18,6 +18,8 @@ export const SHARING = {
   },
   /** A chapter's sharing is its book's. */
   book: "This sets the whole book: every chapter shares the book's setting.",
+  /** A member's switch: Public is the org owner's act (the API's `can_publish`), so its button is off. */
+  ownerPublishes: "Only an owner of this org can make it Public. Link and Members are yours to set.",
   copyLabel: "Copy link",
   changing: "Changing",
   failed: "Could not change the sharing. Try again.",

@@ -40,7 +40,7 @@ One editor (you, or one agent given the plan, the drafts and the findings) appli
 
 ## 5. Publish together
 
-Publish every chapter in one go, in order (`reference/publish.md`, *Books*), all as Members. A book's sharing covers its chapters; change it with `knowledge share <book> …`. Report the book's URL and each chapter's.
+Publish every chapter in one go, in order (`reference/publish.md`, *Books*). A new book starts as Members: send `--share members` with its first chapter only, and no `--share` with the rest. A book's sharing covers its chapters; the operator changes it with `knowledge share <book> …`. Report the book's URL and each chapter's.
 
 ## A refresh of a book
 

@@ -37,6 +37,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
+from server import sharing
 from server.accounts.auth import AuthContext, require_owner, require_user
 from server.accounts.security import generate_opaque_token, sha256_hex
 from server.accounts.service import DuplicateOrgSlugError, get_accounts_service
@@ -258,11 +259,17 @@ async def set_project_visibility(
 
     A project's visibility is only the default its NEW items start at (``public`` ->
     Public, ``private`` -> Members, ``server.sharing``): the toggle changes no existing
-    item's sharing and makes no git commit.
+    item's sharing and makes no git commit. It first settles the project
+    (``sharing.settle``), so the day-one fill never later makes its existing items
+    Public either; a store that cannot record that is a **503** and nothing changes.
     """
 
     await _load_scoped_project(project_id, ctx)
     await require_owner(ctx)
+    try:
+        await sharing.settle(project_id)
+    except sharing.SharingError:
+        raise HTTPException(status_code=503, detail="could not change the visibility; try again")
     updated = await get_accounts_service().set_project_visibility(
         project_id, payload.visibility
     )

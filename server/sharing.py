@@ -26,11 +26,20 @@ The link travels to the content routes as the ``X-Share-Token`` header (the web 
 sets it from the reader's share cookie), and ``GET /app/shared/{token}`` names the
 item a live link opens. Every miss on any of them is the routes' own one 404.
 
-``python -m server.sharing fill [--dry-run]`` is the one-time, idempotent fill: every
-existing item of a public project gets a Public row, so nothing changes on day one.
-Alembic cannot see the SQLite content rows, so the fill reads them here. It also runs
-by itself at start-up while ``item_shares`` is empty (``fill_if_empty``); once any row
-exists it never runs again by itself. It only ever inserts missing rows.
+Making an item **Public** is the org owner's act, as making a project public was:
+the owner's session, the master bearer, or an org-level key (which only an owner
+mints). **Link** and **Members** are any member's, as for design builds
+(``may_publish``, ``api_may_publish``). A member's view of an item's sharing says which
+(``can_publish``), so the reader's switch can say why Public is off.
+
+The day-one fill gives every existing item of a public project a Public row, so
+nothing changes on the day the table arrives. Alembic cannot see the SQLite content
+rows, so the fill reads them here. It runs **once, ever**, per project: each project it
+sees gets a marker row (``kind = 'fill'``, never an item) recording that its existing
+items are settled, and so does a project whose owner switches its visibility, since
+that switch promises existing items keep their sharing. ``fill_once`` runs at every
+start-up and touches only projects with no marker yet; ``python -m server.sharing fill
+[--dry-run]`` runs the same thing by hand. It only ever inserts missing rows.
 """
 
 from __future__ import annotations
@@ -47,7 +56,7 @@ from typing import Any, Iterable
 from uuid import UUID
 
 from fastapi import Header
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -65,6 +74,9 @@ STATES = (MEMBERS, LINK, PUBLIC)
 
 KIND_DOC = "doc"
 KIND_BOOK = "book"
+# A project's marker row: the day-one fill settled its existing items (``fill_once``).
+# Never an item: no route reads or sets a ``fill`` row's state.
+KIND_FILL = "fill"
 
 # A token is what ``secrets.token_urlsafe(24)`` makes (32 url-safe characters). Any
 # other shape is a miss before Postgres is asked.
@@ -140,14 +152,56 @@ def url_for(token: str) -> str:
     return f"{config.public_base_url()}/s/{token}"
 
 
-def share_json(share: Share, kind: str) -> dict[str, Any]:
-    """A member's view of an item's sharing: its state, what holds it, and the link's URL."""
+def share_json(share: Share, kind: str, *, can_publish: bool) -> dict[str, Any]:
+    """A member's view of an item's sharing: its state, what holds it, the link's URL,
+    and whether this caller may make it Public (the owner's act)."""
 
     return {
         "state": share.state,
         "kind": kind,
         "url": url_for(share.token) if share.state == LINK and share.token else None,
+        "can_publish": can_publish,
     }
+
+
+# -- who may publish ---------------------------------------------------------------------------
+
+
+async def may_publish(tenant_id: UUID, user_id: UUID) -> bool:
+    """Is this signed-in user an owner of the org (the one who makes items Public)?
+
+    A role that cannot be read is ``False`` (fail closed).
+    """
+
+    from server.accounts.types import ROLE_OWNER  # import cycle guard
+    from server.accounts.service import get_accounts_service
+
+    try:
+        role = await get_accounts_service().get_member_role(tenant_id, user_id)
+    except Exception:  # noqa: BLE001 - fail closed
+        logger.warning("member role could not be read; answered as not an owner", exc_info=True)
+        return False
+    return role == ROLE_OWNER
+
+
+async def api_may_publish(ctx: Any) -> bool:
+    """May this ``/api`` caller (an ``ApiAuthContext``) make an item Public?
+
+    The master bearer (the operator's) and an org-level key (only an owner mints one)
+    may; a project key (any member mints one) may not; a session may when its user owns
+    the org. Legacy mode has no sharing to change.
+    """
+
+    if ctx.tenant_id is None:
+        return True
+    if ctx.credential_id is not None:
+        return ctx.project_id is None
+    if getattr(ctx, "user_id", None) is not None:
+        return await may_publish(ctx.tenant_id, ctx.user_id)
+    return True  # the master bearer: tenant #1's operator
+
+
+ONLY_OWNER_PUBLISHES = "only an owner of this org can make an item public"
 
 
 # -- the store -----------------------------------------------------------------------------
@@ -364,22 +418,28 @@ class FillReport:
     added: int = 0
 
 
-async def fill(conn: sqlite3.Connection, *, dry_run: bool = False) -> FillReport:
-    """Give every existing item of every public project a Public row, once.
+async def fill(
+    conn: sqlite3.Connection, *, dry_run: bool = False, only: Iterable[UUID] | None = None
+) -> FillReport:
+    """Give every existing item of every public project (of ``only``, when given) a
+    Public row.
 
+    The primitive under :func:`fill_once`, which alone decides which projects are due.
     Inserts only missing rows (``ON CONFLICT DO NOTHING``), so a second run changes
     nothing and an item whose state was already set keeps it.
     """
 
     report = FillReport()
+    query = select(ProjectModel.id, ProjectModel.tenant_id, ProjectModel.name).where(
+        ProjectModel.visibility == "public"
+    )
+    if only is not None:
+        ids = list(only)
+        if not ids:
+            return report
+        query = query.where(ProjectModel.id.in_(ids))
     async with get_session_maker()() as session:
-        projects = (
-            await session.execute(
-                select(ProjectModel.id, ProjectModel.tenant_id, ProjectModel.name).where(
-                    ProjectModel.visibility == "public"
-                )
-            )
-        ).all()
+        projects = (await session.execute(query)).all()
         stored = {
             (r.project_id, r.kind, r.item_key)
             for r in (await session.scalars(select(ItemShareModel))).all()
@@ -406,40 +466,82 @@ async def fill(conn: sqlite3.Connection, *, dry_run: bool = False) -> FillReport
     return report
 
 
-async def fill_if_empty(conn: sqlite3.Connection) -> FillReport | None:
-    """Run :func:`fill` at start-up only while ``item_shares`` holds no row at all."""
+def _marker(project_id: UUID) -> dict[str, Any]:
+    return {"project_id": project_id, "kind": KIND_FILL, "item_key": "", "state": MEMBERS}
+
+
+async def settle(project_id: UUID) -> None:
+    """Record that the project's existing items are settled: no fill ever touches them.
+
+    The visibility switch calls it before it changes the default, so "existing ones
+    keep their sharing" holds across every restart.
+    """
+
+    try:
+        async with get_session_maker()() as session, session.begin():
+            await session.execute(
+                pg_insert(ItemShareModel).values(_marker(project_id)).on_conflict_do_nothing(
+                    index_elements=["project_id", "kind", "item_key"]
+                )
+            )
+    except SQLAlchemyError as exc:
+        raise SharingError("could not settle the project's sharing") from exc
+
+
+async def fill_once(conn: sqlite3.Connection, *, dry_run: bool = False) -> FillReport | None:
+    """The day-one fill, once ever per project: start-up and the CLI run this.
+
+    Only projects with no marker row are due: each public one's existing items get
+    their Public rows, then every due project gets its marker, so no later run, toggle
+    or restart fills it again. ``None`` when no project is due.
+    """
 
     async with get_session_maker()() as session:
-        count = await session.scalar(select(func.count()).select_from(ItemShareModel))
-    if count:
+        settled = select(ItemShareModel.project_id).where(ItemShareModel.kind == KIND_FILL)
+        due = list(
+            (await session.scalars(select(ProjectModel.id).where(ProjectModel.id.not_in(settled)))).all()
+        )
+    if not due:
         return None
-    return await fill(conn)
+    report = await fill(conn, dry_run=dry_run, only=due)
+    if dry_run:
+        return report
+    async with get_session_maker()() as session, session.begin():
+        await session.execute(
+            pg_insert(ItemShareModel)
+            .values([_marker(pid) for pid in due])
+            .on_conflict_do_nothing(index_elements=["project_id", "kind", "item_key"])
+        )
+    return report
 
 
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m server.sharing",
-        description="Item sharing: the one-time fill of existing public items.",
+        description="Item sharing: the once-ever fill of existing public items.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("fill", help="give every existing item of a public project a Public row")
+    f = sub.add_parser("fill", help="once per project: give every existing item of a public project a Public row")
     f.add_argument("--dry-run", action="store_true", help="count what the fill would add; write nothing")
     args = parser.parse_args(argv)
     if config.database_url() is None:
         print("sharing: no DATABASE_URL (legacy mode has no sharing)", file=sys.stderr)
         return 2
 
-    async def run() -> FillReport:
+    async def run() -> FillReport | None:
         conn = db.connect()
         try:
-            return await fill(conn, dry_run=args.dry_run)
+            return await fill_once(conn, dry_run=args.dry_run)
         finally:
             conn.close()
 
     report = asyncio.run(run())
+    if report is None:
+        print("sharing fill: every project is settled already (the fill runs once)")
+        return 0
     verb = "would add" if args.dry_run else "added"
     print(
-        f"sharing fill: {report.projects} public project(s), {report.items} item(s), "
+        f"sharing fill: {report.projects} public project(s) due, {report.items} item(s), "
         f"{verb} {report.added} Public row(s)"
     )
     return 0
@@ -450,8 +552,9 @@ if __name__ == "__main__":  # pragma: no cover - the CLI
 
 
 __all__ = [
-    "KIND_BOOK", "KIND_DOC", "LINK", "MEMBERS", "PUBLIC", "STATES", "Share", "SharedItem",
-    "SharingError", "by_token", "forget_doc", "default_for", "ensure_share", "existing_items", "fill",
-    "fill_if_empty", "get_share", "get_shares", "is_token", "item_of_doc", "readable",
-    "set_share", "share_json", "share_token_header", "url_for",
+    "KIND_BOOK", "KIND_DOC", "KIND_FILL", "LINK", "MEMBERS", "ONLY_OWNER_PUBLISHES", "PUBLIC",
+    "STATES", "Share", "SharedItem", "SharingError", "api_may_publish", "by_token",
+    "forget_doc", "default_for", "ensure_share", "existing_items", "fill", "fill_once",
+    "get_share", "get_shares", "is_token", "item_of_doc", "may_publish", "readable",
+    "set_share", "settle", "share_json", "share_token_header", "url_for",
 ]

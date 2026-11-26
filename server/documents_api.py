@@ -419,10 +419,12 @@ async def _member_share(conn, doc: dict, ctx: AuthContext | None) -> dict | None
         return None
     kind, key = sharing.item_of_doc(conn, doc)
     try:
+        can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
         record = await get_accounts_service().get_project_by_name(ctx.tenant.id, doc["project"])
         if record is None:
-            return sharing.share_json(sharing.NO_ROW, kind)
-        return sharing.share_json(await sharing.get_share(record.id, kind, key), kind)
+            return sharing.share_json(sharing.NO_ROW, kind, can_publish=can)
+        share = await sharing.get_share(record.id, kind, key)
+        return sharing.share_json(share, kind, can_publish=can)
     except Exception:  # noqa: BLE001 - the read still answers; the switch shows nothing
         return None
 
@@ -634,19 +636,24 @@ async def set_document_share(
     """A member sets a document's sharing (a chapter's is its book's) -> ``{share}``.
 
     Session-only and member-only: another org's or a missing id is the 404 every read
-    answers. ``link`` mints a link unless one is on; ``members``/``public`` clear it.
+    answers. ``public`` is the org owner's (a member's is a **403**, as the project
+    switch's is); ``link`` and ``members`` are any member's. ``link`` mints a link
+    unless one is on; ``members``/``public`` clear it.
     """
 
     doc = db.get_document(conn, doc_id, tenant_id=str(ctx.tenant.id))
     if doc is None or config.database_url() is None:
         raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
+    can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
+    if body.state == sharing.PUBLIC and not can:
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
     kind, key = sharing.item_of_doc(conn, doc)
     record = await get_accounts_service().get_or_create_project(ctx.tenant.id, doc["project"])
     try:
         share = await sharing.set_share(record.id, kind, key, body.state)
     except sharing.SharingError:
         raise HTTPException(status_code=503, detail="could not change the sharing; try again")
-    return {"share": sharing.share_json(share, kind)}
+    return {"share": sharing.share_json(share, kind, can_publish=can)}
 
 
 @router.get("/app/documents/{doc_id}/raw")
@@ -841,7 +848,9 @@ async def get_document_version_raw(
 _NO_SUCH_ASSET_DETAIL = "no such asset"
 
 # Content-addressed bytes never change; the only staleness is a lost right to read
-# them, so the cache window stays short. Shared caches only for a public project.
+# them, so the cache window stays short. Shared caches only for a Public item: a member's
+# read and a link holder's read are ``private`` (a shared cache keyed on the URL would
+# serve a link-only image to anyone, and keep it after the link is turned off).
 _ASSET_CACHE_PRIVATE = "private, max-age=300"
 _ASSET_CACHE_PUBLIC = "public, max-age=300"
 # Raster bytes only, never a document: nothing in the response may run.
@@ -922,14 +931,32 @@ async def get_document_asset(
 
     Optional-identity exactly like ``GET /app/documents/{id}``: resolved through
     ``_resolve_readable_doc``, so a member reads their own private document's images
-    and anyone reads a public project's. ``Cache-Control`` is ``public`` only when
-    the read came through the public path. Unmetered (``/app``).
+    and anyone reads a Public item's, or a Link item's while holding its link.
+    ``Cache-Control`` is ``public`` only for a Public item read by a non-member
+    (``_shared_cache_ok``). Unmetered (``/app``).
     """
 
     doc = await _resolve_readable_doc(conn, doc_id, ctx, share)
     if doc is None:
         raise _no_such_asset()
-    return await _asset_response(conn, doc, file, public=not _is_member_of(doc, ctx))
+    public = await _shared_cache_ok(conn, doc, is_member=_is_member_of(doc, ctx), share=share)
+    return await _asset_response(conn, doc, file, public=public)
+
+
+async def _shared_cache_ok(
+    conn, doc: dict, *, is_member: bool, share: tuple[str, ...] | None
+) -> bool:
+    """May a shared cache keep this read? Only a non-member's read of a Public item.
+
+    A read that held link tokens is asked again without them, so a Link item read by
+    its link is ``private``; one more share lookup, only on that path.
+    """
+
+    if is_member:
+        return False
+    if not share:
+        return True  # it passed the gate without a link: Public
+    return await _is_publicly_readable(conn, doc, None)
 
 
 @router.get("/app/orgs/{org}/{project}/{slug}/assets/{file:path}")
@@ -952,7 +979,8 @@ async def get_document_asset_by_slug(
     if resolved is None:
         raise _no_such_asset()
     doc, _tenant, is_member = resolved
-    return await _asset_response(conn, doc, file, public=not is_member)
+    public = await _shared_cache_ok(conn, doc, is_member=is_member, share=share)
+    return await _asset_response(conn, doc, file, public=public)
 
 
 def _delete_owned_document(doc_id: int, api_ctx: ApiAuthContext) -> bool:

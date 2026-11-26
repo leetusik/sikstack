@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { SHARING } from "@/content/sharing";
 import { setItemShare } from "@/lib/sharing/actions";
-import { SHARE_STATES, type ItemShare, type ShareState, type ShareTarget } from "@/lib/sharing/model";
+import { mayChooseShare, SHARE_STATES, type ItemShare, type ShareState, type ShareTarget } from "@/lib/sharing/model";
 import { Copy } from "@/sikstack/frame";
 import { Button, FieldError } from "@/sikstack/ui";
 
@@ -14,7 +14,8 @@ import { Button, FieldError } from "@/sikstack/ui";
  * Anyone with the link / Public, the state's one line under it, and while the link is on, the link and its
  * Copy. Turning the link off (Members or Public) kills it; turning it on again makes a new one. A chapter's
  * switch sets its book's (`share.kind === "book"`), said in one line. Only a member's read carries `share`,
- * so a visitor or a link reader never draws it.
+ * so a visitor or a link reader never draws it. Public is the org owner's: for a member (`can_publish` false)
+ * its button is off (`mayChooseShare`) and one line says so; Link and Members stay any member's.
  */
 export function ShareControl({ target, share: initial }: { target: ShareTarget; share: ItemShare }) {
   const [share, setShare] = useState<ItemShare>(initial);
@@ -22,7 +23,7 @@ export function ShareControl({ target, share: initial }: { target: ShareTarget; 
   const [failed, setFailed] = useState(false);
 
   async function change(state: ShareState) {
-    if (busy || state === share.state) return;
+    if (busy || state === share.state || !mayChooseShare(share, state)) return;
     setBusy(state);
     setFailed(false);
     try {
@@ -49,7 +50,7 @@ export function ShareControl({ target, share: initial }: { target: ShareTarget; 
             aria-pressed={share.state === state}
             busy={busy === state}
             busyLabel={SHARING.changing}
-            disabled={busy !== null}
+            disabled={busy !== null || !mayChooseShare(share, state)}
             onClick={() => void change(state)}
             title={SHARING.states[state]}
           >
@@ -58,6 +59,7 @@ export function ShareControl({ target, share: initial }: { target: ShareTarget; 
         ))}
       </div>
       <p className="meta item-share-line">{SHARING.means[share.state]}</p>
+      {share.can_publish === false ? <p className="meta">{SHARING.ownerPublishes}</p> : null}
       {share.kind === "book" ? <p className="meta">{SHARING.book}</p> : null}
       {share.state === "link" && share.url ? (
         <div className="design-share-on">

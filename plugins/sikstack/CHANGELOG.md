@@ -25,6 +25,8 @@ install on any of them updates to 0.3.0, because `claude plugin update` follows 
   - bodies cite code paths and PRs, never phase or slice ids; open work comes from the agenda's Proposed and Open
     items.
   - it publishes as Members with `knowledge save … --share members`; `knowledge share` changes who reads it.
+  - it sends `--share members` only for a new document or a new book's first chapter; a refresh, a next
+    chapter and a chapter's next version send none, so an item the operator shared keeps its state and its link.
 - **The engine has no explain route.** `create-phase` no longer creates or runs explain phases, and its research
   route (the explain plugin's "research first" hand-back) is gone. `next` no longer prints `explain_unit=`;
   `validate`, `phase rounds` and `slice finish` read `## Explain` in `intent.md` as nothing special.

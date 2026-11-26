@@ -13,7 +13,8 @@ Postgres-gated like ``tests/test_public_read``. Proved here:
 * reader state stays session-only, and a link item has none for another org's reader;
 * ``POST /api/share`` (``knowledge share``) sets a state with a full key;
 * a deleted document's row goes, so the next one under its stem starts afresh;
-* the one-time fill is idempotent, and leaves an item whose state was set alone.
+* the fill primitive is idempotent, and leaves an item whose state was set alone (its
+  once-ever guard: ``tests/test_item_share_authority``).
 """
 from __future__ import annotations
 
@@ -110,7 +111,7 @@ def test_the_link_reads_only_while_it_is_on(documents_client):
 
     # Off: the same link is the same 404 as everything else.
     off = _share(client, headers, did, "members")
-    assert off == {"state": "members", "kind": "doc", "url": None}
+    assert off == {"state": "members", "kind": "doc", "url": None, "can_publish": True}
     dead = client.get(f"/app/documents/{did}", headers=hold)
     assert dead.status_code == 404 and dead.json() == anon_miss.json()
     assert client.get(f"/app/shared/{token}").status_code == 404
@@ -246,7 +247,9 @@ def test_the_key_route_sets_a_state(documents_client):
     assert r.status_code == 200, r.text
     assert r.json()["share"]["state"] == "link" and "/s/" in r.json()["share"]["url"]
     r = client.post("/api/share", headers=key, json={"book": "guide", "project": "lab", "state": "public"})
-    assert r.status_code == 200 and r.json()["share"] == {"state": "public", "kind": "book", "url": None}
+    assert r.status_code == 200 and r.json()["share"] == {
+        "state": "public", "kind": "book", "url": None, "can_publish": True,
+    }
     assert client.get(f"/app/orgs/{org}/lab/books/guide").status_code == 200
     assert client.post("/api/share", headers=key, json={"book": "guide", "state": "public"}).status_code == 422
     assert client.post("/api/share", headers=key, json={"document": "lab/nope.md", "state": "public"}).status_code == 404

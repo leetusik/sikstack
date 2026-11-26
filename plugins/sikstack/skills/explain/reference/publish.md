@@ -24,7 +24,7 @@ Write the body to a scratch file (`body.md`: no front matter, no `# H1`), then d
       --lang en --project <project> --co-authored-by "<model> <noreply@…>" \
       [--asset <name>=<path> ...]
 
-- `--share members` is explain's only publish state: the org reads it, nobody else.
+- `--share members` goes on a **new** document only: it starts as Members, the org reads it, nobody else. Explain never sends any other state.
 - Tags: 2 to 5, lowercase-kebab. The title says what the document explains, no trailing period.
 - On a 201 (exit 0), report the `url` and `version` from the JSON. Warnings are not failures.
 - **409** (a document already at that path): it is the same topic again. Tell the operator its title and `rel_path` and publish as a new version on their word.
@@ -37,7 +37,9 @@ A refresh of a loose document is its next version, never a new document:
 
     knowledge list --project <project>          # its rel_path
     knowledge read <rel_path> --source          # the prior body, its ids and its Sources commit
-    knowledge save body.md --format native --share members --new-version --rel-path <rel_path> …
+    knowledge save body.md --format native --new-version --rel-path <rel_path> …
+
+A refresh sends no `--share`: the document keeps the sharing it has, its link included. A `--share` on it would set that state, and `members` would kill its link and unpublish it.
 
 Keep the id of every heading and block that survives. A version inherits no images: attach again every `asset:` it still names.
 
@@ -47,14 +49,14 @@ A translation is a new document beside its source: `--slug <source slug>-<lang> 
 
 A chapter is placed with `--book` and `--chapter` together; re-sending the same book, key and `--lang` is the chapter's next version.
 
-    knowledge save ch1.md --format native --share members --json \
+    knowledge save ch1.md --format native --json [--share members] \
       --title "<Chapter title>" --project <project> \
       --book <book-slug> --chapter <key> --position <n> --chapter-title "<Chapter title>" \
       [--book-title "<Book title>" --book-kind codebase|subject [--book-subject "<label>"]]
 
 - `--position` and `--chapter-title` matter only for a new chapter; `--book-title`, `--book-kind` and `--book-subject` only when the book is new (send them with the first chapter).
 - The server keeps the book's manifest (its chapter order and titles) from these flags: publish chapters in order, first to last.
-- The book's sharing covers its chapters: send the same `--share members` on each.
+- The book's sharing covers its chapters. Send `--share members` only with a **new** book's first chapter, so the book starts as Members; every later chapter, and every chapter's next version, sends none and keeps the book's sharing.
 
 ## Sharing
 

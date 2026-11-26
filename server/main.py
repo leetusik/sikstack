@@ -95,19 +95,20 @@ async def lifespan(app: FastAPI):
             f"sections={report.get('sections', {}).get('count', 0)}",
             flush=True,
         )
-    # Item sharing, day one: while item_shares holds no row at all, every existing
-    # item of a public project gets a Public row (server/sharing.py), so nothing reads
-    # differently after the deploy that adds it. Best-effort; never blocks the boot.
+    # Item sharing, day one: every existing item of a public project gets a Public row
+    # (server/sharing.py), so nothing reads differently after the deploy that adds it.
+    # Once ever per project: a project the fill saw, or whose owner switched its
+    # visibility, is never filled again. Best-effort; never blocks the boot.
     if config.database_url() is not None:
         try:
             conn = db.connect()
             try:
-                filled = await sharing.fill_if_empty(conn)
+                filled = await sharing.fill_once(conn)
             finally:
                 conn.close()
             if filled is not None:
                 print(
-                    f"[kb-api] sharing fill: {filled.projects} public project(s), "
+                    f"[kb-api] sharing fill: {filled.projects} public project(s) due, "
                     f"added {filled.added} Public row(s)",
                     flush=True,
                 )
@@ -154,6 +155,24 @@ async def usage_metering(request: Request, call_next):
         and 200 <= response.status_code < 300
     ):
         await record_usage(hint)  # best-effort; never raises
+    return response
+
+
+@app.middleware("http")
+async def link_reads_stay_private(request: Request, call_next):
+    """A read made with a share link is never kept by a shared cache (RFC 9111 §5.2.2.6).
+
+    A request holding ``X-Share-Token``, or naming a link at ``/app/shared/{token}``, is
+    answered for that link's holder only: a response that set no ``Cache-Control`` gets
+    ``private, no-store``. A route that judged its own scope keeps it (an image of a
+    Public item may stay ``public``; ``documents_api._shared_cache_ok``).
+    """
+
+    response = await call_next(request)
+    if (
+        request.headers.get("x-share-token") or request.url.path.startswith("/app/shared/")
+    ) and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -1595,11 +1614,31 @@ def _record_share_by_name(ctx, project: str, kind: str, key: str, requested):
         return None
 
 
+async def require_publish_right_document(
+    body: DocumentIn, ctx: ApiAuthContext = Depends(resolve_api_write)
+) -> None:
+    """A write that names ``share: public`` is the owner's act (403 before anything is
+    written, the registry project included); see ``sharing.api_may_publish``."""
+
+    if body.share == sharing.PUBLIC and not await sharing.api_may_publish(ctx):
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+
+
+async def require_publish_right_book(
+    body: BookPutIn, ctx: ApiAuthContext = Depends(resolve_api_write)
+) -> None:
+    """``require_publish_right_document`` for the book manifest PUT's ``share``."""
+
+    if body.share == sharing.PUBLIC and not await sharing.api_may_publish(ctx):
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
+
+
 @app.post("/api/documents", status_code=201)
 def create_document(
     body: DocumentIn,
     request: Request,
     ctx: ApiAuthContext = Depends(resolve_api_write),
+    _publish: None = Depends(require_publish_right_document),
     registry: RegistryProject = Depends(ensure_registry_project),
     org_slug: str | None = Depends(resolve_org_slug),
     conn=Depends(get_conn),
@@ -2259,6 +2298,9 @@ async def set_share_by_key(
 ):
     """Set one item's sharing with a full key (``knowledge share``) -> ``{share, ...}``.
 
+    ``public`` is the owner's act: an org-level key, the master bearer or an owner's
+    session; a project key (any member mints one) or a member's session is a **403**
+    (``sharing.api_may_publish``). ``link`` and ``members`` take any full key.
     ``document`` is a rel_path (a chapter's sharing is its book's); ``book`` is a slug
     in ``project`` (else the key's own project). Tenant-scoped: another org's item, or
     none, is a 404. Legacy mode has no sharing (404). Unmetered.
@@ -2268,6 +2310,9 @@ async def set_share_by_key(
         raise HTTPException(status_code=404, detail="sharing needs the accounts plane")
     if (body.document is None) == (body.book is None):
         raise HTTPException(status_code=422, detail="name one document (rel_path) or one book")
+    can = await sharing.api_may_publish(ctx)
+    if body.state == sharing.PUBLIC and not can:
+        raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
     tid = str(ctx.tenant_id)
     if body.document is not None:
         doc = db.get_document_by_path_or_alias(conn, body.document, tenant_id=tid)
@@ -2290,7 +2335,10 @@ async def set_share_by_key(
         share = await sharing.set_share(record.id, kind, key, body.state)
     except sharing.SharingError:
         raise HTTPException(status_code=503, detail="could not change the sharing; try again")
-    return {"project": project, "key": key, "share": sharing.share_json(share, kind)}
+    return {
+        "project": project, "key": key,
+        "share": sharing.share_json(share, kind, can_publish=can),
+    }
 
 
 @app.put("/api/books/{project}/{book}")
@@ -2299,6 +2347,7 @@ def put_book(
     book: str,
     body: BookPutIn,
     ctx: ApiAuthContext = Depends(resolve_api_write),
+    _publish: None = Depends(require_publish_right_book),
     conn=Depends(get_conn),
 ):
     """Replace (or create) a book's manifest: its title, order and bindings.
