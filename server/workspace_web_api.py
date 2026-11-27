@@ -57,7 +57,9 @@ and whose result comes back in that sync's batch. Until then the item reads
   then the entry on its minted id, in one transaction). The same feedback twice on one
   item is a 409. The feedback reads Filed on that item at once: its state is written
   in the inbox write's own transaction (``server.feedback.sync.file_from_web``, by
-  ``person:<email>``).
+  ``person:<email>``). A Discard of the filing (its entry, or the add of its new agenda)
+  or the engine's refusal returns it to Open unless another item still holds it; Try
+  again on a refused filing files it again when it has no state since.
 - ``GET /app/feedback/{feedback}/agenda`` → ``{project, linked, items}``: the items a
   piece of feedback is on, derived from the entries (stored or pending) whose source
   names it.
@@ -100,7 +102,7 @@ from server.accounts.auth import AuthContext, require_user
 from server.accounts.service import AccountsReadError, get_accounts_service
 from server.app_api import _load_scoped_project
 from server.feedback.service import FeedbackReadError, get_feedback_service
-from server.feedback.sync import file_from_web
+from server.feedback.sync import file_again, file_from_web, inbox_feedback
 from server.workspace import (
     WorkspaceInputError,
     WorkspacePersistenceError,
@@ -676,8 +678,13 @@ async def retry_inbox_entry(
         again = await _write(reader.project_id, ctx, kind=entry.kind, items=list(entry.items),
                              fields=fields, minted_id=minted, replaces=entry.id)
         return {"entry": _serialize(again), "agenda": minted}
+    refile: Callable[[AsyncSession], Awaitable[None]] | None = None
+    if inbox_feedback(entry) is not None:  # a refused filing, filed again (Open since)
+        by = f"person:{ctx.user.email}"
+        refile = lambda session: file_again(session, reader.project_id, entry, by=by)  # noqa: E731
+
     again = await _write(reader.project_id, ctx, kind=entry.kind, items=list(entry.items),
-                         fields=fields, replaces=entry.id)
+                         fields=fields, replaces=entry.id, on_written=refile)
     return {"entry": _serialize(again)}
 
 

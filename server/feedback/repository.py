@@ -771,6 +771,52 @@ class FeedbackRepository:
         )
         return (await self._session.execute(statement)).first() is not None
 
+    async def filed_agendas(
+        self, feedback_ids: Collection[UUID], *, project_id: UUID
+    ) -> dict[UUID, str | None]:
+        """``{id: agenda}`` for each of ``feedback_ids`` that is Filed and belongs to
+        ``project_id``; any other state is not listed."""
+
+        ids = tuple(feedback_ids)
+        if not ids:
+            return {}
+        statement = (
+            select(FeedbackTriageModel.feedback_id, FeedbackTriageModel.agenda)
+            .join(FeedbackEventModel, FeedbackEventModel.id == FeedbackTriageModel.feedback_id)
+            .where(FeedbackTriageModel.feedback_id.in_(ids),
+                   FeedbackTriageModel.state == STATE_FILED,
+                   FeedbackEventModel.project_id == project_id)
+        )
+        return {fid: agenda for fid, agenda in (await self._session.execute(statement)).all()}
+
+    async def follow_filed(
+        self, feedback_id: UUID, *, project_id: UUID, agenda: str | None
+    ) -> bool:
+        """Move a Filed feedback of ``project_id`` to the agenda that still holds it, or,
+        with ``agenda`` None, back to Open (its row goes: no row reads Open, as before it
+        was filed). Who filed it and when stay. Any other state is left alone. True when
+        it moved."""
+
+        scoped = (
+            FeedbackTriageModel.feedback_id == feedback_id,
+            FeedbackTriageModel.state == STATE_FILED,
+            exists().where(FeedbackEventModel.id == feedback_id,
+                           FeedbackEventModel.project_id == project_id),
+        )
+        if agenda is None:
+            statement = (
+                delete(FeedbackTriageModel).where(*scoped)
+                .returning(FeedbackTriageModel.feedback_id)
+                .execution_options(synchronize_session=False)
+            )
+        else:
+            statement = (
+                update(FeedbackTriageModel).where(*scoped).values(agenda=agenda)
+                .returning(FeedbackTriageModel.feedback_id)
+                .execution_options(synchronize_session=False)
+            )
+        return (await self._session.execute(statement)).first() is not None
+
     def _to_triage_record(self, model: FeedbackTriageModel) -> FeedbackTriageRecord:
         return FeedbackTriageRecord(
             feedback_id=model.feedback_id,

@@ -446,6 +446,204 @@ def test_the_web_filing_reads_filed_at_once(fb):
     assert [f["id"] for f in _triage(fb, org.pid, org.ws).json()["feedback"]] == []
 
 
+# --- Filed follows the entry that filed it ---------------------------------------------
+
+
+A8 = "A8-p3"
+
+
+def _queue(client: TestClient, org: _Org) -> list[str]:
+    return [f["id"] for f in _triage(client, org.pid, org.ws).json()["feedback"]]
+
+
+def _web_file(client: TestClient, org: _Org, fid: str, item: str | None = None) -> dict:
+    res = client.post(f"/app/feedback/{fid}/agenda", json={} if item is None else {"item": item},
+                      headers=org.owner["session"])
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+def _discard(client: TestClient, org: _Org, entry: str) -> None:
+    res = client.post(f"/app/projects/{org.pid}/workspace/inbox/{entry}/discard",
+                      headers=org.owner["session"])
+    assert res.status_code == 200, res.text
+
+
+def _results(client: TestClient, org: _Org, results: list[dict], ops: list | None = None):
+    batch = {"batch_id": str(uuid4()), "command": ["sync"], "origin": "command",
+             "ops": ops or [], "events": [], "derived": [], "inbox": results}
+    res = client.post(f"/api/workspace/{org.pid}/commit", headers={**_h(org.ws), **_ENGINE},
+                      json=batch)
+    assert res.status_code == 200, res.text
+    org.revs.update(res.json()["revs"])
+
+
+def _delete(org: _Org, path: str) -> dict:
+    return {"op": "delete", "path": path, "base_rev": org.revs[path]}
+
+
+def _entry_path(aid: str = AID, name: str = ITEM) -> str:
+    return f"works/agenda/{aid}/entries/{name}.json"
+
+
+def _open(client: TestClient, org: _Org, fid: str) -> None:
+    got = _state(client, org, fid)
+    assert (got["state"], got["agenda"]) == ("open", None), got
+    assert fid in _queue(client, org)
+    res = client.get(f"/api/feedback/{org.pid}/triage/{fid}", headers=_h(org.ws))
+    assert res.json()["feedback"]["triage"]["state"] == "untriaged"
+
+
+def test_a_web_filing_onto_a_new_agenda_whose_pending_agenda_is_discarded_reads_open(fb):
+    """Case (a): discarding the pending agenda (its add), or the filing's own entry,
+    returns the feedback to Open and to the engine's queue."""
+
+    org = _Org(fb)
+    a, b = org.feedback(fb, "a"), org.feedback(fb, "b")
+    _commit(fb, org, [_agenda(org)])
+    added = _web_file(fb, org, a)
+    assert _state(fb, org, a)["state"] == "filed" and a not in _queue(fb, org)
+    add, _entry = (e["id"] for e in added["entries"])
+    _discard(fb, org, add)
+    _open(fb, org, a)
+
+    entry = _web_file(fb, org, b)["entries"][1]["id"]
+    _discard(fb, org, entry)
+    _open(fb, org, b)
+
+
+def test_a_landed_item_deleted_later_returns_its_feedback_to_open(fb):
+    """Case (b): a later batch deletes the entry file that filed it (by the sync rule,
+    by the engine's mark, or by the web filing that landed)."""
+
+    org = _Org(fb)
+    a, b = org.feedback(fb, "a"), org.feedback(fb, "b")
+    _commit(fb, org, [_agenda(org), _item(org, f"feedback:{a}")])
+    _file(fb, org, b)
+    _commit(fb, org, [_item(org, f"feedback:{b}", name=ITEM2)])
+    assert _state(fb, org, a)["state"] == _state(fb, org, b)["state"] == "filed"
+    _commit(fb, org, [_delete(org, _entry_path()), _delete(org, _entry_path(name=ITEM2))])
+    _open(fb, org, a)
+    _open(fb, org, b)
+
+    # a new item naming it later files it again (no row: the sync rule's first step)
+    _commit(fb, org, [_item(org, f"feedback:{a}", name="20261124T010000.000003Z-cccc")])
+    assert _state(fb, org, a)["state"] == "filed"
+
+
+def test_a_moved_item_carries_its_feedbacks_agenda(fb):
+    """Case (c): a move op, and a split written as a delete and a put in one batch: the
+    stored agenda is the new one, as the panel and the engine's ``agendas`` say."""
+
+    org = _Org(fb)
+    a, b = org.feedback(fb, "a"), org.feedback(fb, "b")
+    _commit(fb, org, [_agenda(org), _agenda(org, A8), _item(org, f"feedback:{a}"),
+                      _item(org, f"feedback:{b}", name=ITEM2)])
+    src = _entry_path()
+    _commit(fb, org, [{"op": "move", "from": src, "to": _entry_path(A8),
+                       "base_rev": org.revs[src]}])
+    _commit(fb, org, [_delete(org, _entry_path(name=ITEM2)),
+                      _item(org, f"feedback:{b}", aid=A8, name=ITEM2)])
+    for fid in (a, b):
+        got = _state(fb, org, fid)
+        assert (got["state"], got["agenda"]) == ("filed", A8), got
+        panel = fb.get(f"/app/feedback/{fid}/agenda", headers=org.owner["session"]).json()
+        assert [i["id"] for i in panel["items"]] == [A8]
+        res = fb.get(f"/api/feedback/{org.pid}/triage/{fid}", headers=_h(org.ws))
+        assert res.json()["feedback"]["triage"]["agendas"] == [A8]
+        assert res.json()["feedback"]["triage"]["agenda"] == A8
+    # then done on its new agenda: resolved there
+    _commit(fb, org, [_item(org, f"feedback:{a}", aid=A8, state="done")])
+    assert (_state(fb, org, a)["state"], _state(fb, org, a)["agenda"]) == ("resolved", A8)
+
+
+def test_a_pending_web_filing_onto_an_existing_item_discarded_reads_open(fb):
+    """Case (d)."""
+
+    org = _Org(fb)
+    a = org.feedback(fb, "a")
+    _commit(fb, org, [_agenda(org)])
+    entry = _web_file(fb, org, a, AID)["entries"][0]["id"]
+    _discard(fb, org, entry)
+    _open(fb, org, a)
+
+
+def test_a_pending_filing_the_engine_refuses_reads_open_until_tried_again(fb):
+    """Case (e): the engine's ``refused`` result, for the filing's entry or for the add
+    of its new agenda, returns the feedback to Open; Try again files it again."""
+
+    org = _Org(fb)
+    a, b = org.feedback(fb, "a"), org.feedback(fb, "b")
+    _commit(fb, org, [_agenda(org)])
+    entry = _web_file(fb, org, a, AID)["entries"][0]["id"]
+    _results(fb, org, [{"id": entry, "state": "refused", "reason": "no", "exit": 1}])
+    _open(fb, org, a)
+
+    add = _web_file(fb, org, b)["entries"][0]["id"]
+    _results(fb, org, [{"id": add, "state": "refused", "reason": "no", "exit": 1}])
+    _open(fb, org, b)
+
+    res = fb.post(f"/app/projects/{org.pid}/workspace/inbox/{entry}/retry",
+                  headers=org.owner["session"])
+    assert res.status_code == 201, res.text
+    got = _state(fb, org, a)
+    assert (got["state"], got["agenda"]) == ("filed", AID)
+    assert a not in _queue(fb, org)
+
+
+def test_an_agenda_deleted_with_its_entries_returns_its_only_feedback_to_open(fb):
+    """Case (f), and the must-stay: a feedback another live or pending entry still names
+    stays Filed, on that entry's agenda."""
+
+    org = _Org(fb)
+    a, b, c = org.feedback(fb, "a"), org.feedback(fb, "b"), org.feedback(fb, "c")
+    third = "20261124T010000.000003Z-cccc"
+    _commit(fb, org, [_agenda(org), _agenda(org, A8), _item(org, f"feedback:{a}"),
+                      _item(org, f"feedback:{b}", name=ITEM2),
+                      _item(org, f"feedback:{b}", aid=A8, name=ITEM2),
+                      _item(org, f"feedback:{c}", name=third)])
+    _commit(fb, org, [_agenda(org, "A9-z9")])
+    _web_file(fb, org, c, "A9-z9")  # pending: a filing that has not landed
+    _file(fb, org, c)  # the engine's mark, on the agenda about to go
+    assert [_state(fb, org, x)["agenda"] for x in (a, b, c)] == [AID, AID, AID]
+
+    agenda = f"works/agenda/{AID}/agenda.json"
+    _commit(fb, org, [_delete(org, agenda), _delete(org, _entry_path()),
+                      _delete(org, _entry_path(name=ITEM2)),
+                      _delete(org, _entry_path(name=third))])
+    _open(fb, org, a)
+    assert [(_state(fb, org, x)["state"], _state(fb, org, x)["agenda"]) for x in (b, c)] == [
+        ("filed", A8), ("filed", "A9-z9")]
+    assert _queue(fb, org) == [a]
+
+
+def test_a_manual_state_never_follows_an_entry(fb):
+    """Must stay: Resolved, Dropped and Open (a Reopen) are never changed by a withdrawn
+    or moved entry, a discarded filing or a refused one."""
+
+    org = _Org(fb)
+    r, d, o, w = (org.feedback(fb, m) for m in ("r", "d", "o", "w"))
+    third, fourth = "20261124T010000.000003Z-cccc", "20261124T010000.000004Z-dddd"
+    _commit(fb, org, [_agenda(org), _agenda(org, A8), _item(org, f"feedback:{r}"),
+                      _item(org, f"feedback:{d}", name=ITEM2),
+                      _item(org, f"feedback:{o}", name=third)])
+    entry = _web_file(fb, org, w, AID)["entries"][0]["id"]
+    assert _set(fb, org, [r], "resolved").status_code == 200
+    assert _set(fb, org, [d], "dropped", reason="noise").status_code == 200
+    assert _set(fb, org, [o, w], "open").status_code == 200
+    before = {x: _state(fb, org, x) for x in (r, d, o, w)}
+
+    src = _entry_path(name=third)
+    _commit(fb, org, [{"op": "move", "from": src, "to": _entry_path(A8, third),
+                       "base_rev": org.revs[src]}])
+    _commit(fb, org, [_delete(org, _entry_path()), _delete(org, _entry_path(name=ITEM2))])
+    _results(fb, org, [{"id": entry, "state": "refused", "reason": "no", "exit": 1}])
+    _discard(fb, org, entry)
+    assert {x: _state(fb, org, x) for x in (r, d, o, w)} == before
+    _commit(fb, org, [_item(org, f"feedback:{o}", name=fourth)])
+    assert _state(fb, org, o) == before[o]
+
+
 # --- the migration --------------------------------------------------------------------
 
 
