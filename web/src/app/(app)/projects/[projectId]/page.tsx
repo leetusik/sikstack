@@ -50,7 +50,7 @@ import "./project-home.css";
 // - the head, Usage and Trend, and the keys: `getProjectUsage` (one read; 30-day window);
 // - Active total (Usage) and the Library's count: `getDocuments({project, limit: 1}).total`;
 // - the Library's rows: the org library listing (`getOrgLibrary`), this project's books and documents;
-// - Feedback: page 1 of `listFeedbackPage({project_id, limit: 5})`, and `countFeedback` over the
+// - Feedback: page 1 of `listFeedbackPage({project_id, limit: 5, state: "all"})`, and `countFeedback` over the
 //   viewer's month for `N this month` (D247-4x); either failing is the panel's failed form.
 // - Workspace: the project's Workspace (`readWorkspace`, one read: its phases and agenda items); for a
 //   project not linked or never synced, the link command from the request's origin (`headers()`).
@@ -108,7 +108,8 @@ async function loadFeedback(
     (async () =>
       listFeedbackPage(
         token,
-        { project_id: projectId, limit: FEEDBACK_SHOWN },
+        // every state (P91-v3): without `state` the API lists Open alone
+        { project_id: projectId, limit: FEEDBACK_SHOWN, state: "all" },
         1,
       ))(),
     (async () =>

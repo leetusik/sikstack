@@ -18,6 +18,14 @@ const detail = vi.fn();
 const projects = vi.fn();
 let zoneCookie: string | undefined;
 
+// the item's state island (P91-v3) holds the router (Delete goes back to the list) and reads the caller's role
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+vi.mock("@/lib/knowledge/orgs", () => ({
+  getMembers: async () => ({ role: "owner", members: [] }),
+}));
 vi.mock("@/lib/auth-guards", () => ({
   requireIdentity: async () => ({
     token: "t",
@@ -318,11 +326,12 @@ describe("Feedback not found", () => {
 });
 
 describe("the page's frame", () => {
-  it("fills S6's two slots as not offered: the head ends at its title, the Agenda part says why between Comment and Details", async () => {
+  it("fills S6's two slots as not offered: the head's end holds the state's actions alone, the Agenda part says why between Comment and Details", async () => {
     detail.mockResolvedValue(bare());
     const html = await orgPage();
+    // P91-v3: the state line ends the title block; the head's end is the state's actions, no add after them
     expect(html).toMatch(
-      /<div class="page-head fi-head"><div class="page-title">.*?<\/p><\/div><\/div><\/header>/,
+      /<div class="page-head fi-head"><div class="page-title">.*?<p class="[^"]*fi-state">.*?<\/p><\/div><div class="cluster fi-head-end"><div class="cluster fi-acts">(<button[^>]*>.*?<\/button>)+<\/div><\/div><\/div><\/header>/,
     );
     expect(html).toContain(
       'No comment.</p></div></section><section class="panel" aria-label="Agenda"><div class="panel-head"><h2>Agenda</h2></div><div class="panel-body has-rule block"><p class="block-text">This feedback has no project, so there is no agenda to add it to.</p></div></section><section class="panel" aria-label="Details">',

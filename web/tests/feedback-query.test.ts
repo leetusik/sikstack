@@ -71,7 +71,7 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
     });
   });
 
-  it("counts a window with `limit: 1` and reads only the total", async () => {
+  it("counts a window in every state (`state=all`), with `limit: 1`, and reads only the total", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       json({ records: [{ id: "a" }], total: 42 }),
     );
@@ -86,6 +86,8 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
       start_ingested_at: start,
       end_ingested_at: end,
       limit: "1",
+      // the API answers Open alone without `state` (P91-v3); project home's count is every state's
+      state: "all",
     });
   });
 

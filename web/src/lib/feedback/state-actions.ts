@@ -48,7 +48,8 @@ export async function changeFeedbackState(
       body,
       { token },
     );
-    return { ok: true, ids: (read.states ?? []).map((s) => s.id) };
+    const states = read.states ?? [];
+    return { ok: true, ids: states.map((s) => s.id), states };
   } catch (error) {
     return why(error);
   }

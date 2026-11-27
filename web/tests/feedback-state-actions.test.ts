@@ -62,9 +62,14 @@ afterEach(() => {
 describe("the state change", () => {
   it("posts {ids, state} for Resolve and Reopen, and answers the ids changed", async () => {
     const sent = answer(200, { states: [state(A, "resolved"), state(B, "resolved")] });
-    expect(await changeFeedbackState([A, B], "resolved")).toEqual({ ok: true, ids: [A, B] });
+    expect(await changeFeedbackState([A, B], "resolved")).toEqual({
+      ok: true,
+      ids: [A, B],
+      states: [state(A, "resolved"), state(B, "resolved")],
+    });
     answer(200, { states: [state(A, "open")] });
-    expect(await changeFeedbackState([A], "open")).toEqual({ ok: true, ids: [A] });
+    // the stored states ride along: the item page draws its own (P91-v3.S5)
+    expect(await changeFeedbackState([A], "open")).toEqual({ ok: true, ids: [A], states: [state(A, "open")] });
     expect(sent).toEqual([
       {
         url: `${BASE}/app/feedback/state`,

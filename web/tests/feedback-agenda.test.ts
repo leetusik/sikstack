@@ -15,6 +15,14 @@ const projects = vi.fn();
 const agendaRead = vi.fn();
 const workspace = vi.fn();
 
+// the item's state island (P91-v3) holds the router (Delete goes back to the list) and reads the caller's role
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+vi.mock("@/lib/knowledge/orgs", () => ({
+  getMembers: async () => ({ role: "owner", members: [] }),
+}));
 vi.mock("@/lib/auth-guards", () => ({
   requireIdentity: async () => ({
     token: "t",

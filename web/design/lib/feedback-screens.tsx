@@ -29,7 +29,7 @@ import { feedbackBackHref } from "@/lib/feedback/place";
 import { agendaItemHref } from "@/lib/workspace/address";
 
 import { actDone } from "@/content/feedback-state";
-import { FeedbackItem } from "../next/feedback/item/item";
+import { FeedbackItem } from "@/sikstack/feedback/item";
 import { ItemStateActs, ItemStateLine, StateScope, type StateSend } from "@/sikstack/feedback/state/control";
 import { changed, OPEN, type FeedbackAct, type FeedbackStateRecord, type OrgRole, type StateAsk } from "@/sikstack/feedback/state/model";
 import { FEEDBACK, feedbackItemsIn } from "./answers";
@@ -47,10 +47,9 @@ import { apply, current, dataOf, getSnapshot, load, reset } from "./store";
  * the browser shows here, on the Agenda and on the item's thread at once. Production's page body
  * (`src/sikstack/feedback/item/body.tsx`) is a server component: this screen fills the same two slots it fills.
  *
- * P91-v3.S3's design: the item is the next version (`next/feedback/item/item.tsx`) with its third slot, the state
- * line, and the state's actions before the add at the head's end, in one `StateScope` (production's
- * `src/sikstack/feedback/state/`, applied in P91-v3.S4). The
- * states are made (`feedback-list-data.ts`): the recording predates them.
+ * P91-v3: the item's third slot, the state line, and the state's actions before the add at the head's end, in one
+ * `StateScope` (production's `src/sikstack/feedback/state/`), as `body.tsx` fills them. The states are made
+ * (`feedback-list-data.ts`): the recording predates them.
  */
 
 type FeedbackState = (typeof FEEDBACK_STATES.list)[number]["key"];

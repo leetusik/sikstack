@@ -51,7 +51,8 @@ export async function listFeedbackPage(
  * How many records the list holds in a window: `total` over
  * `start_ingested_at <= ingested_at < end_ingested_at` (ISO instants), one
  * project or the whole org, read with `limit: 1`. Project home's
- * `N this month` passes the viewer's month as the window.
+ * `N this month` passes the viewer's month as the window. Every state (`state=all`): without it the API counts
+ * Open alone (P91-v3).
  */
 export async function countFeedback(
   token: string,
@@ -64,6 +65,7 @@ export async function countFeedback(
       start_ingested_at: window.start,
       end_ingested_at: window.end,
       limit: 1,
+      state: "all",
     })}`,
     { token, signal },
   );

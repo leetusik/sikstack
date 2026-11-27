@@ -187,5 +187,10 @@ export interface FeedbackFiled {
  * answer, or no session).
  */
 export type FeedbackActAnswer =
-  | { ok: true; ids: string[] }
+  | {
+      ok: true;
+      ids: string[];
+      /** The state route's stored states, in request order (the item page draws its own; Delete answers none). */
+      states?: { id: string; state: FeedbackState }[];
+    }
   | { ok: false; reason: "not-found" | "forbidden" | "refused" | "failed" };

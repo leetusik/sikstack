@@ -14,10 +14,6 @@ import "../../src/app/globals.css";
 import "@/sikstack/styles/index.css";
 import "@/sikstack/shell/shell.css";
 import "../../src/app/canvas.css";
-// The next versions of production sheets a design changes (`next/styles/`), after production's own: each holds
-// production's rules byte for byte plus the design's new ones, and replaces its original when applied. (The list's
-// sheet was applied in P91-v3.S4 and is production's own now.)
-import "../next/styles/feedback/item.css";
 
 // The design build's root: production's root layout (`src/app/layout.tsx`) as it draws a signed-in page,
 // its sheets, faces and body classes, without the request-bound parts (Listen, the zone cookie).

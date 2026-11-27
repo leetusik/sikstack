@@ -90,9 +90,7 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
 const FB = "src/sikstack/feedback";
 const FB_AGENDA = "src/sikstack/feedback/agenda";
 const FB_ROUTE = "src/app/(app)/projects/[projectId]/feedback/[feedbackId]";
-// P91-v3.S3's design. The list and the shared state module were applied in S4 and are production's now; the item's
-// next version (`design/next/`) still replaces production's when S5 applies it.
-const NX = "design/next/feedback";
+// P91-v3.S3's design, applied: the list and the shared state module in S4, the item in S5; each `from` names production.
 const NX_LIST = `${FB}/list/view.tsx`;
 const NX_STATE = `${FB}/state`;
 const FB_LIST_ROUTE = "src/app/(app)/feedback";
@@ -137,7 +135,7 @@ export const FEEDBACK_STATES = pageStates("Feedback item", [
   { key: "not-found", label: "Not found", from: `${FB_ROUTE}/not-found.tsx` },
   { key: "error", label: "Page error", from: `${FB_ROUTE}/error.tsx` },
   // P91-v3.S3's design: the state line and the state's actions (the next versions; the states are made).
-  { key: "resolved", label: "Resolved", from: `${NX_STATE}/line.tsx:28 the badge · ${NX}/item/item.tsx:69 the state slot (made)` },
+  { key: "resolved", label: "Resolved", from: `${NX_STATE}/line.tsx:28 the badge · ${FB}/item/item.tsx:64 the state slot (made)` },
   { key: "dropped", label: "Dropped, with a reason", from: `${NX_STATE}/line.tsx:29 the reason · Reopen (made)` },
   { key: "resolving", label: "Resolving", from: `${NX_STATE}/control.tsx:123 acts at once · line.tsx:60 busy word in place` },
   { key: "confirm-drop", label: "Drop confirm", from: `${NX_STATE}/control.tsx:120 · confirm.tsx:77 Reason (optional)` },

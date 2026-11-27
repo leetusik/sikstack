@@ -4,7 +4,8 @@
    Scoped like the system's sheets (../README.md): unlayered, root rules as `:scope`; colours and gaps are the
    tokens' roles; the frame's classes are ./frame.css's, never redefined here. The boards' own <style> rules, as
    signed; one change: the board's `.fi-head > .sc-host` (the canvas's host of the head's end) is the head's end
-   itself, `.fi-head > .page-title + *`, whatever P65-nh.S6 mounts there. */
+   itself, `.fi-head > .page-title + *`, whatever P65-nh.S6 mounts there.
+   The rules after "P91-v3" are the state line's and the state's actions (applied from P91-v3.S3's signed design). */
 @scope (.ui) to ([data-ui-legacy]) {
   /* the head: the title's line, then the head's end on its first line (F142) */
   .fi-head {
@@ -63,5 +64,23 @@
     .fi-files td.to-end {
       margin-right: calc(var(--space-2) - var(--space-4));
     }
+  }
+
+  /* ── P91-v3: the state line and the state's actions ──
+     the state line takes the title block's own line, under the rating and the time */
+  .fi-state {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .fi-state-reason {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* the head's end holds the state's actions, then Add to agenda: one row that wraps, ending on the head's edge */
+  .fi-head-end {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
 }
