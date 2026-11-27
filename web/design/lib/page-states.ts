@@ -161,17 +161,16 @@ export const INVITE_STATES = pageStates("Invite", [
   { key: "expired", label: "Expired, revoked or used", from: `${ORG}/invite.tsx:193 phase expired (one state for the three)` },
 ]);
 
-// ── The landing: production's route branches, drawn by the next `Landing` and its header (the "sik" mark and the
-// open-source section's design, `next/landing/`). Each state is a branch production draws; the next files' lines are
-// named, with production's own line where the next version uses the branch a second time.
+// ── The landing (P87's design, applied: the "sik" mark in its header and the open-source section): production's
+// route branches, drawn by production's `Landing` and its header.
 const MKT = "src/app/(marketing)/page.tsx";
-const LP = "next/landing/landing.tsx";
-const LP_HEAD = "next/landing/header.tsx";
+const LP = "src/sikstack/landing/landing.tsx";
+const LP_HEAD = "src/sikstack/landing/header.tsx";
 
 /** The landing (`/`): who reads it, and whether the server holds the feedback control's key. */
 export const LANDING_STATES = pageStates("Landing", [
-  { key: "signed-out", label: "Signed out", from: `${MKT}:30 signedIn false, :31 key held (as on sikstack.com) · ${LP}:74 Create account, Sign in; :507 Send feedback in the footer and :461 under Contribute (production's landing.tsx:442, sendFeedback) · ${LP_HEAD}:72 Sign in, Create account` },
-  { key: "signed-in", label: "Signed in", from: `${MKT}:18 optionalIdentity, :30 signedIn true · ${LP}:74 Open dashboard · ${LP_HEAD}:72 Dashboard` },
-  { key: "no-feedback-key", label: "No feedback key", from: `${MKT}:31 feedback.configured false · ${LP}:507 the footer's links alone, :461 Contribute's three links (production's landing.tsx:442)` },
+  { key: "signed-out", label: "Signed out", from: `${MKT}:30 signedIn false, :31 key held (as on sikstack.com) · ${LP}:72 Create account, Sign in; :459 Send feedback under Contribute, :505 in the footer · ${LP_HEAD}:70 Sign in, Create account` },
+  { key: "signed-in", label: "Signed in", from: `${MKT}:18 optionalIdentity, :30 signedIn true · ${LP}:72 Open dashboard · ${LP_HEAD}:70 Dashboard` },
+  { key: "no-feedback-key", label: "No feedback key", from: `${MKT}:31 feedback.configured false · ${LP}:459 Contribute's three links, :505 the footer's links alone` },
 ]);
 export type LandingState = (typeof LANDING_STATES.list)[number]["key"];

@@ -56,14 +56,14 @@ const builds = buildPageIds();
 const plain = DESIGN_PART.builds.find((b) => !b.private && !b.share.on && !b.options)?.id ?? builds[0];
 
 export const PAGES: readonly BuildPage[] = [
-  // The landing (the "sik" mark and the open-source section's design: the next `Landing`, `next/landing/`):
-  // production's `/`, drawn at /landing/ (the build's `/` is its front page). No recording: its words are its data.
+  // The landing (P87's design, applied: the "sik" mark and the open-source section): production's `/`, drawn at
+  // /landing/ (the build's `/` is its front page). No recording: its words are its data.
   {
     name: "Landing",
     route: "/",
     production: "src/app/(marketing)/page.tsx",
     entry: "/landing/",
-    reads: ["next/landing/landing.tsx", "next/landing/header.tsx", "next/landing/wordmark.tsx", "next/landing/landing.css", "next/content/marketing/landing.ts"],
+    reads: ["src/sikstack/landing/landing.tsx", "src/content/marketing/landing.ts", "src/sikstack/landing/header.tsx", "src/sikstack/landing/wordmark.tsx", "src/sikstack/landing/landing.css"],
     states: LANDING_STATES,
   },
   {

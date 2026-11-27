@@ -5,7 +5,7 @@
 export { SECTION_IDS } from "./section-ids";
 export type { SectionId } from "./section-ids";
 
-export { BRAND, SITE } from "./site";
+export { SITE } from "./site";
 export { NAV_LINKS, SKIP_TO_CONTENT } from "./nav";
 
 export type { Cta, NavLink, SiteMeta } from "./types";

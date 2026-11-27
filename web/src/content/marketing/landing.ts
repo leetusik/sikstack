@@ -46,6 +46,8 @@ export const LANDING = {
     siteName: "sikstack",
   },
   wordmark: "sikstack",
+  /** The mark: the wordmark's first three letters, the icon's; the dot of its i is in the accent. */
+  mark: "sik",
   header: {
     nav: "Landing",
     signIn: "Sign in",
@@ -277,6 +279,24 @@ export const LANDING = {
     confirm: {
       title: "Confirm on the web",
       text: "Check that the page shows the same code, sign in or create an account, and press Connect.",
+    },
+  },
+  /** The open-source section, last before the footer: the licence, the repo, the ways to contribute. */
+  openSource: {
+    title: "Open source",
+    text: "sikstack is MIT licensed. Its code is on GitHub.",
+    repo: { label: "sikstack on GitHub", href: REPO },
+    contribute: {
+      title: "Contribute",
+      /** After the feedback control's own trigger, which is there only where the server holds its key. */
+      links: [
+        { label: "Open an issue", href: `${REPO}/issues` },
+        { label: "Open a pull request", href: `${REPO}/pulls` },
+        {
+          label: "Read CONTRIBUTING.md",
+          href: `${REPO}/blob/main/CONTRIBUTING.md`,
+        },
+      ],
     },
   },
   footer: {

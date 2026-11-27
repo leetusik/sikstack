@@ -1,9 +1,8 @@
-// Applied: `@/content/marketing` (this design keeps the new words at `next/content/marketing/landing.ts`).
-import { LANDING } from "../content/marketing/landing";
+import { LANDING } from "@/content/marketing";
 
 /**
- * sikstack's name as the landing's header draws it (the "sik" mark's design, direction C, "Live dot"; new,
- * applied as `src/sikstack/landing/wordmark.tsx`): the name as text, as it was, with the dot of the mark's i in
+ * sikstack's name as the landing's header draws it (P87's "sik" mark, direction C, "Live dot"): the name as
+ * text, as it was, with the dot of the mark's i in
  * the accent (`landing.css` section 10). Live text in the house face: no image and no tile, so it follows the
  * scheme and the text size. It goes inside the header's `.mark.lp-mark` link, which gives it its size, weight
  * and row. The link is a flex row, so the name is one span, one flex item: split into three items it would be
