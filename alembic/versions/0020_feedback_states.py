@@ -14,8 +14,9 @@ change. The data does:
   (``feedback:<id>``) gets a ``filed`` row: stored item files (live, non-deleted
   ``works/agenda/<A>/entries/*.json`` records, content from ``workspace_blobs``) and
   pending web filings (``workspace_inbox`` kind ``entry``, state ``pending``,
-  ``fields.source``). ``agenda`` is the first such agenda (stored items by path, then
-  pending entries oldest first), ``triaged_by`` ``agent:sikstack``. Until now such a
+  ``fields.source``). ``agenda`` is the first such agenda of its own project (stored
+  items by path, then pending entries oldest first); another project's item naming the
+  same id is never weighed. ``triaged_by`` ``agent:sikstack``. Until now such a
   feedback read filed, derived from the workspace on every read.
 * nothing is resolved: a Filed feedback whose item was done before this revision stays
   Filed until a member resolves it.
@@ -69,7 +70,8 @@ def upgrade() -> None:
     conn = op.get_bind()
     conn.execute(sa.text("UPDATE feedback_triage SET state = 'dropped' WHERE state = 'dismissed'"))
 
-    named: dict[UUID, tuple[UUID, str]] = {}
+    # Every candidate per feedback id, in order; the insert keeps the first of its own project.
+    named: dict[UUID, list[tuple[UUID, str]]] = {}
     stored = conn.execute(sa.text(
         "SELECT f.project_id, f.path, b.content FROM workspace_files f "
         "JOIN workspace_blobs b ON b.project_id = f.project_id AND b.sha256 = f.blob_sha256 "
@@ -86,7 +88,7 @@ def upgrade() -> None:
             continue
         fid = _feedback_id(data.get("source")) if isinstance(data, dict) else None
         if fid is not None:
-            named.setdefault(fid, (project_id, aid))
+            named.setdefault(fid, []).append((project_id, aid))
     pending = conn.execute(sa.text(
         "SELECT project_id, items, fields FROM workspace_inbox "
         "WHERE kind = 'entry' AND state = 'pending' ORDER BY created_at, id"
@@ -96,7 +98,7 @@ def upgrade() -> None:
             continue
         fid = _feedback_id(fields.get("source")) if isinstance(fields, dict) else None
         if fid is not None:
-            named.setdefault(fid, (project_id, items[0]))
+            named.setdefault(fid, []).append((project_id, items[0]))
 
     insert = sa.text(
         "INSERT INTO feedback_triage (feedback_id, state, agenda, reason, triaged_by) "
@@ -104,8 +106,12 @@ def upgrade() -> None:
         "WHERE e.id = :fid AND e.project_id = :pid "
         "ON CONFLICT (feedback_id) DO NOTHING"
     )
-    for fid, (project_id, aid) in named.items():
-        conn.execute(insert, {"fid": fid, "pid": project_id, "agenda": aid, "by": _AUTHOR})
+    for fid, candidates in named.items():
+        for project_id, aid in candidates:
+            done = conn.execute(insert, {"fid": fid, "pid": project_id, "agenda": aid,
+                                         "by": _AUTHOR})
+            if done.rowcount:
+                break
 
 
 def downgrade() -> None:

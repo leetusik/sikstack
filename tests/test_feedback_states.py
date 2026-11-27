@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from uuid import UUID, uuid4
 
 import pytest
@@ -652,13 +654,108 @@ def test_the_states_migration_keeps_marks_and_backfills_filed(monkeypatch):
     feedback that only an item of its own project names (stored, or pending in the
     inbox); it resolves nothing. Downgrade, then upgrade again."""
 
+    with _migration_db(monkeypatch) as (cfg, engine):
+        _keeps_marks_and_backfills_filed(cfg, engine)
+
+
+def _keeps_marks_and_backfills_filed(cfg, engine) -> None:
+    from alembic import command
+
+    tenant, project, other = uuid4(), uuid4(), uuid4()
+    ev = {k: uuid4() for k in ("filed", "dismissed", "stored", "pending", "plain", "foreign",
+                               "done", "bad")}
+
+    def blob(data: dict | str) -> tuple[str, bytes]:
+        raw = (data if isinstance(data, str) else json.dumps(data)).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest(), raw
+
+    command.upgrade(cfg, "0019_item_shares")
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO tenants (id, name) VALUES (:t, 'T')"), {"t": tenant})
+        conn.execute(text("INSERT INTO projects (id, tenant_id, name) VALUES "
+                          "(:p, :t, 'one'), (:o, :t, 'two')"),
+                     {"p": project, "o": other, "t": tenant})
+        for key, fid in ev.items():
+            conn.execute(text("INSERT INTO feedback_events (id, project_id, message, "
+                              "source_product) VALUES (:id, :p, :m, 'app')"),
+                         {"id": fid, "p": other if key == "foreign" else project, "m": key})
+        conn.execute(text("INSERT INTO feedback_triage (feedback_id, state, agenda, reason, "
+                          "triaged_by) VALUES (:f, 'filed', 'A1-x2', NULL, 'agent:e'), "
+                          "(:d, 'dismissed', NULL, 'dupe', 'person:op')"),
+                     {"f": ev["filed"], "d": ev["dismissed"]})
+        files = {
+            f"works/agenda/A5-q2/entries/{ITEM}.json":
+                {"source": f"feedback:{ev['stored']}", "body": "x"},
+            f"works/agenda/A5-q2/entries/{ITEM2}.json":
+                {"source": f"feedback:{ev['filed']}", "body": "x"},
+            "works/agenda/A6-r3/entries/20261124T010000.000003Z-cccc.json":
+                {"source": f"feedback:{ev['foreign']}", "body": "x"},
+            "works/agenda/A6-r3/entries/20261124T010000.000004Z-dddd.json":
+                {"source": f"feedback:{ev['done']}", "body": "x", "state": "done"},
+            "works/agenda/A6-r3/entries/20261124T010000.000005Z-eeee.json": "{not json",
+            "works/agenda/A6-r3/agenda.json":
+                {"id": "A6-r3", "source": f"feedback:{ev['bad']}"},
+        }
+        for path, data in files.items():
+            sha, raw = blob(data)
+            conn.execute(text("INSERT INTO workspace_blobs (project_id, sha256, size, content) "
+                              "VALUES (:p, :s, :n, :c) ON CONFLICT DO NOTHING"),
+                         {"p": project, "s": sha, "n": len(raw), "c": raw})
+            conn.execute(text("INSERT INTO workspace_files (project_id, path, rev, sha256, "
+                              "size, kind, deleted, blob_sha256) VALUES "
+                              "(:p, :path, 1, :s, :n, 'file', false, :s)"),
+                         {"p": project, "path": path, "s": sha, "n": len(raw)})
+        for state, fid in (("pending", ev["pending"]), ("applied", ev["plain"])):
+            conn.execute(text("INSERT INTO workspace_inbox (id, project_id, kind, items, "
+                              "fields, state) VALUES (:id, :p, 'entry', CAST(:items AS jsonb), "
+                              "CAST(:fields AS jsonb), :state)"),
+                         {"id": uuid4(), "p": project, "items": json.dumps(["A7-s4"]), "state": state,
+                          "fields": json.dumps({"source": f"feedback:{fid}", "body": "x"})})
+
+    rows = text("SELECT feedback_id, state, agenda, reason, triaged_by FROM feedback_triage")
+
+    def read() -> dict[UUID, tuple]:
+        with engine.connect() as conn:
+            return {r[0]: tuple(r[1:]) for r in conn.execute(rows)}
+
+    command.upgrade(cfg, "head")
+    got = read()
+    assert got == {
+        ev["filed"]: ("filed", "A1-x2", None, "agent:e"),
+        ev["dismissed"]: ("dropped", None, "dupe", "person:op"),
+        ev["stored"]: ("filed", "A5-q2", None, "agent:sikstack"),
+        ev["done"]: ("filed", "A6-r3", None, "agent:sikstack"),
+        ev["pending"]: ("filed", "A7-s4", None, "agent:sikstack"),
+    }
+
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE feedback_triage SET state = 'resolved' WHERE feedback_id = :d"),
+                     {"d": ev["done"]})
+        conn.execute(text("INSERT INTO feedback_triage (feedback_id, state, triaged_by) "
+                          "VALUES (:p, 'open', 'person:op')"), {"p": ev["plain"]})
+    command.downgrade(cfg, "0019_item_shares")
+    down = read()
+    assert down[ev["dismissed"]][0] == "dismissed"
+    assert down[ev["done"]][0] == "filed" and ev["plain"] not in down
+    assert {state for state, *_ in down.values()} == {"filed", "dismissed"}
+
+    command.upgrade(cfg, "head")
+    again = read()
+    assert again[ev["dismissed"]][0] == "dropped"
+    assert again[ev["done"]][0] == "filed" and ev["plain"] not in again
+    assert set(again) == set(got)
+
+
+@contextmanager
+def _migration_db(monkeypatch) -> Iterator[tuple]:
+    """A scratch database on the disposable Postgres, with its Alembic config and engine;
+    dropped after."""
+
     if not _RAW_DSN:
         pytest.skip("set KB_TEST_DATABASE_URL to a disposable Postgres to run the migration test")
     from pathlib import Path
 
     from alembic.config import Config
-
-    from alembic import command
 
     ini = Path(__file__).resolve().parents[1] / "alembic.ini"
     base = make_url(_RAW_DSN).set(drivername="postgresql+psycopg")
@@ -672,47 +769,46 @@ def test_the_states_migration_keeps_marks_and_backfills_filed(monkeypatch):
         pytest.skip(f"cannot create a scratch database: {exc}")
     url = base.set(database=name).render_as_string(hide_password=False)
     monkeypatch.setenv("DATABASE_URL", url)
-    cfg = Config(str(ini))
     engine = create_engine(url)
-
-    tenant, project, other = uuid4(), uuid4(), uuid4()
-    ev = {k: uuid4() for k in ("filed", "dismissed", "stored", "pending", "plain", "foreign",
-                               "done", "bad")}
-
-    def blob(data: dict | str) -> tuple[str, bytes]:
-        raw = (data if isinstance(data, str) else json.dumps(data)).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest(), raw
-
     try:
+        yield Config(str(ini)), engine
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+def test_the_states_migration_files_on_the_feedbacks_own_project_only(monkeypatch):
+    """``0020`` weighs only the feedback's own project's items: another project's item
+    that sorts first, stored or pending, never hides the own project's stored item or
+    pending web filing."""
+
+    from alembic import command
+
+    with _migration_db(monkeypatch) as (cfg, engine):
+        tenant = uuid4()
+        # The foreign project's id sorts first, so its rows come first in either query.
+        foreign, own = UUID(int=1), UUID(int=2)
+        ev = {k: uuid4() for k in ("stored_stored", "stored_pending", "pending_pending")}
         command.upgrade(cfg, "0019_item_shares")
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO tenants (id, name) VALUES (:t, 'T')"), {"t": tenant})
             conn.execute(text("INSERT INTO projects (id, tenant_id, name) VALUES "
-                              "(:p, :t, 'one'), (:o, :t, 'two')"),
-                         {"p": project, "o": other, "t": tenant})
+                              "(:f, :t, 'foreign'), (:o, :t, 'own')"),
+                         {"f": foreign, "o": own, "t": tenant})
             for key, fid in ev.items():
                 conn.execute(text("INSERT INTO feedback_events (id, project_id, message, "
                                   "source_product) VALUES (:id, :p, :m, 'app')"),
-                             {"id": fid, "p": other if key == "foreign" else project, "m": key})
-            conn.execute(text("INSERT INTO feedback_triage (feedback_id, state, agenda, reason, "
-                              "triaged_by) VALUES (:f, 'filed', 'A1-x2', NULL, 'agent:e'), "
-                              "(:d, 'dismissed', NULL, 'dupe', 'person:op')"),
-                         {"f": ev["filed"], "d": ev["dismissed"]})
-            files = {
-                f"works/agenda/A5-q2/entries/{ITEM}.json":
-                    {"source": f"feedback:{ev['stored']}", "body": "x"},
-                f"works/agenda/A5-q2/entries/{ITEM2}.json":
-                    {"source": f"feedback:{ev['filed']}", "body": "x"},
-                "works/agenda/A6-r3/entries/20261124T010000.000003Z-cccc.json":
-                    {"source": f"feedback:{ev['foreign']}", "body": "x"},
-                "works/agenda/A6-r3/entries/20261124T010000.000004Z-dddd.json":
-                    {"source": f"feedback:{ev['done']}", "body": "x", "state": "done"},
-                "works/agenda/A6-r3/entries/20261124T010000.000005Z-eeee.json": "{not json",
-                "works/agenda/A6-r3/agenda.json":
-                    {"id": "A6-r3", "source": f"feedback:{ev['bad']}"},
-            }
-            for path, data in files.items():
-                sha, raw = blob(data)
+                             {"id": fid, "p": own, "m": key})
+            stored = [
+                (foreign, f"works/agenda/A9-z9/entries/{ITEM}.json", ev["stored_stored"]),
+                (foreign, f"works/agenda/A9-z9/entries/{ITEM2}.json", ev["stored_pending"]),
+                (own, f"works/agenda/A5-q2/entries/{ITEM}.json", ev["stored_stored"]),
+            ]
+            for project, path, fid in stored:
+                raw = json.dumps({"source": f"feedback:{fid}", "body": "x"}).encode("utf-8")
+                sha = hashlib.sha256(raw).hexdigest()
                 conn.execute(text("INSERT INTO workspace_blobs (project_id, sha256, size, content) "
                                   "VALUES (:p, :s, :n, :c) ON CONFLICT DO NOTHING"),
                              {"p": project, "s": sha, "n": len(raw), "c": raw})
@@ -720,47 +816,24 @@ def test_the_states_migration_keeps_marks_and_backfills_filed(monkeypatch):
                                   "size, kind, deleted, blob_sha256) VALUES "
                                   "(:p, :path, 1, :s, :n, 'file', false, :s)"),
                              {"p": project, "path": path, "s": sha, "n": len(raw)})
-            for state, fid in (("pending", ev["pending"]), ("applied", ev["plain"])):
+            pending = [  # oldest first: the foreign entry is the older one
+                (foreign, "A9-z9", ev["pending_pending"], "2026-11-20T00:00:00Z"),
+                (own, "A7-s4", ev["stored_pending"], "2026-11-21T00:00:00Z"),
+                (own, "A7-s4", ev["pending_pending"], "2026-11-22T00:00:00Z"),
+            ]
+            for project, aid, fid, at in pending:
                 conn.execute(text("INSERT INTO workspace_inbox (id, project_id, kind, items, "
-                                  "fields, state) VALUES (:id, :p, 'entry', CAST(:items AS jsonb), "
-                                  "CAST(:fields AS jsonb), :state)"),
-                             {"id": uuid4(), "p": project, "items": json.dumps(["A7-s4"]), "state": state,
+                                  "fields, state, created_at) VALUES (:id, :p, 'entry', "
+                                  "CAST(:items AS jsonb), CAST(:fields AS jsonb), 'pending', :at)"),
+                             {"id": uuid4(), "p": project, "items": json.dumps([aid]), "at": at,
                               "fields": json.dumps({"source": f"feedback:{fid}", "body": "x"})})
 
-        rows = text("SELECT feedback_id, state, agenda, reason, triaged_by FROM feedback_triage")
-
-        def read() -> dict[UUID, tuple]:
-            with engine.connect() as conn:
-                return {r[0]: tuple(r[1:]) for r in conn.execute(rows)}
-
         command.upgrade(cfg, "head")
-        got = read()
+        with engine.connect() as conn:
+            got = {r[0]: tuple(r[1:]) for r in conn.execute(text(
+                "SELECT feedback_id, state, agenda, triaged_by FROM feedback_triage"))}
         assert got == {
-            ev["filed"]: ("filed", "A1-x2", None, "agent:e"),
-            ev["dismissed"]: ("dropped", None, "dupe", "person:op"),
-            ev["stored"]: ("filed", "A5-q2", None, "agent:sikstack"),
-            ev["done"]: ("filed", "A6-r3", None, "agent:sikstack"),
-            ev["pending"]: ("filed", "A7-s4", None, "agent:sikstack"),
+            ev["stored_stored"]: ("filed", "A5-q2", "agent:sikstack"),
+            ev["stored_pending"]: ("filed", "A7-s4", "agent:sikstack"),
+            ev["pending_pending"]: ("filed", "A7-s4", "agent:sikstack"),
         }
-
-        with engine.begin() as conn:
-            conn.execute(text("UPDATE feedback_triage SET state = 'resolved' WHERE feedback_id = :d"),
-                         {"d": ev["done"]})
-            conn.execute(text("INSERT INTO feedback_triage (feedback_id, state, triaged_by) "
-                              "VALUES (:p, 'open', 'person:op')"), {"p": ev["plain"]})
-        command.downgrade(cfg, "0019_item_shares")
-        down = read()
-        assert down[ev["dismissed"]][0] == "dismissed"
-        assert down[ev["done"]][0] == "filed" and ev["plain"] not in down
-        assert {state for state, *_ in down.values()} == {"filed", "dismissed"}
-
-        command.upgrade(cfg, "head")
-        again = read()
-        assert again[ev["dismissed"]][0] == "dropped"
-        assert again[ev["done"]][0] == "filed" and ev["plain"] not in again
-        assert set(again) == set(got)
-    finally:
-        engine.dispose()
-        with admin.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
-        admin.dispose()
