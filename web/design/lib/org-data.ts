@@ -1,6 +1,11 @@
-import type { ShellOrg } from "@/sikstack/shell";
-
+import type { RenameOrgResult } from "@/app/(app)/dashboard/name-panel";
+import type { SaveSlugResult } from "@/app/(app)/dashboard/org-home-model";
+import type { KeyRow, MintResult, RevokeResult } from "@/sikstack/frame";
 import type { CreateOrgResult, InviteResult, InviteRow, InviteView, MemberRow } from "@/sikstack/org/model";
+
+import type { DeleteResult } from "../next/frame/delete-dialog";
+// The org menu's next `ShellOrg` (P88-ms.S3's design: `owner` added), which every org page here draws.
+import type { ShellOrg } from "../next/shell/model";
 import { NOW, RECORDING } from "./recording";
 
 /**
@@ -96,3 +101,52 @@ export const INVITE_VIEW: Omit<InviteView, "phase" | "account"> = {
 };
 /** Made: the other account a forwarded link is opened in. */
 export const OTHER_ACCOUNT = "jun.lee@example.com";
+
+// ── Settings (P88-ms.S3's design) ─────────────────────────────────────────────────────────────
+// **Synthesized, every line** but the recorded org, project and account: the settings pages' API (S1, S2) was
+// never recorded against the sample project, and no API answers an org's owner for the org menu yet.
+
+/** Made: the org menu's owner per org (`ShellOrg.owner`, a field the API does not have yet). The account owns its
+ * active org; another account owns an org of the same name, which the account joined (two `Sample org`s). */
+export const CURRENT_ORG_OWNED: ShellOrg = { ...CURRENT_ORG, owner: ME };
+export const SAME_NAME_ORG: ShellOrg = {
+  id: "00000000-0000-4000-8000-0000000000e5",
+  name: RECORDING.shell.org.name,
+  address: null,
+  projects: CURRENT_ORG.projects,
+  owner: "jun.lee@example.com",
+};
+
+/** Made: the org's claimed URL name, in the states that show the claimed address. */
+export const ORG_SLUG = "sample-org";
+
+/** Made: the org's people with a second owner (the account can step down and leave). */
+export const MEMBERS_TWO_OWNERS: MemberRow[] = [
+  OWNER,
+  { id: "m-mina", email: "mina.park@example.com", role: "owner", joinedAt: at(-3) },
+  { id: "m-jun", email: "jun.lee@example.com", role: "member", joinedAt: at(-2) },
+];
+
+/** Made: the project's API keys, one of each access (the project page lists them; none recorded). */
+export const PROJECT_KEYS: KeyRow[] = [
+  {
+    id: "k-sync",
+    name: "Workspace sync",
+    prefix: "vk_3f9a1c",
+    access: "workspace",
+    status: "active",
+    created: at(-6),
+    lastUsed: at(-0.02),
+  },
+  { id: "k-capture", name: "Feedback widget", prefix: "vk_b72e40", access: "capture", status: "idle", created: at(-5), lastUsed: null },
+  { id: "k-full", name: null, prefix: "vk_91c4e7", access: "full", status: "active", created: at(-4), lastUsed: at(-1) },
+];
+
+export const designRename = (name: string): Promise<RenameOrgResult> => wait(500, { ok: true, name });
+export const designSaveSlug = (slug: string): Promise<SaveSlugResult> => wait(500, { ok: true, slug });
+export const designStepDown = (): Promise<{ ok: boolean }> => wait(400, { ok: true });
+export const designSetVisibility = (): Promise<{ ok: boolean }> => wait(500, { ok: true });
+export const designMint = (): Promise<MintResult> => wait(600, { ok: true, key: "vk_d0e5a2_design_only_not_a_key" });
+export const designRevokeKey = (): Promise<RevokeResult> => wait(400, { ok: true });
+/** The design's deletes: done (production then lands elsewhere; the design closes the dialog and says so). */
+export const designDelete = (): Promise<DeleteResult> => wait(900, { ok: true });

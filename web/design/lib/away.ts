@@ -1,6 +1,7 @@
 import { workspaceHrefs } from "@/sikstack/workspace/agenda/model";
 
-import { railFor } from "@/sikstack/shell/model";
+// The rail's next version (P88-ms.S3's design: Settings in both forms), as the org pages draw it.
+import { railFor } from "../next/shell/model";
 
 /**
  * The addresses the design's pages link to but do not draw (the Shell's rail and menus, the
@@ -16,6 +17,9 @@ export function awayPaths(project: string): string[] {
     "/dashboard",
     "/members",
     "/orgs/new",
+    // The settings pages (P88-ms.S3's design); `/members` above moves the browser on to Org settings.
+    "/settings",
+    `/projects/${encodeURIComponent(project)}/settings`,
   ]);
   const ws = workspaceHrefs(project);
   const projectRail = railFor(`/projects/${encodeURIComponent(project)}/workspace`);
