@@ -113,7 +113,9 @@ describe("membership ends", () => {
 
   it("Leave leaves the active org, clears the org cookie and lands on the next org's home", async () => {
     const fetchMock = answer(204);
-    await expect(leaveOrgAction()).rejects.toThrow(/^REDIRECT:\/dashboard$/);
+    // No redirect(): Next 16 rejects an action's promise on one, and the page would show "Could not leave".
+    // The page lands on org home itself (`settings/org-settings.tsx`).
+    expect(await leaveOrgAction()).toEqual({ ok: true });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://kb.test:8766/app/tenant/leave");
     expect(init.method).toBe("POST");

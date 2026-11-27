@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { Dialog, DialogActions } from "@/sikstack/frame/dialog";
 import { Button, Field, FieldError, Label, Notice } from "@/sikstack/ui";
@@ -99,8 +99,14 @@ export function DeleteDialog({
       return;
     }
     setPhase(result.reason);
-    if (result.reason === "name") fieldRef.current?.focus();
   };
+
+  // An answer that keeps the dialog open (`name`, `failed`, a refusal) puts focus back in the field, as the design's
+  // states draw it. The field is disabled while deleting, so it lost focus then; it is enabled again only once this
+  // phase renders, which is why this runs as an effect and not in `submit`.
+  useEffect(() => {
+    if (phase !== "typing" && phase !== "deleting") fieldRef.current?.focus();
+  }, [phase]);
 
   const notice = phase === "failed" ? C.failed(name) : refused ? refusal(phase) : null;
 

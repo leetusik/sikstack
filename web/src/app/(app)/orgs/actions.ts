@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 
 import { requireIdentity } from "@/lib/auth-guards";
 import { ApiError } from "@/lib/knowledge/client";
@@ -37,8 +36,10 @@ import {
  * - `makeOwnerAction`: Make owner on a member's row (owner only).
  * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row, or on
  *   an owner's when the org has another. A left org is no longer the caller's, so Leave clears the org cookie (the
- *   session acts in its first org again, a fresh `Personal` one when the left org was its only one) and lands on that
- *   org's home, as the switch does. Neither ever ends an org's last owner (the API's 409 `last_owner`, kept as the
+ *   session acts in its first org again, a fresh `Personal` one when the left org was its only one) and answers
+ *   `{ok: true}`; the page then lands on that org's home (Org settings' client part, `../settings/org-settings.tsx`),
+ *   as a delete does. A `redirect()` here would reject the action's promise in Next 16, and the Members panel would
+ *   catch it and flash "Could not leave" before the page moved. Neither ever ends an org's last owner (the API's 409 `last_owner`, kept as the
  *   `reason` the page words its toast by).
  */
 
@@ -153,8 +154,8 @@ export async function removeMemberAction(
   }
 }
 
-/** Leave the active org: on success the org cookie is cleared and the page lands on the next org's home. */
-export async function leaveOrgAction(): Promise<{ ok: false; reason: MembershipRefusal }> {
+/** Leave the active org: on success the org cookie is cleared; the page then lands on the next org's home. */
+export async function leaveOrgAction(): Promise<{ ok: true } | { ok: false; reason: MembershipRefusal }> {
   const { token } = await requireIdentity();
   try {
     await leaveOrg(token);
@@ -163,5 +164,5 @@ export async function leaveOrgAction(): Promise<{ ok: false; reason: MembershipR
   }
   (await cookies()).set(ORG_COOKIE, "", clearedOrgCookieOptions());
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  return { ok: true };
 }
