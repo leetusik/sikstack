@@ -80,22 +80,25 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup drift self-heal: docs/ is canonical, the DB is disposable — a full
-    # reindex on boot cures manual edits, fallback writes, and git resets. The
-    # embedding sync inside is content-hash cached, so a clean boot is ~free.
+    # reindex on boot cures manual edits, fallback writes, and git resets. Its rows
+    # are rebuilt before the server takes traffic; the embedding catch-up is Gemini
+    # round-trips (one per new section: a corpus's first boot after a new kind of
+    # vector is hundreds of them, with rate-limit backoff), so it runs on the
+    # after-response worker and search stays keyword-only until it lands.
     if config.startup_reindex_enabled():
         # Tenant mode: resolve tenant #1's id so the docs/ walk stamps the
         # operator's tenant; namespaced tenants/<uuid>/ roots are re-derived from
         # their paths. Legacy mode -> None -> the '' sentinel (byte-identical).
         tenant_one_id = await get_tenant_one_id()
-        report = reindex_mod.reindex(tenant_one_id=tenant_one_id)
-        emb = report.get("embeddings", {})
+        report = reindex_mod.reindex(tenant_one_id=tenant_one_id, embed=False)
         print(
             f"[kb-api] startup reindex: indexed={report['indexed']} "
             f"removed={report['removed']} skipped={len(report['skipped'])} "
-            f"embedded={emb.get('embedded', 0)} "
             f"sections={report.get('sections', {}).get('count', 0)}",
             flush=True,
         )
+        if config.embeddings_enabled():
+            publish.submit("startup embeddings", _startup_embed_task(config.db_path()))
     # Item sharing, day one: every existing item of a public project gets a Public row
     # (server/sharing.py), so nothing reads differently after the deploy that adds it.
     # Once ever per project: a project the fill saw, or whose owner switched its
@@ -277,6 +280,32 @@ app.include_router(design_api.router)
 # re-exported here unchanged. The write path makes no git commit or push: library
 # content is never published to git (item sharing gates reads, ``server/sharing.py``).
 WRITE_LOCK = write_lock.WRITE_LOCK
+
+
+def _startup_embed_task(db_file: Path):
+    """Build the boot's embedding catch-up, run on the after-response worker.
+
+    It opens its own connection (the worker thread cannot share the boot's) and stores
+    each vector as it succeeds, so a restart mid-way keeps the progress.
+    """
+
+    def _task() -> None:
+        conn = db.connect(db_file)
+        try:
+            synced = reindex_mod.sync_embeddings(conn)
+        finally:
+            conn.close()
+        emb, sec = synced["embeddings"], synced["sections"]
+        print(
+            f"[kb-api] startup embeddings: embedded={emb.get('embedded', 0)} "
+            f"cached={emb.get('cached', 0)} sections_embedded={sec.get('embedded', 0)} "
+            f"sections_cached={sec.get('cached', 0)}"
+            + (f" ({emb['skipped_reason']})" if emb.get("skipped_reason") else "")
+            + (f" ({sec['skipped_reason']})" if sec.get("skipped_reason") else ""),
+            flush=True,
+        )
+
+    return _task
 
 
 def _embed_task(*, db_file: Path, doc_id: int, title: str, markdown: str):

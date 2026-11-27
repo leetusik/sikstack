@@ -568,10 +568,35 @@ def _rebuild_books(
     return indexed, removed, skipped
 
 
+def sync_embeddings(conn: Optional[sqlite3.Connection] = None) -> dict:
+    """The full reindex's embedding step: document and section vectors, cached by content.
+
+    Each vector is stored as it succeeds, so an interrupted run keeps its progress. It
+    also drops the vectors no document or section holds any more. Returns
+    ``{embeddings: {...}, sections: {count, ...}}``.
+    """
+    own_conn = conn is None
+    if conn is None:
+        conn = db.connect()
+    try:
+        embeddings_report = _sync_embeddings(conn)
+        # P75: section vectors, cached by content; a full sync also drops the vectors no
+        # section holds any more.
+        sections_report = {
+            "count": sections_mod.count(conn),
+            **sections_mod.sync_embeddings(conn, retries=_EMBED_RETRIES, collect=True),
+        }
+    finally:
+        if own_conn:
+            conn.close()
+    return {"embeddings": embeddings_report, "sections": sections_report}
+
+
 def reindex(
     conn: Optional[sqlite3.Connection] = None,
     docs_root: Optional[Path] = None,
     tenant_one_id=None,
+    embed: bool = True,
 ) -> dict:
     """Walk every content root, upsert valid explainers, delete vanished rows.
 
@@ -597,7 +622,9 @@ def reindex(
     duration_ms}. The vanished-row cleanup is tenant-scoped: a row is stale only if
     its ``(tenant_id, rel_path)`` isn't on disk, so one tenant's reindex never
     deletes another tenant's rows. The embedding-sync step (content-hash cached)
-    runs after the walk; keep it in any future reindex refactor.
+    runs after the walk; keep it in any future reindex refactor. ``embed=False``
+    leaves it out (the app's boot, which queues ``sync_embeddings`` on the
+    after-response worker instead, so no Gemini call holds the server's start-up).
     """
     start = time.monotonic()
     own_conn = conn is None
@@ -682,13 +709,13 @@ def reindex(
     if versions_removed:
         conn.commit()
 
-    embeddings_report = _sync_embeddings(conn)
-    # P75: section vectors, cached by content; a full reindex also drops the vectors no
-    # section holds any more.
-    sections_report = {
-        "count": sections_mod.count(conn),
-        **sections_mod.sync_embeddings(conn, retries=_EMBED_RETRIES, collect=True),
-    }
+    if embed:
+        synced = sync_embeddings(conn)
+        embeddings_report = synced["embeddings"]
+        sections_report = synced["sections"]
+    else:
+        embeddings_report = {"embedded": 0, "cached": 0, "removed": 0, "deferred": True}
+        sections_report = {"count": sections_mod.count(conn), "embedded": 0, "deferred": True}
 
     duration_ms = int((time.monotonic() - start) * 1000)
     if own_conn:
