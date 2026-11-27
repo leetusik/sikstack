@@ -120,11 +120,14 @@ export const FEEDBACK_FILED_STATES = pageStates("Feedback item on the agenda", [
 const SHELL_NEXT = "src/sikstack/shell/shell.tsx";
 const ORG = "src/sikstack/org";
 
-/** The org switcher, in the top bar of every app page (drawn here over org home's address). */
+/** The org switcher, in the top bar of every app page (drawn here over org home's address): production's Shell,
+ * with P88-ms.S3's line for a shared name (applied by P88-ms.S4), whose lines the `from`s name. */
+const SHELL_P88 = SHELL_NEXT;
 export const ORG_SWITCHER_STATES = pageStates("Org switcher", [
-  { key: "several", label: "Several orgs, menu open", from: `${SHELL_NEXT}:169 open === "org", :188 aria-current · org-data.ts OTHER_ORGS (made)` },
-  { key: "one", label: "One org, menu open", from: `${SHELL_NEXT}:169 the menu for one org too, :206 New org · recording shell.org` },
-  { key: "closed", label: "Menu closed", from: `${SHELL_NEXT}:163 the crumb's button, its chevron` },
+  { key: "several", label: "Several orgs, menu open", from: `${SHELL_P88}:216 open === "org", :235 aria-current · org-data.ts OTHER_ORGS (made)` },
+  { key: "same-name", label: "Two orgs with the same name", from: `${SHELL_P88}:245 OrgLineText, :427 Owned by · src/sikstack/shell/model.ts:38 orgLine · org-data.ts SAME_NAME_ORG (made; production reads GET /auth/me owner_email)` },
+  { key: "one", label: "One org, menu open", from: `${SHELL_P88}:216 the menu for one org too, New org · recording shell.org` },
+  { key: "closed", label: "Menu closed", from: `${SHELL_P88} the crumb's button, its chevron` },
 ]);
 
 /** New org (`/orgs/new`). */
@@ -136,18 +139,37 @@ export const NEW_ORG_STATES = pageStates("New org", [
   { key: "failed", label: "Create failed", from: `${ORG}/new-org.tsx:101 the notice (no answer)` },
 ]);
 
-/** Members (`/members`): the owner's view in each phase of the invite form, then a member's view. */
-export const MEMBERS_STATES = pageStates("Members", [
-  { key: "members", label: "Members and invites", from: `${ORG}/members.tsx:179 members, :289 invites · org-data.ts (made)` },
-  { key: "owner-only", label: "Only the owner", from: `${ORG}/members.tsx:312 no invites, Invite primary · org-data.ts OWNER (made)` },
-  { key: "open", label: "Invite form open", from: `${ORG}/members.tsx:224 phase open` },
-  { key: "sending", label: "Sending", from: `${ORG}/members.tsx:269 busy, Sending…` },
-  { key: "sent", label: "Invite sent", from: `${ORG}/members.tsx:127 the row first, the toast` },
-  { key: "not-address", label: "Not an address", from: `${ORG}/members.tsx:102 phase address (looksLikeEmail)` },
-  { key: "already-member", label: "Already a member", from: `${ORG}/members.tsx:102 phase member (the API's refusal; made)` },
-  { key: "already-invited", label: "Already invited", from: `${ORG}/members.tsx:102 phase invited (the API's refusal; made)` },
-  { key: "send-failed", label: "Send failed", from: `${ORG}/members.tsx:226 the notice (no answer)` },
-  { key: "member-view", label: "A member's view", from: `${ORG}/members.tsx:200 owner false: no Invites panel` },
+// ── The settings pages (P88-ms.S3's design): applied by P88-ms.S4, so each `from` names production's file and line.
+// Their data is made (`org-data.ts`, Settings). `/members` (P78-s2.S2's page) is a part of Org settings now; the
+// invite form's phases (P78's Members states) are unchanged and not listed again.
+const N = "src/sikstack";
+
+/** Org settings (`/settings`): who is looking, the invites, the delete dialog's phases, the API's refusals. */
+export const ORG_SETTINGS_STATES = pageStates("Org settings", [
+  { key: "owner", label: "Owner, pending invites", from: `${N}/org/settings.tsx:88 owner: NamePanel, UrlPanel, :105 Delete org · ${N}/org/members.tsx:463 invites · org-data.ts (made)` },
+  { key: "no-invites", label: "Owner, no invites", from: `${N}/org/members.tsx:394 Invite primary, no invites · org-data.ts OWNER alone (made)` },
+  { key: "two-owners", label: "Owner with another owner", from: `${N}/org/model.ts:106 Step down, Leave on the account's row · org-data.ts MEMBERS_TWO_OWNERS, ORG_SLUG (made)` },
+  { key: "member", label: "A member's view", from: `${N}/org/settings.tsx:98 NameReadPanel, :100 UrlReadPanel, no Delete org · ${N}/org/members.tsx:386 no Invites` },
+  { key: "delete-empty", label: "Delete org: empty", from: `${N}/frame/delete-dialog.tsx:157 Delete off until the name matches` },
+  { key: "delete-wrong", label: "Delete org: name typed wrong", from: `${N}/frame/delete-dialog.tsx:84 typedNameWrong, :144 the field's error` },
+  { key: "delete-right", label: "Delete org: name typed right", from: `${N}/frame/delete-dialog.tsx:157 Delete ready (typedNameMatches)` },
+  { key: "deleting", label: "Deleting", from: `${N}/frame/delete-dialog.tsx:90 phase deleting, Deleting…, locked` },
+  { key: "delete-failed", label: "Delete failed", from: `${N}/frame/delete-dialog.tsx:105 the notice (no answer)` },
+  { key: "tenant-one", label: "Refused: the server's own org", from: `${N}/frame/delete-dialog.tsx:82 refused · DELETE /app/tenant 409 tenant_one (made)` },
+  { key: "last-owner", label: "Step down refused: last owner", from: `${N}/org/members.tsx:89 stepDownLastOwner, the toast · POST /app/members/{id}/member 409 last_owner (made)` },
+]);
+
+/** Project settings (`/projects/<id>/settings`): who is looking, the delete dialog's phases, the API's refusals. */
+export const PROJECT_SETTINGS_STATES = pageStates("Project settings", [
+  { key: "owner", label: "Owner", from: `${N}/project/settings.tsx:77 Make public, :141 Keys, :143 Delete project · org-data.ts PROJECT_KEYS (made)` },
+  { key: "member", label: "A member's view", from: `${N}/project/settings.tsx:77 owner false: the badge alone, no Delete project` },
+  { key: "delete-empty", label: "Delete project: empty", from: `${N}/frame/delete-dialog.tsx:157 Delete off until the name matches` },
+  { key: "delete-wrong", label: "Delete project: name typed wrong", from: `${N}/frame/delete-dialog.tsx:84 typedNameWrong, :144 the field's error` },
+  { key: "delete-right", label: "Delete project: name typed right", from: `${N}/frame/delete-dialog.tsx:157 Delete ready (typedNameMatches)` },
+  { key: "deleting", label: "Deleting", from: `${N}/frame/delete-dialog.tsx:90 phase deleting, Deleting…, locked` },
+  { key: "delete-failed", label: "Delete failed", from: `${N}/frame/delete-dialog.tsx:105 the notice (no answer)` },
+  { key: "install-feedback", label: "Refused: install feedback", from: `${N}/frame/delete-dialog.tsx:82 refused · DELETE /app/projects/{id} 409 install_feedback (made)` },
+  { key: "tracked-path", label: "Refused: a site folder's name", from: `${N}/frame/delete-dialog.tsx:82 refused · DELETE /app/projects/{id} 409 tracked_path (made)` },
 ]);
 
 /** The invite link (`/invite?code=…`), in the sign-in frame. */

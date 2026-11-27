@@ -77,11 +77,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from server import config
+from server import config, project_names
 from server.accounts.auth import AuthContext, optional_user, require_user
 from server.accounts.security import generate_opaque_token, sha256_hex
 from server.accounts.service import get_accounts_service
 from server.accounts.types import CREDENTIAL_SCOPE_WORKSPACE
+from server.api_auth import get_tenant_one_id
 from server.auth_api import _client_ip
 from server.feedback.notify import notify_feedback_captured
 from server.feedback.service import FeedbackPersistenceError, get_feedback_service
@@ -247,15 +248,29 @@ def _web_url(path: str) -> str:
 
 async def _free_project_name(session, org: UUID, repo: str) -> str:
     """The name a Connect in ``org`` gives the repo's new project: the folder's name, or the
-    first of ``<name>-2``, ``<name>-3``, ... that no project in the org has."""
+    first of ``<name>-2``, ``<name>-3``, ... that no project in the org has.
+
+    Every name stays inside the shared rule (``project_names.PROJECT_NAME_MAX``): the
+    folder's name is cut to make room for the suffix. In tenant #1 a tracked ``docs/``
+    folder's name counts as taken (``project_names.reserved_for_tenant_one``), so the
+    repo ``assets`` connects as ``assets-2`` there."""
 
     taken = set((await session.execute(select(ProjectModel.name).where(ProjectModel.tenant_id == org))).scalars())
-    if repo not in taken:
-        return repo
+    tenant_one = org == await get_tenant_one_id()
+
+    def free(name: str) -> bool:
+        return name not in taken and not (tenant_one and project_names.reserved_for_tenant_one(name))
+
+    limit = project_names.PROJECT_NAME_MAX
+    if free(repo[:limit]):
+        return repo[:limit]
     n = 2
-    while f"{repo}-{n}" in taken:
+    while True:
+        suffix = f"-{n}"
+        name = f"{repo[: limit - len(suffix)]}{suffix}"
+        if free(name):
+            return name
         n += 1
-    return f"{repo}-{n}"
 
 
 # --- registration ---------------------------------------------------------------
@@ -295,7 +310,9 @@ async def start_sign_in(request: Request) -> dict[str, object]:
     _take_address(request, "sign-in")
     body = await _json_body(request)
     install_id = _text(body, "install_id", _INSTALL_ID, 100)
-    repo = _text(body, "repo", max_len=200)
+    repo = _text(body, "repo", max_len=1000)
+    if len(repo) > project_names.PROJECT_NAME_MAX:  # the repo's name becomes its project's
+        raise _bad(project_names.PROJECT_NAME_LENGTH_ERROR)
     version = _text(body, "plugin_version", _VERSION, 50)
     release = body.get("release", False)
     if not isinstance(release, bool):

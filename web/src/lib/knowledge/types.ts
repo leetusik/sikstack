@@ -39,6 +39,12 @@ export interface KbTenant {
   /** The org's plan (`"free"` by default; read-only over the API). Shown nowhere yet. */
   plan: string;
   created_at: string;
+  /**
+   * P88-ms — its first owner's address (the owner row joined first; after it steps down, the next), on
+   * `GET /auth/me`'s tenants alone (absent elsewhere), `null` for an org with no owner. The org menu names it to
+   * tell two orgs of one name apart (`ShellOrg.owner`).
+   */
+  owner_email?: string | null;
 }
 
 /**

@@ -198,6 +198,18 @@ def test_an_unusable_repo_name_is_a_sentence_not_a_422(home, api, tmp_path, monk
     assert api.calls == []
 
 
+def test_a_project_name_past_200_characters_never_reaches_the_server(home, api, repo, tmp_path, capsys):
+    """The server's one length rule (`server/project_names.py`), checked before sending."""
+
+    doc = tmp_path / "note.md"
+    doc.write_text("# A note\n\nbody\n")
+    assert run("save", str(doc), "--tag", "a", "--tag", "b", "--project", "p" * 201) == 1
+    assert "project name must be 1 to 200 characters" in capsys.readouterr().err
+    assert api.calls == []
+    assert run("save", str(doc), "--tag", "a", "--tag", "b", "--project", "p" * 200) == 0
+    assert api.calls[0][3]["project"] == "p" * 200
+
+
 # --- T3: the 409 detail is a dict ---------------------------------------------
 
 

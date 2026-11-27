@@ -244,7 +244,7 @@ export const PROJECT_HOME = {
     empty: "No workspace linked yet.",
     run: {
       before: "Run ",
-      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Keys when it asks.",
+      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Project settings when it asks.",
       command: (origin: string, projectId: string): string =>
         `sikstack link ${origin}/projects/${projectId}`,
     },

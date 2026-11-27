@@ -1,8 +1,8 @@
 # Members
 
-**Reach it:** `/members`, the org rail's section after Feedback, in the active org. Two accounts: the test account (`$SESSION`), the owner of its first org, and the second account (`$SESSION-other`, `run.sh signin other`), which owns only its own sign-up org. The second account joins the test account's org through the API: the owner's invite (`run.sh api POST /app/invites`), whose link the API logs to `$EV/api.log` (no SMTP on the stack), and the second account's accept (`run.sh api other POST /app/invite/<code>/accept`).
+**Reach it:** Org settings' Members and Invites panels (`/settings`, the org rail's Settings), in the active org. An old `/members` link is a permanent redirect (308) to `/settings`; this feature opens `/members` and lands there. Two accounts: the test account (`$SESSION`), the owner of its first org, and the second account (`$SESSION-other`, `run.sh signin other`), which owns only its own sign-up org. The second account joins the test account's org through the API: the owner's invite (`run.sh api POST /app/invites`), whose link the API logs to `$EV/api.log` (no SMTP on the stack), and the second account's accept (`run.sh api other POST /app/invite/<code>/accept`).
 
-**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave appears on the owner's own row; a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `default` org of its own, as at sign-up: its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 375, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
+**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave and Step down appear on the owner's own row (and on no other row); a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `Personal` org of its own, as at sign-up, with no "Could not leave" toast on the way (a watcher keeps every toast the tab shows in `sessionStorage`): its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 375, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
 
 ```bash drive
 OTHER="$SESSION-other"
@@ -66,10 +66,14 @@ must "the second account accepts" "$("$RUN" api other POST "/app/invite/$CODE/ac
 must "the API lists a member" "$(roles)" "$OWNER_EMAIL=owner,$OTHER_EMAIL=member"
 
 # 1. The owner's view before the promotion: Make owner and Remove on the member's row; a sole owner has no Leave.
+#    The page is reached by its old address: /members is a permanent redirect to Org settings.
 MAKE="button[aria-label=\"Make $OTHER_EMAIL an owner\"]"
 LEAVE="button[aria-label=\"Leave $ORG_NAME\"]"
+STEP="button[aria-label=\"Step down to member of $ORG_NAME\"]"
+must "/members answers a permanent redirect to /settings" "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$WEB/members")" "308 $WEB/settings"
 pw goto "$WEB/members"
-see "$SESSION" "$OTHER_EMAIL" "Make owner" "Remove"
+see "$SESSION" "Org settings" "$OTHER_EMAIL" "Make owner" "Remove"
+must "/members lands on /settings" "$(js '() => location.pathname' | tr -d '"')" /settings
 must "the member's row reads Member" "$(role_of "$SESSION" "$OTHER_EMAIL")" Member
 must "Make owner on the member's row" "$(has "$SESSION" "$MAKE")" true
 must "Remove on the member's row" "$(has "$SESSION" "button[aria-label=\"Remove $OTHER_EMAIL from the org\"]")" true
@@ -84,6 +88,8 @@ pw screenshot --filename="$EV/members-made-owner-toast.png"
 must "the row reads Owner" "$(role_of "$SESSION" "$OTHER_EMAIL")" Owner
 must "no Make owner left" "$(has "$SESSION" "$MAKE")" false
 must "Leave on the owner's own row" "$(has "$SESSION" "$LEAVE")" true
+must "Step down on the owner's own row" "$(js "() => [...document.querySelectorAll('tr')].find(t => t.innerText.includes($(q "$OWNER_EMAIL")) && t.querySelector('td')).querySelector($(q "$STEP")) !== null" | tr -d '"')" true
+must "Step down on no other row" "$(js "() => document.querySelectorAll('button[aria-label^=\"Step down\"]').length" | tr -d '"')" 1
 shots owner-after
 must "the API lists two owners" "$(roles)" "$OWNER_EMAIL=owner,$OTHER_EMAIL=owner"
 pw goto "$WEB/members"
@@ -105,26 +111,33 @@ must "the second account's header-less org is its own" "$([ "$OTHER_ORG" != "$OR
 must "the second account invites the test account" "$("$RUN" api other POST /app/invites "{\"email\": \"$OWNER_EMAIL\"}" | status)" 201
 CODE=$(link "$OWNER_EMAIL") || exit 1
 must "the test account accepts" "$("$RUN" api POST "/app/invite/$CODE/accept" | status)" 200
-OWNER_ROW=$("$RUN" api other GET /app/members | body | python3 -c 'import json,sys; print(next(m["id"] for m in json.load(sys.stdin)["members"] if m["email"] == sys.argv[1]))' "$OWNER_EMAIL")
-must "the second account makes the test account an owner of its org" "$("$RUN" api other POST "/app/members/$OWNER_ROW/owner" | status)" 204
+# Make owner through the second account's own page (each `run.sh api` call is a login; the API allows 20 per 15 minutes).
+S="$OTHER" pw goto "$WEB/settings"
+see "$OTHER" "$OWNER_EMAIL"
+S="$OTHER" pw click "button[aria-label=\"Make $OWNER_EMAIL an owner\"]"
+see "$OTHER" "$OWNER_EMAIL is an owner now."
 must "the second account leaves its own org" "$("$RUN" api other POST /app/tenant/leave | status)" 204
 OTHER_ME=$("$RUN" api other GET /auth/me | body)
 must "the shared org is the second account's only org" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me org)" "1,$ORG_ID"
 
 # 5. The second account switches to the shared org (the org menu's form post), sees Leave as a co-owner, and leaves
-#    its only org: it lands on the home of a fresh `default` org of its own, the only row on its Members, as Owner.
+#    its only org: it lands on the home of a fresh `Personal` org of its own, the only row on its Members, as Owner.
 js "async () => { const r = await fetch('/api/auth/org', { method: 'POST', body: new URLSearchParams({ org: $(q "$ORG_ID") }) }); return r.ok; }" "$OTHER" >/dev/null
 S="$OTHER" pw goto "$WEB/members"
 see "$OTHER" "$OWNER_EMAIL" "Leave"
 must "the co-owner's view: Leave on its own row" "$(has "$OTHER" "$LEAVE")" true
 must "the co-owner's view: nothing on the other owner's row" "$(js "() => [...document.querySelectorAll('tr')].find(t => t.innerText.includes($(q "$OWNER_EMAIL")) && t.querySelector('td')).querySelectorAll('button').length" "$OTHER" | tr -d '"')" 0
 S="$OTHER" shots co-owner
+js "() => { sessionStorage.setItem('verify-toasts', ''); const keep = () => document.querySelectorAll('.toast').forEach(t => sessionStorage.setItem('verify-toasts', sessionStorage.getItem('verify-toasts') + '|' + t.innerText.trim())); new MutationObserver(keep).observe(document.body, { subtree: true, childList: true, characterData: true }); return true; }" "$OTHER" >/dev/null
 S="$OTHER" pw click "$LEAVE"
 i=0; until [ "$(js '() => location.pathname' "$OTHER" | tr -d '"')" = /dashboard ]; do i=$((i + 1)); [ "$i" -gt 15 ] && break; sleep 1; done
 must "the co-owner left its only org and landed on a home" "$(js '() => location.pathname' "$OTHER" | tr -d '"')" /dashboard
+TOASTS=$(js "() => sessionStorage.getItem('verify-toasts') || ''" "$OTHER" | tr -d '"')
+echo "toasts seen while leaving: '$TOASTS'"
+must "no failure toast while leaving" "$(printf '%s' "$TOASTS" | grep -c 'Could not leave' || true)" 0
 OTHER_ME=$("$RUN" api other GET /auth/me | body)
 FRESH=$(printf '%s' "$OTHER_ME" | me org)
-must "the second account has one org, a fresh default" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me name),$([ "$FRESH" != "$ORG_ID" ] && [ "$FRESH" != "$OTHER_ORG" ] && echo fresh)" "1,default,fresh"
+must "the second account has one org, a fresh Personal" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me name),$([ "$FRESH" != "$ORG_ID" ] && [ "$FRESH" != "$OTHER_ORG" ] && echo fresh)" "1,Personal,fresh"
 must "the API lists it alone in its fresh org, as owner" "$(roles other)" "$OTHER_EMAIL=owner"
 S="$OTHER" pw goto "$WEB/members"
 see "$OTHER" "$OTHER_EMAIL"
@@ -138,4 +151,4 @@ must "the owner is the sole owner again: no Leave" "$(has "$SESSION" "$LEAVE")" 
 pw screenshot --filename="$EV/members.png"
 ```
 
-**Proof:** every `must` prints `ok` and every `see` is seen; `members-owner-before-{1440,375}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,375}.png` the row as Owner and Leave on the owner's own row; `members-sole-owner-{1440,375}.png` the second account alone in its org, no controls; `members-co-owner-{1440,375}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,375}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `default` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).
+**Proof:** every `must` prints `ok` and every `see` is seen (`/members` answering 308 to `/settings` and landing there, no failure toast while leaving); `members-owner-before-{1440,375}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,375}.png` the row as Owner and Leave and Step down on the owner's own row; `members-sole-owner-{1440,375}.png` the second account alone in its org, no controls; `members-co-owner-{1440,375}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,375}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `Personal` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).

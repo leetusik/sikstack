@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.accounts.types import (
+    ROLE_OWNER,
     AuthTokenRecord,
     CreateAuthToken,
     CreateProject,
@@ -226,6 +227,31 @@ class AccountsRepository:
             )
             for member, email in rows
         )
+
+    async def first_owner_emails(self, tenant_ids: list[UUID]) -> dict[UUID, str]:
+        """Each tenant's first owner's address, in one query: its owner row first in
+        ``list_org_members``' order (``tenant_members.created_at``, then id). A tenant
+        with no owner row is absent from the answer.
+        """
+
+        if not tenant_ids:
+            return {}
+        statement = (
+            select(TenantMemberModel.tenant_id, UserModel.email)
+            .join(UserModel, UserModel.id == TenantMemberModel.user_id)
+            .where(
+                TenantMemberModel.tenant_id.in_(tenant_ids),
+                TenantMemberModel.role == ROLE_OWNER,
+            )
+            .order_by(
+                TenantMemberModel.tenant_id,
+                TenantMemberModel.created_at,
+                TenantMemberModel.id,
+            )
+            .distinct(TenantMemberModel.tenant_id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return {tenant_id: email for tenant_id, email in rows}
 
     async def list_tenants_for_user(self, user_id: UUID) -> tuple[TenantRecord, ...]:
         """Return the tenants a user is a member of, in the order the user joined them.

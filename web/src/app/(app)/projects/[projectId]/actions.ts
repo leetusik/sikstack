@@ -33,7 +33,9 @@ import { ApiError } from "@/lib/knowledge/client";
  *
  * The route is dynamic, so every `revalidatePath` passes the ROUTE PATTERN plus the
  * `"page"` type argument — `revalidatePath("/projects/[projectId]", "page")`.
- * Passing the concrete path would silently revalidate nothing.
+ * Passing the concrete path would silently revalidate nothing. Since P88-ms the
+ * visibility switch and the keys are Project settings' (`settings/`), so each
+ * action revalidates that page too (project home keeps the visibility badge).
  */
 
 /**
@@ -156,6 +158,7 @@ export async function mintCredentialAction(
   // without client-side list state. The show-once modal survives it: it lives in
   // the action state, not in the server-rendered tree.
   revalidatePath("/projects/[projectId]", "page");
+  revalidatePath("/projects/[projectId]/settings", "page");
   return { error: null, key: minted.key, ok: Date.now() };
 }
 
@@ -196,6 +199,7 @@ export async function revokeCredentialAction(
   }
 
   revalidatePath("/projects/[projectId]", "page");
+  revalidatePath("/projects/[projectId]/settings", "page");
   return { error: null, ok: Date.now() };
 }
 
@@ -239,5 +243,6 @@ export async function setProjectVisibilityAction(
   }
 
   revalidatePath("/projects/[projectId]", "page");
+  revalidatePath("/projects/[projectId]/settings", "page");
   return { error: null, ok: Date.now() };
 }

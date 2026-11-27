@@ -16,11 +16,16 @@ import {
   Label,
   Notice,
   Panel,
+  PanelBody,
   PanelHead,
 } from "@/sikstack/ui";
 import { date, plural, type FormatOptions } from "@/lib/format";
 
 import { MEMBERS } from "@/content/org";
+// P88-ms.S3's signed design, applied by P88-ms.S4: Members is a part of Org settings (`/settings`; `/members`
+// redirects there), with no page head of its own (the Members panel has a head), Step down and the role note. The
+// new words are `@/content/settings`.
+import { SETTINGS } from "@/content/settings";
 import {
   inviteFieldError,
   inviteFormOpen,
@@ -28,6 +33,7 @@ import {
   looksLikeEmail,
   memberControls,
   membersInOrder,
+  withMember,
   withOwner,
   type InvitePhase,
   type InviteResult,
@@ -54,6 +60,10 @@ export interface MembersViewProps {
    * success the page moves to the next org's home, so it answers only a refusal).
    */
   leave: () => Promise<MembershipResult | undefined>;
+  /** Step down to member, from the account's own row (an owner's, when the org has another owner). */
+  stepDown: (id: string) => Promise<MembershipResult>;
+  /** The account is a member now: the page draws a member's view (no invites, no danger zone). */
+  onSteppedDown?: () => void;
   format: FormatOptions;
   /** The invite form's first phase and address (the page opens with the form closed). */
   phase?: InvitePhase;
@@ -73,13 +83,23 @@ export function removeToast(email: string, result: MembershipResult): string {
   return result.ok ? M.removed(email) : M.removeFailed(email);
 }
 
+/** Step down's toast: a member now, the org's last owner (409 `last_owner`), or anything else, try again. */
+export function stepDownToast(org: string, result: MembershipResult): string {
+  const S = SETTINGS.members;
+  return result.ok ? S.steppedDown(org) : result.reason === "last_owner" ? S.stepDownLastOwner(org) : S.stepDownFailed(org);
+}
+
 /** A refused Leave's toast: the org's last owner asks for another owner first; anything else, try again. */
 export function leaveToast(org: string, result: MembershipResult): string {
   return result.reason === "last_owner" ? M.leaveLastOwner(org) : M.leaveFailed(org);
 }
 
 /**
- * Members (`/members`, P78-s2.S2's design): the org's people, in two panels.
+ * Members (P78-s2.S2's design; a part of Org settings since P88-ms.S3's design, `/settings`): the org's people, in
+ * two panels. The Members panel has its own head (Members, the count) and ends with the role note: what an owner and
+ * a member can do. An owner's own row, when the org has another owner, ends with Step down before Leave (the same
+ * pattern: no confirm, the toast); stepped down, the row reads Member and the page draws a member's view. The API's
+ * `last_owner` (another owner stepped down or left meanwhile) is the toast, the row kept.
  *
  * - Members: every member's address, role (Owner, Member) and the day they joined; the signed-in account's row
  *   marked You. The owners first. Membership changes in Revoke's pattern (P78-s2.F1; no confirm, the toast says
@@ -87,7 +107,7 @@ export function leaveToast(org: string, result: MembershipResult): string {
  *   with the owners) and Remove (the row goes); the owner's own row ends with Leave when the org has another owner,
  *   and has nothing when it is the only one (an org keeps an owner); another owner's row has nothing (no one makes
  *   an owner a member again). In a member's view its own row ends with Leave. Leave lands on the account's next
- *   org's home (a fresh `default` org when it was the account's only one). A refusal (the org's last owner, or no
+ *   org's home (a fresh `Personal` org when it was the account's only one). A refusal (the org's last owner, or no
  *   answer) is the toast, the row kept.
  * - Invites (an owner's view only): the head's Invite opens the form in place (Email, Cancel, Send invite), as
  *   Projects' New project does on org home; the pending invites, newest first, each with the day it was sent, the
@@ -109,6 +129,8 @@ export function MembersView({
   promote,
   remove,
   leave,
+  stepDown,
+  onSteppedDown,
   format,
   phase: initialPhase = "list",
   draft: initialDraft = "",
@@ -222,6 +244,23 @@ export function MembersView({
     publishToast(removeToast(row.email, result));
   };
 
+  const stepDownSelf = async (row: MemberRow) => {
+    if (ending) return;
+    setEnding(`step-down:${row.id}`);
+    let result: MembershipResult;
+    try {
+      result = await stepDown(row.id);
+    } catch {
+      result = { ok: false };
+    }
+    setEnding(null);
+    if (result.ok) {
+      setPeople((rows) => withMember(rows, row.id));
+      onSteppedDown?.();
+    }
+    publishToast(stepDownToast(org, result));
+  };
+
   const leaveOrg = async (row: MemberRow) => {
     if (ending) return;
     setEnding(`leave:${row.id}`);
@@ -242,17 +281,12 @@ export function MembersView({
   const controls = people.some((m) => control(m).length > 0);
 
   return (
-    <div className="column">
-      <header className="page-top">
-        <div className="page-head">
-          <div className="page-title">
-            <h1>{MEMBERS.title}</h1>
-            <p className="meta">{plural(people.length, M.unit)}</p>
-          </div>
-        </div>
-      </header>
-
-      <Panel className="org-members" aria-label={M.heading}>
+    <>
+      <Panel aria-label={SETTINGS.members.heading}>
+        <PanelHead>
+          <h2 style={{ flex: "1 0 auto" }}>{SETTINGS.members.heading}</h2>
+          <p className="meta">{plural(people.length, M.unit)}</p>
+        </PanelHead>
         <StackTable>
           <thead>
             <tr>
@@ -308,6 +342,17 @@ export function MembersView({
                           >
                             {M.remove}
                           </Button>
+                        ) : c === "step-down" ? (
+                          <Button
+                            key={c}
+                            variant="quiet"
+                            aria-label={SETTINGS.members.stepDownLabel(org)}
+                            disabled={ending !== null}
+                            busy={ending === `step-down:${m.id}`}
+                            onClick={() => void stepDownSelf(m)}
+                          >
+                            {SETTINGS.members.stepDown}
+                          </Button>
                         ) : (
                           <Button
                             key={c}
@@ -328,6 +373,14 @@ export function MembersView({
             ))}
           </tbody>
         </StackTable>
+        <PanelBody rule className="stack gap-1">
+          {(["owner", "member"] as const).map((role) => (
+            <p key={role} className="meta">
+              <span className="strong">{SETTINGS.members.roles[role].name}</span>
+              {SETTINGS.members.roles[role].text}
+            </p>
+          ))}
+        </PanelBody>
       </Panel>
 
       {owner ? (
@@ -447,6 +500,6 @@ export function MembersView({
           )}
         </Panel>
       ) : null}
-    </div>
+    </>
   );
 }

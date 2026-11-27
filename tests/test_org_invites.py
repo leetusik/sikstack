@@ -165,19 +165,19 @@ def _role(client, org_id: str, email: str) -> str | None:
 # --- C1: create an org ------------------------------------------------------------
 
 
-def test_create_org_makes_tenant_owner_and_one_project(org):
+def test_create_org_makes_tenant_owner_and_no_project(org):
     me = _account(org)
     res = org.post("/app/orgs", json={"name": "  Acme Labs  "}, headers=me["h"])
     assert res.status_code == 201, res.text
     body = res.json()
     new_id = body["tenant"]["id"]
     assert body["tenant"]["name"] == "Acme Labs"
-    assert body["project"]["name"] == "default" and body["project"]["tenant_id"] == new_id
+    assert "project" in body and body["project"] is None
     assert _role(org, new_id, me["email"]) == "owner"
     with org.db.connect() as conn:
         assert conn.execute(
             text("SELECT count(*) FROM projects WHERE tenant_id = :t"), {"t": new_id}
-        ).scalar_one() == 1
+        ).scalar_one() == 0
 
     who = org.get("/auth/me", headers=me["h"]).json()
     assert [t["id"] for t in who["tenants"]] == [me["default_org"], new_id]
@@ -185,7 +185,7 @@ def test_create_org_makes_tenant_owner_and_one_project(org):
     switched = org.get("/auth/me", headers=_in(me["h"], new_id)).json()
     assert switched["active_tenant_id"] == new_id
     projects = org.get("/app/projects", headers=_in(me["h"], new_id)).json()["projects"]
-    assert [p["name"] for p in projects] == ["default"]
+    assert projects == []
 
 
 def test_create_org_refuses_a_bad_or_taken_name(org):
@@ -193,8 +193,8 @@ def test_create_org_refuses_a_bad_or_taken_name(org):
     for name in ["", "   ", "x" * 101, "a\nb"]:
         res = org.post("/app/orgs", json={"name": name}, headers=me["h"])
         assert res.status_code == 422, (name, res.text)
-    # Every account has an org named "default": a second one is taken, in any case.
-    taken = org.post("/app/orgs", json={"name": "Default"}, headers=me["h"])
+    # Every account starts in an org named "Personal": a second one is taken, in any case.
+    taken = org.post("/app/orgs", json={"name": "personal"}, headers=me["h"])
     assert taken.status_code == 409 and taken.json()["reason"] == "taken"
     assert org.post("/app/orgs", json={"name": "x" * 100}, headers=me["h"]).status_code == 201
     assert org.post("/app/orgs", json={"name": "Acme"}).status_code == 401
@@ -802,6 +802,128 @@ def test_an_owner_makes_a_member_an_owner(org):
     assert _joined_at(org, org_id, member["email"]) == joined
 
 
+def _step_down(client, owner: dict, org_id: str, email: str):
+    mid = _member_id(client, owner, org_id, email)
+    return client.post(f"/app/members/{mid}/member", headers=_in(owner["h"], org_id))
+
+
+def test_an_owner_steps_a_co_owner_down_and_then_itself(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Step Org")
+    co = _joined(org, owner, org_id)
+    assert _promote(org, owner, org_id, co["email"]).status_code == 204
+    joined = _joined_at(org, org_id, co["email"])
+
+    # C1: the co-owner's row reads member; its joined_at stays.
+    done = _step_down(org, owner, org_id, co["email"])
+    assert done.status_code == 204, done.text
+    assert _role(org, org_id, co["email"]) == "member"
+    assert _joined_at(org, org_id, co["email"]) == joined
+    listed = org.get("/app/members", headers=_in(owner["h"], org_id)).json()["members"]
+    assert [(m["email"], m["role"]) for m in listed] == [
+        (owner["email"], "owner"),
+        (co["email"], "member"),
+    ]
+    # A row that is a member already is a 204 that changes nothing.
+    assert _step_down(org, owner, org_id, co["email"]).status_code == 204
+    assert _role(org, org_id, co["email"]) == "member"
+    assert _joined_at(org, org_id, co["email"]) == joined
+
+    # C2: an owner steps itself down while another owner stays, and is a member at once.
+    assert _promote(org, owner, org_id, co["email"]).status_code == 204
+    own_joined = _joined_at(org, org_id, owner["email"])
+    assert _step_down(org, owner, org_id, owner["email"]).status_code == 204
+    assert _role(org, org_id, owner["email"]) == "member"
+    assert _joined_at(org, org_id, owner["email"]) == own_joined
+    assert "invites" not in org.get("/app/members", headers=_in(owner["h"], org_id)).json()
+    assert _promote(org, owner, org_id, co["email"]).status_code == 403
+
+
+def test_the_last_owner_cannot_step_down_and_a_member_or_stranger_cannot_reach_it(org):
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Sole Org")
+    member = _joined(org, owner, org_id)
+    oid = _member_id(org, owner, org_id, owner["email"])
+    mid = _member_id(org, owner, org_id, member["email"])
+
+    # C3: the last owner stepping itself down is refused, and nothing changes.
+    res = org.post(f"/app/members/{oid}/member", headers=_in(owner["h"], org_id))
+    assert res.status_code == 409 and res.json()["reason"] == "last_owner", res.text
+    assert _role(org, org_id, owner["email"]) == "owner"
+
+    # C4: a member steps no one down (the owner included); another org's owner, and an
+    # id that is no row, are 404; no session is 401.
+    assert org.post(f"/app/members/{oid}/member", headers=_in(member["h"], org_id)).status_code == 403
+    stranger = _account(org)
+    assert org.post(f"/app/members/{oid}/member", headers=stranger["h"]).status_code == 404
+    assert org.post(f"/app/members/{mid}/member", headers=stranger["h"]).status_code == 404
+    assert org.post(f"/app/members/{uuid4()}/member", headers=_in(owner["h"], org_id)).status_code == 404
+    assert org.post(f"/app/members/{oid}/member").status_code == 401
+    assert _role(org, org_id, owner["email"]) == "owner"
+    assert _role(org, org_id, member["email"]) == "member"
+
+
+def test_a_step_down_counts_the_owners_among_the_locked_rows(org):
+    """Two owners; while one steps itself down it waits on the org's rows, and the other
+    owner's row goes meanwhile. Counted under the lock, the caller is now the last owner:
+    409, and it stays an owner."""
+
+    owner = _account(org)
+    org_id = _new_org(org, owner, "Count Org")
+    co = _joined(org, owner, org_id)
+    assert _promote(org, owner, org_id, co["email"]).status_code == 204
+    oid = _member_id(org, owner, org_id, owner["email"])
+    co_id = _user_id(org, co["email"])
+    res = _while_the_org_is_locked(
+        org,
+        org_id,
+        lambda: org.post(f"/app/members/{oid}/member", headers=_in(owner["h"], org_id)),
+        lambda conn: conn.execute(
+            text("DELETE FROM tenant_members WHERE tenant_id = :t AND user_id = :u"),
+            {"t": org_id, "u": co_id},
+        ),
+    )
+    assert res.status_code == 409 and res.json()["reason"] == "last_owner", res.text
+    assert _role(org, org_id, owner["email"]) == "owner"
+
+
+def _owner_email(client, who: dict, org_id: str):
+    tenants = client.get("/auth/me", headers=who["h"]).json()["tenants"]
+    return next(t for t in tenants if t["id"] == org_id)["owner_email"]
+
+
+def test_auth_me_names_each_orgs_first_owner_and_the_next_after_a_step_down(org):
+    """`GET /auth/me`'s tenants carry `owner_email`: the owner row joined first (then id),
+    the same for a member; after that owner steps down, the next owner by the same order
+    (not by who was made an owner first); `null` for an org with no owner."""
+
+    first = _account(org)
+    org_id = _new_org(org, first, "Owned Org")
+    early = _joined(org, first, org_id)
+    late = _joined(org, first, org_id)
+    me = org.get("/auth/me", headers=first["h"]).json()["tenants"]
+    assert [t["owner_email"] for t in me] == [first["email"], first["email"]]
+    assert _owner_email(org, early, org_id) == first["email"]
+
+    # The later joiner is made an owner first; the earlier joiner second.
+    assert _promote(org, first, org_id, late["email"]).status_code == 204
+    assert _promote(org, first, org_id, early["email"]).status_code == 204
+    assert _owner_email(org, first, org_id) == first["email"]
+
+    assert _step_down(org, first, org_id, first["email"]).status_code == 204
+    for who in (first, early, late):
+        assert _owner_email(org, who, org_id) == early["email"]
+    # Each account's own sign-up org still names its own owner.
+    assert _owner_email(org, late, late["default_org"]) == late["email"]
+
+    with org.db.begin() as conn:
+        conn.execute(
+            text("UPDATE tenant_members SET role = 'member' WHERE tenant_id = :t"),
+            {"t": org_id},
+        )
+    assert _owner_email(org, early, org_id) is None
+
+
 def test_a_co_owner_leaves_and_the_last_owner_still_cannot(org):
     owner = _account(org)
     org_id = _new_org(org, owner, "Handover Org")
@@ -832,16 +954,16 @@ def _user_id(client, email: str):
 
 
 def _a_fresh_default_org(client, who: dict, *, besides: list[str]) -> str:
-    """The account's one org is a new ``default``, as at sign-up: the account its only
-    member and owner, one project ``default``, and no maker (it never counts as made)."""
+    """The account's one org is a new ``Personal``, as at sign-up: the account its only
+    member and owner, no project, and no maker (it never counts as made)."""
 
     (only,) = _orgs(client, who)
-    assert only["name"] == "default" and only["id"] not in besides, only
+    assert only["name"] == "Personal" and only["id"] not in besides, only
     listed = client.get("/app/members", headers=who["h"]).json()
     assert listed["role"] == "owner"
     assert [(m["email"], m["role"]) for m in listed["members"]] == [(who["email"], "owner")]
     projects = client.get("/app/projects", headers=who["h"]).json()["projects"]
-    assert [p["name"] for p in projects] == ["default"]
+    assert projects == []
     with client.db.connect() as conn:
         assert conn.execute(
             text("SELECT made_by FROM tenants WHERE id = :t"), {"t": only["id"]}
@@ -969,7 +1091,11 @@ def test_an_owner_removed_while_it_acts_changes_nothing(org):
     org_id = _new_org(org, owner, "Race Org")
     target = _joined(org, owner, org_id)
     tid = _member_id(org, owner, org_id, target["email"])
-    for method, path in (("post", f"/app/members/{tid}/owner"), ("delete", f"/app/members/{tid}")):
+    for method, path in (
+        ("post", f"/app/members/{tid}/owner"),
+        ("post", f"/app/members/{tid}/member"),
+        ("delete", f"/app/members/{tid}"),
+    ):
         other = _joined(org, owner, org_id)
         assert _promote(org, owner, org_id, other["email"]).status_code == 204
         other_id = _user_id(org, other["email"])

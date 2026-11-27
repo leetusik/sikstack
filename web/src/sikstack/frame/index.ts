@@ -19,4 +19,13 @@ export {
   type CopyProps,
 } from "./copy";
 export { Dialog, DialogActions, type DialogProps } from "./dialog";
+export {
+  DeleteDialog,
+  typedNameMatches,
+  typedNameWrong,
+  type DeleteDialogProps,
+  type DeletePhase,
+  type DeleteRefusal,
+  type DeleteResult,
+} from "./delete-dialog";
 export { Usage, type UsageFigures, type UsageProps } from "./usage";

@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 import { VERSION_REDIRECT } from "./src/app/(app)/documents/legacy";
+import { MEMBERS_REDIRECT } from "./src/app/(app)/settings/members-redirect";
 import { APP_CSP } from "./src/lib/csp";
 
 /**
@@ -32,8 +33,9 @@ const nextConfig: NextConfig = {
   // P63 (operator decision 4, D152-kw) — an old past-version page opens the document's Versions
   // view, `/documents/<id>?v=<v>`, its query kept. A config redirect answers before the proxy and
   // before any page, so no page script under the reader's nonce CSP does it (`legacy.ts`).
+  // P88-ms — Members (`/members`) is a part of Org settings: a permanent redirect there (`members-redirect.ts`).
   async redirects() {
-    return [{ ...VERSION_REDIRECT }];
+    return [{ ...VERSION_REDIRECT }, { ...MEMBERS_REDIRECT }];
   },
   async headers() {
     return [

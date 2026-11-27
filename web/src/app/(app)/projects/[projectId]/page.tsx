@@ -13,7 +13,6 @@ import {
   getProjectUsage,
 } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
-import { getMembers } from "@/lib/knowledge/orgs";
 import type { KbIdentity, KbProjectUsage } from "@/lib/knowledge/types";
 import { orgSegment, projectLibraryHref } from "@/lib/reader-href";
 import { readWorkspace } from "@/lib/workspace/read";
@@ -25,7 +24,6 @@ import {
   feedbackCount,
   feedbackRows,
   isMissingProjectStatus,
-  keyRowOf,
   libraryCount,
   libraryRows,
   monthWindow,
@@ -38,16 +36,16 @@ import {
 } from "./model";
 import { FeedbackPanel, LibraryPanel, WorkspacePanel } from "./parts";
 import { ProjectHead } from "./project-head";
-import { ProjectKeys } from "./project-keys";
 
 import "./project-home.css";
 
 // Project home (job 01, round 03-instrument, `ProjectHome.dc.html`), a system page inside the Shell:
 // `div.column` straight into `main.app-main`. In the signed order: the head, Workspace, Library and
-// Feedback side by side, Usage in two groups with Trend, the project's API keys.
+// Feedback side by side, Usage in two groups with Trend. The visibility switch and the project's API keys
+// are Project settings' (`settings/`, P88-ms.S3's signed design); the head keeps the visibility badge.
 //
 // Every figure comes from a read the page already had or the app already makes:
-// - the head, Usage and Trend, and the keys: `getProjectUsage` (one read; 30-day window);
+// - the head, Usage and Trend: `getProjectUsage` (one read; 30-day window);
 // - Active total (Usage) and the Library's count: `getDocuments({project, limit: 1}).total`;
 // - the Library's rows: the org library listing (`getOrgLibrary`), this project's books and documents;
 // - Feedback: page 1 of `listFeedbackPage({project_id, limit: 5})`, and `countFeedback` over the
@@ -132,15 +130,6 @@ async function loadFeedback(
   return { rows: feedbackRows(list.value.records, projectId, format), count };
 }
 
-/** The viewer's role in the org (`GET /app/members`); `null` when the read fails (the head then draws no switch). */
-async function readRole(token: string): Promise<"owner" | "member" | null> {
-  try {
-    return (await getMembers(token)).role;
-  } catch {
-    return null;
-  }
-}
-
 export default async function ProjectHomePage({
   params,
 }: {
@@ -153,12 +142,11 @@ export default async function ProjectHomePage({
 
   const usage = await loadProject(token, projectId);
   const { project } = usage;
-  const [documents, rows, feedback, workspace, role] = await Promise.all([
+  const [documents, rows, feedback, workspace] = await Promise.all([
     getDocuments(token, { project: project.id, limit: 1 }),
     loadLibraryRows(token, identity, project.name),
     loadFeedback(token, project.id, format),
     readWorkspace(token, project.id),
-    readRole(token),
   ]);
   const count = libraryCount(documents.total);
   const origin = requestOrigin(await headers());
@@ -168,12 +156,10 @@ export default async function ProjectHomePage({
   return (
     <div className="column">
       <ProjectHead
-        projectId={project.id}
         name={project.name}
         org={org}
         created={date(project.created_at, format)}
         visibility={project.visibility}
-        owner={role === "owner"}
       />
       <WorkspacePanel
         part={workspacePart(workspace, project.id)}
@@ -218,12 +204,6 @@ export default async function ProjectHomePage({
         />
         <Trend series={series} lastDay={lastDay} format={format} />
       </div>
-      <ProjectKeys
-        projectId={project.id}
-        subject={project.name}
-        rows={usage.credentials.map(keyRowOf)}
-        format={format}
-      />
     </div>
   );
 }

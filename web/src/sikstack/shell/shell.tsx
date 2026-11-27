@@ -15,11 +15,16 @@ import { ACCOUNT } from "@/content/account";
 import { ORG_SHELL } from "@/content/org";
 import { plural } from "@/lib/format";
 
+// P88-ms.S3's signed design, applied by P88-ms.S4: the rail's Settings in both forms, and the org menu's second
+// line telling apart two orgs of one name (`orgLine`, `./model`; the owner's address is `GET /auth/me`'s
+// `owner_email`, read by `./data`).
+import { SETTINGS } from "@/content/settings";
 import {
   closeMenuOnEscape,
   filterProjects,
   hasProjectSwitcher,
   initialOf,
+  orgLine,
   projectCountText,
   projectIdOf,
   projectSwitchHref,
@@ -56,8 +61,8 @@ const NEW_ORG = "/orgs/new";
 const ACCOUNT_PAGE = "/account";
 /** The fade at a phone rail's side (the bundle's `--space-6`): the current tab is scrolled clear of it. */
 const RAIL_FADE = 32;
-/** The rail's words, the org form's Members with them. */
-const RAIL_WORDS = { ...SHELL.rail, members: ORG_SHELL.members };
+/** The rail's words, Settings (both forms) with them. */
+const RAIL_WORDS = { ...SHELL.rail, settings: SETTINGS.rail };
 
 /**
  * The Shell (frame.md F9; `Shell.dc.html`): the top bar (wordmark, org switcher, project switcher,
@@ -237,7 +242,7 @@ export function Shell({
                           </span>
                         ) : null}
                         <span className="menu-sub">
-                          {o.address ?? SHELL.noPublicUrl}
+                          <OrgLineText org={o} orgs={orgs} email={email} />
                         </span>
                       </button>
                     ))}
@@ -413,6 +418,14 @@ export function Shell({
       ) : null}
     </>
   );
+}
+
+/** An org row's second line (`orgLine`): its public URL, who owns it when its name is shared, or No public URL. */
+function OrgLineText({ org, orgs, email }: { org: ShellOrg; orgs: readonly ShellOrg[]; email: string }) {
+  const line = orgLine(org, orgs, email);
+  if (line.kind === "address") return <>{line.address}</>;
+  if (line.kind === "owner") return <>{line.mine ? SETTINGS.orgLine.mine : SETTINGS.orgLine.owned(line.email)}</>;
+  return <>{SHELL.noPublicUrl}</>;
 }
 
 /** A rail item: a link, the current one `aria-current="page"`. */

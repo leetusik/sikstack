@@ -54,6 +54,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from starlette.concurrency import run_in_threadpool
 
 from server import config
+from server.project_names import ProjectName
 from server import listen as store
 from server import listen_jobs as lj
 from server import listen_mp4 as mp4
@@ -118,7 +119,7 @@ class ListenKey(_Body):
     """A Listen: ``doc``, or ``book`` from ``from_chapter`` (default: its first)."""
 
     org: str = Field(min_length=1, max_length=200)
-    project: str = Field(min_length=1, max_length=200)
+    project: ProjectName
     doc: Optional[str] = Field(default=None, min_length=1, max_length=200)
     book: Optional[str] = Field(default=None, min_length=1, max_length=200)
     from_chapter: Optional[str] = Field(default=None, min_length=1, max_length=200)
@@ -526,6 +527,8 @@ async def _make(key: ListenKey, ctx: AuthContext, conn, *, update: bool) -> dict
     manifests = await run_in_threadpool(_build)
     now = lj.utc_now()
     async with lj.new_session() as session, session.begin():
+        # The units are keyed by the project's name: hold its row (``rs.hold_project``).
+        await rs.hold_project(session, listen.tenant_id, listen.project)
         first: list[Any] = []  # the Listen's own parts, in reading order
         later: list[Any] = []  # an update in progress behind an earlier version
         for e, make, upd in work:

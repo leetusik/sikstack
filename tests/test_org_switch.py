@@ -245,7 +245,10 @@ def test_capture_scope_is_refused_by_the_library(switch_client):
 def test_mint_accepts_only_known_scopes(switch_client):
     body = _signup(switch_client)
     session = {"Authorization": f"Bearer {body['token']}"}
-    for path in ("/app/credentials", f"/app/projects/{body['project']['id']}/credentials"):
+    made = switch_client.post("/app/projects", json={"name": "default"}, headers=session)
+    assert made.status_code == 201, made.text
+    pid = made.json()["project"]["id"]
+    for path in ("/app/credentials", f"/app/projects/{pid}/credentials"):
         assert switch_client.post(path, json={"scope": "admin"}, headers=session).status_code == 422
         ok = switch_client.post(path, json={"scope": "capture"}, headers=session)
         assert ok.status_code == 201 and ok.json()["credential"]["scope"] == "capture"

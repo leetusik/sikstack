@@ -139,7 +139,9 @@ async def set_book_share(
     can = await sharing.may_publish(ctx.tenant.id, ctx.user.id)
     if body.state == sharing.PUBLIC and not can:
         raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
-    record = await get_accounts_service().get_or_create_project(ctx.tenant.id, project)
+    record = await sharing.project_for_share(ctx.tenant.id, project)
+    if record is None:  # the project was deleted since the lookup above
+        raise HTTPException(status_code=404, detail=_NO_SUCH_BOOK_DETAIL)
     try:
         share = await sharing.set_share(record.id, sharing.KIND_BOOK, book, body.state)
     except sharing.SharingError:

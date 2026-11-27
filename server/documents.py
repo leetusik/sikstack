@@ -18,6 +18,8 @@ from typing import NamedTuple, Optional, Union
 
 import yaml
 
+from server import project_names
+
 # --- errors ---------------------------------------------------------------
 
 
@@ -45,14 +47,34 @@ def slugify(title: str) -> str:
     return s or "untitled"
 
 
-def validate_project(project: str) -> str:
+def validate_project(
+    project: str, *, tenant_one: bool = False, check_length: bool = True
+) -> str:
+    """``project`` when it is a usable project name, else ``ConventionError``.
+
+    The shared length rule first (``server.project_names``: 1 to 200 characters, the
+    same words on every path), then this path's own character rule. ``tenant_one``
+    (a write into ``docs/``: tenant #1 or legacy mode) also refuses the tracked MkDocs
+    folders' names, in any case. ``check_length=False`` is for a reader of names that
+    exist already (a delete's paths, the reconcile's folders): a project published
+    before the length rule keeps its paths.
+    """
+
+    if not isinstance(project, str):
+        raise ConventionError(f"invalid project: {project!r}")
+    if check_length:
+        try:
+            project_names.check_project_name(project)
+        except ValueError as exc:
+            raise ConventionError(str(exc)) from None
     if (
-        not isinstance(project, str)
-        or not _PROJECT_RE.fullmatch(project)
+        not _PROJECT_RE.fullmatch(project)
         or ".." in project
         or "/" in project
     ):
         raise ConventionError(f"invalid project: {project!r}")
+    if tenant_one and project_names.reserved_for_tenant_one(project):
+        raise ConventionError(project_names.PROJECT_NAME_RESERVED_ERROR)
     return project
 
 
@@ -708,11 +730,11 @@ def ensure_project_landing(docs_root: Union[str, Path], project: str) -> bool:
 
     Returns ``True`` when it created the landing (the write path then stages it in
     the same scoped commit), ``False`` when a landing — hand-written or previously
-    auto-created — already exists and is left byte-for-byte untouched. Pairs with
-    the delete path by design: deleting a project's last document leaves this
-    landing behind, but a project dir with only ``index.md`` has zero countable
-    docs, so ``discover_projects`` no longer lists it and the gate is unaffected —
-    no delete-side cleanup is needed.
+    auto-created — already exists and is left byte-for-byte untouched. Deleting a
+    project's last document leaves this landing behind (a project dir with only
+    ``index.md`` has zero countable docs, so ``discover_projects`` no longer lists
+    it); deleting the project itself (``server.deletion``) removes the whole
+    ``<project>/`` folder, the landing with it.
     """
     landing = Path(docs_root) / project / "index.md"
     if landing.exists():

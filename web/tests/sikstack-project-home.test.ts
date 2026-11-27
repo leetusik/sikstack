@@ -298,11 +298,8 @@ describe("Project home's reads", () => {
       params: Promise.resolve({ projectId: PROJECT }),
     });
     const found = findElement(page, WorkspacePanel);
-    // The Workspace once; the role read (the head's switch is the owner's, P78-s2.F1) beside it.
-    expect(calls).toEqual([
-      `http://kb.test:8766/app/projects/${PROJECT}/workspace`,
-      "http://kb.test:8766/app/members",
-    ]);
+    // The Workspace once, and nothing else: the role read went with the head's switch (P88-ms: Project settings').
+    expect(calls).toEqual([`http://kb.test:8766/app/projects/${PROJECT}/workspace`]);
     expect(found?.props.part).toEqual(
       workspacePart({ state: "ready", value: NAMED }, PROJECT),
     );
@@ -342,7 +339,7 @@ describe("Workspace panel: not linked", () => {
       before: "Run ",
       command:
         "sikstack link https://sikstack.com/projects/p_42",
-      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Keys when it asks.",
+      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Project settings when it asks.",
     });
     expect(w).not.toHaveProperty("badge");
   });

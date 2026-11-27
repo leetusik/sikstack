@@ -24,7 +24,7 @@ import {
   urlForm,
   urlShown,
   type SaveSlugResult,
-} from "./org-home-model";
+} from "@/app/(app)/dashboard/org-home-model";
 
 /**
  * Public URL (`OrgHomeUrl.dc.html`): claimed, the address with Copy and Change in the head; no name,

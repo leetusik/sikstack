@@ -11,15 +11,19 @@ or an org-level key (``/app/credentials``, ``project_id NULL`` — one key autho
 every project in the org); either way the plaintext ``vk_`` value is returned once
 (on create) and never persisted or re-exposed — only its sha256 hash and a short
 display prefix are stored. Projects are get-or-create by name (``POST /app/projects``
-is idempotent on the tenant's ``UNIQUE(tenant_id, name)``). ``PATCH /app/tenant``
+is idempotent on the tenant's ``UNIQUE(tenant_id, name)``); ``DELETE
+/app/projects/{id} {name}`` deletes one for good, the org owner's act with its name
+typed again (``server.deletion``; the org's own delete is ``DELETE /app/tenant`` in
+``server.orgs_api``). ``PATCH /app/tenant``
 claims the caller's tenant's public **org slug** (the ``{org}`` of a pretty share
 URL) — 422 on a malformed/reserved value, 409 when another tenant holds it.
 
 Org-level writes are the org owner's alone (``require_owner``, a **403** for a
 ``member``): the slug claim, the org key mint and revoke and a project's visibility
 here (publishing is an org act: a public project's new items start Public, and
-making an item Public is the owner's too, ``server.sharing``), the name, the invites and the members in ``server.orgs_api``. A member
-keeps the rest of the project-level work: projects and their keys.
+making an item Public is the owner's too, ``server.sharing``), a project's delete, and
+the name, the invites, the members and the org's delete in ``server.orgs_api``. A
+member keeps the rest of the project-level work: making projects and their keys.
 
 Ported from vocky ``app_api.py`` (Starlette → FastAPI): body binding and path
 params are FastAPI-native (malformed UUID / blank name → standard **422**, not
@@ -35,9 +39,11 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 
-from server import sharing
+from server import deletion, project_names, sharing
 from server.accounts.auth import AuthContext, require_owner, require_user
 from server.accounts.security import generate_opaque_token, sha256_hex
 from server.accounts.service import DuplicateOrgSlugError, get_accounts_service
@@ -47,6 +53,7 @@ from server.accounts.types import (
     CreateProject,
     CreateProjectCredential,
 )
+from server.api_auth import get_tenant_one_id
 from server.auth_api import serialize_tenant
 
 logger = logging.getLogger(__name__)
@@ -55,17 +62,15 @@ router = APIRouter()
 
 
 class CreateProjectInput(BaseModel):
-    """Project-creation request body."""
+    """Project-creation request body: the shared name rule (``server.project_names``,
+    1 to 200 characters once trimmed), then trimmed."""
 
-    name: str = Field(min_length=1, max_length=200)
+    name: project_names.ProjectName
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("must not be blank")
-        return stripped
+        return value.strip()
 
 
 class CreateCredentialInput(BaseModel):
@@ -93,6 +98,12 @@ class SetProjectVisibilityInput(BaseModel):
     """Visibility-toggle request body. Any other value gets a free 422 from the Literal."""
 
     visibility: Literal["private", "public"]
+
+
+class ConfirmNameInput(BaseModel):
+    """A delete's typed confirmation: the item's name, typed again (required; else 422)."""
+
+    name: str = Field(max_length=1000)
 
 
 class SetTenantSlugInput(BaseModel):
@@ -225,8 +236,14 @@ async def create_project(
 
     Idempotent on name (``UNIQUE(tenant_id, name)``): a duplicate name returns the
     existing row with the same 201 shape instead of a 500 from the unique violation.
+    Tenant #1 may not take a tracked ``docs/`` folder's name (422,
+    ``project_names.reserved_for_tenant_one``).
     """
 
+    if ctx.tenant.id == await get_tenant_one_id() and project_names.reserved_for_tenant_one(
+        payload.name
+    ):
+        raise HTTPException(status_code=422, detail=project_names.PROJECT_NAME_RESERVED_ERROR)
     service = get_accounts_service()
     project = await service.get_or_create_project(ctx.tenant.id, payload.name)
     return {"project": serialize_project(project)}
@@ -274,6 +291,64 @@ async def set_project_visibility(
         project_id, payload.visibility
     )
     return {"project": serialize_project(updated)}
+
+
+@router.delete("/app/projects/{project_id}", status_code=204, response_model=None)
+async def delete_project(
+    project_id: UUID,
+    payload: ConfirmNameInput,
+    ctx: AuthContext = Depends(require_user),
+) -> Response | JSONResponse:
+    """Delete one of the active org's projects for good (the org owner's; ``server.deletion``).
+
+    The body is ``{"name": "<the project's name>"}``, typed again in the dialog: a
+    missing one is a 422, another name a 409 ``{"reason": "name"}``. 404 for a project
+    that is missing or another org's (first, so nothing leaks), 403 for a member. 409
+    with a ``reason`` for a project no delete takes: ``install_feedback`` (the
+    instance's install-feedback sink, ``KB_INSTALL_FEEDBACK_PROJECT_ID``) and
+    ``tracked_path`` (a tenant #1 project named like a tracked site folder). Its
+    documents, books, versions, images, design builds, feedback, linked workspace,
+    keys, shares and every reader's and listener's state go; its usage rows stay with
+    the project link emptied. 503 when the store fails before the commit (nothing is
+    deleted). 204 on success.
+    """
+
+    project = await _load_scoped_project(project_id, ctx)
+    await require_owner(ctx)
+    tenant_one_id = await get_tenant_one_id()
+    refusal = deletion.refusal_for_project(
+        tenant_id=ctx.tenant.id,
+        project_id=project.id,
+        name=project.name,
+        tenant_one_id=tenant_one_id,
+    )
+    if refusal is None and not deletion.typed_name_matches(payload.name, project.name):
+        refusal = deletion.WRONG_NAME
+    if refusal is not None:
+        return _refused(refusal)
+    target = deletion.ProjectTarget(
+        tenant_id=ctx.tenant.id,
+        project_id=project.id,
+        name=project.name,
+        user_id=ctx.user.id,
+        root=deletion.tenant_root(ctx.tenant.id, tenant_one_id),
+    )
+    try:
+        outcome = await run_in_threadpool(deletion.delete_project, target)
+    except Exception:
+        logger.error("project delete failed before its commit, or could not confirm it", exc_info=True)
+        raise HTTPException(status_code=503, detail="could not delete the project; try again")
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="project not found")
+    if outcome == "forbidden":
+        raise HTTPException(status_code=403, detail="only an owner of this org can do that")
+    if isinstance(outcome, deletion.Refusal):
+        return _refused(outcome)
+    return Response(status_code=204)
+
+
+def _refused(refusal: "deletion.Refusal") -> JSONResponse:
+    return JSONResponse({"detail": refusal.detail, "reason": refusal.reason}, status_code=409)
 
 
 @router.post("/app/projects/{project_id}/credentials", status_code=201)

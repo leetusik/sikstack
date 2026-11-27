@@ -648,7 +648,9 @@ async def set_document_share(
     if body.state == sharing.PUBLIC and not can:
         raise HTTPException(status_code=403, detail=sharing.ONLY_OWNER_PUBLISHES)
     kind, key = sharing.item_of_doc(conn, doc)
-    record = await get_accounts_service().get_or_create_project(ctx.tenant.id, doc["project"])
+    record = await sharing.project_for_share(ctx.tenant.id, doc["project"])
+    if record is None:  # the project was deleted since the lookup above
+        raise HTTPException(status_code=404, detail=f"no document with id {doc_id}")
     try:
         share = await sharing.set_share(record.id, kind, key, body.state)
     except sharing.SharingError:

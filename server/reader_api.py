@@ -91,6 +91,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from server import anchors, config, review
 from server import reader_state as rs
 from server.accounts.auth import AuthContext, require_user
+from server.project_names import ProjectName
 from server.documents_api import get_conn
 
 router = APIRouter(prefix="/app/reader")
@@ -164,7 +165,7 @@ class DocKey(_Body):
     """The document a write is about: ``(org, project, doc)``."""
 
     org: str = Field(min_length=1, max_length=200)
-    project: str = Field(min_length=1, max_length=200)
+    project: ProjectName
     doc: str = Field(min_length=1, max_length=200)
 
     @field_validator("project", "doc")

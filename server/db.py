@@ -1129,6 +1129,49 @@ def delete_book(conn: sqlite3.Connection, *, tenant_id: str, project: str, slug:
     conn.commit()
 
 
+def delete_project_rows(conn: sqlite3.Connection, *, tenant_id: str, project: str) -> dict[str, int]:
+    """Drop every index row of one project (a project delete, ``server.deletion``).
+
+    Documents (FTS by the AFTER DELETE trigger, sections and vectors by cascade),
+    versions, books, chapters and variants of ``(tenant_id, project)``. A document or
+    version is matched by its ``project`` column or its path's first segment, so a
+    row can never outlive its folder. Returns the rowcount per table.
+    """
+    prefix = f"{project}/"
+    archive = f".versions/{project}/"
+    removed: dict[str, int] = {}
+    removed["documents"] = conn.execute(
+        "DELETE FROM documents WHERE tenant_id = ? "
+        "AND (project = ? OR substr(rel_path, 1, ?) = ?)",
+        (tenant_id, project, len(prefix), prefix),
+    ).rowcount
+    removed["document_versions"] = conn.execute(
+        "DELETE FROM document_versions WHERE tenant_id = ? "
+        "AND (substr(rel_path, 1, ?) = ? OR substr(archive_path, 1, ?) = ?)",
+        (tenant_id, len(prefix), prefix, len(archive), archive),
+    ).rowcount
+    for table in ("chapter_variants", "chapters", "books"):
+        removed[table] = conn.execute(
+            f"DELETE FROM {table} WHERE tenant_id = ? AND project = ?", (tenant_id, project)
+        ).rowcount
+    conn.commit()
+    return removed
+
+
+def delete_tenant_rows(conn: sqlite3.Connection, *, tenant_id: str) -> dict[str, int]:
+    """Drop every index row of one org (an org delete, ``server.deletion``). Refuses
+    the ``''`` legacy sentinel: a delete always names its tenant."""
+    if not tenant_id:
+        raise ValueError("an org delete needs its tenant id")
+    removed: dict[str, int] = {}
+    for table in ("documents", "document_versions", "chapter_variants", "chapters", "books"):
+        removed[table] = conn.execute(
+            f"DELETE FROM {table} WHERE tenant_id = ?", (tenant_id,)
+        ).rowcount
+    conn.commit()
+    return removed
+
+
 def find_chapter_binding(
     conn: sqlite3.Connection, rel_path: str, tenant_id: str
 ) -> Optional[dict[str, Any]]:

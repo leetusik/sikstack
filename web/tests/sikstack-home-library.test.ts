@@ -1,4 +1,5 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -21,6 +22,7 @@ const reads = vi.hoisted(() => ({
   getProjectUsage: vi.fn(),
   listFeedbackPage: vi.fn(),
   countFeedback: vi.fn(),
+  getMembers: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -50,6 +52,8 @@ vi.mock("@/lib/knowledge/app", () => ({
   getOrgLibrary: reads.getOrgLibrary,
   getProjectUsage: reads.getProjectUsage,
 }));
+// The viewer owns the org: what an owner was shown is what moved to the settings pages (P88-ms).
+vi.mock("@/lib/knowledge/orgs", () => ({ getMembers: reads.getMembers }));
 vi.mock("@/lib/feedback/app", () => ({
   listFeedbackPage: reads.listFeedbackPage,
   countFeedback: reads.countFeedback,
@@ -71,6 +75,9 @@ const { FeedbackFailed } =
   await import("@/app/(app)/projects/[projectId]/feedback-retry");
 const { ProjectHead } =
   await import("@/app/(app)/projects/[projectId]/project-head");
+const { Keys } = await import("@/sikstack/frame");
+const { NamePanel } = await import("@/sikstack/org/name-panel");
+const { UrlPanel, UrlReadPanel } = await import("@/sikstack/org/url-panel");
 
 /** Every element of `type` in the tree a page returned. */
 function find(node: ReactNode, type: unknown): ReactElement[] {
@@ -124,9 +131,21 @@ async function projectsPanelRows() {
 beforeEach(() => {
   jar.zone = null;
   for (const read of Object.values(reads)) read.mockReset();
+  reads.getMembers.mockResolvedValue({ role: "owner", members: [] });
 });
 
 describe("org home", () => {
+  it("draws no Org name or Public URL panel, even for the owner, and keeps the org keys (P88-ms)", async () => {
+    orgHomeReads([project(1)]);
+    const tree = await DashboardPage();
+    expect(find(tree, NamePanel)).toHaveLength(0);
+    expect(find(tree, UrlPanel)).toHaveLength(0);
+    expect(find(tree, UrlReadPanel)).toHaveLength(0);
+    const [keys] = find(tree, Keys);
+    expect((keys.props as { scope: string; readOnly: boolean }).scope).toBe("org");
+    expect((keys.props as { readOnly: boolean }).readOnly).toBe(false);
+  });
+
   it("dates a project in the viewer's zone from the cookie, UTC without it", async () => {
     orgHomeReads([project(1)]);
     jar.zone = "Asia/Seoul";
@@ -276,6 +295,19 @@ async function projectHome() {
 }
 
 describe("project home", () => {
+  it("draws the visibility badge with no switch and no keys panel, even for the owner (P88-ms)", async () => {
+    projectHomeReads();
+    const tree = await ProjectHomePage({
+      params: Promise.resolve({ projectId: "p1" }),
+    });
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain("New items members only");
+    expect(html).not.toContain("Make public");
+    expect(html).not.toContain("Make private");
+    expect(html).not.toContain(">API keys<");
+    expect(find(tree, Keys)).toHaveLength(0);
+  });
+
   it("dates the project in the viewer's zone from the cookie, UTC without it", async () => {
     projectHomeReads();
     jar.zone = "Asia/Seoul";

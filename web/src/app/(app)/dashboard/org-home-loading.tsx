@@ -2,7 +2,7 @@ import { ORG_HOME } from "@/content/dashboard";
 import { Button, Panel, PanelBody, PanelHead, Skeleton } from "@/sikstack/ui";
 
 /**
- * Org home's own skeletons (`OrgHomeProjects.dc.html`, `OrgHomeUrl.dc.html`,
+ * Org home's own skeletons (`OrgHomeProjects.dc.html`,
  * `OrgHomeActivity.dc.html` Loading; frame.md F31): each bar sits in the real cell, so nothing moves
  * when the data lands. Shared by the route's `loading.tsx` and the Projects panel's Try again.
  */
@@ -112,24 +112,6 @@ export function ProjectsLoading() {
     <Panel aria-label={P.heading} aria-busy="true">
       <ProjectsHeadLoading />
       <ProjectsTableLoading />
-    </Panel>
-  );
-}
-
-export function UrlLoading() {
-  return (
-    <Panel aria-label={ORG_HOME.url.heading} aria-busy="true">
-      <PanelHead>
-        <h2>{ORG_HOME.url.heading}</h2>
-      </PanelHead>
-      <PanelBody rule>
-        <div className="copy-field">
-          <span className="copy-value">
-            <Skeleton width="10em" />
-          </span>
-        </div>
-        <span className="sr-only">{ORG_HOME.loading}</span>
-      </PanelBody>
     </Panel>
   );
 }

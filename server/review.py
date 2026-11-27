@@ -759,6 +759,7 @@ async def seed_quiz_card(user_id: UUID, ref: rs.DocRef, attempt: Any) -> Any:
         .returning(*CARDS.c)
     )
     async with get_session_maker()() as session:
+        await rs.hold_project(session, ref.tenant_id, ref.project)
         row = (await session.execute(stmt)).one_or_none()
         if row is not None:
             await session.execute(pg_insert(LOGS).values(
@@ -794,6 +795,7 @@ async def set_highlight_review(user_id: UUID, ref: rs.DocRef, annotation: Any, o
     at = now()
     async with get_session_maker()() as session:
         if on:
+            await rs.hold_project(session, ref.tenant_id, ref.project)
             card = _fresh_card(at)
             ins = pg_insert(CARDS).values(
                 id=uuid4(), user_id=user_id, tenant_id=ref.tenant_id, project=ref.project,

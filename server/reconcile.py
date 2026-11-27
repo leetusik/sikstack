@@ -151,7 +151,7 @@ def error_stage(error: Optional[str]) -> Optional[str]:
 
 def _is_project_dir_name(name: str, docs: Path) -> bool:
     try:
-        documents_mod.validate_project(name)
+        documents_mod.validate_project(name, check_length=False)
     except Exception:  # noqa: BLE001 - any invalid shape is "not a project dir"
         return False
     if name in _NOT_PROJECTS or name.startswith("."):

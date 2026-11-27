@@ -84,26 +84,44 @@ def _signup(client: TestClient) -> dict:
     return res.json()
 
 
-def test_signup_provisions_default_org_and_project(accounts_client):
-    """Signup returns a "default" org + "default" project, visible via /app."""
+def _signup_with_project(client: TestClient) -> dict:
+    """A sign-up plus one project ``default`` made by hand (a new org holds none)."""
+
+    body = _signup(client)
+    made = client.post(
+        "/app/projects",
+        json={"name": "default"},
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert made.status_code == 201, made.text
+    body["project"] = made.json()["project"]
+    return body
+
+
+def test_signup_provisions_a_personal_org_with_no_project(accounts_client):
+    """Signup's only org is named "Personal" and holds no project; the body keeps its
+    ``project`` key, as null (the /auth/* shape only ever gains fields)."""
 
     client, _sync = accounts_client
     body = _signup(client)
-    assert body["tenant"]["name"] == "default"
+    assert body["tenant"]["name"] == "Personal"
     assert body["tenant"]["plan"] == "free"  # 0008: every org starts on the free plan
-    assert body["project"]["name"] == "default"
+    assert "project" in body and body["project"] is None
 
     headers = {"Authorization": f"Bearer {body['token']}"}
+    me = client.get("/auth/me", headers=headers)
+    assert me.status_code == 200, me.text
+    assert [t["name"] for t in me.json()["tenants"]] == ["Personal"]
     res = client.get("/app/projects", headers=headers)
     assert res.status_code == 200, res.text
-    assert [p["name"] for p in res.json()["projects"]] == ["default"]
+    assert res.json()["projects"] == []
 
 
 def test_minted_credential_carries_tenant_id(accounts_client):
     """A minted project credential persists tenant_id (= the project's tenant)."""
 
     client, sync_engine = accounts_client
-    body = _signup(client)
+    body = _signup_with_project(client)
     headers = {"Authorization": f"Bearer {body['token']}"}
 
     res = client.post(
@@ -125,10 +143,10 @@ def test_minted_credential_carries_tenant_id(accounts_client):
 
 
 def test_new_project_defaults_private(accounts_client):
-    """Signup's project is private, on the create response and both read shapes."""
+    """A new project is private, on the create response and both read shapes."""
 
     client, _sync = accounts_client
-    body = _signup(client)
+    body = _signup_with_project(client)
     assert body["project"]["visibility"] == "private"
 
     headers = {"Authorization": f"Bearer {body['token']}"}
@@ -145,7 +163,7 @@ def test_patch_visibility_toggles_both_ways(accounts_client):
     """PATCH flips visibility to public and back to private, returning the new value."""
 
     client, _sync = accounts_client
-    body = _signup(client)
+    body = _signup_with_project(client)
     headers = {"Authorization": f"Bearer {body['token']}"}
     project_id = body["project"]["id"]
 
@@ -177,7 +195,7 @@ def test_patch_visibility_invalid_value_is_422(accounts_client):
     """PATCH an out-of-enum visibility value -> 422 from the Literal, no DB write."""
 
     client, _sync = accounts_client
-    body = _signup(client)
+    body = _signup_with_project(client)
     headers = {"Authorization": f"Bearer {body['token']}"}
     res = client.patch(
         f"/app/projects/{body['project']['id']}",

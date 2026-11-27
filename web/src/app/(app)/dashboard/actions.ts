@@ -342,7 +342,8 @@ export async function setOrgSlugAction(
     return { error: SET_ORG_SLUG_ERRORS.generic, reason: "failed" };
   }
 
-  revalidatePath("/dashboard", "page");
+  // Public URL is Org settings' panel (P88-ms); the Shell's org menu shows the address too.
+  revalidatePath("/", "layout");
   return { error: null, ok: Date.now() };
 }
 

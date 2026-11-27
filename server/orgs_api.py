@@ -2,19 +2,21 @@
 
 Every route but the invite's read needs a session (``require_user``) and acts in the
 session's active org (``X-Sikstack-Org``, else the first). An org's ``owner`` (who
-made it, or was made one) renames it, invites, revokes, removes members and makes a
-member an owner; a ``member`` (who joined by an invite) reads its members and may
-leave. Every account keeps at least one org: when a leave or a removal ends the
-account's last membership, the same transaction gives it a fresh org, as sign-up does
-(``default``, the account its owner, one project ``default``). Routes:
+made it, or was made one) renames it, invites, revokes, removes members, makes a
+member an owner and steps an owner (itself included) down to member; a ``member`` (who joined by an invite) reads its members and may
+leave. Every account keeps at least one org: when a leave, a removal or the org's
+delete ends the account's last membership, the same transaction gives it a fresh org,
+as sign-up does
+(``Personal``, the account its owner, no project). Routes:
 
 - ``POST /app/orgs {name}``: a new org named ``name`` (1 to ``ORG_NAME_MAX``
   characters once trimmed, no control character; else 422), the caller its owner,
-  with one project ``default``, as at sign-up. A name one of the caller's orgs has
+  with no project, as at sign-up. A name one of the caller's orgs has
   already (any case) is a 409 ``{"reason": "taken"}``; an account that made
   ``ORGS_PER_DAY`` orgs with this route in the last day (``tenants.made_by``: an org it
   was made owner of, its sign-up org and a fresh org never count) gets a 429
-  ``{"reason": "limit"}``. ``201 {"tenant", "project"}``.
+  ``{"reason": "limit"}``. ``201 {"tenant", "project": null}`` (the ``project`` key
+  stays from when the route made one).
 - ``PATCH /app/tenant/name {name}``: rename the active org (owner only, else 403;
   the same name rule). The slug (Public URL) stays ``PATCH /app/tenant``.
 - ``GET /app/members``: ``{"role", "members": [{id, email, role, joined_at}]}`` in
@@ -36,8 +38,12 @@ account's last membership, the same transaction gives it a fresh org, as sign-up
 - ``POST /app/members/{id}/owner`` (owner only; ``id`` is a member row's, as
   listed): the row's role becomes ``owner`` (its ``joined_at`` stays), so an owner can
   hand the org over and then leave. 204; 404 for an id that is not this org's; a row
-  that is an owner already is a 204 that changes nothing. No route makes an owner a
-  member again.
+  that is an owner already is a 204 that changes nothing.
+- ``POST /app/members/{id}/member`` (owner only; ``id`` is a member row's, as
+  listed): step an owner down, the caller itself included; the row's role becomes
+  ``member`` (its ``joined_at`` stays). 204; 404 for an id that is not this org's; a
+  row that is a member already is a 204 that changes nothing; 409 ``{"reason":
+  "last_owner"}`` when the row is the org's last owner.
 - ``DELETE /app/members/{id}`` (owner only; ``id`` is a member row's, as listed):
   the member is out of the org at once (its next request naming the org is the
   ``X-Sikstack-Org`` 403), and gets a fresh org when this was its only one. 204; 404
@@ -45,6 +51,13 @@ account's last membership, the same transaction gives it a fresh org, as sign-up
   last owner.
 - ``POST /app/tenant/leave``: the caller leaves the active org, and gets a fresh org
   when this was its only one. 204; 409 ``{"reason": "last_owner"}`` for its last owner.
+- ``DELETE /app/tenant {name}`` (owner only, else 403): delete the active org and
+  everything in it for good (``server.deletion``), ``name`` its name typed again (a
+  missing one is a 422, another a 409 ``{"reason": "name"}``). Every member whose only
+  org it was, the caller included, gets a fresh org in the same transaction. 409
+  ``{"reason": "tenant_one"}`` for the instance's own org (it holds ``docs/`` and the
+  master token) and ``install_feedback`` for the org holding the install-feedback
+  project. ``200 {"tenant"}``: the caller's first org afterwards.
 - ``GET /app/invite/{code}`` (a session or none): the org's name and the invite's
   state (``valid``, ``expired``, ``revoked``, ``used``); on a valid invite also the
   invited address and the inviter's, which the invite page draws. Signed in, it adds
@@ -55,7 +68,7 @@ account's last membership, the same transaction gives it a fresh org, as sign-up
   account whose email is not the invited one; 410 ``{"state"}`` for an invite that
   no longer works; 404 for an unknown code.
 
-Make owner and Remove check the caller's role twice: before (``require_owner``) and
+Make owner, Step down and Remove check the caller's role twice: before (``require_owner``) and
 again among the rows they lock, so an owner removed while its act waits on the lock gets
 a 403 and nothing changes. Invite and revoke check it once: a late invite from a removed
 owner stays revocable by any owner left.
@@ -73,19 +86,20 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, text, update
+from starlette.concurrency import run_in_threadpool
 
-from server import config, invites
+from server import config, deletion, invites
 from server.accounts.auth import AuthContext, optional_user, require_owner, require_user
+from server.api_auth import get_tenant_one_id
 from server.accounts.repository import AccountsRepository
 from server.accounts.security import sha256_hex
 from server.accounts.service import (
     DEFAULT_ORG_NAME,
-    DEFAULT_PROJECT_NAME,
     OrgLimitError,
     get_accounts_service,
 )
-from server.accounts.types import ROLE_MEMBER, ROLE_OWNER, CreateProject
-from server.auth_api import serialize_project, serialize_tenant
+from server.accounts.types import ROLE_MEMBER, ROLE_OWNER
+from server.auth_api import serialize_tenant
 from server.email_address import is_plain_address
 from server.installs_api import _require_accounts_plane, _take, _take_address
 from server.persistence.engine import get_session_maker
@@ -178,12 +192,12 @@ def serialize_invite(row: OrgInviteModel) -> dict[str, object]:
 async def create_org(
     payload: OrgNameInput, ctx: AuthContext = Depends(require_user)
 ) -> dict[str, object] | JSONResponse:
-    """Make an org with the caller as its owner and one project ``default``."""
+    """Make an org with the caller as its owner and no project."""
 
     if await _name_taken(ctx, payload.name):
         return _refused(409, "taken", "you already have an org with that name")
     try:
-        tenant, _member, project = await get_accounts_service().create_org(
+        tenant, _member = await get_accounts_service().create_org(
             ctx.user.id,
             payload.name,
             made_by_user=True,
@@ -191,7 +205,7 @@ async def create_org(
         )
     except OrgLimitError:
         return _refused(429, "limit", "you made as many orgs as you may today; try tomorrow")
-    return {"tenant": serialize_tenant(tenant), "project": serialize_project(project)}
+    return {"tenant": serialize_tenant(tenant), "project": None}
 
 
 @router.patch("/app/tenant/name", response_model=None)
@@ -421,13 +435,12 @@ def _owns(rows, user_id: UUID) -> bool:
 async def _fresh_org(session, user_id: UUID) -> None:
     """A fresh org for an account whose last membership just ended, in the caller's
     transaction, as at sign-up (``AccountsService.provision_signup``): the tenant
-    ``default`` with no maker (it never counts against the daily limit), the account its
-    owner, and one project ``default``."""
+    ``Personal`` with no maker (it never counts against the daily limit), the account its
+    owner, and no project."""
 
     repository = AccountsRepository(session)
     tenant = await repository.create_tenant(DEFAULT_ORG_NAME)
     await repository.add_tenant_member(tenant_id=tenant.id, user_id=user_id, role=ROLE_OWNER)
-    await repository.create_project(CreateProject(tenant_id=tenant.id, name=DEFAULT_PROJECT_NAME))
 
 
 _REFUSALS = {"last_owner": "an org keeps at least one owner"}
@@ -453,6 +466,33 @@ async def make_owner(member_id: UUID, ctx: AuthContext = Depends(require_user)) 
                 update(TenantMemberModel)
                 .where(TenantMemberModel.id == target.id)
                 .values(role=ROLE_OWNER)
+            )
+    return Response(status_code=204)
+
+
+@router.post("/app/members/{member_id}/member", status_code=204, response_model=None)
+async def step_down(
+    member_id: UUID, ctx: AuthContext = Depends(require_user)
+) -> Response | JSONResponse:
+    """Step an owner of the active org down to member (owner only; the caller may step
+    itself down while another owner stays)."""
+
+    _require_accounts_plane()
+    await require_owner(ctx)
+    async with get_session_maker()() as session, session.begin():
+        rows = (await session.execute(_locked_rows(ctx.tenant.id))).scalars().all()
+        if not _owns(rows, ctx.user.id):  # removed or stepped down while this waited
+            raise HTTPException(status_code=403, detail=_NOT_AN_OWNER)
+        target = next((r for r in rows if r.id == member_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="member not found")
+        if target.role == ROLE_OWNER:
+            if sum(r.role == ROLE_OWNER for r in rows) <= 1:
+                return _refused(409, "last_owner", _REFUSALS["last_owner"])
+            await session.execute(
+                update(TenantMemberModel)
+                .where(TenantMemberModel.id == target.id)
+                .values(role=ROLE_MEMBER)
             )
     return Response(status_code=204)
 
@@ -487,6 +527,50 @@ async def leave_org(ctx: AuthContext = Depends(require_user)) -> Response | JSON
 
 
 # --- the invite's link --------------------------------------------------------------
+
+
+# --- delete the org -----------------------------------------------------------------
+
+
+class ConfirmOrgNameInput(BaseModel):
+    """The org's name, typed again to delete it (required; else 422)."""
+
+    name: str = Field(max_length=1000)
+
+
+@router.delete("/app/tenant", response_model=None)
+async def delete_org(
+    payload: ConfirmOrgNameInput, ctx: AuthContext = Depends(require_user)
+) -> dict[str, object] | JSONResponse:
+    """Delete the active org and everything in it for good (owner only; ``server.deletion``)."""
+
+    _require_accounts_plane()
+    await require_owner(ctx)
+    tenant_one_id = await get_tenant_one_id()
+    refusal = deletion.refusal_for_tenant(tenant_id=ctx.tenant.id, tenant_one_id=tenant_one_id)
+    if refusal is None and not deletion.typed_name_matches(payload.name, ctx.tenant.name):
+        refusal = deletion.WRONG_NAME
+    if refusal is not None:
+        return _refused(409, refusal.reason, refusal.detail)
+    target = deletion.TenantTarget(
+        tenant_id=ctx.tenant.id,
+        name=payload.name,
+        user_id=ctx.user.id,
+        root=deletion.tenant_root(ctx.tenant.id, tenant_one_id),
+    )
+    try:
+        outcome = await run_in_threadpool(deletion.delete_tenant, target)
+    except Exception:
+        logger.error("org delete failed before its commit, or could not confirm it", exc_info=True)
+        raise HTTPException(status_code=503, detail="could not delete the org; try again")
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="tenant not found")
+    if outcome == "forbidden":  # no longer an owner by the time the lock was held
+        raise HTTPException(status_code=403, detail=_NOT_AN_OWNER)
+    if isinstance(outcome, deletion.Refusal):
+        return _refused(409, outcome.reason, outcome.detail)
+    tenants = await get_accounts_service().list_tenants_for_user(ctx.user.id)
+    return {"tenant": serialize_tenant(tenants[0])}
 
 
 @router.get("/app/invite/{code}")

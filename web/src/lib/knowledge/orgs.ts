@@ -1,21 +1,22 @@
 import "server-only";
 
 import { ApiError, getJson, getRaw, sendJson } from "./client";
-import type { KbProject, KbTenant } from "./types";
+import type { KbTenant } from "./types";
 
-// The org pages' calls to the API (`server/orgs_api.py`), server to server: New org, the org
-// home's rename, Members (the list, an invite, a revoke, making an owner, a removal, leaving) and the invite link
+// The org pages' calls to the API (`server/orgs_api.py`), server to server: New org, Org settings' (the rename,
+// Members: the list, an invite, a revoke, making an owner, stepping down, a removal, leaving; the org's delete) and
+// the invite link
 // (its read and its accept). Each session call acts in the active org (`X-Sikstack-Org` from the org cookie, as
 // every call does), but the invite link's two: its read lists the invite's own org, and its accept
 // joins that org, so neither names one (`org: null`), as the connect page's calls do. The refusals
 // keep the API's `reason` on the `ApiError` (`taken`, `address`, `member`, `invited`, `other`,
-// `limit`, `recipient`, `last_owner`).
+// `limit`, `recipient`, `last_owner`; the org's delete: `name`, `tenant_one`, `install_feedback`).
 
-/** `POST /app/orgs`: a new org, the caller its owner, with one project `default`. */
+/** `POST /app/orgs`: a new org, the caller its owner, with no project (`project` is `null`, kept for its shape). */
 export async function createOrg(
   token: string,
   name: string,
-): Promise<{ tenant: KbTenant; project: KbProject }> {
+): Promise<{ tenant: KbTenant; project: null }> {
   return sendJson("/app/orgs", "POST", { name }, { token });
 }
 
@@ -66,6 +67,14 @@ export async function makeOwner(token: string, id: string): Promise<void> {
   await sendJson<void>(`/app/members/${encodeURIComponent(id)}/owner`, "POST", undefined, { token });
 }
 
+/**
+ * `POST /app/members/{id}/member`: step an owner of the active org down to member (owner only; a member's row: no
+ * change). 204; 409 `last_owner` for the org's last owner.
+ */
+export async function stepDown(token: string, id: string): Promise<void> {
+  await sendJson<void>(`/app/members/${encodeURIComponent(id)}/member`, "POST", undefined, { token });
+}
+
 /** `DELETE /app/members/{id}`: remove a member from the active org (owner only; never its last owner, never from its only org). */
 export async function removeMember(token: string, id: string): Promise<void> {
   await sendJson<void>(`/app/members/${encodeURIComponent(id)}`, "DELETE", undefined, { token });
@@ -74,6 +83,16 @@ export async function removeMember(token: string, id: string): Promise<void> {
 /** `POST /app/tenant/leave`: leave the active org (never as its last owner, never the caller's only org). */
 export async function leaveOrg(token: string): Promise<void> {
   await sendJson<void>("/app/tenant/leave", "POST", undefined, { token });
+}
+
+/**
+ * `DELETE /app/tenant` with `{name}`, the org's name typed again (P88-ms): the active org and everything in it go for
+ * good, for every member. 200 `{tenant}`: the caller's first org after it, which the page makes the active one. The
+ * owner's: a member is a 403. A refusal is a 409 `reason`: `name`, `tenant_one` (this server's own org),
+ * `install_feedback`. 503 when nothing was deleted.
+ */
+export async function deleteOrg(token: string, name: string): Promise<{ tenant: KbTenant }> {
+  return sendJson("/app/tenant", "DELETE", { name }, { token });
 }
 
 /**

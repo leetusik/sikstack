@@ -70,6 +70,8 @@ _TAG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # server also rejects '/' and '..' inside it (`validate_project`), which this
 # pattern already forbids.
 _PROJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# server/project_names.py — one length rule on every path that writes a project name.
+PROJECT_NAME_MAX = 200
 
 # server/documents.py:61-62 — `2 <= len(tags) <= 5`, on every write.
 MIN_TAGS = 2
@@ -260,6 +262,8 @@ def validate_project(name: str, *, derived: bool) -> str:
     invalid is a lie — they never typed it. Name the source, then offer the fix.
     """
 
+    if len(name.strip()) > PROJECT_NAME_MAX:
+        raise CliError(f"project name must be 1 to {PROJECT_NAME_MAX} characters")
     if _PROJECT_RE.match(name):
         return name
     suggestion = _kebab(name)

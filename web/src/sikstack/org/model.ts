@@ -1,6 +1,7 @@
 // The org surfaces' rules as pure functions (P78-s2.S2's design): New org's form, Members' invite form, and the
 // invite link's view. No React and no I/O, so they are tested on their own; `new-org.tsx`, `members.tsx` and
-// `invite.tsx` render what these return.
+// `invite.tsx` render what these return. Members' Step down (`memberControls`, `withMember`) is P88-ms.S3's
+// signed design, applied by P88-ms.S4.
 
 // ── New org ───────────────────────────────────────────────────────────────────────────────────
 
@@ -85,13 +86,14 @@ export interface MembershipResult {
   reason?: MembershipRefusal;
 }
 
-/** The controls a member row ends with: Make owner, Remove, Leave. */
-export type MemberControl = "promote" | "remove" | "leave";
+/** The controls a member row ends with: Make owner, Remove, Step down, Leave. */
+export type MemberControl = "promote" | "remove" | "step-down" | "leave";
 
 /**
  * The controls a row ends with, for the viewer `me`, in order. An owner's view: each member's row Make owner and
- * Remove; the owner's own row Leave when the org has another owner (an org keeps one); another owner's row none
- * (no one makes an owner a member again). A member's view: its own row Leave; the rest none.
+ * Remove; the owner's own row Step down and Leave when the org has another owner (an org keeps one; P88-ms.S3's
+ * design adds Step down, `POST /app/members/{id}/member`); another owner's row none (an owner steps down only
+ * itself). A member's view: its own row Leave; the rest none.
  */
 export function memberControls(
   row: MemberRow,
@@ -101,7 +103,12 @@ export function memberControls(
   const mine = row.email === me.email;
   if (me.role !== "owner") return mine ? ["leave"] : [];
   if (row.role === "member") return ["promote", "remove"];
-  return mine && rows.some((r) => r.role === "owner" && r.id !== row.id) ? ["leave"] : [];
+  return mine && rows.some((r) => r.role === "owner" && r.id !== row.id) ? ["step-down", "leave"] : [];
+}
+
+/** The rows once Step down on row `id` lands: that row reads Member and moves down with the members. */
+export function withMember(rows: readonly MemberRow[], id: string): MemberRow[] {
+  return membersInOrder(rows.map((r) => (r.id === id ? { ...r, role: "member" } : r)));
 }
 
 /** Newest first: an invite just sent is the table's first row. */
