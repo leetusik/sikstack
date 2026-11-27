@@ -147,9 +147,9 @@ def test_the_unpacked_cap_names_the_size_and_the_cap(dest, monkeypatch):
 
 
 def test_the_real_caps_are_the_decided_ones():
-    assert settings.MAX_UPLOAD_BYTES == 16 * 1024 * 1024
-    assert settings.MAX_UNPACKED_BYTES == 50 * 1024 * 1024
-    assert settings.MAX_FILES == 5000
+    assert settings.MAX_UPLOAD_BYTES == 32 * 1024 * 1024
+    assert settings.MAX_UNPACKED_BYTES == 100 * 1024 * 1024
+    assert settings.MAX_FILES == 10000
 
 
 def test_no_manifest_or_an_unmarked_one_is_refused(dest, tmp_path):

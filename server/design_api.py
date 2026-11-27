@@ -6,9 +6,9 @@ revoked key 401), like ``/api/workspace``:
 
 - ``POST /api/design/{project_id}/builds``: the body is one ``tar.gz`` of the build
   folder (``design/out/``: ``manifest.json`` at its root). Over ``MAX_UPLOAD_BYTES``
-  (16 MB) is a 413 before or while it is read; it is unpacked under the caps
-  (``server.design.unpack``: files and folders only, clean relative names, 50 MB
-  unpacked, 5,000 files, a 413 or 400 naming the size and the cap) and must hold a
+  (32 MB) is a 413 before or while it is read; it is unpacked under the caps
+  (``server.design.unpack``: files and folders only, clean relative names, 100 MB
+  unpacked, 10,000 files, a 413 or 400 naming the size and the cap) and must hold a
   marked ``manifest.json``. ``201 {build, viewer, url}``; every publish is a new build. A
   build whose manifest's ``recording.file`` is under ``design/data/local/`` is
   private. An ``X-Sikstack-Checkout`` header, when sent, is kept as where it came from.

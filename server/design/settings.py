@@ -13,8 +13,10 @@
   signs its cookies with (both processes need the same value). Unset: no ticket is
   minted and the design origin admits no one.
 
-The caps (DECOMP run 3: about 5x today's build, under the edge's 20 MB body cap) are
-module constants so a test can lower them.
+The caps are about 7x a full build of today's design folder (14 MB unpacked, 5 MB
+compressed, under 900 files). The compressed one stays under the edge's body cap for
+this route (``deploy/sikstack.conf``: 40m) and Cloudflare's 100 MB request cap. They
+are module constants so a test can lower them.
 """
 
 from __future__ import annotations
@@ -32,9 +34,9 @@ APP_ORIGIN_ENV = "KB_DESIGN_APP_ORIGIN"
 SECRET_ENV = "KB_DESIGN_SECRET"
 
 #: The compressed upload, the unpacked files, and the file count.
-MAX_UPLOAD_BYTES = 16 * 1024 * 1024
-MAX_UNPACKED_BYTES = 50 * 1024 * 1024
-MAX_FILES = 5_000
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+MAX_UNPACKED_BYTES = 100 * 1024 * 1024
+MAX_FILES = 10_000
 #: Folders and other headers count too, so a stream of empty entries is bounded.
 MAX_ENTRIES = 20_000
 MAX_PATH_CHARS = 1024

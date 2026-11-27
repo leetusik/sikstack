@@ -10,6 +10,13 @@ integer version per release, `## v<N>` below; that history continues here.
 The plugin is numbered 0.x until it is declared 1.0. Releases 1.0.0, 2.0.0 and 2.1.0 came before this numbering; an
 install on any of them updates to 0.3.0, because `claude plugin update` follows a changed version, not a higher one.
 
+## 0.12.1 — 2026-11-27
+
+- **Design builds get twice the room.** `design-publish` now takes a build up to 100 MB unpacked, 10,000 files and
+  32 MB compressed (it was 50 MB, 5,000 and 16 MB), matching sikstack.com's new caps. Today's full design build is
+  about 14 MB unpacked and 5 MB compressed. A build over a cap is still refused before anything is sent, with its
+  size and the cap.
+
 ## 0.12.0 — 2026-11-26
 
 - **The workspace records the release that last wrote it: `works/engine.json`.** It holds `{"version": "<plugin
