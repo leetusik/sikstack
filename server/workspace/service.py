@@ -24,6 +24,11 @@ Owns the session lifecycle (one transaction per call) and the rules of a sync ba
   a result for an entry no longer pending is a conflict (409, nothing applied), so
   no entry is applied twice. The web closes an open entry (Discard) or closes a
   refused one while writing its replacement (Try again).
+- **Feedback closes with its item.** A landed batch (never a 409 or a replay) hands
+  the agenda files it changed to ``server.feedback.sync`` in its own transaction: a
+  new item naming an unmarked feedback files it, and an item turning done or an agenda
+  turning solved resolves a Filed one. An inbox write may carry its own feedback write
+  (``on_written``, the web's filing) in the same transaction.
 
 Errors from SQLAlchemy surface as ``WorkspacePersistenceError`` (writes) or
 ``WorkspaceReadError`` (reads); a malformed batch is a ``WorkspaceInputError``.
@@ -33,7 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -42,6 +47,7 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from server.feedback import sync as feedback_sync
 from server.persistence.engine import get_session_maker
 from server.workspace.repository import WorkspaceRepository
 from server.workspace.types import (
@@ -363,9 +369,11 @@ class WorkspaceService:
         minted_id: str | None,
         user_id: UUID | None,
         replaces: UUID | None = None,
+        on_written: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> InboxEntry:
         """Write one pending entry; ``replaces`` (Try again) closes that refused entry
-        in the same transaction, or nothing is written (:class:`InboxStateError`)."""
+        in the same transaction, or nothing is written (:class:`InboxStateError`).
+        ``on_written`` runs in that transaction after the write."""
 
         if kind not in INBOX_KINDS:
             raise WorkspaceInputError(f"unknown agenda change {kind!r}")
@@ -383,10 +391,13 @@ class WorkspaceService:
                             raise InboxStateError(
                                 replaces, current.state if current is not None else None
                             )
-                    return await repository.insert_inbox(
+                    written = await repository.insert_inbox(
                         project_id, kind=kind, items=items, fields=fields,
                         minted_id=minted_id, user_id=user_id, at=now,
                     )
+                    if on_written is not None:
+                        await on_written(session)
+                    return written
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
 
@@ -396,8 +407,10 @@ class WorkspaceService:
         entries: Sequence[dict[str, Any]],
         *,
         user_id: UUID | None,
+        on_written: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> list[InboxEntry]:
-        """Write several pending entries in one transaction, all or none, in this order.
+        """Write several pending entries in one transaction, all or none, in this order
+        (``on_written`` runs in that transaction after them).
 
         Each is ``{kind, items, fields, minted_id?}``. The engine applies the inbox
         oldest first (``created_at``, then id), so each entry is stamped one microsecond
@@ -413,7 +426,7 @@ class WorkspaceService:
             repository = WorkspaceRepository(session)
             try:
                 async with session.begin():
-                    return [
+                    written = [
                         await repository.insert_inbox(
                             project_id, kind=entry["kind"], items=entry["items"],
                             fields=entry["fields"], minted_id=entry.get("minted_id"),
@@ -421,6 +434,9 @@ class WorkspaceService:
                         )
                         for k, entry in enumerate(entries)
                     ]
+                    if on_written is not None:
+                        await on_written(session)
+                    return written
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
 
@@ -476,7 +492,8 @@ class WorkspaceService:
                         return CommitAnswer(
                             status=int(prior.status), body=dict(prior.response), replayed=True
                         )
-                    return await _apply(repository, project_id, writer, batch, head)
+                    return await _apply(repository, project_id, writer, batch, head,
+                                        session=session)
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to persist the workspace batch") from exc
 
@@ -487,8 +504,15 @@ async def _apply(
     writer: Writer,
     batch: CommitBatch,
     head: int,
+    *,
+    session: AsyncSession,
 ) -> CommitAnswer:
-    """Check every op against the locked head, then write all of it or none of it."""
+    """Check every op against the locked head, then write all of it or none of it.
+
+    A batch that lands hands the agenda files it changed to the feedback side
+    (:func:`server.feedback.sync.apply_landing`) in this same transaction, so a filed
+    feedback closes with the item that closes it, or not at all.
+    """
 
     touched: list[str] = []
     for op in batch.ops:
@@ -681,6 +705,7 @@ async def _apply(
         await repository.upsert_records(project_id, changed, now)
         await repository.insert_events(events)
         await repository.insert_revisions(revisions)
+        await _close_feedback(repository, session, project_id, batch, stored, changed)
     await repository.upsert_derived(
         project_id, ((item.path, item.content) for item in batch.derived), landed, now
     )
@@ -700,6 +725,42 @@ async def _apply(
         engine_version=writer.engine_version, credential_id=writer.credential_id,
     )
     return CommitAnswer(status=200, body=body)
+
+
+async def _close_feedback(
+    repository: WorkspaceRepository,
+    session: AsyncSession,
+    project_id: UUID,
+    batch: CommitBatch,
+    stored: dict[str, WorkingRecord],
+    changed: Sequence[WorkingRecord],
+) -> None:
+    """Hand the agenda files a landing batch changed to the feedback side, each with its
+    content before the batch (a move's: the path it came from) and after it."""
+
+    watched = [rec for rec in changed if not rec.deleted and feedback_sync.watches(rec.path)]
+    if not watched:
+        return
+    moved_from = {op.to_path: op.from_path for op in batch.ops if isinstance(op, MoveOp)}
+    files: list[feedback_sync.LandedFile] = []
+    for rec in watched:
+        prior = stored.get(rec.path)
+        if (prior is None or prior.deleted) and rec.path in moved_from:
+            prior = stored.get(moved_from[rec.path])
+        before = (await repository.record_content(project_id, prior)
+                  if prior is not None and not prior.deleted else None)
+        after = rec.content if rec.content is not None else await repository.record_content(
+            project_id, rec)
+        files.append(feedback_sync.LandedFile(path=rec.path, before=before, after=after))
+
+    async def entries_of(aid: str) -> list[bytes]:
+        prefix = feedback_sync.entry_prefix(aid)
+        live = await repository.live_records(project_id)
+        records = [live[path] for path in sorted(live)
+                   if path.startswith(prefix) and feedback_sync.watches(path)]
+        return [item.content for item in await repository.contents(project_id, records)]
+
+    await feedback_sync.apply_landing(session, project_id, files, entries_of)
 
 
 def get_workspace_service() -> WorkspaceService:

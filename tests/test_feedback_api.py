@@ -1074,6 +1074,9 @@ def _seed(client: TestClient, project_id: str, stamps: list, *, message="seeded"
     return ids
 
 
+_ALL_OPEN_120 = {"open": 120, "filed": 0, "resolved": 0, "dropped": 0}
+
+
 def test_the_session_list_pages_by_number_with_a_total(fb):
     a = _signup(fb)
     b = _signup(fb)
@@ -1095,7 +1098,7 @@ def test_the_session_list_pages_by_number_with_a_total(fb):
     assert second["total"] == 120 and "next_cursor" not in second
     assert all(r["project_id"] == a["project"]["id"] for r in second["records"])
     assert [len(read(f"page={n}")["records"]) for n in (1, 3)] == [50, 20]
-    assert read("page=4") == {"records": [], "total": 120}  # past the last page
+    assert read("page=4") == {"records": [], "total": 120, "counts": _ALL_OPEN_120}  # past the last page
     narrowed = read(f"page=3&project_id={a['project']['id']}")
     assert narrowed["total"] == 120 and len(narrowed["records"]) == 20
 
@@ -1130,8 +1133,8 @@ def test_the_session_list_pages_by_number_with_a_total(fb):
 
     # The web's six-digit cap is still a page (past the last: empty, with the total). A page
     # past it is a 400 naming ``page``, before its offset can overflow the database's bigint.
-    assert read("page=999999") == {"records": [], "total": 120}
-    assert read("page=999999&limit=100") == {"records": [], "total": 120}
+    assert read("page=999999") == {"records": [], "total": 120, "counts": _ALL_OPEN_120}
+    assert read("page=999999&limit=100") == {"records": [], "total": 120, "counts": _ALL_OPEN_120}
     for huge in (1_000_000, 2**63 // 50 + 2, 2**63, 10**23 - 1):
         res = fb.get(f"/app/feedback?page={huge}&limit=50", headers=a["session"])
         assert res.status_code == 400 and "page" in res.json()["detail"], (huge, res.text)
@@ -1280,8 +1283,9 @@ def test_filed_and_dismissed_feedback_never_lists_again_and_the_latest_mark_wins
 
 
 def test_feedback_an_agenda_item_names_counts_as_filed(fb):
-    """The web's "file on the agenda" and the engine's agree: a feedback an item names by
-    its source, stored or in a pending inbox entry, never lists."""
+    """The web's "file on the agenda" and the engine's agree: a feedback a landed item
+    names by its source is stored Filed, and one the web files reads Filed at once (its
+    inbox entry still pending); neither lists."""
 
     owner = _signup(fb)
     pid = owner["project"]["id"]
@@ -1296,8 +1300,10 @@ def test_feedback_an_agenda_item_names_counts_as_filed(fb):
         "20261124T010000.000002Z-bbbb": "slice:P8-q4.S1"}))
     assert [f["id"] for f in _triage(fb, pid, workspace).json()["feedback"]] == [c, b]
     got = fb.get(f"/api/feedback/{pid}/triage/{a}", headers=_h(workspace)).json()["feedback"]
-    assert got["triage"] == {"state": "filed", "agenda": "A2-k5", "reason": None, "by": None,
-                             "at": None, "agendas": ["A2-k5"]}
+    assert got["triage"] == {"state": "filed", "agenda": "A2-k5", "reason": None,
+                             "by": "agent:sikstack", "at": got["triage"]["at"],
+                             "agendas": ["A2-k5"]}
+    assert got["triage"]["at"].endswith("Z")
 
     # the web files b on A2-k5: a pending inbox entry, before any engine applies it
     res = fb.post(f"/app/feedback/{b}/agenda", json={"item": "A2-k5"}, headers=owner["session"])

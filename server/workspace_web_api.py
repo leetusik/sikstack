@@ -55,7 +55,9 @@ and whose result comes back in that sync's batch. Until then the item reads
   ``feedback:<id>``, its body the message and ``/feedback/<id>``): on ``item``, an item
   the workspace holds, or on a new one (an add titled from the message's first line,
   then the entry on its minted id, in one transaction). The same feedback twice on one
-  item is a 409.
+  item is a 409. The feedback reads Filed on that item at once: its state is written
+  in the inbox write's own transaction (``server.feedback.sync.file_from_web``, by
+  ``person:<email>``).
 - ``GET /app/feedback/{feedback}/agenda`` → ``{project, linked, items}``: the items a
   piece of feedback is on, derived from the entries (stored or pending) whose source
   names it.
@@ -85,18 +87,20 @@ from __future__ import annotations
 
 import re
 import secrets
-from collections.abc import Collection
+from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.accounts.auth import AuthContext, require_user
 from server.accounts.service import AccountsReadError, get_accounts_service
 from server.app_api import _load_scoped_project
 from server.feedback.service import FeedbackReadError, get_feedback_service
+from server.feedback.sync import file_from_web
 from server.workspace import (
     WorkspaceInputError,
     WorkspacePersistenceError,
@@ -475,11 +479,12 @@ async def _write(
     fields: dict[str, Any],
     minted_id: str | None = None,
     replaces: UUID | None = None,
+    on_written: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> InboxEntry:
     try:
         return await get_workspace_service().add_inbox(
             project_id, kind=kind, items=items, fields=fields, minted_id=minted_id,
-            user_id=ctx.user.id, replaces=replaces,
+            user_id=ctx.user.id, replaces=replaces, on_written=on_written,
         )
     except InboxStateError as exc:
         raise _closed(exc) from exc
@@ -737,6 +742,11 @@ async def file_feedback(
         if name != "item":
             raise _field_error(f"filing feedback takes no {name}")
     entry_fields = _feedback_entry(record, ctx)
+    by = f"person:{ctx.user.email}"
+
+    def filed_on(aid: str) -> Callable[[AsyncSession], Awaitable[None]]:
+        return lambda session: file_from_web(session, record.id, agenda=aid, by=by)
+
     if body.get("item") is None:
         minted = await _mint(reader)
         add_fields = {"title": _title(feedback_title(record.message)),
@@ -747,7 +757,7 @@ async def file_feedback(
                 [{"kind": INBOX_ADD, "items": [minted], "fields": add_fields,
                   "minted_id": minted},
                  {"kind": INBOX_ENTRY, "items": [minted], "fields": entry_fields}],
-                user_id=ctx.user.id,
+                user_id=ctx.user.id, on_written=filed_on(minted),
             )
         except WorkspaceInputError as exc:
             raise _field_error(str(exc)) from exc
@@ -763,7 +773,7 @@ async def file_feedback(
     if aid in already:
         raise HTTPException(status_code=409, detail=f"this feedback is already on {aid}")
     entry = await _write(reader.project_id, ctx, kind=INBOX_ENTRY, items=[aid],
-                         fields=entry_fields)
+                         fields=entry_fields, on_written=filed_on(aid))
     return {"item": aid, "entries": [_serialize(entry)]}
 
 

@@ -9,7 +9,7 @@ the route answers 5xx. Org-facing reads go through the ``get_scoped_*`` methods 
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -28,6 +28,7 @@ from server.feedback.types import (
     FeedbackListPage,
     FeedbackMetrics,
     FeedbackMetricsQuery,
+    FeedbackStateCounts,
     FeedbackSummary,
     FeedbackTriageRecord,
     ListFeedbackQuery,
@@ -257,23 +258,63 @@ class FeedbackService:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback records") from exc
 
-    # -- triage ---------------------------------------------------------------
+    # -- states ---------------------------------------------------------------
+
+    async def list_feedback_with_states(
+        self, query: ListFeedbackQuery
+    ) -> tuple[FeedbackListPage, dict[UUID, FeedbackTriageRecord], FeedbackStateCounts]:
+        """A page of feedback, the stored states of its records (an Open one with no row
+        is absent) and the filtered list's counts by state (one session)."""
+
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                page = await repository.list_feedback(query)
+                states = await repository.triage_for_ids([record.id for record in page.records])
+                counts = await repository.count_feedback_states(query.filters)
+                return page, states, counts
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise FeedbackReadError("failed to read feedback records") from exc
+
+    async def set_member_states(
+        self,
+        feedback_ids: Sequence[UUID],
+        project_ids: Collection[UUID],
+        *,
+        state: str,
+        reason: str | None,
+        by: str,
+    ) -> dict[UUID, FeedbackTriageRecord] | None:
+        """A member's Resolve, Drop or Reopen on several pieces of feedback, all or none,
+        in one transaction: ``None`` (nothing changed) when any id is not in
+        ``project_ids``; else the stored states after it (an Open one with no row is
+        absent). A feedback already in ``state`` is left as it is."""
+
+        ids = tuple(dict.fromkeys(feedback_ids))
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                async with session.begin():
+                    if await repository.scoped_feedback_ids(ids, project_ids) != set(ids):
+                        return None
+                    await repository.set_member_states(ids, state=state, reason=reason, by=by)
+                    return await repository.triage_for_ids(ids)
+            except SQLAlchemyError as exc:
+                raise FeedbackPersistenceError("failed to persist feedback states") from exc
 
     async def list_untriaged_feedback(
         self,
         project_id: UUID,
         *,
-        exclude: Collection[UUID] = (),
         limit: int,
     ) -> tuple[tuple[FeedbackEventRecord, ...], bool]:
-        """The project's untriaged feedback, newest first, and whether more remain."""
+        """The project's Open feedback, newest first, and whether more remain."""
 
         async with self._session_maker() as session:
             repository = FeedbackRepository(session)
             try:
-                return await repository.list_untriaged_feedback(
-                    project_id, exclude=exclude, limit=limit
-                )
+                return await repository.list_untriaged_feedback(project_id, limit=limit)
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback records") from exc
