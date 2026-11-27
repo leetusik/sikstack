@@ -1,0 +1,161 @@
+/* sikstack — Feedback: the list (`Feedback.dc.html`, `FeedbackList.dc.html`, `FeedbackListStates.dc.html`).
+   Owner: P65-nh.S4; no other slice edits this file.
+   Pre-created by P65-nh.S2 and imported once by ../index.css (so no page or component imports a sheet of its own).
+   Scoped like the system's sheets (../README.md): unlayered, root rules as `:scope`; colours and gaps are the
+   tokens' roles; the frame's classes are ./frame.css's, never redefined here (the list's set columns and its
+   message's 56ch are the frame's `.stack-*`, the board's `.fl-table`, `.fl-rating` and the rest). What is left
+   of the FeedbackList board's own rules is here, under the board's names.
+   The next version (P91-v3.S3's design): the rules after "P91-v3" are new; the ones above are production's, byte for
+   byte. The design build loads this after production's sheets (`design/app/layout.tsx`); applied, it replaces
+   `src/sikstack/styles/feedback/list.css` and that import goes. */
+@scope (.ui) to ([data-ui-legacy]) {
+  /* what stands in place of the rows keeps the hairline a table's head draws under the search and filters (F141) */
+  .fl-body {
+    border-top: 1px solid var(--line);
+  }
+  /* an empty part's sentence breaks into even lines, never inside the key's name and never between a link and its comma */
+  .fl-body > .block-text {
+    text-wrap: balance;
+  }
+  .fl-keep {
+    white-space: nowrap;
+  }
+  /* a link inside a sentence is 44 px tall to the finger, and its line keeps its height */
+  .fl-inline {
+    /* the board's control is a button (inline-block): a link drawn as it keeps that box, so its 44 px are real */
+    display: inline-block;
+    padding-block: var(--space-3);
+    margin-block: calc(-1 * var(--space-3));
+  }
+  /* a skeleton row's rating is a bar as wide as the widest rating, on its baseline, so the Feedback column stays where it is when the rows land */
+  .fl-ghost {
+    align-items: baseline;
+    justify-items: stretch;
+  }
+
+  /* ── P91-v3: one state at a time, picking rows, acting on them ──
+     The panel is a container of its own: the list's head and the picked rows' strip follow its width. */
+  .fl-panel {
+    container: flpanel / inline-size;
+  }
+  /* the list's head, between the bar and the rows: the box that picks every row on screen, over the rows' boxes,
+     then the state filter. On a phone the states' words start on the rows' text edge; wider, on the Rating column's */
+  .fl-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) 0;
+    padding: calc((var(--top-h) - var(--control-h)) / 2) var(--space-4)
+      calc((var(--top-h) - var(--control-h)) / 2) var(--space-1);
+    border-top: 1px solid var(--line);
+  }
+  .fl-check {
+    flex: none;
+    justify-content: center;
+    width: var(--control-h);
+  }
+  span.fl-check {
+    display: block;
+    height: var(--control-h);
+  }
+  @container flpanel (min-width: 48em) {
+    .fl-head {
+      column-gap: var(--space-4);
+    }
+  }
+  /* the state filter is links (each state is an address); the one shown is the pressed toggle's ink and rule */
+  /* the filter takes the head's line beside the box and wraps its states inside it */
+  .fl-states {
+    flex: 1 1 0;
+  }
+  .fl-states > .seg-item {
+    gap: var(--space-1);
+    text-decoration: none;
+  }
+  .fl-states > .seg-item[aria-current="page"] {
+    color: var(--ink);
+  }
+  .fl-states > .seg-item[aria-current="page"]::after {
+    background: var(--ink);
+  }
+  .fl-n {
+    color: var(--ink-2);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  .fl-n > .skel {
+    width: 1.5em;
+  }
+  .fl-count {
+    font-variant-numeric: tabular-nums;
+  }
+  /* with rows picked: where the head has room, the count, Clear and the actions end its line; narrower, they come in
+     a strip at the panel's end that stays in view at the window's foot (the Agenda's F309) */
+  .fl-head-acts {
+    display: none;
+  }
+  .fl-bulk {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 calc(var(--radius-m) - 1px) calc(var(--radius-m) - 1px);
+    background: var(--surface);
+  }
+  .fl-bulk > .fl-count {
+    flex: 1 1 auto;
+  }
+  .fl-bulk > .fl-acts {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+  @container flpanel (min-width: 52em) {
+    .fl-head-acts {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-2) var(--space-4);
+      margin-left: auto;
+    }
+    .fl-bulk {
+      display: none;
+    }
+  }
+  /* a row's box leads it, one control square, on the row's first line; a picked row is tinted as the Agenda's is */
+  .stack-set .fl-pick {
+    width: calc(var(--control-h) + var(--space-1));
+    padding: 0 0 0 var(--space-1);
+    vertical-align: top;
+  }
+  .fl-picks tbody tr.is-selected {
+    background: var(--accent-tint);
+  }
+  /* the column a state adds: the agenda item (an id, one line), or the reason (a share of the table, wrapping) */
+  .fl-agenda {
+    width: 8em;
+  }
+  .fl-reason {
+    width: 22%;
+  }
+  /* stacked, the box stays at the row's start beside its message, and the line under the message starts on the
+     message's edge */
+  @container tstack (max-width: 48em) {
+    .table-stack .table.fl-picks tbody tr {
+      position: relative;
+      padding-left: calc(var(--space-1) + var(--control-h));
+    }
+    .fl-picks td.fl-pick {
+      position: absolute;
+      top: 0;
+      left: var(--space-1);
+    }
+    .table-stack .table td.fl-pick:empty {
+      display: none;
+    }
+  }
+}

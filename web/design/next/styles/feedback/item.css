@@ -1,0 +1,88 @@
+/* sikstack — Feedback: one piece of feedback (`FeedbackItem.dc.html`, `FeedbackItemComments*`, `FeedbackItemFiles*`).
+   Owner: P65-nh.S5; no other slice edits this file.
+   Pre-created by P65-nh.S2 and imported once by ../index.css (so no page or component imports a sheet of its own).
+   Scoped like the system's sheets (../README.md): unlayered, root rules as `:scope`; colours and gaps are the
+   tokens' roles; the frame's classes are ./frame.css's, never redefined here. The boards' own <style> rules, as
+   signed; one change: the board's `.fi-head > .sc-host` (the canvas's host of the head's end) is the head's end
+   itself, `.fi-head > .page-title + *`, whatever P65-nh.S6 mounts there.
+   The next version (P91-v3.S3's design): the rules after "P91-v3" are new; the ones above are production's, byte for
+   byte. The design build loads this after production's sheets (`design/app/layout.tsx`); applied, it replaces
+   `src/sikstack/styles/feedback/item.css` and that import goes. */
+@scope (.ui) to ([data-ui-legacy]) {
+  /* the head: the title's line, then the head's end on its first line (F142) */
+  .fi-head {
+    align-items: flex-start;
+  }
+  .fi-head > .page-title {
+    flex: 1 1 16em;
+    padding-block: var(--space-2);
+  }
+  .fi-head > .page-title + * {
+    display: flex;
+    margin-left: auto;
+  }
+
+  /* one comment: who and when on a line, then what they wrote; a hairline between comments */
+  .fi-comment {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--line);
+  }
+
+  /* the table sets its columns, never what a row holds: loading and loaded share every edge (the signed keys
+     table's recipe) */
+  .fi-files {
+    table-layout: fixed;
+  }
+  .fi-files th:nth-child(2) {
+    width: 28%;
+  }
+  .fi-files th:nth-child(3) {
+    width: 18%;
+  }
+  .fi-files th:nth-child(4) {
+    width: 24%;
+  }
+  /* a file's name and type are the caller's strings: they break where they must */
+  .fi-files td.is-main,
+  .fi-type {
+    overflow-wrap: anywhere;
+  }
+  /* loading: Download's place, one control tall, its mark on the baseline where the label will be */
+  .fi-get-skel {
+    display: inline-block;
+    height: var(--control-h);
+    padding-right: var(--space-4);
+    line-height: var(--control-h);
+  }
+  .fi-get-skel > .skel {
+    width: 4.5em;
+  }
+  /* stacked, the row's action keeps the 8 px edge a table's row action has: its cell moves, the button keeps
+     its size */
+  @container tstack (max-width: 48em) {
+    .fi-files td.to-end {
+      margin-right: calc(var(--space-2) - var(--space-4));
+    }
+  }
+
+  /* ── P91-v3: the state line and the state's actions ──
+     the state line takes the title block's own line, under the rating and the time */
+  .fi-state {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .fi-state-reason {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* the head's end holds the state's actions, then Add to agenda: one row that wraps, ending on the head's edge */
+  .fi-head-end {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+}
