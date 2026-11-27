@@ -24,6 +24,14 @@ Owns the session lifecycle (one transaction per call) and the rules of a sync ba
   a result for an entry no longer pending is a conflict (409, nothing applied), so
   no entry is applied twice. The web closes an open entry (Discard) or closes a
   refused one while writing its replacement (Try again).
+- **Feedback closes with its item.** A landed batch (never a 409 or a replay) hands
+  the agenda files it changed to ``server.feedback.sync`` in its own transaction: a
+  new item naming an unmarked feedback files it, and an item turning done or an agenda
+  turning solved resolves a Filed one. A Filed feedback follows its item: an item
+  file naming it that is deleted or moved, a filing the engine refuses, and a filing
+  the web discards (here, in the discard's transaction) move it to the agenda that
+  still holds it, or back to Open. An inbox write may carry its own feedback write
+  (``on_written``, the web's filing) in the same transaction.
 
 Errors from SQLAlchemy surface as ``WorkspacePersistenceError`` (writes) or
 ``WorkspaceReadError`` (reads); a malformed batch is a ``WorkspaceInputError``.
@@ -33,7 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -42,6 +50,7 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from server.feedback import sync as feedback_sync
 from server.persistence.engine import get_session_maker
 from server.workspace.repository import WorkspaceRepository
 from server.workspace.types import (
@@ -363,9 +372,11 @@ class WorkspaceService:
         minted_id: str | None,
         user_id: UUID | None,
         replaces: UUID | None = None,
+        on_written: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> InboxEntry:
         """Write one pending entry; ``replaces`` (Try again) closes that refused entry
-        in the same transaction, or nothing is written (:class:`InboxStateError`)."""
+        in the same transaction, or nothing is written (:class:`InboxStateError`).
+        ``on_written`` runs in that transaction after the write."""
 
         if kind not in INBOX_KINDS:
             raise WorkspaceInputError(f"unknown agenda change {kind!r}")
@@ -383,10 +394,13 @@ class WorkspaceService:
                             raise InboxStateError(
                                 replaces, current.state if current is not None else None
                             )
-                    return await repository.insert_inbox(
+                    written = await repository.insert_inbox(
                         project_id, kind=kind, items=items, fields=fields,
                         minted_id=minted_id, user_id=user_id, at=now,
                     )
+                    if on_written is not None:
+                        await on_written(session)
+                    return written
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
 
@@ -396,8 +410,10 @@ class WorkspaceService:
         entries: Sequence[dict[str, Any]],
         *,
         user_id: UUID | None,
+        on_written: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> list[InboxEntry]:
-        """Write several pending entries in one transaction, all or none, in this order.
+        """Write several pending entries in one transaction, all or none, in this order
+        (``on_written`` runs in that transaction after them).
 
         Each is ``{kind, items, fields, minted_id?}``. The engine applies the inbox
         oldest first (``created_at``, then id), so each entry is stamped one microsecond
@@ -413,7 +429,7 @@ class WorkspaceService:
             repository = WorkspaceRepository(session)
             try:
                 async with session.begin():
-                    return [
+                    written = [
                         await repository.insert_inbox(
                             project_id, kind=entry["kind"], items=entry["items"],
                             fields=entry["fields"], minted_id=entry.get("minted_id"),
@@ -421,6 +437,9 @@ class WorkspaceService:
                         )
                         for k, entry in enumerate(entries)
                     ]
+                    if on_written is not None:
+                        await on_written(session)
+                    return written
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
 
@@ -444,6 +463,11 @@ class WorkspaceService:
                         raise InboxStateError(
                             entry_id, current.state if current is not None else None
                         )
+                    pending_of, stored_of = _feedback_reads(repository, project_id)
+                    await feedback_sync.follow_entries(
+                        session, project_id, closed=[closed],
+                        pending_of=pending_of, stored_of=stored_of,
+                    )
                     return closed
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to write the workspace inbox") from exc
@@ -476,7 +500,8 @@ class WorkspaceService:
                         return CommitAnswer(
                             status=int(prior.status), body=dict(prior.response), replayed=True
                         )
-                    return await _apply(repository, project_id, writer, batch, head)
+                    return await _apply(repository, project_id, writer, batch, head,
+                                        session=session)
             except SQLAlchemyError as exc:
                 raise WorkspacePersistenceError("failed to persist the workspace batch") from exc
 
@@ -487,8 +512,15 @@ async def _apply(
     writer: Writer,
     batch: CommitBatch,
     head: int,
+    *,
+    session: AsyncSession,
 ) -> CommitAnswer:
-    """Check every op against the locked head, then write all of it or none of it."""
+    """Check every op against the locked head, then write all of it or none of it.
+
+    A batch that lands hands the agenda files it changed to the feedback side
+    (:func:`server.feedback.sync.apply_landing`) in this same transaction, so a filed
+    feedback closes with the item that closes it, or not at all.
+    """
 
     touched: list[str] = []
     for op in batch.ops:
@@ -689,6 +721,10 @@ async def _apply(
             project_id, result.id, state=result.state, reason=result.reason,
             exit_code=result.exit_code, batch_id=batch.batch_id, at=now,
         )
+    refused = [entry for result in results if result.state == INBOX_REFUSED
+               if (entry := await repository.get_inbox(project_id, result.id)) is not None]
+    if changed or refused:
+        await _close_feedback(repository, session, project_id, batch, stored, changed, refused)
     await repository.set_landed(
         project_id, head=landed, at=now, engine_version=writer.engine_version
     )
@@ -700,6 +736,71 @@ async def _apply(
         engine_version=writer.engine_version, credential_id=writer.credential_id,
     )
     return CommitAnswer(status=200, body=body)
+
+
+async def _close_feedback(
+    repository: WorkspaceRepository,
+    session: AsyncSession,
+    project_id: UUID,
+    batch: CommitBatch,
+    stored: dict[str, WorkingRecord],
+    changed: Sequence[WorkingRecord],
+    refused: Sequence[InboxEntry],
+) -> None:
+    """Hand the agenda files a landing batch changed to the feedback side, each with its
+    content before the batch (a move's: the path it came from) and after it (a deleted
+    one's: None), with the inbox entries the batch refused. Runs after the batch's
+    records and inbox results are written, so a read here sees the workspace after it."""
+
+    watched = [rec for rec in changed if feedback_sync.watches(rec.path)]
+    if not watched and not refused:
+        return
+    moved_from = {op.to_path: op.from_path for op in batch.ops if isinstance(op, MoveOp)}
+    files: list[feedback_sync.LandedFile] = []
+    for rec in watched:
+        prior = stored.get(rec.path)
+        if (prior is None or prior.deleted) and rec.path in moved_from:
+            prior = stored.get(moved_from[rec.path])
+        before = (await repository.record_content(project_id, prior)
+                  if prior is not None and not prior.deleted else None)
+        if rec.deleted:
+            after = None
+        else:
+            after = rec.content if rec.content is not None else (
+                await repository.record_content(project_id, rec))
+        files.append(feedback_sync.LandedFile(path=rec.path, before=before, after=after))
+
+    async def entries_of(aid: str) -> list[bytes]:
+        prefix = feedback_sync.entry_prefix(aid)
+        live = await repository.live_records(project_id)
+        records = [live[path] for path in sorted(live)
+                   if path.startswith(prefix) and feedback_sync.watches(path)]
+        return [item.content for item in await repository.contents(project_id, records)]
+
+    pending_of, stored_of = _feedback_reads(repository, project_id)
+    await feedback_sync.apply_landing(session, project_id, files, entries_of,
+                                      closed=refused, pending_of=pending_of,
+                                      stored_of=stored_of)
+
+
+def _feedback_reads(
+    repository: WorkspaceRepository, project_id: UUID
+) -> tuple[feedback_sync.PendingOf, feedback_sync.StoredOf]:
+    """What the feedback side reads to see which agendas still hold a feedback: the
+    pending inbox entries, and the live item files (path, content) with the live
+    agenda ids, each read as the transaction sees them now."""
+
+    async def pending_of() -> list[InboxEntry]:
+        return await repository.inbox_entries(project_id, (INBOX_PENDING,))
+
+    async def stored_of() -> tuple[list[tuple[str, bytes]], set[str]]:
+        live = await repository.live_records(project_id)
+        agendas = {aid for path in live if (aid := feedback_sync.agenda_of(path)) is not None}
+        records = [live[path] for path in sorted(live) if feedback_sync.is_entry(path)]
+        files = await repository.contents(project_id, records)
+        return [(item.path, item.content) for item in files], agendas
+
+    return pending_of, stored_of
 
 
 def get_workspace_service() -> WorkspaceService:

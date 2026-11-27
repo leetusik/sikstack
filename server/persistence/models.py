@@ -929,13 +929,12 @@ class FeedbackAttachmentModel(Base):
 
 
 class FeedbackTriageModel(Base):
-    """What became of one piece of feedback on the agenda (``feedback_triage``, revision
-    ``0018``):``filed`` on an agenda (its full id) or ``dismissed`` (an optional reason),
-    by whom (an entry author, ``person:``/``agent:``) and when. One row per event: a
-    later mark replaces it (the latest wins). No row is *untriaged*; a feedback an
-    agenda item names by ``source: feedback:<id>`` also reads filed, derived from the
-    workspace and never stored here (``server.feedback_api``). Value checks are
-    app-layer."""
+    """The one state of a piece of feedback (``feedback_triage``, revisions ``0018`` and
+    ``0020``): ``open``, ``filed``, ``resolved`` or ``dropped``; ``agenda`` the agenda it
+    was filed on or resolved by (its full id), ``reason`` the optional Drop reason, and
+    who set it (``person:``/``agent:``) and when. One row per event, written once on
+    each transition (``server.feedback``): a later state replaces it. No row reads
+    ``open``. Value checks are app-layer."""
 
     __tablename__ = "feedback_triage"
 

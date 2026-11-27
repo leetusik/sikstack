@@ -90,13 +90,40 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
 const FB = "src/sikstack/feedback";
 const FB_AGENDA = "src/sikstack/feedback/agenda";
 const FB_ROUTE = "src/app/(app)/projects/[projectId]/feedback/[feedbackId]";
+// P91-v3.S3's design, applied: the list and the shared state module in S4, the item in S5; each `from` names production.
+const NX_LIST = `${FB}/list/view.tsx`;
+const NX_STATE = `${FB}/state`;
+const FB_LIST_ROUTE = "src/app/(app)/feedback";
+
+/**
+ * The Feedback list (`/feedback`, the org's; a project's list is the same component): production's view on made
+ * data (`feedback-list-data.ts`). Each state filter, the three empties, picking rows and acting on them, the two
+ * confirms, a member's view, and the route's loading and failed branches.
+ */
+export const FEEDBACK_LIST_STATES = pageStates("Feedback list", [
+  { key: "open", label: "Open (default)", from: `${NX_LIST}:268 the head, :292 Open current · list/model.ts:80 · feedback-list-data.ts (made)` },
+  { key: "filed", label: "Filed", from: `${NX_LIST}:188 holds agenda, :371 the Agenda column (made)` },
+  { key: "resolved", label: "Resolved", from: `${NX_LIST}:371 the Agenda column (resolved by its agenda item; made)` },
+  { key: "dropped", label: "Dropped", from: `${NX_LIST}:380 the Reason column, a dash without one (made)` },
+  { key: "none", label: "No feedback yet", from: `${NX_LIST}:439 · list/model.ts:79 every count 0, no filter` },
+  { key: "state-empty", label: "None open", from: `${NX_LIST}:447 · list/model.ts:80 the org has feedback, none Open, no filter` },
+  { key: "no-match", label: "Search matches nothing", from: `${NX_LIST}:470 · list/model.ts:77 a search set; the counts show where it matches` },
+  { key: "one", label: "One selected", from: `${NX_LIST}:342 is-selected, :302 the head's actions (52em), :496 the strip narrower` },
+  { key: "several", label: "Several selected", from: `${NX_LIST}:196 the count, :211 one act for all picked` },
+  { key: "resolving", label: "Resolving", from: `${NX_LIST}:211 Resolve acts at once, :196 the count says Resolving…` },
+  { key: "confirm-drop", label: "Drop, with a reason", from: `${NX_STATE}/confirm.tsx:77 one reason for the selection` },
+  { key: "confirm-delete", label: "Delete confirm (owner)", from: `${NX_STATE}/confirm.tsx:112 btn-danger · state/model.ts:47 owner only` },
+  { key: "member", label: "A member's view", from: `${NX_STATE}/model.ts:47 no Delete (POST /app/feedback/delete answers a member 403)` },
+  { key: "loading", label: "Loading", from: `${FB_LIST_ROUTE}/loading.tsx · ${FB}/list/loading.tsx (the skeleton rows and counts)` },
+  { key: "failed", label: "Did not load", from: `${FB}/list/list.tsx failed · ${NX_LIST}:477` },
+]);
 
 /**
  * A piece of feedback not on the agenda yet (P61-e9; f3 of the recording): the add in each of its phases, its waiting
  * answer, the two not-offered answers (no workspace linked, no project), and the routes' branches.
  */
 export const FEEDBACK_STATES = pageStates("Feedback item", [
-  { key: "offered", label: "Add to agenda", from: `${FB}/item/body.tsx offered (linked, on no item) · ${FB_AGENDA}/control.tsx · recording f3, on no item`, data: true },
+  { key: "offered", label: "Open, Add to agenda", from: `${FB}/item/body.tsx offered (linked, on no item) · ${FB_AGENDA}/control.tsx · recording f3, on no item`, data: true },
   { key: "no-workspace", label: "No workspace linked", from: `${FB}/item/body.tsx not offered · lib/feedback/agenda.ts canAdd: linked false` },
   { key: "confirm-new", label: "Confirm: a new item", from: `${FB_AGENDA}/control.tsx:163 isOpen, :179 the choice (A new item)` },
   { key: "confirm-existing", label: "Confirm: an existing item", from: `${FB_AGENDA}/control.tsx:179 the choice (A3-1z picked)` },
@@ -107,12 +134,22 @@ export const FEEDBACK_STATES = pageStates("Feedback item", [
   { key: "loading", label: "Loading", from: `${FB_ROUTE}/loading.tsx` },
   { key: "not-found", label: "Not found", from: `${FB_ROUTE}/not-found.tsx` },
   { key: "error", label: "Page error", from: `${FB_ROUTE}/error.tsx` },
+  // P91-v3.S3's design: the state line and the state's actions (the next versions; the states are made).
+  { key: "resolved", label: "Resolved", from: `${NX_STATE}/line.tsx:28 the badge · ${FB}/item/item.tsx:64 the state slot (made)` },
+  { key: "dropped", label: "Dropped, with a reason", from: `${NX_STATE}/line.tsx:29 the reason · Reopen (made)` },
+  { key: "resolving", label: "Resolving", from: `${NX_STATE}/control.tsx:123 acts at once · line.tsx:60 busy word in place` },
+  { key: "confirm-drop", label: "Drop confirm", from: `${NX_STATE}/control.tsx:120 · confirm.tsx:77 Reason (optional)` },
+  { key: "confirm-delete", label: "Delete confirm (owner)", from: `${NX_STATE}/confirm.tsx:46 its comments and files counted (one of each made)` },
+  { key: "member", label: "A member's view", from: `${NX_STATE}/model.ts:47 no Delete` },
 ]);
 
 /** A piece of feedback already on the agenda (f1: a new item and A3-1z; f2: A3-1z): the part names each item. */
 export const FEEDBACK_FILED_STATES = pageStates("Feedback item on the agenda", [
   { key: "filed", label: "On the agenda", from: `${FB_AGENDA}/part.tsx:43 one row an item · recording.json feedback (GET /app/feedback/{id}/agenda)`, data: true },
   { key: "no-workspace", label: "No workspace linked", from: `${FB}/item/body.tsx not offered · lib/feedback/agenda.ts canAdd: linked false, sent() none` },
+  // P91-v3.S3's design (made states): Filed names its item; resolved by the workspace when the item is done.
+  { key: "resolved", label: "Resolved by its agenda item", from: `${NX_STATE}/line.tsx:29 the agenda kept · by agent:sikstack (made)` },
+  { key: "confirm-delete", label: "Delete confirm (owner)", from: `${NX_STATE}/confirm.tsx:46 · the agenda items stay` },
 ]);
 
 // ── The org surfaces (P78-s2.S2's design): applied by P78-s2.S4, so each `from` names production's file

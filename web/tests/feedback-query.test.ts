@@ -57,7 +57,11 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
       { project_id: PROJECT, q: "slow" },
       3,
     );
-    expect(page).toEqual({ records: [{ id: "a" }], total: 230 });
+    expect(page).toEqual({
+      records: [{ id: "a" }],
+      total: 230,
+      counts: { open: 0, filed: 0, resolved: 0, dropped: 0 },
+    });
     const url = new URL(String(vi.mocked(fetch).mock.calls[0][0]));
     expect(url.pathname).toBe("/app/feedback");
     expect(Object.fromEntries(url.searchParams)).toEqual({
@@ -67,7 +71,7 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
     });
   });
 
-  it("counts a window with `limit: 1` and reads only the total", async () => {
+  it("counts a window in every state (`state=all`), with `limit: 1`, and reads only the total", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       json({ records: [{ id: "a" }], total: 42 }),
     );
@@ -82,6 +86,8 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
       start_ingested_at: start,
       end_ingested_at: end,
       limit: "1",
+      // the API answers Open alone without `state` (P91-v3); project home's count is every state's
+      state: "all",
     });
   });
 

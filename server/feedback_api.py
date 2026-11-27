@@ -44,6 +44,7 @@ any auth, like the Listen routes: Feedback needs the accounts plane.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import contextlib
@@ -65,7 +66,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
 from server import config
-from server.accounts.auth import AuthContext, extract_bearer_token, require_user
+from server.accounts.auth import (
+    AuthContext,
+    extract_bearer_token,
+    require_owner,
+    require_user,
+)
 from server.accounts.security import sha256_hex
 from server.accounts.service import (
     DEFAULT_PROJECT_NAME,
@@ -107,10 +113,17 @@ from server.feedback.types import (
     FeedbackMetrics,
     FeedbackMetricsQuery,
     FeedbackQueryFilters,
+    FeedbackStateCounts,
     FeedbackTriageRecord,
     ListFeedbackQuery,
+    FEEDBACK_STATES,
+    MEMBER_STATES,
+    STATE_DROPPED,
+    STATE_OPEN,
+    STATE_TO_TRIAGE,
     TRIAGE_FILED,
     TRIAGE_STATES,
+    TRIAGE_TO_STATE,
 )
 from server.usage.metering import stamp_credential_used
 from server.workspace import WorkspaceReadError
@@ -124,6 +137,9 @@ from server.workspace.types import (
 from server.workspace_read import open_reader
 
 logger = logging.getLogger(__name__)
+
+#: A state filter's word for "every state" on the session list.
+_ALL_STATES = "all"
 
 router = APIRouter()
 
@@ -920,19 +936,22 @@ UNLINKED_SWEEP_MAX_ROWS = 500
 UNLINKED_SWEEP_MAX_SECONDS = 1.0
 
 
-async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
-    """Delete unlinked attachments older than the TTL, rows then files, in batches.
+async def sweep_unlinked_attachments(storage: AttachmentStorage | None = None) -> int:
+    """Delete unlinked attachments older than the TTL, rows then files, in batches;
+    the number of rows reclaimed.
 
-    The opportunistic sweep (no scheduler): an upload nobody linked within
-    ``KB_FEEDBACK_ATTACHMENTS_UNLINKED_TTL_S`` is reclaimed by a later upload. Each
-    batch's files are removed only for rows its committed delete returned; a file
-    already missing is not an error. Batches repeat until one comes back short (no
-    stale row left) or the budget (``UNLINKED_SWEEP_MAX_ROWS`` rows,
-    ``UNLINKED_SWEEP_MAX_SECONDS``) is spent. The sweep never fails the upload that
-    runs it. A capture that later names a reclaimed id is treated like any unknown
-    id (stored without it).
+    The one sweep, run by each upload before it stores its file and by the app's own
+    timer (``run_unlinked_sweeps``): an upload nobody linked within
+    ``KB_FEEDBACK_ATTACHMENTS_UNLINKED_TTL_S`` is reclaimed. Each batch's files are
+    removed only for rows its committed delete returned; a file already missing is
+    not an error. Batches repeat until one comes back short (no stale row left) or
+    the budget (``UNLINKED_SWEEP_MAX_ROWS`` rows, ``UNLINKED_SWEEP_MAX_SECONDS``) is
+    spent. A failed batch is logged and ends the run, never failing its caller. A
+    capture that later names a reclaimed id is treated like any unknown id (stored
+    without it).
     """
 
+    storage = storage if storage is not None else get_attachment_storage()
     older_than = datetime.now(UTC) - timedelta(
         seconds=config.feedback_attachments_unlinked_ttl_s()
     )
@@ -947,7 +966,7 @@ async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
                 older_than=older_than, limit=limit
             )
         except FeedbackPersistenceError:
-            logger.exception("unlinked attachment sweep failed; the upload goes on")
+            logger.exception("unlinked attachment sweep failed; its caller goes on")
             break
         for key in keys:
             try:
@@ -961,6 +980,49 @@ async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
             break
     if reclaimed:
         logger.info("reclaimed %d unlinked attachment(s)", reclaimed)
+    return reclaimed
+
+
+#: The timer's task while the app runs (``start_unlinked_sweeps``), else None.
+_sweep_task: asyncio.Task | None = None
+
+
+async def run_unlinked_sweeps(interval_s: float) -> None:
+    """Sweep at once, then every ``interval_s`` seconds, until cancelled. A run that
+    raises is logged and the next one still comes."""
+
+    while True:
+        try:
+            await sweep_unlinked_attachments()
+        except Exception:  # noqa: BLE001 - one bad run never ends the timer
+            logger.exception("the unlinked attachment sweep failed; the next runs on time")
+        await asyncio.sleep(interval_s)
+
+
+def start_unlinked_sweeps() -> asyncio.Task | None:
+    """Start the timer in the running loop (the app's lifespan): only when the
+    feedback store is configured (``DATABASE_URL``) and
+    ``KB_FEEDBACK_ATTACHMENTS_SWEEP_INTERVAL_S`` is above 0."""
+
+    global _sweep_task
+    interval = config.feedback_attachments_sweep_interval_s()
+    if config.database_url() is None or interval <= 0:
+        return None
+    _sweep_task = asyncio.create_task(run_unlinked_sweeps(interval),
+                                      name="feedback-unlinked-sweep")
+    return _sweep_task
+
+
+async def stop_unlinked_sweeps() -> None:
+    """Cancel the timer and wait for it to end (the lifespan's shutdown)."""
+
+    global _sweep_task
+    task, _sweep_task = _sweep_task, None
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 #: The 503 an upload gets when it would take unlinked attachments above the ceiling.
@@ -1028,7 +1090,7 @@ async def upload_attachment(request: Request, background_tasks: BackgroundTasks)
         return _detail("unsupported image type", 415)
 
     storage = get_attachment_storage()
-    await _reclaim_unlinked_attachments(storage)
+    await sweep_unlinked_attachments(storage)
     # The ceilings, after the sweep: checked first so a refused upload writes no
     # file, then again under a lock with the insert so no race can overshoot them.
     # The unlinked ceiling comes first. The total ceiling counts every stored
@@ -1478,6 +1540,21 @@ async def get_api_project_usage(request: Request) -> Response:
 # --- session reads (/app/feedback*) -------------------------------------------------
 
 
+def _state_json(triage: FeedbackTriageRecord | None) -> dict[str, Any]:
+    """A feedback's state as the session reads give it: ``{state, agenda, reason, by,
+    at}``; no row reads ``open`` with the rest null."""
+
+    if triage is None:
+        return {"state": STATE_OPEN, "agenda": None, "reason": None, "by": None, "at": None}
+    return {"state": triage.state, "agenda": triage.agenda, "reason": triage.reason,
+            "by": triage.by, "at": serialize_datetime(triage.at)}
+
+
+def _counts_json(counts: FeedbackStateCounts) -> dict[str, int]:
+    return {"open": counts.open, "filed": counts.filed, "resolved": counts.resolved,
+            "dropped": counts.dropped}
+
+
 @router.get("/app/feedback")
 async def list_app_feedback(request: Request) -> Response:
     """List and search (``q``: a case-insensitive substring) the active org's
@@ -1485,12 +1562,22 @@ async def list_app_feedback(request: Request) -> Response:
 
     ``page`` (1-based, 1 when absent) reads one numbered page of ``limit``, with
     ``total``: the whole filtered list's count, the same on every page. ``cursor`` is
-    the key routes' and is ignored here, as ``page`` is there."""
+    the key routes' and is ignored here, as ``page`` is there.
+
+    ``state`` (``open``, ``filed``, ``resolved``, ``dropped`` or ``all``; ``open`` when
+    absent) filters by the stored state; ``counts`` ``{open, filed, resolved,
+    dropped}`` count the same filtered list in each state, its state filter left out.
+    Each record carries its ``state`` (``{state, agenda, reason, by, at}``)."""
 
     _ctx, owned = await _session_caller(request)
     try:
         query = normalize_list_query(request, keyset=False)
         query.filters.search = normalize_optional_text(request.query_params.get("q"))
+        state = (request.query_params.get("state") or STATE_OPEN).strip()
+        if state not in (*FEEDBACK_STATES, _ALL_STATES):
+            raise FeedbackValidationError(
+                f"state must be one of {', '.join((*FEEDBACK_STATES, _ALL_STATES))}")
+        query.filters.state = None if state == _ALL_STATES else state
         number = _parse_int_param(request.query_params.get("page"), field_name="page")
         if number is not None and not 1 <= number <= MAX_LIST_PAGE:
             raise FeedbackValidationError(f"page must be between 1 and {MAX_LIST_PAGE}")
@@ -1510,15 +1597,18 @@ async def list_app_feedback(request: Request) -> Response:
             return _detail("project not found", 404)
         scope = (narrow,)
     if not scope:
-        return JSONResponse({"records": [], "total": 0})
+        return JSONResponse({"records": [], "total": 0,
+                             "counts": _counts_json(FeedbackStateCounts())})
     query.filters.project_ids = scope
     try:
-        page = await get_feedback_service().list_feedback(query)
+        page, states, counts = await get_feedback_service().list_feedback_with_states(query)
     except FeedbackReadError:
         return _read_failed()
     payload: dict[str, object] = {
-        "records": [_with_project_id(record) for record in page.records],
+        "records": [{**_with_project_id(record), "state": _state_json(states.get(record.id))}
+                    for record in page.records],
         "total": page.total,
+        "counts": _counts_json(counts),
     }
     return JSONResponse(payload)
 
@@ -1557,12 +1647,15 @@ async def get_app_feedback(request: Request) -> Response:
             if owned
             else None
         )
+        triage = (await get_feedback_service().get_feedback_triage(feedback_id)
+                  if detail is not None else None)
     except FeedbackReadError:
         return _read_failed()
     if detail is None:
         return _not_found()
     record, comments, attachments = detail
     payload = _with_project_id(record)
+    payload["state"] = _state_json(triage)
     payload["comments"] = [serialize_comment(comment) for comment in comments]
     payload["attachments"] = [
         serialize_attachment(
@@ -1573,6 +1666,145 @@ async def get_app_feedback(request: Request) -> Response:
     return JSONResponse({"record": payload})
 
 
+# --- session state changes ------------------------------------------------------------
+
+MAX_STATE_IDS = 100
+MAX_STATE_BODY_BYTES = 16_384
+
+
+def _unprocessable(message: str) -> JSONResponse:
+    return _detail(message, 422)
+
+
+def _ids_input(ids: Any) -> tuple[UUID, ...]:
+    """1 to ``MAX_STATE_IDS`` feedback ids, duplicates dropped, in their order; or a
+    FeedbackValidationError."""
+
+    if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_STATE_IDS:
+        raise FeedbackValidationError(f"ids must list 1 to {MAX_STATE_IDS} feedback ids")
+    parsed: list[UUID] = []
+    for value in ids:
+        try:
+            parsed.append(UUID(value))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise FeedbackValidationError("ids must be feedback ids (UUIDs)") from exc
+    return tuple(dict.fromkeys(parsed))
+
+
+def _state_input(raw: Any) -> tuple[tuple[UUID, ...], str, str | None]:
+    """``(ids, state, reason)`` from a state change's body, or a FeedbackValidationError
+    naming the one thing wrong."""
+
+    if not isinstance(raw, dict):
+        raise FeedbackValidationError("the body must be a JSON object")
+    unknown = sorted(set(raw) - {"ids", "state", "reason"})
+    if unknown:
+        raise FeedbackValidationError(f"a state change takes no {unknown[0]}")
+    state = raw.get("state")
+    if state not in MEMBER_STATES:
+        raise FeedbackValidationError(f"state must be one of {', '.join(MEMBER_STATES)}")
+    ids = _ids_input(raw.get("ids"))
+    reason = raw.get("reason")
+    if reason is not None:
+        if state != STATE_DROPPED:
+            raise FeedbackValidationError("only a drop takes a reason")
+        if not isinstance(reason, str):
+            raise FeedbackValidationError("reason must be text")
+        reason = reason.strip() or None
+        if reason is not None and (len(reason) > MAX_TRIAGE_REASON
+                                   or not re.fullmatch(f"{ENTRY_ONE_LINE}*", reason)):
+            raise FeedbackValidationError(
+                f"reason must be one line of at most {MAX_TRIAGE_REASON} characters")
+    return ids, state, reason
+
+
+@router.post("/app/feedback/state")
+async def set_app_feedback_state(request: Request) -> Response:
+    """``POST /app/feedback/state {ids, state, reason?}`` -> 200 ``{states: [{id,
+    state}]}``: any member of the active org sets ``resolved``, ``dropped`` (an optional
+    one-line ``reason``, at most 500 characters) or ``open`` on 1 to 100 of its
+    feedback, all or none: one id outside the org (or none at all) is a 404 and nothing
+    changes. A feedback already in that state is left as it is; ``by`` is
+    ``person:<email>``. Each ``state`` is ``{state, agenda, reason, by, at}``, in the
+    order the ids came. A bad body is a 422 with one line."""
+
+    ctx, owned = await _session_caller(request)
+    raw = await _read_capped_body(request, MAX_STATE_BODY_BYTES)
+    if isinstance(raw, JSONResponse):
+        return raw
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        return _unprocessable("the body must be a JSON object")
+    try:
+        ids, state, reason = _state_input(body)
+    except FeedbackValidationError as exc:
+        return _unprocessable(str(exc))
+    if not owned:
+        return _not_found()
+    try:
+        states = await get_feedback_service().set_member_states(
+            ids, owned, state=state, reason=reason, by=f"person:{ctx.user.email}"
+        )
+    except FeedbackPersistenceError:
+        return _write_failed()
+    if states is None:
+        return _not_found()
+    return JSONResponse({"states": [{"id": str(fid), "state": _state_json(states.get(fid))}
+                                    for fid in ids]})
+
+
+@router.post("/app/feedback/delete")
+async def delete_app_feedback(request: Request) -> Response:
+    """``POST /app/feedback/delete {ids}`` -> 200 ``{deleted: [id], files: n}``: an
+    owner of the active org deletes 1 to 100 of its feedback for good, all or none (one
+    id outside the org, or unknown, is a 404 and nothing goes). Each event goes with its
+    comments, state and attachment rows in one transaction; ``files`` counts those
+    attachments, whose files are deleted after the commit, best effort (a failure is
+    logged, never the call's). ``deleted`` keeps the order the ids came, duplicates
+    once. A member is a 403; a bad body a 422 with one line. Agenda items that name a
+    deleted feedback stay as they are."""
+
+    ctx, owned = await _session_caller(request)
+    await require_owner(ctx)
+    raw = await _read_capped_body(request, MAX_STATE_BODY_BYTES)
+    if isinstance(raw, JSONResponse):
+        return raw
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        return _unprocessable("the body must be a JSON object")
+    try:
+        if not isinstance(body, dict):
+            raise FeedbackValidationError("the body must be a JSON object")
+        unknown = sorted(set(body) - {"ids"})
+        if unknown:
+            raise FeedbackValidationError(f"a delete takes no {unknown[0]}")
+        ids = _ids_input(body.get("ids"))
+    except FeedbackValidationError as exc:
+        return _unprocessable(str(exc))
+    if not owned:
+        return _not_found()
+    try:
+        result = await get_feedback_service().delete_feedback_events(ids, owned)
+    except FeedbackPersistenceError:
+        return _write_failed()
+    if result is None:
+        return _not_found()
+    deleted, storage_keys = result
+
+    storage = get_attachment_storage()
+    for storage_key in storage_keys:
+        try:
+            storage.delete(storage_key)
+        except StorageObjectNotFoundError:
+            continue
+        except StorageError:
+            logger.warning("failed to delete attachment object %s of a deleted feedback",
+                           storage_key)
+    return JSONResponse({"deleted": [str(fid) for fid in deleted], "files": len(storage_keys)})
+
+
 # --- triage: the engine's feedback on the agenda (0.6.0) ------------------------------
 #
 # Engine-facing, under the project's ``workspace`` key like ``/api/workspace`` and the
@@ -1580,18 +1812,20 @@ async def get_app_feedback(request: Request) -> Response:
 # id, is a 404; any other caller a 403; no key or a revoked one a 401):
 #
 # - ``GET /api/feedback/{project}/triage[?limit=]`` -> ``{project, feedback, more}``: the
-#   project's untriaged feedback, newest first, at most ``limit`` (default 50, at most
-#   100), ``more`` when there is more. Untriaged means no mark here and no item of the
-#   project's workspace (stored, or in a pending inbox entry) naming it by its source,
-#   ``feedback:<id>``: the web's "file on the agenda" files it as well.
+#   project's Open feedback (the stored state, ``feedback_triage``: no row, or ``open``),
+#   newest first, at most ``limit`` (default 50, at most 100), ``more`` when there is
+#   more. A feedback a member reopened on the web comes back to it.
 # - ``GET /api/feedback/{project}/triage/{feedback}`` -> ``{feedback}``, the same shape with
-#   its ``triage`` (``{state, agenda, reason, by, at, agendas}``: ``untriaged``, ``filed``
-#   or ``dismissed``; ``agendas`` the agendas whose items name it).
+#   its ``triage`` (``{state, agenda, reason, by, at, agendas}``: the stored state in the
+#   engine's words, ``untriaged`` (Open), ``filed``, ``resolved`` or ``dismissed``
+#   (Dropped); ``agendas`` the agendas whose items name it, derived from the workspace,
+#   information only).
 # - ``POST /api/feedback/{project}/triage/{feedback} {state, agenda?, reason?, by}`` ->
-#   ``{feedback, triage}``: ``filed`` with a full agenda id, or ``dismissed`` with an
-#   optional one-line reason; ``by`` an entry author (``person:``/``agent:``). A later
-#   mark replaces the earlier one. The agenda is not checked against the store: the
-#   engine records the mark after it wrote the item, before its batch lands.
+#   ``{feedback, triage}``: ``filed`` with a full agenda id stores Filed, ``dismissed``
+#   with an optional one-line reason stores Dropped; ``by`` an entry author
+#   (``person:``/``agent:``). A later mark replaces the earlier one, whatever it was.
+#   The agenda is not checked against the store: the engine records the mark after it
+#   wrote the item, before its batch lands.
 #
 # A feedback of another project, or none, is a 404 (``feedback not found``); a bad body
 # a 400 with one line. Each feedback reads ``{id, at, product, channel, value, message,
@@ -1622,7 +1856,8 @@ async def _triage_caller(
 async def _filed_by_items(project_id: UUID) -> dict[str, list[str]]:
     """``{feedback id: [agenda]}``: every feedback an item of the project's workspace names
     by its source, stored or in a pending inbox entry (the web's "file on the agenda",
-    as ``WorkspaceReader.feedback_items`` reads it). An unlinked project names none."""
+    as ``WorkspaceReader.feedback_items`` reads it). An unlinked project names none.
+    Only the engine's ``agendas`` information reads it; the state is stored."""
 
     reader = await open_reader(project_id)
     if not reader.linked:
@@ -1663,12 +1898,13 @@ def _triage_feedback(record: FeedbackEventRecord) -> dict[str, Any]:
 
 
 def _triage_json(triage: FeedbackTriageRecord | None, agendas: list[str]) -> dict[str, Any]:
-    if triage is None:
-        return {"state": TRIAGE_FILED if agendas else "untriaged",
-                "agenda": agendas[0] if agendas else None,
-                "reason": None, "by": None, "at": None, "agendas": agendas}
-    return {"state": triage.state, "agenda": triage.agenda, "reason": triage.reason,
-            "by": triage.by, "at": serialize_datetime(triage.at), "agendas": agendas}
+    """The stored state in the engine's words (``untriaged``, ``filed``, ``resolved``,
+    ``dismissed``), with the derived ``agendas``."""
+
+    body = _state_json(triage)
+    body["state"] = STATE_TO_TRIAGE.get(body["state"], body["state"])
+    body["agendas"] = agendas
+    return body
 
 
 async def _triage_event(ctx: ApiAuthContext, feedback_id: str) -> FeedbackEventRecord | None:
@@ -1697,16 +1933,8 @@ async def list_untriaged_feedback(
     if not 1 <= limit <= MAX_TRIAGE_LIMIT:
         return _detail(f"limit must be between 1 and {MAX_TRIAGE_LIMIT}", 400)
     try:
-        named = await _filed_by_items(ctx.project_id)
-    except WorkspaceReadError:
-        return _read_failed()
-    skipped = []
-    for raw in named:
-        with contextlib.suppress(ValueError):
-            skipped.append(UUID(raw))
-    try:
         records, more = await get_feedback_service().list_untriaged_feedback(
-            ctx.project_id, exclude=skipped, limit=limit
+            ctx.project_id, limit=limit
         )
     except FeedbackReadError:
         return _read_failed()
@@ -1793,7 +2021,7 @@ async def mark_feedback_triage(
         return _not_found()
     try:
         triage = await get_feedback_service().set_feedback_triage(
-            record.id, state=state, agenda=agenda, reason=reason, by=by
+            record.id, state=TRIAGE_TO_STATE[state], agenda=agenda, reason=reason, by=by
         )
     except FeedbackPersistenceError:
         return _write_failed()

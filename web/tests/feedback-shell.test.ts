@@ -23,6 +23,7 @@ describe("Feedback with a project picked", () => {
     q: "refund",
     project: null,
     rating: "liked",
+    state: "open",
   });
 
   it("is a route under the project, for the list and for an item opened from it", () => {
@@ -63,6 +64,7 @@ describe("Feedback with the org alone", () => {
       q: "",
       project: "p1",
       rating: null,
+      state: "open",
     });
     expect(opened.split("?")[0]).toBe("/feedback/f1");
     expect(railFor(opened).form).toBe("org");

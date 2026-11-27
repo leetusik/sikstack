@@ -8,17 +8,26 @@ import type {
   FeedbackDetail,
   FeedbackNumberedPage,
   FeedbackQuery,
+  FeedbackStateCounts,
 } from "./types";
 
 // The Feedback module's session-scoped reads (`/app/feedback*`), on the same
 // client seam as `@/lib/knowledge/app`: the caller passes the session bearer, the
 // client adds the active org, and every call is `no-store`.
 
+const NO_COUNTS: FeedbackStateCounts = {
+  open: 0,
+  filed: 0,
+  resolved: 0,
+  dropped: 0,
+};
+
 /**
  * `GET /app/feedback?page=N` → `{records, total}`: one numbered page (1-based,
  * `limit` a page, fifty by default) of the active org's feedback, newest first,
- * and the count of the whole list as read. A page past the last is no records
- * and the total. Without `page` the API answers page 1.
+ * the count of the whole list as read, and each state's count (`counts`, P91-v3).
+ * A page past the last is no records and the total. Without `page` the API
+ * answers page 1; without `state`, Open.
  */
 export async function listFeedbackPage(
   token: string,
@@ -31,14 +40,19 @@ export async function listFeedbackPage(
     `/app/feedback${feedbackQueryString(numbered)}`,
     { token, signal },
   );
-  return { records: read.records ?? [], total: read.total ?? 0 };
+  return {
+    records: read.records ?? [],
+    total: read.total ?? 0,
+    counts: { ...NO_COUNTS, ...read.counts },
+  };
 }
 
 /**
  * How many records the list holds in a window: `total` over
  * `start_ingested_at <= ingested_at < end_ingested_at` (ISO instants), one
  * project or the whole org, read with `limit: 1`. Project home's
- * `N this month` passes the viewer's month as the window.
+ * `N this month` passes the viewer's month as the window. Every state (`state=all`): without it the API counts
+ * Open alone (P91-v3).
  */
 export async function countFeedback(
   token: string,
@@ -51,6 +65,7 @@ export async function countFeedback(
       start_ingested_at: window.start,
       end_ingested_at: window.end,
       limit: 1,
+      state: "all",
     })}`,
     { token, signal },
   );

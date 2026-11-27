@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound, unstable_rethrow } from "next/navigation";
-import { cache } from "react";
+import { cache, type ReactNode } from "react";
 
 import { itemHeading, NOT_FOUND } from "@/content/feedback-frame";
 import { requireIdentity } from "@/lib/auth-guards";
@@ -13,6 +13,7 @@ import { feedbackBackHref, type FeedbackScope } from "@/lib/feedback/place";
 import type { FeedbackAgenda, FeedbackDetail } from "@/lib/feedback/types";
 import { listProjects } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
+import { getMembers } from "@/lib/knowledge/orgs";
 import type { KbProject } from "@/lib/knowledge/types";
 import { TIME_ZONE_COOKIE, viewerTimeZone } from "@/lib/time-zone";
 import { readWorkspace } from "@/lib/workspace/read";
@@ -27,8 +28,11 @@ import {
   pickable,
   type PickItem,
 } from "../agenda";
+import { ItemStateActs, ItemStateLine } from "../state/control";
+import { OPEN, type OrgRole } from "../state/model";
 import { FeedbackItem } from "./item";
 import { feedbackItemView, inScope, isFeedbackId, zoneMetaOf } from "./model";
+import { ItemStateScope } from "./state";
 
 /**
  * One piece of feedback's server body, shared by its two routes (P65-nh.S3's addresses):
@@ -124,6 +128,29 @@ async function pickableItems(record: FeedbackDetail): Promise<PickItem[]> {
   return ws.state === "ready" ? pickable(ws.value.agenda, []) : [];
 }
 
+/**
+ * The caller's role in the active org (`GET /app/members`), read as the list reads it: an owner deletes; a member, or
+ * a role read that failed, sees no Delete (the API refuses a member's delete either way).
+ */
+async function readRole(token: string): Promise<OrgRole> {
+  try {
+    return (await getMembers(token)).role === "owner" ? "owner" : "member";
+  } catch (error) {
+    unstable_rethrow(error);
+    return "member";
+  }
+}
+
+/** The head's end (P91-v3): the state's actions, then what Add to agenda put there. */
+function HeadEnd({ children }: { children?: ReactNode }) {
+  return (
+    <div className="cluster fi-head-end">
+      <ItemStateActs />
+      {children}
+    </div>
+  );
+}
+
 export async function FeedbackItemBody({
   scope,
   feedbackId,
@@ -137,12 +164,34 @@ export async function FeedbackItemBody({
   const read = await readFeedbackItem(scope, feedbackId);
   if (!read) notFound();
   const store = await cookies();
+  const { token } = await requireIdentity();
+  const role = await readRole(token);
+  const timeZone = viewerTimeZone(store);
   const view = feedbackItemView(read.record, {
     projectName: read.projectName,
     zone: zoneMetaOf(store.get(TIME_ZONE_COOKIE)?.value, (tz) => zoneLabel(tz)),
-    format: { timeZone: viewerTimeZone(store) },
+    format: { timeZone },
   });
   const backHref = feedbackBackHref(scope, from);
+  // The state (P91-v3): its line under the title and its actions at the head's end, before Add to agenda, in one
+  // island over the list's two server actions; Delete goes back to `backHref` with the toast.
+  const stated = (page: ReactNode) => (
+    <ItemStateScope
+      id={read.record.id}
+      message={read.record.message}
+      lang={view.lang}
+      initial={read.record.state ?? OPEN}
+      role={role}
+      counted={{
+        comments: read.record.comments.length,
+        files: read.record.attachments.length,
+      }}
+      timeZone={timeZone}
+      backHref={backHref}
+    >
+      {page}
+    </ItemStateScope>
+  );
   // The two slots (P65-nh.S6, P61-e9): Add to agenda at the head's end and the Agenda part, from the
   // agenda seam over `GET /app/feedback/{id}/agenda`, in the board's order: filed, else waiting, else
   // not offered, else the add. Once the record is on an item the head reads Added to agenda and offers
@@ -154,7 +203,7 @@ export async function FeedbackItemBody({
   );
   if (agenda.kind === "offered") {
     const items = await pickableItems(read.record);
-    return (
+    return stated(
       <AgendaScope
         project={agenda.project}
         items={items}
@@ -163,18 +212,28 @@ export async function FeedbackItemBody({
         <FeedbackItem
           view={view}
           backHref={backHref}
-          headEnd={<AgendaHeadEnd />}
+          state={<ItemStateLine />}
+          headEnd={
+            <HeadEnd>
+              <AgendaHeadEnd />
+            </HeadEnd>
+          }
           agenda={<AgendaSlot />}
         />
-      </AgendaScope>
+      </AgendaScope>,
     );
   }
-  return (
+  return stated(
     <FeedbackItem
       view={view}
       backHref={backHref}
-      headEnd={agenda.kind === "not-offered" ? null : <AddedToAgenda />}
+      state={<ItemStateLine />}
+      headEnd={
+        <HeadEnd>
+          {agenda.kind === "not-offered" ? null : <AddedToAgenda />}
+        </HeadEnd>
+      }
       agenda={<AgendaPart state={agenda} />}
-    />
+    />,
   );
 }

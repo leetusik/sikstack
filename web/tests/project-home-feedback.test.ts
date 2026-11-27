@@ -324,7 +324,8 @@ describe("the rows", () => {
     expect(html).not.toContain("/feedback?project=");
     expect(feedbackApp.listFeedbackPage).toHaveBeenCalledWith(
       "t",
-      { project_id: "p1", limit: 5 },
+      // every state, as before P91-v3: the API answers Open alone without `state`
+      { project_id: "p1", limit: 5, state: "all" },
       1,
     );
   });

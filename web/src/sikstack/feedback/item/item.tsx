@@ -25,12 +25,17 @@ import { FACT_LABELS, type FeedbackItemView, type ItemFact } from "./model";
  * The two slots are P65-nh.S6's (Add to agenda and the Agenda part): `headEnd` sits at the head's end
  * (`.fi-head`, after `.page-title`), `agenda` between Comment and Details. Both render nothing unless
  * given; they are filled in one place only, `./body.tsx`.
+ *
+ * The third slot, `state` (P91-v3, applied from S3's signed design): the state line (`ItemStateLine`), under the
+ * title's line inside `.page-title`; the state's actions join the head's end, before Add to agenda (`./body.tsx`
+ * fills both).
  */
 export function FeedbackItem({
   view,
   backHref,
   headEnd = null,
   agenda = null,
+  state = null,
 }: {
   view: FeedbackItemView;
   backHref: string;
@@ -38,6 +43,8 @@ export function FeedbackItem({
   headEnd?: ReactNode;
   /** The Agenda part, between Comment and Details (S6). */
   agenda?: ReactNode;
+  /** The state line, under the title's line (P91-v3). */
+  state?: ReactNode;
 }) {
   return (
     <div className="column">
@@ -54,6 +61,7 @@ export function FeedbackItem({
                 {view.when}
               </time>
             </p>
+            {state}
           </div>
           {headEnd}
         </div>

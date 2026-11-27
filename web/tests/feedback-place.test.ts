@@ -39,7 +39,13 @@ describe("the list's place", () => {
         rating: "disliked",
         cursor: "abc",
       }),
-    ).toEqual({ page: 3, q: "결제", project: "p1", rating: "disliked" });
+    ).toEqual({
+      page: 3,
+      q: "결제",
+      project: "p1",
+      rating: "disliked",
+      state: "open",
+    });
   });
 
   it("has no project filter in a project's list", () => {
@@ -217,5 +223,77 @@ describe("the way back", () => {
   it("leads the rail and Clear to the list at rest for what the Shell shows", () => {
     expect(feedbackHref()).toBe("/feedback");
     expect(feedbackHref("p 1")).toBe("/projects/p%201/feedback");
+  });
+});
+
+// P91-v3 — the list shows one state at a time (`?state=filed|resolved|dropped`, absent for Open, the default): the
+// state is the list's own place, kept by a search, a filter, a page and the way back, and a state the list does not
+// show is No such view.
+describe("the state in the list's place", () => {
+  it("reads Open from no state, and each other state from its value", () => {
+    expect(readFeedbackPlace({})).toEqual(place({ state: "open" }));
+    expect(readFeedbackPlace({ state: "open" })).toEqual(AT_REST);
+    for (const s of ["filed", "resolved", "dropped"] as const)
+      expect(readFeedbackPlace({ state: s })).toEqual(place({ state: s }));
+    expect(readFeedbackPlace({ state: "dropped" }, "p1")).toEqual(
+      place({ state: "dropped" }),
+    );
+  });
+
+  it("is No such view for a state the list does not show", () => {
+    for (const s of ["all", "Filed", "dismissed", "x"])
+      expect(valid(ORG, readFeedbackPlace({ state: s }))).toBe(false);
+  });
+
+  it("writes Open out of the address and every other state into it", () => {
+    expect(feedbackListHref(null, place({ state: "open" }))).toBe("/feedback");
+    expect(feedbackListHref(null, place({ state: "filed" }))).toBe(
+      "/feedback?state=filed",
+    );
+    expect(
+      feedbackListHref("p1", place({ page: 2, q: "x", state: "resolved" })),
+    ).toBe("/projects/p1/feedback?page=2&q=x&state=resolved");
+  });
+
+  it("is kept by a search, a filter and a page; a state change starts at page 1", () => {
+    const at = place({ page: 3, q: "refund", state: "dropped" });
+    expect(feedbackChangeHref(null, at, { q: "late" })).toBe(
+      "/feedback?q=late&state=dropped",
+    );
+    expect(feedbackChangeHref(null, at, { rating: "liked" })).toBe(
+      "/feedback?q=refund&rating=liked&state=dropped",
+    );
+    expect(feedbackPageHref(null, at, 4)).toBe(
+      "/feedback?page=4&q=refund&state=dropped",
+    );
+    expect(feedbackChangeHref(null, at, { state: "open" })).toBe(
+      "/feedback?q=refund",
+    );
+    expect(feedbackChangeHref(null, at, { state: "filed" })).toBe(
+      "/feedback?q=refund&state=filed",
+    );
+  });
+
+  it("rides in the way back and returns there", () => {
+    const href = feedbackItemHref(null, "f1", place({ state: "resolved" }));
+    const from = new URL(href, "https://x.invalid").searchParams.get("from");
+    expect(from).toBe("/feedback?state=resolved");
+    expect(decodeFeedbackFrom(from, null)).toEqual(place({ state: "resolved" }));
+    expect(feedbackBackHref(null, from)).toBe(from);
+    const proj = feedbackItemHref("p1", "f1", place({ page: 2, state: "filed" }));
+    expect(
+      feedbackBackHref(
+        "p1",
+        new URL(proj, "https://x.invalid").searchParams.get("from"),
+      ),
+    ).toBe("/projects/p1/feedback?page=2&state=filed");
+    expect(feedbackBackHref(null, "/feedback?state=all")).toBe("/feedback");
+    expect(feedbackBackHref(null, "/feedback?state=filed&state=dropped")).toBe(
+      "/feedback",
+    );
+  });
+
+  it("is not a search or a filter: Clear does not show for a state alone", () => {
+    expect(isFiltered(place({ state: "dropped" }))).toBe(false);
   });
 });

@@ -118,7 +118,11 @@ async def lifespan(app: FastAPI):
                 )
         except Exception:  # noqa: BLE001 - the boot goes on; `python -m server.sharing fill` retries
             logger.warning("startup sharing fill failed", exc_info=True)
+    # Stale unlinked feedback uploads are swept at start-up and then on a timer
+    # (KB_FEEDBACK_ATTACHMENTS_SWEEP_INTERVAL_S), not only by the next upload.
+    feedback_api.start_unlinked_sweeps()
     yield
+    await feedback_api.stop_unlinked_sweeps()
     # Give the after-response worker a bounded chance to finish its queued embed
     # work before the process goes away (P24.S1). Best-effort: anything still
     # pending is dropped, and the next reindex catches the embeddings up.

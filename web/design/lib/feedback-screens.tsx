@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
-import { FeedbackItem, feedbackItemView, zoneMetaOf } from "@/sikstack/feedback/item";
+import { feedbackItemView, zoneMetaOf } from "@/sikstack/feedback/item";
+import { publishToast } from "@/sikstack/shell";
 import {
   FeedbackItemErrorState,
   FeedbackItemLoadingState,
@@ -26,7 +28,12 @@ import { zoneLabel } from "@/lib/feedback/format";
 import { feedbackBackHref } from "@/lib/feedback/place";
 import { agendaItemHref } from "@/lib/workspace/address";
 
+import { actDone } from "@/content/feedback-state";
+import { FeedbackItem } from "@/sikstack/feedback/item";
+import { ItemStateActs, ItemStateLine, StateScope, type StateSend } from "@/sikstack/feedback/state/control";
+import { changed, OPEN, type FeedbackAct, type FeedbackStateRecord, type OrgRole, type StateAsk } from "@/sikstack/feedback/state/model";
 import { FEEDBACK, feedbackItemsIn } from "./answers";
+import { MADE_STATES, MADE_COMMENT, MADE_FILE, ME_BY, RECORDED_STATES } from "./feedback-list-data";
 import { FEEDBACK_FILED_STATES, FEEDBACK_STATES } from "./page-states";
 import { NOW, PROJECT, TIME_ZONE } from "./recording";
 import { Frame, SHELL, THROWN, useSnap } from "./screens";
@@ -39,6 +46,10 @@ import { apply, current, dataOf, getSnapshot, load, reset } from "./store";
  * items it is on are read from the store's workspace (`feedbackItemsIn`, the server's own rule), so an add made in
  * the browser shows here, on the Agenda and on the item's thread at once. Production's page body
  * (`src/sikstack/feedback/item/body.tsx`) is a server component: this screen fills the same two slots it fills.
+ *
+ * P91-v3: the item's third slot, the state line, and the state's actions before the add at the head's end, in one
+ * `StateScope` (production's `src/sikstack/feedback/state/`), as `body.tsx` fills them. The states are made
+ * (`feedback-list-data.ts`): the recording predates them.
  */
 
 type FeedbackState = (typeof FEEDBACK_STATES.list)[number]["key"];
@@ -90,6 +101,44 @@ const PHASE: Partial<Record<FeedbackState, AddPhase>> = {
   failed: "failed",
 };
 
+const WAIT = 700;
+
+/** The state's setup a design state names: the state on arrival, who is signed in, a confirm or a send open. */
+function stateSetup(id: string, state: string) {
+  const filed = isFiled(id);
+  let initial: FeedbackStateRecord = RECORDED_STATES[id] ?? OPEN;
+  if (state === "resolved") initial = MADE_STATES.resolved(filed ? (FEEDBACK[id]?.agenda.items[0]?.id ?? null) : null);
+  if (state === "dropped") initial = MADE_STATES.dropped;
+  const role: OrgRole = state === "member" ? "member" : "owner";
+  const ask: Pick<StateAsk, "act" | "reason" | "busy" | "notice"> | null =
+    state === "confirm-drop"
+      ? { act: "drop", reason: "", busy: false, notice: null }
+      : state === "confirm-delete"
+        ? { act: "delete", reason: "", busy: false, notice: null }
+        : null;
+  const busy: FeedbackAct | null = state === "resolving" ? "resolve" : null;
+  return { initial, role, ask, busy, counted: state === "confirm-delete" };
+}
+
+/** The design's write: what `POST /app/feedback/state` stores, or `/delete`'s answer, after a short wait. */
+const designSend: StateSend = (act, reason, from) =>
+  new Promise((resolve) =>
+    setTimeout(() => {
+      if (act === "delete") resolve("deleted");
+      else resolve(changed(from, act, { by: ME_BY, at: new Date(NOW).toISOString().replace(/\.\d+Z$/, "Z"), reason }));
+    }, WAIT),
+  );
+
+/** The head's end: the state's actions, then what the add put there. */
+function HeadEnd({ children }: { children?: ReactNode }) {
+  return (
+    <div className="cluster fi-head-end">
+      <ItemStateActs />
+      {children}
+    </div>
+  );
+}
+
 export function FeedbackScreen({
   id,
   state,
@@ -100,7 +149,12 @@ export function FeedbackScreen({
   retry?: () => void;
 }) {
   const ws = useSnap().workspace;
-  const record = FEEDBACK[id].record;
+  const router = useRouter();
+  const set = stateSetup(id, state);
+  // The counted Delete confirm names a made comment and file (the recorded pieces have none): the page shows them.
+  const record = set.counted
+    ? { ...FEEDBACK[id].record, comments: [MADE_COMMENT], attachments: [MADE_FILE] }
+    : FEEDBACK[id].record;
   const view = feedbackItemView(record, {
     projectName: PROJECT_NAME,
     zone: zoneMetaOf(TIME_ZONE, (tz) => zoneLabel(tz, NOW)),
@@ -108,6 +162,31 @@ export function FeedbackScreen({
   });
   const backHref = feedbackBackHref(PROJECT, null);
   const on = feedbackItemsIn(ws.agenda, id).map(withHref(ws.project));
+  const scoped = (page: ReactNode) => (
+    <Frame>
+      <StateScope
+        key={state}
+        id={id}
+        message={record.message}
+        lang={view.lang}
+        initial={set.initial}
+        role={set.role}
+        counted={{ comments: record.comments.length, files: record.attachments.length }}
+        format={{ timeZone: TIME_ZONE, now: NOW }}
+        send={designSend}
+        ask={set.ask}
+        busy={set.busy}
+        onDeleted={() => {
+          publishToast(actDone("delete", 1));
+          router.push("/feedback/");
+        }}
+        onFailed={publishToast}
+      >
+        {page}
+      </StateScope>
+    </Frame>
+  );
+  const line = <ItemStateLine />;
 
   switch (state) {
     case "loading":
@@ -136,70 +215,78 @@ export function FeedbackScreen({
         canAdd(record, PROJECT_NAME, unlinked),
         sent(record, unlinked),
       );
-      return (
-        <Frame>
-          <FeedbackItem
-            view={view}
-            backHref={backHref}
-            headEnd={none.kind === "not-offered" || none.kind === "offered" ? null : <AddedToAgenda />}
-            agenda={none.kind === "offered" ? null : <AgendaPart state={none} />}
-          />
-        </Frame>
-      );
-    }
-    case "no-project":
-      return (
-        <Frame>
-          <FeedbackItem
-            view={view}
-            backHref={backHref}
-            agenda={
-              <AgendaPart
-                state={{
-                  kind: "not-offered",
-                  reason: "no-project",
-                  text: notOfferedText({ offered: false, reason: "no-project" }),
-                }}
-              />
-            }
-          />
-        </Frame>
-      );
-    case "filed":
-    case "waiting": {
-      const filed = agendaPageState({ offered: true, project: PROJECT_NAME }, on);
-      return (
-        <Frame>
-          <FeedbackItem
-            view={view}
-            backHref={backHref}
-            headEnd={filed.kind === "filed" || filed.kind === "waiting" ? <AddedToAgenda /> : null}
-            agenda={filed.kind === "filed" || filed.kind === "waiting" ? <AgendaPart state={filed} /> : null}
-          />
-        </Frame>
-      );
-    }
-  }
-  const items = pickable(ws.agenda, on);
-  const existing = items.find((i) => i.id === "A3-1z") ?? items[0];
-  return (
-    <Frame>
-      <AgendaScope
-        key={state}
-        project={PROJECT_NAME}
-        items={items}
-        phase={PHASE[state] ?? "rest"}
-        pick={state === "confirm-existing" && existing ? { kind: "item", id: existing.id } : NEW_ITEM}
-        add={(pick) => fileFeedback(id, pick)}
-      >
+      return scoped(
         <FeedbackItem
           view={view}
           backHref={backHref}
-          headEnd={<AgendaHeadEnd />}
-          agenda={<AgendaSlot />}
-        />
-      </AgendaScope>
-    </Frame>
+          state={line}
+          headEnd={<HeadEnd>{none.kind === "not-offered" || none.kind === "offered" ? null : <AddedToAgenda />}</HeadEnd>}
+          agenda={none.kind === "offered" ? null : <AgendaPart state={none} />}
+        />,
+      );
+    }
+    case "no-project":
+      return scoped(
+        <FeedbackItem
+          view={view}
+          backHref={backHref}
+          state={line}
+          headEnd={<HeadEnd />}
+          agenda={
+            <AgendaPart
+              state={{
+                kind: "not-offered",
+                reason: "no-project",
+                text: notOfferedText({ offered: false, reason: "no-project" }),
+              }}
+            />
+          }
+        />,
+      );
+    case "filed":
+    case "waiting":
+      return filedPage();
+    case "resolved":
+    case "confirm-delete":
+      // The filed page's own states draw its part as filed; the add's page draws them with the add.
+      if (isFiled(id)) return filedPage();
+  }
+
+  function filedPage() {
+    const filed = agendaPageState({ offered: true, project: PROJECT_NAME }, on);
+    return scoped(
+      <FeedbackItem
+        view={view}
+        backHref={backHref}
+        state={line}
+        headEnd={<HeadEnd>{filed.kind === "filed" || filed.kind === "waiting" ? <AddedToAgenda /> : null}</HeadEnd>}
+        agenda={filed.kind === "filed" || filed.kind === "waiting" ? <AgendaPart state={filed} /> : null}
+      />,
+    );
+  }
+  const items = pickable(ws.agenda, on);
+  const existing = items.find((i) => i.id === "A3-1z") ?? items[0];
+  return scoped(
+    <AgendaScope
+      key={state}
+      project={PROJECT_NAME}
+      items={items}
+      phase={PHASE[state as FeedbackState] ?? "rest"}
+      pick={state === "confirm-existing" && existing ? { kind: "item", id: existing.id } : NEW_ITEM}
+      add={(pick) => fileFeedback(id, pick)}
+    >
+      <FeedbackItem
+        view={view}
+        backHref={backHref}
+        state={line}
+        headEnd={
+          <HeadEnd>
+            <AgendaHeadEnd />
+          </HeadEnd>
+        }
+        agenda={<AgendaSlot />}
+      />
+    </AgendaScope>,
   );
 }
 

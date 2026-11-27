@@ -158,6 +158,9 @@ class FeedbackQueryFilters:
     channel: str | None = None
     target_type: str | None = None
     tag: str | None = None
+    #: One of ``FEEDBACK_STATES`` (a feedback with no state row is ``open``); ``None``
+    #: means *no filter*. Only the list and its counts read it.
+    state: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -252,16 +255,30 @@ class FeedbackMetrics:
     daily_counts: tuple[FeedbackDailyMetricCount, ...]
 
 
-#: The two marks a piece of feedback takes from the engine (``feedback_triage``).
+#: The one state a piece of feedback holds (``feedback_triage``; no row reads Open).
+STATE_OPEN = "open"
+STATE_FILED = "filed"
+STATE_RESOLVED = "resolved"
+STATE_DROPPED = "dropped"
+FEEDBACK_STATES = (STATE_OPEN, STATE_FILED, STATE_RESOLVED, STATE_DROPPED)
+#: The states a member sets from the web (Filed comes from filing it on the agenda).
+MEMBER_STATES = (STATE_RESOLVED, STATE_DROPPED, STATE_OPEN)
+
+#: The two marks a piece of feedback takes from the engine (``/api/feedback/<p>/triage``):
+#: ``filed`` stores Filed, ``dismissed`` stores Dropped. Its reads keep the old words
+#: (``untriaged`` for Open, ``dismissed`` for Dropped) plus ``resolved``.
 TRIAGE_FILED = "filed"
 TRIAGE_DISMISSED = "dismissed"
 TRIAGE_STATES = (TRIAGE_FILED, TRIAGE_DISMISSED)
+TRIAGE_TO_STATE = {TRIAGE_FILED: STATE_FILED, TRIAGE_DISMISSED: STATE_DROPPED}
+STATE_TO_TRIAGE = {STATE_OPEN: "untriaged", STATE_FILED: TRIAGE_FILED,
+                   STATE_RESOLVED: STATE_RESOLVED, STATE_DROPPED: TRIAGE_DISMISSED}
 
 
 @dataclass(slots=True, kw_only=True)
 class FeedbackTriageRecord:
-    """What became of one piece of feedback: ``filed`` on ``agenda``, or ``dismissed``
-    (``reason`` optional), by whom and when. The latest mark only."""
+    """The stored state of one piece of feedback: ``state`` (one of ``FEEDBACK_STATES``),
+    the ``agenda`` it was filed on or resolved by, the Drop ``reason``, by whom and when."""
 
     feedback_id: UUID
     state: str
@@ -269,3 +286,13 @@ class FeedbackTriageRecord:
     reason: str | None
     by: str
     at: datetime
+
+
+@dataclass(slots=True, kw_only=True)
+class FeedbackStateCounts:
+    """How many of a filtered list are in each state."""
+
+    open: int = 0
+    filed: int = 0
+    resolved: int = 0
+    dropped: int = 0

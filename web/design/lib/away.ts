@@ -2,6 +2,8 @@ import { workspaceHrefs } from "@/sikstack/workspace/agenda/model";
 
 import { railFor } from "@/sikstack/shell/model";
 
+import { LIST_ITEM_PATHS } from "./feedback-list-data";
+
 /**
  * The addresses the design's pages link to but do not draw (the Shell's rail and menus, the
  * Workspace's other tabs, the Design viewer's open route). Each gets a stub page, so a click lands on a page that says so and a
@@ -16,6 +18,8 @@ export function awayPaths(project: string): string[] {
     "/dashboard",
     "/members",
     "/orgs/new",
+    // The Feedback list (P91-v3.S3's design), the org's.
+    "/feedback",
   ]);
   const ws = workspaceHrefs(project);
   const projectRail = railFor(`/projects/${encodeURIComponent(project)}/workspace`);
@@ -32,6 +36,8 @@ export function awayPaths(project: string): string[] {
     // The invite link's sign-in pair (P78-s2.S2's design).
     "/login",
     "/signup",
+    // The org's Feedback list links each piece at its org-scoped address, which the design does not draw.
+    ...LIST_ITEM_PATHS,
   ];
   const paths = new Set<string>();
   for (const href of hrefs) {

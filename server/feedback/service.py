@@ -9,7 +9,7 @@ the route answers 5xx. Org-facing reads go through the ``get_scoped_*`` methods 
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -28,6 +28,7 @@ from server.feedback.types import (
     FeedbackListPage,
     FeedbackMetrics,
     FeedbackMetricsQuery,
+    FeedbackStateCounts,
     FeedbackSummary,
     FeedbackTriageRecord,
     ListFeedbackQuery,
@@ -138,14 +139,35 @@ class FeedbackService:
         async with self._session_maker() as session:
             repository = FeedbackRepository(session)
             try:
-                storage_keys = await repository.list_storage_keys_for_feedback(feedback_id)
-                deleted = await repository.delete_feedback_event(feedback_id)
+                deleted, storage_keys = await _delete_events(repository, (feedback_id,))
                 await session.commit()
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackPersistenceError("failed to persist feedback event") from exc
 
-        return (deleted, storage_keys if deleted else ())
+        return (bool(deleted), storage_keys)
+
+    async def delete_feedback_events(
+        self, feedback_ids: Sequence[UUID], project_ids: Collection[UUID]
+    ) -> tuple[tuple[UUID, ...], tuple[str, ...]] | None:
+        """Delete several feedback records, all or none, in one transaction.
+
+        ``None`` (nothing deleted) when any id is not in ``project_ids``. Otherwise
+        ``(deleted_ids, storage_keys)``: each event goes with its comments, state and
+        attachment rows (the cascade), and the keys of those attachments come back so
+        the caller deletes the files after the commit.
+        """
+
+        ids = tuple(dict.fromkeys(feedback_ids))
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                async with session.begin():
+                    if await repository.scoped_feedback_ids(ids, project_ids) != set(ids):
+                        return None
+                    return await _delete_events(repository, ids)
+            except SQLAlchemyError as exc:
+                raise FeedbackPersistenceError("failed to persist feedback event") from exc
 
     # -- event reads ----------------------------------------------------------
 
@@ -257,23 +279,63 @@ class FeedbackService:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback records") from exc
 
-    # -- triage ---------------------------------------------------------------
+    # -- states ---------------------------------------------------------------
+
+    async def list_feedback_with_states(
+        self, query: ListFeedbackQuery
+    ) -> tuple[FeedbackListPage, dict[UUID, FeedbackTriageRecord], FeedbackStateCounts]:
+        """A page of feedback, the stored states of its records (an Open one with no row
+        is absent) and the filtered list's counts by state (one session)."""
+
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                page = await repository.list_feedback(query)
+                states = await repository.triage_for_ids([record.id for record in page.records])
+                counts = await repository.count_feedback_states(query.filters)
+                return page, states, counts
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise FeedbackReadError("failed to read feedback records") from exc
+
+    async def set_member_states(
+        self,
+        feedback_ids: Sequence[UUID],
+        project_ids: Collection[UUID],
+        *,
+        state: str,
+        reason: str | None,
+        by: str,
+    ) -> dict[UUID, FeedbackTriageRecord] | None:
+        """A member's Resolve, Drop or Reopen on several pieces of feedback, all or none,
+        in one transaction: ``None`` (nothing changed) when any id is not in
+        ``project_ids``; else the stored states after it (an Open one with no row is
+        absent). A feedback already in ``state`` is left as it is."""
+
+        ids = tuple(dict.fromkeys(feedback_ids))
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                async with session.begin():
+                    if await repository.scoped_feedback_ids(ids, project_ids) != set(ids):
+                        return None
+                    await repository.set_member_states(ids, state=state, reason=reason, by=by)
+                    return await repository.triage_for_ids(ids)
+            except SQLAlchemyError as exc:
+                raise FeedbackPersistenceError("failed to persist feedback states") from exc
 
     async def list_untriaged_feedback(
         self,
         project_id: UUID,
         *,
-        exclude: Collection[UUID] = (),
         limit: int,
     ) -> tuple[tuple[FeedbackEventRecord, ...], bool]:
-        """The project's untriaged feedback, newest first, and whether more remain."""
+        """The project's Open feedback, newest first, and whether more remain."""
 
         async with self._session_maker() as session:
             repository = FeedbackRepository(session)
             try:
-                return await repository.list_untriaged_feedback(
-                    project_id, exclude=exclude, limit=limit
-                )
+                return await repository.list_untriaged_feedback(project_id, limit=limit)
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback records") from exc
@@ -556,6 +618,23 @@ class FeedbackService:
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback attachment") from exc
+
+
+async def _delete_events(
+    repository: FeedbackRepository, feedback_ids: Sequence[UUID]
+) -> tuple[tuple[UUID, ...], tuple[str, ...]]:
+    """The one delete: each event's attachment keys read first, then the event (its
+    comments, state and attachment rows cascade). The caller commits. Returns the ids
+    really deleted and the keys of their attachments."""
+
+    deleted: list[UUID] = []
+    keys: list[str] = []
+    for feedback_id in feedback_ids:
+        found = await repository.list_storage_keys_for_feedback(feedback_id)
+        if await repository.delete_feedback_event(feedback_id):
+            deleted.append(feedback_id)
+            keys.extend(found)
+    return tuple(deleted), tuple(keys)
 
 
 def get_feedback_service() -> FeedbackService:

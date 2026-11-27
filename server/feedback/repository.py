@@ -14,17 +14,30 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, all_, and_, bindparam, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import (
+    Select,
+    and_,
+    bindparam,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.feedback.types import (
+    STATE_DROPPED,
+    STATE_FILED,
+    STATE_OPEN,
+    STATE_RESOLVED,
     CreateFeedbackAttachment,
     CreateFeedbackComment,
     CreateFeedbackEvent,
@@ -39,6 +52,7 @@ from server.feedback.types import (
     FeedbackMetrics,
     FeedbackMetricsQuery,
     FeedbackQueryFilters,
+    FeedbackStateCounts,
     FeedbackSummary,
     FeedbackTriageRecord,
     ListFeedbackQuery,
@@ -567,18 +581,34 @@ class FeedbackRepository:
             total=total,
         )
 
-    # -- triage (what became of a piece of feedback on the agenda) ------------
+    async def count_feedback_states(self, filters: FeedbackQueryFilters) -> FeedbackStateCounts:
+        """How many of the filtered list are in each state: one ``GROUP BY`` over the same
+        filters as the list, its own state filter left out."""
+
+        state = func.coalesce(FeedbackTriageModel.state, STATE_OPEN)
+        statement = (
+            select(state.label("state"), func.count().label("count"))
+            .select_from(FeedbackEventModel)
+            .outerjoin(FeedbackTriageModel,
+                       FeedbackTriageModel.feedback_id == FeedbackEventModel.id)
+        )
+        statement = self._apply_query_filters(statement, replace(filters, state=None))
+        counts = FeedbackStateCounts()
+        for row in (await self._session.execute(statement.group_by(state))).all():
+            if row.state in (STATE_OPEN, STATE_FILED, STATE_RESOLVED, STATE_DROPPED):
+                setattr(counts, row.state, int(row.count))
+        return counts
+
+    # -- states (``feedback_triage``: one row per event, no row reads Open) ------------
 
     async def list_untriaged_feedback(
         self,
         project_id: UUID,
         *,
-        exclude: Collection[UUID] = (),
         limit: int,
     ) -> tuple[tuple[FeedbackEventRecord, ...], bool]:
-        """The project's feedback with no triage row and not in ``exclude`` (the ones an
-        agenda item names), newest first: ``(records, more)``, ``more`` when the limit
-        cut the list. ``exclude`` travels as one array parameter, however long."""
+        """The project's Open feedback (no state row, or ``open``), newest first:
+        ``(records, more)``, ``more`` when the limit cut the list (the engine's queue)."""
 
         statement = (
             select(FeedbackEventModel)
@@ -588,26 +618,33 @@ class FeedbackRepository:
             )
             .where(
                 FeedbackEventModel.project_id == project_id,
-                FeedbackTriageModel.feedback_id.is_(None),
+                func.coalesce(FeedbackTriageModel.state, STATE_OPEN) == STATE_OPEN,
             )
+            .order_by(FeedbackEventModel.ingested_at.desc(), FeedbackEventModel.id.desc())
+            .limit(limit + 1)
         )
-        skipped = list(dict.fromkeys(exclude))
-        if skipped:
-            statement = statement.where(
-                FeedbackEventModel.id
-                != all_(bindparam("triage_skipped", skipped, type_=ARRAY(PG_UUID(as_uuid=True))))
-            )
-        statement = statement.order_by(
-            FeedbackEventModel.ingested_at.desc(), FeedbackEventModel.id.desc()
-        ).limit(limit + 1)
         models = (await self._session.execute(statement)).scalars().all()
         return tuple(self._to_record(model) for model in models[:limit]), len(models) > limit
 
     async def get_feedback_triage(self, feedback_id: UUID) -> FeedbackTriageRecord | None:
-        """The latest mark of one piece of feedback, or None (untriaged)."""
+        """The stored state of one piece of feedback, or None (Open)."""
 
         model = await self._session.get(FeedbackTriageModel, feedback_id)
         return self._to_triage_record(model) if model is not None else None
+
+    async def triage_for_ids(
+        self, feedback_ids: Sequence[UUID]
+    ) -> dict[UUID, FeedbackTriageRecord]:
+        """The stored states of several pieces of feedback (an Open one with no row is
+        absent)."""
+
+        if not feedback_ids:
+            return {}
+        statement = select(FeedbackTriageModel).where(
+            FeedbackTriageModel.feedback_id.in_(tuple(feedback_ids))
+        ).execution_options(populate_existing=True)
+        models = (await self._session.execute(statement)).scalars().all()
+        return {model.feedback_id: self._to_triage_record(model) for model in models}
 
     async def set_feedback_triage(
         self,
@@ -618,7 +655,8 @@ class FeedbackRepository:
         reason: str | None,
         by: str,
     ) -> FeedbackTriageRecord:
-        """Mark one piece of feedback, replacing any earlier mark (the latest wins)."""
+        """Set one piece of feedback's state, replacing any earlier one (the latest wins:
+        the engine's mark and the web's filing)."""
 
         values = {"state": state, "agenda": agenda, "reason": reason, "triaged_by": by,
                   "triaged_at": func.now()}
@@ -631,6 +669,153 @@ class FeedbackRepository:
         )
         model = (await self._session.execute(statement)).scalar_one()
         return self._to_triage_record(model)
+
+    async def scoped_feedback_ids(
+        self, feedback_ids: Collection[UUID], project_ids: Collection[UUID]
+    ) -> set[UUID]:
+        """The ids among ``feedback_ids`` whose event is in ``project_ids``."""
+
+        ids, scope = tuple(feedback_ids), tuple(project_ids)
+        if not ids or not scope:
+            return set()
+        statement = select(FeedbackEventModel.id).where(
+            FeedbackEventModel.id.in_(ids), FeedbackEventModel.project_id.in_(scope)
+        )
+        return set((await self._session.execute(statement)).scalars().all())
+
+    async def set_member_states(
+        self,
+        feedback_ids: Sequence[UUID],
+        *,
+        state: str,
+        reason: str | None,
+        by: str,
+    ) -> None:
+        """A member's Resolve, Drop or Reopen on several pieces of feedback (load them
+        scoped first). A feedback already in ``state`` is left as it is (who and when
+        included). Resolved keeps the agenda it was filed on; Dropped holds ``reason``
+        and no agenda; Open clears both, and a feedback with no row stays without one."""
+
+        ids = tuple(dict.fromkeys(feedback_ids))
+        if not ids:
+            return
+        if state == STATE_OPEN:
+            await self._session.execute(
+                update(FeedbackTriageModel)
+                .where(FeedbackTriageModel.feedback_id.in_(ids),
+                       FeedbackTriageModel.state != STATE_OPEN)
+                .values(state=STATE_OPEN, agenda=None, reason=None, triaged_by=by,
+                        triaged_at=func.now())
+                .execution_options(synchronize_session=False)
+            )
+            return
+        insert = pg_insert(FeedbackTriageModel).values([
+            {"feedback_id": fid, "state": state, "agenda": None,
+             "reason": reason if state == STATE_DROPPED else None, "triaged_by": by,
+             "triaged_at": func.now()}
+            for fid in ids
+        ])
+        kept_agenda = FeedbackTriageModel.agenda if state == STATE_RESOLVED else None
+        await self._session.execute(
+            insert.on_conflict_do_update(
+                index_elements=[FeedbackTriageModel.feedback_id],
+                set_={"state": insert.excluded.state, "agenda": kept_agenda,
+                      "reason": insert.excluded.reason, "triaged_by": insert.excluded.triaged_by,
+                      "triaged_at": insert.excluded.triaged_at},
+                where=FeedbackTriageModel.state != insert.excluded.state,
+            ).execution_options(synchronize_session=False)
+        )
+
+    async def file_if_unmarked(
+        self, feedback_id: UUID, *, project_id: UUID, agenda: str, by: str
+    ) -> bool:
+        """File a feedback of ``project_id`` that has no state row; any row (a Reopen
+        included) is left alone. True when it wrote one."""
+
+        statement = (
+            pg_insert(FeedbackTriageModel)
+            .from_select(
+                ["feedback_id", "state", "agenda", "reason", "triaged_by"],
+                select(
+                    FeedbackEventModel.id,
+                    bindparam("filed_state", STATE_FILED),
+                    bindparam("filed_agenda", agenda),
+                    bindparam("filed_reason", None, type_=FeedbackTriageModel.reason.type),
+                    bindparam("filed_by", by),
+                ).where(FeedbackEventModel.id == feedback_id,
+                        FeedbackEventModel.project_id == project_id),
+            )
+            .on_conflict_do_nothing(index_elements=[FeedbackTriageModel.feedback_id])
+            .returning(FeedbackTriageModel.feedback_id)
+        )
+        return (await self._session.execute(statement)).first() is not None
+
+    async def resolve_if_filed(
+        self, feedback_id: UUID, *, project_id: UUID, agenda: str, by: str
+    ) -> bool:
+        """Resolve a Filed feedback of ``project_id``; anything else is left alone, so a
+        second close finds nothing to change. True when it moved."""
+
+        statement = (
+            update(FeedbackTriageModel)
+            .where(
+                FeedbackTriageModel.feedback_id == feedback_id,
+                FeedbackTriageModel.state == STATE_FILED,
+                exists().where(FeedbackEventModel.id == feedback_id,
+                               FeedbackEventModel.project_id == project_id),
+            )
+            .values(state=STATE_RESOLVED, agenda=agenda, reason=None, triaged_by=by,
+                    triaged_at=func.now())
+            .returning(FeedbackTriageModel.feedback_id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(statement)).first() is not None
+
+    async def filed_agendas(
+        self, feedback_ids: Collection[UUID], *, project_id: UUID
+    ) -> dict[UUID, str | None]:
+        """``{id: agenda}`` for each of ``feedback_ids`` that is Filed and belongs to
+        ``project_id``; any other state is not listed."""
+
+        ids = tuple(feedback_ids)
+        if not ids:
+            return {}
+        statement = (
+            select(FeedbackTriageModel.feedback_id, FeedbackTriageModel.agenda)
+            .join(FeedbackEventModel, FeedbackEventModel.id == FeedbackTriageModel.feedback_id)
+            .where(FeedbackTriageModel.feedback_id.in_(ids),
+                   FeedbackTriageModel.state == STATE_FILED,
+                   FeedbackEventModel.project_id == project_id)
+        )
+        return {fid: agenda for fid, agenda in (await self._session.execute(statement)).all()}
+
+    async def follow_filed(
+        self, feedback_id: UUID, *, project_id: UUID, agenda: str | None
+    ) -> bool:
+        """Move a Filed feedback of ``project_id`` to the agenda that still holds it, or,
+        with ``agenda`` None, back to Open (its row goes: no row reads Open, as before it
+        was filed). Who filed it and when stay. Any other state is left alone. True when
+        it moved."""
+
+        scoped = (
+            FeedbackTriageModel.feedback_id == feedback_id,
+            FeedbackTriageModel.state == STATE_FILED,
+            exists().where(FeedbackEventModel.id == feedback_id,
+                           FeedbackEventModel.project_id == project_id),
+        )
+        if agenda is None:
+            statement = (
+                delete(FeedbackTriageModel).where(*scoped)
+                .returning(FeedbackTriageModel.feedback_id)
+                .execution_options(synchronize_session=False)
+            )
+        else:
+            statement = (
+                update(FeedbackTriageModel).where(*scoped).values(agenda=agenda)
+                .returning(FeedbackTriageModel.feedback_id)
+                .execution_options(synchronize_session=False)
+            )
+        return (await self._session.execute(statement)).first() is not None
 
     def _to_triage_record(self, model: FeedbackTriageModel) -> FeedbackTriageRecord:
         return FeedbackTriageRecord(
@@ -790,6 +975,10 @@ class FeedbackRepository:
             statement = statement.where(FeedbackEventModel.trigger_type == filters.trigger_type)
         if filters.tag is not None:
             statement = statement.where(FeedbackEventModel.tags.contains([filters.tag]))
+        if filters.state is not None:
+            statement = statement.outerjoin(
+                FeedbackTriageModel, FeedbackTriageModel.feedback_id == FeedbackEventModel.id
+            ).where(func.coalesce(FeedbackTriageModel.state, STATE_OPEN) == filters.state)
 
         return statement
 

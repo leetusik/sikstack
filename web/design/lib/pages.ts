@@ -7,6 +7,7 @@ import {
   DESIGN_BUILD_STATES,
   DESIGN_LIST_STATES,
   FEEDBACK_FILED_STATES,
+  FEEDBACK_LIST_STATES,
   FEEDBACK_STATES,
   INVITE_STATES,
   ITEM_STATES,
@@ -84,6 +85,15 @@ export const PAGES: readonly BuildPage[] = [
     recording: true,
     reads: ["workspace", "items"],
     states: ITEM_STATES,
+  },
+  // The Feedback list (P91-v3.S3's design, applied in S4): production's list view on made data, no recording.
+  {
+    name: "Feedback list",
+    route: "/feedback",
+    production: "src/app/(app)/feedback/page.tsx",
+    entry: "/feedback/",
+    reads: ["src/sikstack/feedback/list/view.tsx", "src/sikstack/feedback/state/", "lib/feedback-list-data.ts (made)"],
+    states: FEEDBACK_LIST_STATES,
   },
   ...(fbFree.length > 0
     ? [

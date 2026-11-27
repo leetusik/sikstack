@@ -16,11 +16,13 @@ import {
 import type { FeedbackNumberedPage, FeedbackQuery } from "@/lib/feedback/types";
 import { listProjects } from "@/lib/knowledge/app";
 import { ApiError } from "@/lib/knowledge/client";
+import { getMembers } from "@/lib/knowledge/orgs";
 import type { KbProject } from "@/lib/knowledge/types";
 import { viewerTimeZone } from "@/lib/time-zone";
 
 import type { FeedbackListProps } from "./list";
 import { listRows, PAGE_SIZE } from "./model";
+import type { OrgRole } from "../state/model";
 
 type Search = Record<string, string | string[] | undefined>;
 
@@ -47,8 +49,24 @@ async function readProjects(token: string): Promise<KbProject[] | null> {
   }
 }
 
+/**
+ * The caller's role in the active org (`GET /app/members`), read as org home reads it: an owner deletes; a member, or
+ * a role read that failed, sees no Delete (the API refuses a member's delete either way).
+ */
+async function readRole(token: string): Promise<OrgRole> {
+  try {
+    return (await getMembers(token)).role === "owner" ? "owner" : "member";
+  } catch (error) {
+    unstable_rethrow(error);
+    return "member";
+  }
+}
+
 function query(scope: FeedbackScope, place: FeedbackPlace) {
-  const q: Omit<FeedbackQuery, "page"> = { limit: PAGE_SIZE };
+  const q: Omit<FeedbackQuery, "page"> = {
+    limit: PAGE_SIZE,
+    state: place.state,
+  };
   if (place.q) q.q = place.q;
   const project = scope ?? place.project;
   if (project) q.project_id = project;
@@ -58,7 +76,8 @@ function query(scope: FeedbackScope, place: FeedbackPlace) {
 
 /**
  * The list's reads, for either route: the org's projects (the select, the Project column's names, the
- * scope's and the filter's check) and one numbered page of the list with its total.
+ * scope's and the filter's check), the caller's role (an owner's Delete), and one numbered page of the
+ * list in the state the address names (Open by default), with its total and each state's count.
  *
  * - With a project picked that is no project of the org: Not found (`notFound()`).
  * - An address the list does not answer (a page that is not a whole number from 1, a rating other than
@@ -73,7 +92,10 @@ export async function readFeedbackList(
   const { token, identity } = await requireIdentity();
   const orgName = identity.tenant?.name ?? "—";
   const place = readFeedbackPlace(search, scope);
-  const projects = await readProjects(token);
+  const [projects, role] = await Promise.all([
+    readProjects(token),
+    readRole(token),
+  ]);
   if (scope !== null && projects && !projects.some((p) => p.id === scope))
     notFound();
   if (isInvalid(place)) return { kind: "no-view", orgName };
@@ -83,7 +105,15 @@ export async function readFeedbackList(
   const shown = (projects ?? []).map((p) => ({ id: p.id, name: p.name }));
   const failed: FeedbackListRead = {
     kind: "list",
-    list: { scope, place, projects: shown, rows: [], total: 0, failed: true },
+    list: {
+      scope,
+      place,
+      projects: shown,
+      rows: [],
+      total: 0,
+      role,
+      failed: true,
+    },
   };
   if (projects === null) return failed;
 
@@ -108,6 +138,8 @@ export async function readFeedbackList(
       projects: shown,
       rows: listRows(read.records, { scope, place, projects, timeZone }),
       total: read.total,
+      counts: read.counts,
+      role,
       failed: false,
     },
   };
