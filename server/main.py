@@ -35,6 +35,7 @@ from server import books as books_mod
 from server import books_api
 from server import config, db
 from server import dashboard_api
+from server import deletion
 from server import design_api
 from server import documents_api
 from server import feedback_api
@@ -85,6 +86,13 @@ async def lifespan(app: FastAPI):
     # round-trips (one per new section: a corpus's first boot after a new kind of
     # vector is hundreds of them, with rate-limit backoff), so it runs on the
     # after-response worker and search stays keyword-only until it lands.
+    # A project or org delete that crashed or failed part way left a staged entry
+    # (server/deletion.py): settle it before the reindex walks the content roots.
+    if config.database_url() is not None:
+        try:
+            await deletion.recover_staged()
+        except Exception:  # noqa: BLE001 - the boot goes on; the next delete retries
+            logger.warning("startup deletion recovery failed", exc_info=True)
     if config.startup_reindex_enabled():
         # Tenant mode: resolve tenant #1's id so the docs/ walk stamps the
         # operator's tenant; namespaced tenants/<uuid>/ roots are re-derived from

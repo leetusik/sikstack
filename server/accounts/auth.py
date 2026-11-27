@@ -211,7 +211,8 @@ async def require_owner(ctx: AuthContext) -> None:
     """403 unless the caller is an ``owner`` of the request's active org.
 
     The guard of every org-level write: the org's name, its Public URL (slug), its
-    org API keys, its invites and members, and a project's visibility (publishing).
+    org API keys, its invites and members, a project's visibility (publishing), and
+    the deletes of a project and of the org itself.
     A ``member`` keeps the rest of the project-level work.
     """
 

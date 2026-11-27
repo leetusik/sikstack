@@ -384,8 +384,8 @@ async def resolve_capture_project(ctx: ApiAuthContext, project_name: str | None)
     ``capture``-scope org-level key lands only in a project that already exists in
     its org, or in ``"default"`` (absent or named, get-or-created); any other name is
     a 400 (``CAPTURE_KEY_UNKNOWN_PROJECT``): a write-only key placed on a machine the
-    operator does not control must never grow the org's project list, which no route
-    can shrink. A ``full`` key, a session and the master bearer get-or-create the
+    operator does not control must never grow the org's project list, which only the
+    org owner's typed-name delete (``DELETE /app/projects/{id}``) can shrink. A ``full`` key, a session and the master bearer get-or-create the
     named project (else ``"default"``) in ``ctx.tenant_id``. Never ``None``.
     """
 

@@ -4,8 +4,9 @@ Every route but the invite's read needs a session (``require_user``) and acts in
 session's active org (``X-Sikstack-Org``, else the first). An org's ``owner`` (who
 made it, or was made one) renames it, invites, revokes, removes members and makes a
 member an owner; a ``member`` (who joined by an invite) reads its members and may
-leave. Every account keeps at least one org: when a leave or a removal ends the
-account's last membership, the same transaction gives it a fresh org, as sign-up does
+leave. Every account keeps at least one org: when a leave, a removal or the org's
+delete ends the account's last membership, the same transaction gives it a fresh org,
+as sign-up does
 (``default``, the account its owner, one project ``default``). Routes:
 
 - ``POST /app/orgs {name}``: a new org named ``name`` (1 to ``ORG_NAME_MAX``
@@ -45,6 +46,13 @@ account's last membership, the same transaction gives it a fresh org, as sign-up
   last owner.
 - ``POST /app/tenant/leave``: the caller leaves the active org, and gets a fresh org
   when this was its only one. 204; 409 ``{"reason": "last_owner"}`` for its last owner.
+- ``DELETE /app/tenant {name}`` (owner only, else 403): delete the active org and
+  everything in it for good (``server.deletion``), ``name`` its name typed again (a
+  missing one is a 422, another a 409 ``{"reason": "name"}``). Every member whose only
+  org it was, the caller included, gets a fresh org in the same transaction. 409
+  ``{"reason": "tenant_one"}`` for the instance's own org (it holds ``docs/`` and the
+  master token) and ``install_feedback`` for the org holding the install-feedback
+  project. ``200 {"tenant"}``: the caller's first org afterwards.
 - ``GET /app/invite/{code}`` (a session or none): the org's name and the invite's
   state (``valid``, ``expired``, ``revoked``, ``used``); on a valid invite also the
   invited address and the inviter's, which the invite page draws. Signed in, it adds
@@ -73,9 +81,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, text, update
+from starlette.concurrency import run_in_threadpool
 
-from server import config, invites
+from server import config, deletion, invites
 from server.accounts.auth import AuthContext, optional_user, require_owner, require_user
+from server.api_auth import get_tenant_one_id
 from server.accounts.repository import AccountsRepository
 from server.accounts.security import sha256_hex
 from server.accounts.service import (
@@ -487,6 +497,50 @@ async def leave_org(ctx: AuthContext = Depends(require_user)) -> Response | JSON
 
 
 # --- the invite's link --------------------------------------------------------------
+
+
+# --- delete the org -----------------------------------------------------------------
+
+
+class ConfirmOrgNameInput(BaseModel):
+    """The org's name, typed again to delete it (required; else 422)."""
+
+    name: str = Field(max_length=1000)
+
+
+@router.delete("/app/tenant", response_model=None)
+async def delete_org(
+    payload: ConfirmOrgNameInput, ctx: AuthContext = Depends(require_user)
+) -> dict[str, object] | JSONResponse:
+    """Delete the active org and everything in it for good (owner only; ``server.deletion``)."""
+
+    _require_accounts_plane()
+    await require_owner(ctx)
+    tenant_one_id = await get_tenant_one_id()
+    refusal = deletion.refusal_for_tenant(tenant_id=ctx.tenant.id, tenant_one_id=tenant_one_id)
+    if refusal is None and not deletion.typed_name_matches(payload.name, ctx.tenant.name):
+        refusal = deletion.WRONG_NAME
+    if refusal is not None:
+        return _refused(409, refusal.reason, refusal.detail)
+    target = deletion.TenantTarget(
+        tenant_id=ctx.tenant.id,
+        name=payload.name,
+        user_id=ctx.user.id,
+        root=deletion.tenant_root(ctx.tenant.id, tenant_one_id),
+    )
+    try:
+        outcome = await run_in_threadpool(deletion.delete_tenant, target)
+    except Exception:
+        logger.error("org delete failed before its commit", exc_info=True)
+        raise HTTPException(status_code=503, detail="could not delete the org; try again")
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="tenant not found")
+    if outcome == "forbidden":  # no longer an owner by the time the lock was held
+        raise HTTPException(status_code=403, detail=_NOT_AN_OWNER)
+    if isinstance(outcome, deletion.Refusal):
+        return _refused(409, outcome.reason, outcome.detail)
+    tenants = await get_accounts_service().list_tenants_for_user(ctx.user.id)
+    return {"tenant": serialize_tenant(tenants[0])}
 
 
 @router.get("/app/invite/{code}")

@@ -708,11 +708,11 @@ def ensure_project_landing(docs_root: Union[str, Path], project: str) -> bool:
 
     Returns ``True`` when it created the landing (the write path then stages it in
     the same scoped commit), ``False`` when a landing — hand-written or previously
-    auto-created — already exists and is left byte-for-byte untouched. Pairs with
-    the delete path by design: deleting a project's last document leaves this
-    landing behind, but a project dir with only ``index.md`` has zero countable
-    docs, so ``discover_projects`` no longer lists it and the gate is unaffected —
-    no delete-side cleanup is needed.
+    auto-created — already exists and is left byte-for-byte untouched. Deleting a
+    project's last document leaves this landing behind (a project dir with only
+    ``index.md`` has zero countable docs, so ``discover_projects`` no longer lists
+    it); deleting the project itself (``server.deletion``) removes the whole
+    ``<project>/`` folder, the landing with it.
     """
     landing = Path(docs_root) / project / "index.md"
     if landing.exists():
