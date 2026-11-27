@@ -28,10 +28,10 @@ import { zoneLabel } from "@/lib/feedback/format";
 import { feedbackBackHref } from "@/lib/feedback/place";
 import { agendaItemHref } from "@/lib/workspace/address";
 
-import { actDone } from "../next/content/feedback-state";
+import { actDone } from "@/content/feedback-state";
 import { FeedbackItem } from "../next/feedback/item/item";
-import { ItemStateActs, ItemStateLine, StateScope, type StateSend } from "../next/feedback/state/control";
-import { changed, OPEN, type FeedbackAct, type FeedbackStateRecord, type OrgRole, type StateAsk } from "../next/feedback/state/model";
+import { ItemStateActs, ItemStateLine, StateScope, type StateSend } from "@/sikstack/feedback/state/control";
+import { changed, OPEN, type FeedbackAct, type FeedbackStateRecord, type OrgRole, type StateAsk } from "@/sikstack/feedback/state/model";
 import { FEEDBACK, feedbackItemsIn } from "./answers";
 import { MADE_STATES, MADE_COMMENT, MADE_FILE, ME_BY, RECORDED_STATES } from "./feedback-list-data";
 import { FEEDBACK_FILED_STATES, FEEDBACK_STATES } from "./page-states";
@@ -48,7 +48,8 @@ import { apply, current, dataOf, getSnapshot, load, reset } from "./store";
  * (`src/sikstack/feedback/item/body.tsx`) is a server component: this screen fills the same two slots it fills.
  *
  * P91-v3.S3's design: the item is the next version (`next/feedback/item/item.tsx`) with its third slot, the state
- * line, and the state's actions before the add at the head's end, in one `StateScope` (`next/feedback/state/`). The
+ * line, and the state's actions before the add at the head's end, in one `StateScope` (production's
+ * `src/sikstack/feedback/state/`, applied in P91-v3.S4). The
  * states are made (`feedback-list-data.ts`): the recording predates them.
  */
 

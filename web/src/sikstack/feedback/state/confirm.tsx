@@ -5,11 +5,11 @@ import { useId, useRef, type RefObject } from "react";
 import { Dialog, DialogActions } from "@/sikstack/frame/dialog";
 import { Swap } from "@/sikstack/ui";
 
-import { CONFIRM_DELETE, CONFIRM_DROP } from "../../content/feedback-state";
+import { CONFIRM_DELETE, CONFIRM_DROP } from "@/content/feedback-state";
 import { REASON_MAX, type StateAsk } from "./model";
 
 /**
- * The next version's new part (P91-v3.S3's design): `src/sikstack/feedback/state/confirm.tsx` when applied. Drop's and
+ * The state confirm (P91-v3, applied from S3's signed design). Drop's and
  * Delete's confirm, for one piece of feedback or a selection, in the shared dialog (`@/sikstack/frame/dialog`), drawn
  * as the Agenda's `AgendaConfirm` is: the question naming what it acts on (`Drop “<message>”?`, `Delete 3 pieces of
  * feedback?`), one sentence, Drop's one optional **Reason** (Enter in it drops), **Cancel** and the act. Drop's act is

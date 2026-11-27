@@ -40,7 +40,30 @@ export interface Feedback {
   source_metadata: Record<string, unknown>;
   attributes: Record<string, unknown>;
   project_id: string | null;
+  /**
+   * Its one state (P91-v3): `{state, agenda, reason, by, at}`, Open with nulls when none is stored. Optional
+   * because an answer from before the state, or a made record, may lack it: the list reads none as Open.
+   */
+  state?: FeedbackState;
 }
+
+/** A feedback's state name, as the API writes it. */
+export type FeedbackStateValue = "open" | "filed" | "resolved" | "dropped";
+
+/**
+ * A feedback's stored state (`GET /app/feedback`, `GET /app/feedback/{id}`): Filed and Resolved keep the agenda
+ * item, Dropped the reason; `by` is `person:<email>` or the workspace's sync (`agent:sikstack`).
+ */
+export interface FeedbackState {
+  state: FeedbackStateValue;
+  agenda: string | null;
+  reason: string | null;
+  by: string | null;
+  at: string | null;
+}
+
+/** `GET /app/feedback`'s `counts`: each state's count under the same search and filters. */
+export type FeedbackStateCounts = Record<FeedbackStateValue, number>;
 
 /** An operator comment on a record. Read-only in the web app. */
 export interface FeedbackComment {
@@ -79,6 +102,8 @@ export interface FeedbackDetail extends Feedback {
 export interface FeedbackNumberedPage {
   records: Feedback[];
   total: number;
+  /** Each state's count under the same filters (P91-v3); every state 0 when the answer has none. */
+  counts: FeedbackStateCounts;
 }
 
 /**
@@ -105,6 +130,8 @@ export interface FeedbackQuery {
     "like" | "dislike" | "comment" | "rating" | "survey" | "manual" | "other";
   /** A blank tag is a 400, so blanks are never sent. */
   tag?: string;
+  /** The stored state (P91-v3); `open` when absent, `all` for every state; anything else is a 400. */
+  state?: FeedbackStateValue | "all";
   /** 1..100, default 50. */
   limit?: number;
   /** A numbered page, 1-based, `limit` a page; page 1 when absent. */
@@ -152,3 +179,13 @@ export interface FeedbackFiled {
     created_at: string;
   }[];
 }
+
+/**
+ * What the list's state and delete actions answer (`@/lib/feedback/state-actions`, P91-v3): `ok`, or why not, read
+ * from the API's status: `not-found` (404: an id outside the active org, nothing changed), `forbidden` (403: a
+ * member's Delete, or an org the session is not in), `refused` (422: a bad body), `failed` (anything else, no
+ * answer, or no session).
+ */
+export type FeedbackActAnswer =
+  | { ok: true; ids: string[] }
+  | { ok: false; reason: "not-found" | "forbidden" | "refused" | "failed" };

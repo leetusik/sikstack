@@ -8,17 +8,26 @@ import type {
   FeedbackDetail,
   FeedbackNumberedPage,
   FeedbackQuery,
+  FeedbackStateCounts,
 } from "./types";
 
 // The Feedback module's session-scoped reads (`/app/feedback*`), on the same
 // client seam as `@/lib/knowledge/app`: the caller passes the session bearer, the
 // client adds the active org, and every call is `no-store`.
 
+const NO_COUNTS: FeedbackStateCounts = {
+  open: 0,
+  filed: 0,
+  resolved: 0,
+  dropped: 0,
+};
+
 /**
  * `GET /app/feedback?page=N` → `{records, total}`: one numbered page (1-based,
  * `limit` a page, fifty by default) of the active org's feedback, newest first,
- * and the count of the whole list as read. A page past the last is no records
- * and the total. Without `page` the API answers page 1.
+ * the count of the whole list as read, and each state's count (`counts`, P91-v3).
+ * A page past the last is no records and the total. Without `page` the API
+ * answers page 1; without `state`, Open.
  */
 export async function listFeedbackPage(
   token: string,
@@ -31,7 +40,11 @@ export async function listFeedbackPage(
     `/app/feedback${feedbackQueryString(numbered)}`,
     { token, signal },
   );
-  return { records: read.records ?? [], total: read.total ?? 0 };
+  return {
+    records: read.records ?? [],
+    total: read.total ?? 0,
+    counts: { ...NO_COUNTS, ...read.counts },
+  };
 }
 
 /**

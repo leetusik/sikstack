@@ -57,7 +57,11 @@ describe("listFeedbackPage / countFeedback / getFeedbackDetail", () => {
       { project_id: PROJECT, q: "slow" },
       3,
     );
-    expect(page).toEqual({ records: [{ id: "a" }], total: 230 });
+    expect(page).toEqual({
+      records: [{ id: "a" }],
+      total: 230,
+      counts: { open: 0, filed: 0, resolved: 0, dropped: 0 },
+    });
     const url = new URL(String(vi.mocked(fetch).mock.calls[0][0]));
     expect(url.pathname).toBe("/app/feedback");
     expect(Object.fromEntries(url.searchParams)).toEqual({

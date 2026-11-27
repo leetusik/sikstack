@@ -1,6 +1,6 @@
 import type { Feedback } from "@/lib/feedback/types";
 
-import type { FeedbackStateRecord, StateCounts } from "../next/feedback/state/model";
+import type { FeedbackStateRecord, StateCounts } from "@/sikstack/feedback/state/model";
 import { FEEDBACK } from "./answers";
 import { NOW, PROJECT, RECORDING } from "./recording";
 

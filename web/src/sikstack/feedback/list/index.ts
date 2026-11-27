@@ -19,7 +19,9 @@ export {
   noSuchView,
   pageCount,
   PAGE_SIZE,
+  type FeedbackListRecord,
   type FeedbackListRow,
   type ListBody,
   type ListPhase,
+  type ListPlace,
 } from "./model";

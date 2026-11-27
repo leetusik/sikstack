@@ -5,9 +5,9 @@ import { useState, type MouseEvent } from "react";
 import { publishToast } from "@/sikstack/shell";
 import { AT_REST } from "@/lib/feedback/place";
 
-import { actDone, actFailed } from "../next/content/feedback-state";
-import { FeedbackListView } from "../next/feedback/list/view";
-import { listRows, type ListPhase, type ListPlace } from "../next/feedback/list/model";
+import { actDone, actFailed } from "@/content/feedback-state";
+import { FeedbackListView } from "@/sikstack/feedback/list/view";
+import { listRows, type ListPhase, type ListPlace } from "@/sikstack/feedback/list/model";
 import {
   changed,
   shortTitle,
@@ -17,7 +17,7 @@ import {
   type FeedbackStateName,
   type OrgRole,
   type StateAsk,
-} from "../next/feedback/state/model";
+} from "@/sikstack/feedback/state/model";
 import { countsOf, LIST_RECORDS, ME_BY, type ListRecord } from "./feedback-list-data";
 import { FEEDBACK_LIST_STATES } from "./page-states";
 import { NOW, PROJECT, TIME_ZONE } from "./recording";
@@ -25,8 +25,8 @@ import { Frame, SHELL } from "./screens";
 import { StatePage } from "./states";
 
 /**
- * The Feedback list (`/feedback`, P91-v3.S3's design): the next version of production's `FeedbackListView` on made
- * data (`feedback-list-data.ts`), wired as production's island would wire it (`src/sikstack/feedback/list/list.tsx`):
+ * The Feedback list (`/feedback`, P91-v3.S3's design, applied in S4): production's `FeedbackListView` on made
+ * data (`feedback-list-data.ts`), wired as production's island wires it (`src/sikstack/feedback/list/list.tsx`):
  * the state filter, the search and filters, picking rows and acting on them run in the browser. Resolve and Reopen
  * answer after a short wait; Drop and Delete after their confirm; the rows then leave the state on screen and a toast
  * says what was done (the API's `POST /app/feedback/state` and `/delete`, answered here).

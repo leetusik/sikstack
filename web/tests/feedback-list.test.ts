@@ -35,8 +35,16 @@ vi.mock("@/lib/auth-guards", () => ({
 const api = vi.hoisted(() => ({
   projects: [] as { id: string; name: string }[] | Error,
   page: { records: [] as unknown[], total: 0 } as
-    { records: unknown[]; total: number } | Error,
+    | { records: unknown[]; total: number; counts?: Record<string, number> }
+    | Error,
   calls: [] as unknown[][],
+  role: "owner" as "owner" | "member" | Error,
+}));
+vi.mock("@/lib/knowledge/orgs", () => ({
+  getMembers: async () => {
+    if (api.role instanceof Error) throw api.role;
+    return { role: api.role, members: [] };
+  },
 }));
 vi.mock("@/lib/knowledge/app", () => ({
   listProjects: async () => {
@@ -73,6 +81,7 @@ beforeEach(() => {
   api.projects = PROJECTS;
   api.page = { records: [record(1)], total: 1 };
   api.calls = [];
+  api.role = "owner";
 });
 
 /** The org route's own element: the shared list's body, nothing around it. */
@@ -116,7 +125,12 @@ async function orgBody(search: Record<string, string> = {}) {
 describe("which body shows", () => {
   it("follows the record: failed, a request out, rows, no project, no match, none yet", async () => {
     const { listBody } = await import("@/sikstack/feedback/list/model");
-    const all = { rows: 3, projects: 2, filtered: true };
+    const all = {
+      rows: 3,
+      projects: 2,
+      filtered: true,
+      counts: { open: 3, filed: 0, resolved: 0, dropped: 0 },
+    };
     expect(listBody({ ...all, phase: "failed" })).toBe("failed");
     expect(listBody({ ...all, phase: "searching" })).toBe("waiting");
     expect(listBody({ ...all, phase: "loading" })).toBe("waiting");
@@ -126,8 +140,45 @@ describe("which body shows", () => {
       "no-projects",
     );
     expect(listBody({ ...all, rows: 0, phase: "ready" })).toBe("no-match");
-    expect(listBody({ ...all, rows: 0, filtered: false, phase: "ready" })).toBe(
-      "none",
+    expect(
+      listBody({
+        ...all,
+        rows: 0,
+        filtered: false,
+        phase: "ready",
+        counts: { open: 0, filed: 0, resolved: 0, dropped: 0 },
+      }),
+    ).toBe("none");
+  });
+
+  it("tells no feedback, none in this state and no match apart by the counts and the filters (frs7)", async () => {
+    const { listBody } = await import("@/sikstack/feedback/list/model");
+    const zero = { open: 0, filed: 0, resolved: 0, dropped: 0 };
+    const elsewhere = { ...zero, filed: 2, dropped: 1 };
+    const empty = { phase: "ready", rows: 0, projects: 2 } as const;
+    expect(listBody({ ...empty, filtered: false, counts: zero })).toBe("none");
+    expect(listBody({ ...empty, filtered: false, counts: elsewhere })).toBe(
+      "state-empty",
+    );
+    expect(listBody({ ...empty, filtered: true, counts: zero })).toBe(
+      "no-match",
+    );
+    expect(listBody({ ...empty, filtered: true, counts: elsewhere })).toBe(
+      "no-match",
+    );
+    api.page = { records: [], total: 0, counts: elsewhere };
+    const none = await orgBody();
+    expect(none).toContain("No open feedback.");
+    expect(none).not.toContain("No feedback yet.");
+    expect(await orgBody({ state: "resolved" })).toContain(
+      "No resolved feedback.",
+    );
+    expect(await orgBody({ state: "dropped", q: "refund" })).toContain(
+      "No dropped feedback contains “refund”.",
+    );
+    api.page = { records: [], total: 0, counts: zero };
+    expect(await orgBody()).toContain(
+      "No feedback yet. Your product sends it here with a",
     );
   });
 
@@ -137,13 +188,13 @@ describe("which body shows", () => {
       "No feedback yet. Your product sends it here with a",
     );
     expect(await orgBody({ q: "refund" })).toContain(
-      "No feedback contains “refund”.",
+      "No open feedback contains “refund”.",
     );
     expect(await orgBody({ q: "x", rating: "liked", project: "p1" })).toContain(
-      "No feedback contains “x” with these filters.",
+      "No open feedback contains “x” with these filters.",
     );
     expect(await orgBody({ rating: "liked" })).toContain(
-      "No feedback matches this filter.",
+      "No open feedback matches this filter.",
     );
     api.projects = [];
     const none = await orgBody();
@@ -157,6 +208,34 @@ describe("which body shows", () => {
     expect(failed).toContain("Feedback did not load.");
     expect(failed).toContain(">Try again</button>");
     expect(failed).toMatch(/<p class="meta" role="status"><\/p>/);
+  });
+});
+
+describe("the state it reads (P91-v3)", () => {
+  it("asks the API for the address's state, Open by default, and passes the counts and the caller's role", async () => {
+    const { readFeedbackList } = await import("@/sikstack/feedback/list/load");
+    const counts = { open: 4, filed: 1, resolved: 0, dropped: 2 };
+    api.page = { records: [record(1)], total: 2, counts };
+    const read = await readFeedbackList(null, { state: "dropped", q: "x" });
+    expect(api.calls[0][1]).toMatchObject({ state: "dropped", q: "x" });
+    expect(read).toMatchObject({
+      kind: "list",
+      list: { counts, role: "owner", place: { state: "dropped" } },
+    });
+    await readFeedbackList(null, {});
+    expect(api.calls[1][1]).toMatchObject({ state: "open" });
+    api.role = "member";
+    expect(await readFeedbackList(null, {})).toMatchObject({
+      list: { role: "member" },
+    });
+    api.role = new ApiError(500, "boom");
+    expect(await readFeedbackList(null, {})).toMatchObject({
+      list: { role: "member" },
+    });
+  });
+
+  it("is No such view for a state the list does not show", async () => {
+    expect(await orgBody({ state: "all" })).toContain("No such view");
   });
 });
 
@@ -209,6 +288,7 @@ describe("the pager", () => {
   it("marks the page asked for at once and keeps the rows while it loads", async () => {
     const { FeedbackListView } = await import("@/sikstack/feedback/list/view");
     const { AT_REST } = await import("@/lib/feedback/place");
+    const { OPEN } = await import("@/sikstack/feedback/state/model");
     const html = renderToStaticMarkup(
       createElement(FeedbackListView, {
         scope: null,
@@ -224,6 +304,7 @@ describe("the pager", () => {
             at: "2026-11-15T01:00:00Z",
             when: "1h ago",
             href: "/feedback/f1",
+            state: OPEN,
           },
         ],
         total: 230,
@@ -421,6 +502,7 @@ describe("the bar without script", () => {
       q: "latency",
       project: null,
       rating: "disliked",
+      state: "open",
     });
   });
 
@@ -448,6 +530,7 @@ describe("the bar without script", () => {
         q: "latency",
         project: null,
         rating: "liked",
+        state: "open",
       });
     }
   });
@@ -488,9 +571,29 @@ describe("the bar without script", () => {
       sent(await orgBody({ q: "x", rating: "liked" }), "Any rating"),
     );
     expect(any.params.rating ?? "").toBe("");
-    expect(any.place).toEqual({ page: 1, q: "x", project: null, rating: null });
+    expect(any.place).toEqual({
+      page: 1,
+      q: "x",
+      project: null,
+      rating: null,
+      state: "open",
+    });
     const none = await landed(sent(await orgBody({ q: "x" }), "Search", "y"));
     expect(none.params).toEqual({ q: "y", project: "" });
+  });
+
+  it("(h) a state other than Open rides along as a hidden field, so a search keeps it", async () => {
+    const out = await landed(
+      sent(await orgBody({ state: "dropped" }), "Search", "late"),
+    );
+    expect(out.params).toEqual({ q: "late", project: "", state: "dropped" });
+    expect(out.place).toEqual({
+      page: 1,
+      q: "late",
+      project: null,
+      rating: null,
+      state: "dropped",
+    });
   });
 
   it("(g) a search or a toggle starts at page 1", async () => {

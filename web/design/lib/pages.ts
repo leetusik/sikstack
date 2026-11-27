@@ -86,13 +86,13 @@ export const PAGES: readonly BuildPage[] = [
     reads: ["workspace", "items"],
     states: ITEM_STATES,
   },
-  // The Feedback list (P91-v3.S3's design): the next version of production's list on made data, no recording.
+  // The Feedback list (P91-v3.S3's design, applied in S4): production's list view on made data, no recording.
   {
     name: "Feedback list",
     route: "/feedback",
     production: "src/app/(app)/feedback/page.tsx",
     entry: "/feedback/",
-    reads: ["design/next/feedback/list/view.tsx", "design/next/feedback/state/", "lib/feedback-list-data.ts (made)"],
+    reads: ["src/sikstack/feedback/list/view.tsx", "src/sikstack/feedback/state/", "lib/feedback-list-data.ts (made)"],
     states: FEEDBACK_LIST_STATES,
   },
   ...(fbFree.length > 0

@@ -1,4 +1,4 @@
-// The next version's new words file (P91-v3.S3's design): `src/content/feedback-state.ts` when applied. A piece of
+// The Feedback states' words (P91-v3, applied from S3's signed design, which drew them first). A piece of
 // feedback's one state (Open, Filed, Resolved, Dropped), the actions on it (Resolve, Drop, Reopen, Delete), their
 // confirms and their answers, shared by the Feedback list and one piece of feedback. The Agenda's own words stay the
 // Agenda's (`@/content/workspace/agenda`); the verbs and their busy forms are the Workspace's (`WS_ACTIONS`).

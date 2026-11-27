@@ -1,5 +1,5 @@
 /**
- * The next version's new module (P91-v3.S3's design): `src/sikstack/feedback/state/model.ts` when applied. A piece of
+ * The Feedback states' module (P91-v3, applied from S3's signed design). A piece of
  * feedback's one state and the actions on it, pure, so the list, the item's page and their tests share it.
  *
  * - **The state** is the API's `state {state, agenda, reason, by, at}` on every record (`GET /app/feedback`, `GET
@@ -11,7 +11,7 @@
  *   Reopen act at once (`POST /app/feedback/state`).
  * - **Picking** covers the rows on screen (one page of one state); the box over them picks all or clears them.
  */
-import type { FeedbackAct, FeedbackStateName } from "../../content/feedback-state";
+import type { FeedbackAct, FeedbackStateName } from "@/content/feedback-state";
 
 export type { FeedbackAct, FeedbackStateName };
 

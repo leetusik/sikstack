@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 
-import { actFailed } from "../../content/feedback-state";
+import { actFailed } from "@/content/feedback-state";
 import { StateConfirm } from "./confirm";
 import { StateActs, StateLine } from "./line";
 import {
@@ -16,7 +16,7 @@ import {
 } from "./model";
 
 /**
- * The next version's new island (P91-v3.S3's design): `src/sikstack/feedback/state/control.tsx` when applied. One
+ * The item's state island (P91-v3, applied from S3's signed design). One
  * piece of feedback's state on its page, as `AgendaScope` is its add: `StateScope` holds the state and the open
  * confirm, `ItemStateLine` draws the line under the title, `ItemStateActs` the actions at the head's end with the
  * confirm. `send` is the page's write (`POST /app/feedback/state`, or `POST /app/feedback/delete`, which answers no

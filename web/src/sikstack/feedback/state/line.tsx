@@ -2,11 +2,11 @@ import { Badge, Button } from "@/sikstack/ui";
 import { when } from "@/lib/feedback/format";
 import { langAttr } from "@/lib/feedback/lang";
 
-import { ACT_WORD, STATE_WORD, type FeedbackAct } from "../../content/feedback-state";
+import { ACT_WORD, STATE_WORD, type FeedbackAct } from "@/content/feedback-state";
 import { byName, type FeedbackStateRecord } from "./model";
 
 /**
- * The next version's new parts (P91-v3.S3's design): `src/sikstack/feedback/state/line.tsx` when applied.
+ * The state line and actions (P91-v3, applied from S3's signed design).
  *
  * - `StateLine`: one piece of feedback's state, under its title's line: the state's word in a badge (the state is
  *   always its word, never a colour), then what that state holds (the agenda item a filed or resolved piece is on, a

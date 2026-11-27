@@ -8,8 +8,9 @@
  *   `/feedback/{feedbackId}` or `/projects/{id}/feedback/{feedbackId}`, so the item keeps the Shell
  *   its list showed. The Shell reads the scope from the path alone (`sikstack/shell/model.ts`).
  * - **The place** is the list's query: `page`, `q`, `project` (the bar's project filter, the org's
- *   list only: a project's list has no select) and `rating` (`liked` | `disliked`). Blanks are
- *   absent; page 1 is no `page`. The org's list filtered to a project (`/feedback?project={id}`)
+ *   list only: a project's list has no select), `rating` (`liked` | `disliked`) and `state` (the one
+ *   state the list shows, P91-v3: `filed` | `resolved` | `dropped`; Open, the default, is no `state`).
+ *   Blanks are absent; page 1 is no `page`. The org's list filtered to a project (`/feedback?project={id}`)
  *   keeps the org's Shell: the filter is never the scope.
  * - **The way back** rides in one query value, `?from=`, on the item's address: the list's own
  *   address, built here. It is laundered as the Library's `decodeFrom` (`lib/library/from.ts`) is:
@@ -21,6 +22,7 @@
  * the browser.
  */
 
+import type { FeedbackStateName } from "@/content/feedback-state";
 import { safeNextPath } from "@/lib/next-path";
 
 /** A rating filter, as the address writes it. `unrated` is no filter (the API has none). */
@@ -39,6 +41,8 @@ export interface FeedbackPlace {
   project: string | null;
   /** The rating filter, or null for Any rating. */
   rating: FeedbackRating | null;
+  /** The state the list shows (P91-v3): Open by default. Neither a search nor a filter: Clear keeps it. */
+  state: FeedbackStateName;
 }
 
 /** An address no list answers: the page shows No such view. */
@@ -52,6 +56,7 @@ export const AT_REST: Readonly<FeedbackPlace> = Object.freeze({
   q: "",
   project: null,
   rating: null,
+  state: "open",
 });
 
 export const NO_SUCH_VIEW: Readonly<InvalidPlace> = Object.freeze({
@@ -64,9 +69,16 @@ export const FROM_PARAM = "from";
 const FEEDBACK = "/feedback";
 const PAGE = /^[1-9][0-9]{0,5}$/;
 const RATINGS: readonly FeedbackRating[] = ["liked", "disliked"];
+/** The states the list shows; `open` reads as no `state` and is never written. */
+const STATES: readonly FeedbackStateName[] = [
+  "open",
+  "filed",
+  "resolved",
+  "dropped",
+];
 /** The keys each list's address has, in the order they are written. */
-const ORG_KEYS = ["page", "q", "project", "rating"] as const;
-const PROJECT_KEYS = ["page", "q", "rating"] as const;
+const ORG_KEYS = ["page", "q", "project", "rating", "state"] as const;
+const PROJECT_KEYS = ["page", "q", "rating", "state"] as const;
 const PARSE_BASE = "https://feedback-from.invalid";
 
 type Params = Record<string, string | string[] | null | undefined>;
@@ -89,7 +101,8 @@ export function isInvalid(
 
 /**
  * The list's place from its address (`searchParams`), or No such view for a page that is not a
- * whole number from 1 or a rating other than `liked` and `disliked`. A repeated key reads its first
+ * whole number from 1, a rating other than `liked` and `disliked`, or a state the list does not show
+ * (`all` among them: the list has no All view). A repeated key reads its first
  * value; a blank one is absent; a key the list does not have is never read. Never throws.
  */
 export function readFeedbackPlace(
@@ -101,12 +114,16 @@ export function readFeedbackPlace(
   const rating = one(params.rating);
   if (rating !== "" && !RATINGS.includes(rating as FeedbackRating))
     return NO_SUCH_VIEW;
+  const state = one(params.state);
+  if (state !== "" && !STATES.includes(state as FeedbackStateName))
+    return NO_SUCH_VIEW;
   const project = scope === null ? one(params.project) : "";
   return {
     page: page === "" ? 1 : Number(page),
     q: one(params.q),
     project: project || null,
     rating: (rating || null) as FeedbackRating | null,
+    state: (state || "open") as FeedbackStateName,
   };
 }
 
@@ -148,6 +165,9 @@ function query(scope: FeedbackScope, place: Partial<FeedbackPlace>): string {
     if (key === "page") {
       if (typeof value === "number" && Number.isInteger(value) && value > 1)
         search.set("page", String(value));
+    } else if (key === "state") {
+      if (value !== "open" && STATES.includes(value as FeedbackStateName))
+        search.set("state", value as string);
     } else if (typeof value === "string" && value.trim() !== "") {
       search.set(key, value.trim());
     }
@@ -181,12 +201,12 @@ export function feedbackPageHref(
   return feedbackListHref(scope, { ...place, page: n });
 }
 
-/** What a search, the project select or a rating toggle changes. */
+/** What a search, the project select, a rating toggle or the state filter changes. */
 export type FeedbackChange = Partial<
-  Pick<FeedbackPlace, "q" | "project" | "rating">
+  Pick<FeedbackPlace, "q" | "project" | "rating" | "state">
 >;
 
-/** The place after a search or a filter change: the rest kept, and the first page. */
+/** The place after a search, a filter or a state change: the rest kept, and the first page. */
 export function withChange(
   place: FeedbackPlace,
   change: FeedbackChange,
@@ -224,7 +244,8 @@ export function feedbackItemHref(
  * scope's list address as our links write it, else the list at rest. Rejected: a missing, empty or
  * repeated value; what `safeNextPath` refuses or rewrites (`//host`, `https:`, `\`, control
  * characters, `..`); another path (`/library`, another scope's list); a hash; a key the list does
- * not have, or one given twice; a value the list does not read (`rating=unrated`, `page=0`).
+ * not have, or one given twice; a value the list does not read (`rating=unrated`, `page=0`,
+ * `state=all`).
  * Never throws.
  */
 export function decodeFeedbackFrom(

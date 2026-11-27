@@ -2,6 +2,12 @@
  * The Feedback list's rules (`result.md` § The list; frame.md F128, F130, F139 to F141, F340, F343), pure
  * so a node test reaches them: which body stands in the panel, the rows as the table draws them, the
  * pager's figures, No such view's block. No React and no I/O: `./load.ts` reads, `./view.tsx` draws.
+ *
+ * P91-v3 (applied from S3's signed design): the list is one state's (`?state=`, Open by default), so its body tells
+ * three empties apart, from the API's `counts`: no feedback at all (`none`), none in this state with no search or
+ * filter set (`state-empty`; the state filter shows where the rest is), and a search or filter that matches nothing
+ * (`no-match`). A row carries its state; the place carries the state (`@/lib/feedback/place`).
+ *
  */
 
 import { BACK_TO_FEEDBACK, NOT_FOUND } from "@/content/feedback-frame";
@@ -18,6 +24,13 @@ import {
 } from "@/lib/feedback/place";
 import type { Feedback } from "@/lib/feedback/types";
 
+import {
+  OPEN,
+  type FeedbackStateName,
+  type FeedbackStateRecord,
+  type StateCounts,
+} from "../state/model";
+
 /** Fifty rows a page (F340, `FB.PAGE`). */
 export const PAGE_SIZE = 50;
 
@@ -30,29 +43,49 @@ export type ListPhase = "ready" | "loading" | "searching" | "paging" | "failed";
 
 /** What stands in the panel under the bar. */
 export type ListBody =
-  "failed" | "waiting" | "rows" | "no-projects" | "no-match" | "none";
+  | "failed"
+  | "waiting"
+  | "rows"
+  | "no-projects"
+  | "no-match"
+  | "state-empty"
+  | "none";
 
 /**
  * Which body shows, in the record's precedence: failed, then a request out, then rows, then no
- * project in the org, then no match (a search or a filter is set), then no feedback yet.
+ * project in the org, then no match (a search or a project or rating filter is set), then no feedback
+ * yet (no state holds any), then none in this state. `filtered` counts the search and the project and
+ * rating filters only: the state filter is the list's own.
  */
 export function listBody({
   phase,
   rows,
   projects,
   filtered,
+  counts,
 }: {
   phase: ListPhase;
   rows: number;
   projects: number;
   filtered: boolean;
+  counts: StateCounts;
 }): ListBody {
   if (phase === "failed") return "failed";
   if (phase === "loading" || phase === "searching") return "waiting";
   if (rows > 0) return "rows";
   if (projects === 0) return "no-projects";
   if (filtered) return "no-match";
-  return "none";
+  if (counts.open + counts.filed + counts.resolved + counts.dropped === 0)
+    return "none";
+  return "state-empty";
+}
+
+/** A record as the list reads it: its state, or Open when the API has none stored. */
+export type FeedbackListRecord = Feedback & { state?: FeedbackStateRecord };
+
+/** The list's place: the address's place and the state it shows (`open` is the address without `state`). */
+export interface ListPlace extends FeedbackPlace {
+  state: FeedbackStateName;
 }
 
 /** A request is out: the panel is `aria-busy`. */
@@ -85,11 +118,12 @@ export interface FeedbackListRow {
   when: string;
   /** The item, in the Shell the list shows, carrying the list's place as the way back. */
   href: string;
+  state: FeedbackStateRecord;
 }
 
 /** The records as rows: names from the org's projects, times in `timeZone`. */
 export function listRows(
-  records: readonly Feedback[],
+  records: readonly FeedbackListRecord[],
   {
     scope,
     place,
@@ -121,6 +155,7 @@ export function listRows(
       at: r.ingested_at,
       when: when(r.ingested_at, { timeZone, now }),
       href: feedbackItemHref(scope, r.id, place),
+      state: r.state ?? OPEN,
     };
   });
 }

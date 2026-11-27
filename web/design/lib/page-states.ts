@@ -90,14 +90,15 @@ export const DESIGN_BUILD_STATES = pageStates("Design build", [
 const FB = "src/sikstack/feedback";
 const FB_AGENDA = "src/sikstack/feedback/agenda";
 const FB_ROUTE = "src/app/(app)/projects/[projectId]/feedback/[feedbackId]";
-// P91-v3.S3's design: the next versions (`design/next/`), which replace production's files when applied.
+// P91-v3.S3's design. The list and the shared state module were applied in S4 and are production's now; the item's
+// next version (`design/next/`) still replaces production's when S5 applies it.
 const NX = "design/next/feedback";
-const NX_LIST = `${NX}/list/view.tsx`;
-const NX_STATE = `${NX}/state`;
+const NX_LIST = `${FB}/list/view.tsx`;
+const NX_STATE = `${FB}/state`;
 const FB_LIST_ROUTE = "src/app/(app)/feedback";
 
 /**
- * The Feedback list (`/feedback`, the org's; a project's list is the same component): the next version's view on made
+ * The Feedback list (`/feedback`, the org's; a project's list is the same component): production's view on made
  * data (`feedback-list-data.ts`). Each state filter, the three empties, picking rows and acting on them, the two
  * confirms, a member's view, and the route's loading and failed branches.
  */
