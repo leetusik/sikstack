@@ -101,6 +101,10 @@ def _signup(client: TestClient) -> dict:
     assert res.status_code == 201, res.text
     body = res.json()
     body["session"] = {"Authorization": f"Bearer {body['token']}"}
+    # A new account's org holds no project; these tests write into one named "default".
+    made = client.post("/app/projects", json={"name": "default"}, headers=body["session"])
+    assert made.status_code == 201, made.text
+    body["project"] = made.json()["project"]
     return body
 
 

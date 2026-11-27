@@ -61,7 +61,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select
 
-from server import config, db, orgs_api, reader_state
+from server import config, db, orgs_api, project_names, reader_state
 from server import assets as assets_mod
 from server import books as books_mod
 from server import documents as documents_mod
@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 
 #: The MkDocs site sources' folders tracked in git under ``docs/`` (``.gitignore``):
 #: a tenant #1 project by one of these names (any case) is never deleted.
-TRACKED_DOCS_DIRS = frozenset({"assets", "javascripts", "stylesheets"})
+TRACKED_DOCS_DIRS = project_names.TENANT_ONE_RESERVED
 
 #: The tables keyed by ``(tenant_id, project name)`` with no foreign key to
 #: ``projects``; their children (``review_logs``, ``listen_parts``, ``listen_jobs``)
@@ -195,7 +195,7 @@ def project_paths(root: Path, name: str) -> list[Path]:
     ever built from an arbitrary string."""
 
     try:
-        documents_mod.validate_project(name)
+        documents_mod.validate_project(name, check_length=False)
     except documents_mod.ConventionError:
         return []
     return [

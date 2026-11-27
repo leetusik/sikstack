@@ -1,9 +1,9 @@
 """Account auth routes: signup, login, logout, and the caller's identity.
 
 Public ``/auth/*`` surface (outside ``/api/*`` so the content-plane bearer
-guards never touch it). Signup provisions a user plus a default org (tenant) +
-owner membership + default project in one transaction (the ``provision_signup``
-primitive), then mints an opaque DB-backed bearer token; login re-issues one.
+guards never touch it). Signup provisions a user plus an org (tenant) named
+``Personal`` and the owner membership in one transaction (the ``provision_signup``
+primitive; no project), then mints an opaque DB-backed bearer token; login re-issues one.
 Raw tokens are returned once and stored only as a sha256 hash. Responses never
 expose ``password_hash`` or any ``token_hash``.
 
@@ -15,7 +15,8 @@ duplicate, the 30-day session TTL, the singular-``tenant`` signup shape vs
 plural-``tenants`` login/me shape, and hash-free serializers. Signup's tenant
 naming changed in P18: it now provisions a ``"default"`` org + ``"default"``
 project (was ``"<localpart>'s workspace"``) and its response gained an additive
-``project`` field.
+``project`` field. In P88 the org became ``"Personal"`` with no project; the
+``project`` key stays, as ``null``, so the shape only ever gained fields.
 
 The waitlist (``KB_SIGNUP_WAITLIST``, ``users.status``): with the switch on, signup
 creates the account ``waitlisted`` and answers 202 without a token; login answers a
@@ -294,11 +295,12 @@ async def signup(
     response: Response,
     background_tasks: BackgroundTasks,
 ) -> dict[str, object]:
-    """Create a user with a default org + project + owner membership; mint a token.
+    """Create a user with an org and its owner membership; mint a token.
 
-    The org and project are both named ``"default"`` (``provision_signup``); the
-    response carries the new ``project`` alongside the ``tenant`` (additive — the
-    ``/auth/*`` contract is frozen, so signup's shape only gains fields).
+    The org is named ``"Personal"`` and holds no project (``provision_signup``); the
+    response keeps its ``project`` key as ``null`` alongside the ``tenant`` (the
+    ``/auth/*`` contract is frozen, so signup's shape only gains fields and never
+    loses one).
 
     With ``KB_SIGNUP_WAITLIST`` on, the account (and its org and project) is created
     ``waitlisted``, no token is minted, and the answer is ``202 {"status":
@@ -322,7 +324,7 @@ async def signup(
             status_code=409, detail="a user with this email already exists"
         )
 
-    tenant, _member, project = await service.provision_signup(user.id)
+    tenant, _member = await service.provision_signup(user.id)
     joined = None
     if payload.invite:
         result = await invites.accept(user, payload.invite, approve=True)
@@ -340,7 +342,7 @@ async def signup(
         "token": token,
         "user": serialize_user(user),
         "tenant": serialize_tenant(tenant),
-        "project": serialize_project(project),
+        "project": None,
     }
     if joined is not None:
         body["joined"] = serialize_tenant(joined)

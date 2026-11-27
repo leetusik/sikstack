@@ -64,7 +64,7 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
-from server import config
+from server import config, project_names
 from server.accounts.auth import AuthContext, extract_bearer_token, require_user
 from server.accounts.security import sha256_hex
 from server.accounts.service import (
@@ -142,8 +142,6 @@ MAX_LIST_LIMIT = 100
 #: ``(page - 1) * MAX_LIST_LIMIT``, stays far inside the database's bigint, so a larger
 #: page is a 400 here rather than an overflow (a 500) in SQL.
 MAX_LIST_PAGE = 999_999
-#: A capture-supplied project name is a get-or-create key; vocky's bound.
-MAX_CAPTURE_PROJECT_NAME_LENGTH = 200
 #: ``/api/project/usage``'s window when the caller names none.
 DEFAULT_USAGE_WINDOW = timedelta(days=30)
 #: The widest window ``/api/project/usage`` answers: the response holds one entry per
@@ -394,10 +392,12 @@ async def resolve_capture_project(ctx: ApiAuthContext, project_name: str | None)
     if ctx.tenant_id is None:  # never reached: legacy mode 404s first
         raise FeedbackValidationError("no tenant to capture into")
     name = normalize_optional_text(project_name) or DEFAULT_PROJECT_NAME
-    if len(name) > MAX_CAPTURE_PROJECT_NAME_LENGTH:
-        raise FeedbackValidationError(
-            f"project must not exceed {MAX_CAPTURE_PROJECT_NAME_LENGTH} characters"
-        )
+    try:
+        project_names.check_project_name(name)
+    except ValueError as exc:
+        raise FeedbackValidationError(str(exc)) from None
+    if ctx.is_public and project_names.reserved_for_tenant_one(name):
+        raise FeedbackValidationError(project_names.PROJECT_NAME_RESERVED_ERROR)
     accounts = get_accounts_service()
     if ctx.scope != "full" and name != DEFAULT_PROJECT_NAME:
         existing = await accounts.get_project_by_name(ctx.tenant_id, name)

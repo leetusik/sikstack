@@ -93,7 +93,16 @@ def _signup(client: TestClient) -> dict:
         json={"email": f"wsstore-{uuid4().hex}@example.com", "password": "hunter2pass"},
     )
     assert res.status_code == 201, res.text
-    return res.json()
+    body = res.json()
+    # A new account's org holds no project; these tests use one named "default".
+    made = client.post(
+        "/app/projects",
+        json={"name": "default"},
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert made.status_code == 201, made.text
+    body["project"] = made.json()["project"]
+    return body
 
 
 def _workspace_key(client: TestClient, owner: dict, project_id: str) -> dict:

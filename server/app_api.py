@@ -43,7 +43,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from server import deletion, sharing
+from server import deletion, project_names, sharing
 from server.accounts.auth import AuthContext, require_owner, require_user
 from server.accounts.security import generate_opaque_token, sha256_hex
 from server.accounts.service import DuplicateOrgSlugError, get_accounts_service
@@ -62,17 +62,15 @@ router = APIRouter()
 
 
 class CreateProjectInput(BaseModel):
-    """Project-creation request body."""
+    """Project-creation request body: the shared name rule (``server.project_names``,
+    1 to 200 characters once trimmed), then trimmed."""
 
-    name: str = Field(min_length=1, max_length=200)
+    name: project_names.ProjectName
 
     @field_validator("name")
     @classmethod
     def _strip_name(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("must not be blank")
-        return stripped
+        return value.strip()
 
 
 class CreateCredentialInput(BaseModel):
@@ -238,8 +236,14 @@ async def create_project(
 
     Idempotent on name (``UNIQUE(tenant_id, name)``): a duplicate name returns the
     existing row with the same 201 shape instead of a 500 from the unique violation.
+    Tenant #1 may not take a tracked ``docs/`` folder's name (422,
+    ``project_names.reserved_for_tenant_one``).
     """
 
+    if ctx.tenant.id == await get_tenant_one_id() and project_names.reserved_for_tenant_one(
+        payload.name
+    ):
+        raise HTTPException(status_code=422, detail=project_names.PROJECT_NAME_RESERVED_ERROR)
     service = get_accounts_service()
     project = await service.get_or_create_project(ctx.tenant.id, payload.name)
     return {"project": serialize_project(project)}

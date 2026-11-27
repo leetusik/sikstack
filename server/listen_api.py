@@ -54,6 +54,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from starlette.concurrency import run_in_threadpool
 
 from server import config
+from server.project_names import ProjectName
 from server import listen as store
 from server import listen_jobs as lj
 from server import listen_mp4 as mp4
@@ -118,7 +119,7 @@ class ListenKey(_Body):
     """A Listen: ``doc``, or ``book`` from ``from_chapter`` (default: its first)."""
 
     org: str = Field(min_length=1, max_length=200)
-    project: str = Field(min_length=1, max_length=200)
+    project: ProjectName
     doc: Optional[str] = Field(default=None, min_length=1, max_length=200)
     book: Optional[str] = Field(default=None, min_length=1, max_length=200)
     from_chapter: Optional[str] = Field(default=None, min_length=1, max_length=200)

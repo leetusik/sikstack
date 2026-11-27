@@ -1129,7 +1129,7 @@ async def ensure_registry_project(
     if ctx.tenant_id is None:
         return RegistryProject(id=None)
     try:
-        project = documents_mod.validate_project(body.project)
+        project = documents_mod.validate_project(body.project, tenant_one=ctx.is_public)
     except documents_mod.ConventionError:
         return RegistryProject(id=None)
     try:
@@ -1253,7 +1253,7 @@ def _check_document(body: DocumentIn, ctx: ApiAuthContext, conn) -> _CheckedWrit
     # 1. Validate (S1 validators). ConventionError -> 422. Defaults: date=today,
     #    slug=slugify(title).
     try:
-        project = documents_mod.validate_project(body.project)
+        project = documents_mod.validate_project(body.project, tenant_one=ctx.is_public)
         tags = documents_mod.validate_tags(body.tags)
         date = (
             documents_mod.validate_date(body.date)
@@ -2417,7 +2417,7 @@ def put_book(
     Unmetered.
     """
     try:
-        documents_mod.validate_project(project)
+        documents_mod.validate_project(project, tenant_one=ctx.is_public)
         books_mod.validate_book_slug(book)
         if body.slug is not None and body.slug != book:
             raise documents_mod.ConventionError(

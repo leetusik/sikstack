@@ -127,11 +127,11 @@ def test_switch_on_signup_answers_waitlisted_and_mints_no_token(wl, monkeypatch)
     assert res.json() == {"status": "waitlisted", "email": email.lower()}
     assert _status(wl, email) == "waitlisted"
     assert _token_count(wl, email) == 0
-    with wl.db.connect() as conn:  # the org and project are provisioned as today
+    with wl.db.connect() as conn:  # the org is provisioned as today (with no project)
         orgs = conn.execute(
             text(
                 "SELECT count(*) FROM tenant_members m JOIN users u ON u.id = m.user_id "
-                "JOIN projects p ON p.tenant_id = m.tenant_id WHERE u.email = :e"
+                "WHERE u.email = :e"
             ),
             {"e": email.lower()},
         ).scalar_one()

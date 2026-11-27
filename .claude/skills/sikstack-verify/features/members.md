@@ -2,7 +2,7 @@
 
 **Reach it:** `/members`, the org rail's section after Feedback, in the active org. Two accounts: the test account (`$SESSION`), the owner of its first org, and the second account (`$SESSION-other`, `run.sh signin other`), which owns only its own sign-up org. The second account joins the test account's org through the API: the owner's invite (`run.sh api POST /app/invites`), whose link the API logs to `$EV/api.log` (no SMTP on the stack), and the second account's accept (`run.sh api other POST /app/invite/<code>/accept`).
 
-**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave appears on the owner's own row; a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `default` org of its own, as at sign-up: its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 375, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
+**Drive it:** the owner's view before the promotion: Make owner and Remove on the member's row, nothing on the owner's own (a sole owner has no Leave). Make owner turns the row to Owner with a toast, no confirm, and Leave appears on the owner's own row; a reload and the API agree. The second account's view of its own org is a sole owner's: no controls at all. Then, through the API, it hands its own org to the test account (an invite, the accept, Make owner) and leaves it, so the shared org is its only one. It switches to the shared org (the org menu's form post, `/api/auth/org`), sees Leave on its own row as a co-owner, leaves, and lands on the home of a fresh `Personal` org of its own, as at sign-up: its Members lists it alone, as Owner. The owner's list no longer holds it. Every view is shot at 1440 and 375, each checked for no sideways overflow. (A refused Leave's toast is not driven: the page shows Leave only where the API allows it. `web/tests/org-membership.test.ts` holds each toast's wording.)
 
 ```bash drive
 OTHER="$SESSION-other"
@@ -112,7 +112,7 @@ OTHER_ME=$("$RUN" api other GET /auth/me | body)
 must "the shared org is the second account's only org" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me org)" "1,$ORG_ID"
 
 # 5. The second account switches to the shared org (the org menu's form post), sees Leave as a co-owner, and leaves
-#    its only org: it lands on the home of a fresh `default` org of its own, the only row on its Members, as Owner.
+#    its only org: it lands on the home of a fresh `Personal` org of its own, the only row on its Members, as Owner.
 js "async () => { const r = await fetch('/api/auth/org', { method: 'POST', body: new URLSearchParams({ org: $(q "$ORG_ID") }) }); return r.ok; }" "$OTHER" >/dev/null
 S="$OTHER" pw goto "$WEB/members"
 see "$OTHER" "$OWNER_EMAIL" "Leave"
@@ -124,7 +124,7 @@ i=0; until [ "$(js '() => location.pathname' "$OTHER" | tr -d '"')" = /dashboard
 must "the co-owner left its only org and landed on a home" "$(js '() => location.pathname' "$OTHER" | tr -d '"')" /dashboard
 OTHER_ME=$("$RUN" api other GET /auth/me | body)
 FRESH=$(printf '%s' "$OTHER_ME" | me org)
-must "the second account has one org, a fresh default" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me name),$([ "$FRESH" != "$ORG_ID" ] && [ "$FRESH" != "$OTHER_ORG" ] && echo fresh)" "1,default,fresh"
+must "the second account has one org, a fresh Personal" "$(printf '%s' "$OTHER_ME" | me orgs),$(printf '%s' "$OTHER_ME" | me name),$([ "$FRESH" != "$ORG_ID" ] && [ "$FRESH" != "$OTHER_ORG" ] && echo fresh)" "1,Personal,fresh"
 must "the API lists it alone in its fresh org, as owner" "$(roles other)" "$OTHER_EMAIL=owner"
 S="$OTHER" pw goto "$WEB/members"
 see "$OTHER" "$OTHER_EMAIL"
@@ -138,4 +138,4 @@ must "the owner is the sole owner again: no Leave" "$(has "$SESSION" "$LEAVE")" 
 pw screenshot --filename="$EV/members.png"
 ```
 
-**Proof:** every `must` prints `ok` and every `see` is seen; `members-owner-before-{1440,375}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,375}.png` the row as Owner and Leave on the owner's own row; `members-sole-owner-{1440,375}.png` the second account alone in its org, no controls; `members-co-owner-{1440,375}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,375}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `default` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).
+**Proof:** every `must` prints `ok` and every `see` is seen; `members-owner-before-{1440,375}.png` show Make owner beside Remove on the member's row and nothing on the owner's (a sole owner); `members-made-owner-toast.png` the row as Owner with the toast; `members-owner-after-{1440,375}.png` the row as Owner and Leave on the owner's own row; `members-sole-owner-{1440,375}.png` the second account alone in its org, no controls; `members-co-owner-{1440,375}.png` the second account's Leave as a co-owner; `members-fresh-org-{1440,375}.png` the second account alone, as Owner, in the fresh org its last Leave gave it. The stack ends with the second account out of the test account's org, in a fresh `Personal` org of its own, and the test account owning the second account's sign-up org as well (its own first org stays its header-less one).

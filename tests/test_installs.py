@@ -242,7 +242,7 @@ def test_approval_claims_the_install_makes_the_repo_project_and_hands_the_key_ov
     assert approved.status_code == 200, approved.text
     project_id = approved.json()["project"]["id"]
     assert approved.json()["project"]["name"] == "platform" and approved.json()["org_id"] == owner["tenant"]["id"]
-    assert _project_names(client, owner) == ["default", "platform"]
+    assert _project_names(client, owner) == ["platform"]
 
     row = _install_row(engine, sent["install_id"])
     assert str(row["claimed_by"]) == owner["user"]["id"] and row["claimed_at"] is not None
@@ -321,7 +321,7 @@ def test_a_same_named_repo_gets_a_new_project_and_the_first_stays_untouched(db):
     assert second_project["name"] == "scratch-2" and second_project["id"] != first_project["id"]
     _key_opens(client, second, second_project["id"])
 
-    assert _project_names(client, owner) == ["default", "scratch", "scratch-2"]
+    assert _project_names(client, owner) == ["scratch", "scratch-2"]
     assert _workspace_keys(engine, first_project["id"]) == 1  # the first project got no second key
     assert client.get(f"/app/connect/{second['code']}", headers=owner["session"]).json()["project"] == {
         "id": second_project["id"], "name": "scratch-2",
@@ -335,6 +335,9 @@ def test_a_same_named_repo_gets_a_new_project_and_the_first_stays_untouched(db):
 def test_a_repo_named_default_never_joins_the_orgs_default_project(db):
     client, engine = db
     owner = _signup(client)
+    # A new org holds no project; the org's "default" is one its first write made.
+    made = client.post("/app/projects", json={"name": "default"}, headers=owner["session"])
+    assert made.status_code == 201, made.text
     with engine.connect() as conn:
         default_id = str(conn.execute(
             text("SELECT id FROM projects WHERE tenant_id = :t AND name = 'default'"), {"t": owner["tenant"]["id"]}
@@ -359,7 +362,7 @@ def test_a_fresh_name_makes_the_project_by_that_name(db):
     project = _approve(client, started, owner)
     assert project["name"] == "fresh-repo"
     _key_opens(client, started, project["id"])
-    assert _project_names(client, owner) == ["default", "fresh-repo"]
+    assert _project_names(client, owner) == ["fresh-repo"]
 
 
 def test_signing_in_again_after_a_lost_key_names_a_new_project_before_connect(db):
@@ -382,7 +385,7 @@ def test_signing_in_again_after_a_lost_key_names_a_new_project_before_connect(db
     assert new["name"] == "scratch-2" and new["id"] != old["id"]
     _key_opens(client, again, new["id"])
     assert _workspace_keys(engine, old["id"]) == 1
-    assert _project_names(client, owner) == ["default", "scratch", "scratch-2"]
+    assert _project_names(client, owner) == ["scratch", "scratch-2"]
 
 
 def test_with_two_orgs_each_names_its_own_free_project(db):
@@ -431,7 +434,7 @@ def test_an_org_the_account_is_not_in_is_refused(db):
     )
     assert res.status_code == 403
     assert _install_row(engine, sent["install_id"])["claimed_by"] is None
-    assert _project_names(client, stranger) == ["default"]
+    assert _project_names(client, stranger) == []
 
 
 # --- the security rules (C2) -------------------------------------------------------
@@ -452,11 +455,11 @@ def test_an_install_another_account_claimed_is_refused(db):
     assert refused.status_code == 403
     assert client.post(f"/app/connect/{second['code']}/decline", headers=bob["session"]).status_code == 403
     assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == alice["user"]["id"]
-    assert _project_names(client, bob) == ["default"]
+    assert _project_names(client, bob) == []
     assert _poll(client, second).json() == {"status": "pending"}
     # Alice's own second repo connects: an install claimed by her takes more projects.
     assert client.post(f"/app/connect/{second['code']}/approve", json={}, headers=alice["session"]).status_code == 200
-    assert _project_names(client, alice) == ["default", "other-repo", "platform"]
+    assert _project_names(client, alice) == ["other-repo", "platform"]
 
 
 def test_the_setup_email_alone_claims_nothing(db):
@@ -467,14 +470,14 @@ def test_the_setup_email_alone_claims_nothing(db):
 
     # An account with the setup email that approved nothing: no install, no project.
     same = _signup(client, email=setup_email)
-    assert _project_names(client, same) == ["default"]
+    assert _project_names(client, same) == []
     assert _install_row(engine, sent["install_id"])["claimed_by"] is None
     assert _poll(client, started).json() == {"status": "pending"}
 
     # Another account approves; the same-email account still sees none of it.
     owner = _signup(client)
     assert client.post(f"/app/connect/{started['code']}/approve", json={}, headers=owner["session"]).status_code == 200
-    assert _project_names(client, same) == ["default"]
+    assert _project_names(client, same) == []
     assert client.get(f"/app/connect/{started['code']}", headers=same["session"]).json()["state"] == "other"
     assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == owner["user"]["id"]
 
@@ -500,7 +503,7 @@ def test_an_expired_or_unknown_code_changes_nothing(db):
         assert client.get(f"/app/connect/{unknown}", headers=owner["session"]).json()["state"] == "expired"
         assert client.post(f"/app/connect/{unknown}/approve", json={}, headers=owner["session"]).status_code == 410
     assert _install_row(engine, sent["install_id"])["claimed_by"] is None
-    assert _project_names(client, owner) == ["default"]
+    assert _project_names(client, owner) == []
     assert _poll(client, started).json() == {"status": "expired"}
 
 
@@ -516,7 +519,7 @@ def test_a_declined_code_denies_the_poll_and_claims_nothing(db):
     assert client.get(f"/app/connect/{started['code']}", headers=owner["session"]).json()["state"] == "declined"
     assert client.post(f"/app/connect/{started['code']}/approve", json={}, headers=owner["session"]).status_code == 410
     assert _install_row(engine, sent["install_id"])["claimed_by"] is None
-    assert _project_names(client, owner) == ["default"]
+    assert _project_names(client, owner) == []
 
 
 def test_a_signed_out_read_shows_the_setup_email_and_is_rate_limited_per_address(db, monkeypatch):
@@ -626,8 +629,8 @@ def test_release_frees_a_claimed_install_keeps_its_projects_and_keys_and_ends_it
     bobs = _approve(client, answer, bob)
     _key_opens(client, answer, bobs["id"])
     assert str(_install_row(engine, sent["install_id"])["claimed_by"]) == bob["user"]["id"]
-    assert _project_names(client, bob) == ["default", "platform"]
-    assert _project_names(client, alice) == ["default", "platform"]
+    assert _project_names(client, bob) == ["platform"]
+    assert _project_names(client, alice) == ["platform"]
     assert _workspace_keys(engine, project["id"]) == 1
 
 

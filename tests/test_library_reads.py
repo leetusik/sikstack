@@ -55,11 +55,11 @@ def test_the_count_equals_the_documents_total_and_drops_a_deleted_one(
     _, other = _signup(client, f"count-other-{uuid4()}@example.com")
     _seed_doc(other, "alpha", slug="theirs", title="Theirs", markdown="body")
 
-    assert _counts(client, headers) == {"default": 0, "alpha": 3, "beta": 2, "empty": 0}
+    assert _counts(client, headers) == {"alpha": 3, "beta": 2, "empty": 0}
 
     assert client.delete(f"/app/documents/{gone}", headers=headers).status_code == 204
     counts = _counts(client, headers)
-    assert counts == {"default": 0, "alpha": 3, "beta": 1, "empty": 0}
+    assert counts == {"alpha": 3, "beta": 1, "empty": 0}
 
     # The same number /app/documents?project= answers, project by project.
     res = client.get("/app/dashboard", headers=headers).json()
@@ -88,7 +88,7 @@ def test_the_counts_are_one_read_whatever_the_number_of_projects(
         return real(conn, tenant_id=tenant_id)
 
     monkeypatch.setattr(db, "list_projects", spy)
-    assert _counts(client, headers) == {"default": 0, "p1": 1, "p2": 1, "p3": 1, "p4": 1}
+    assert _counts(client, headers) == {"p1": 1, "p2": 1, "p3": 1, "p4": 1}
     assert calls == [tenant]
 
 
@@ -110,7 +110,7 @@ def test_a_count_that_cannot_be_read_keeps_the_projects_panel(
     res = client.get("/app/dashboard", headers=headers)
     assert res.status_code == 200, res.text
     rows = {row["name"]: row for row in res.json()["projects"]}
-    assert set(rows) == {"default", "alpha"}
+    assert set(rows) == {"alpha"}
     assert all(row["active_documents"] is None for row in rows.values())
     assert rows["alpha"]["keys"] == 0 and rows["alpha"]["documents"] == 0
 

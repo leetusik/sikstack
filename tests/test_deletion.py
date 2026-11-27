@@ -647,12 +647,12 @@ def test_members_whose_only_org_is_deleted_land_in_one_fresh_org(kb):
     assert res.status_code == 200, res.text
     for who in (owner, member):
         (only,) = _orgs(kb, who)
-        assert only["name"] == "default" and only["id"] not in (org, who.tenant)
+        assert only["name"] == "Personal" and only["id"] not in (org, who.tenant)
         assert who is not owner or res.json()["tenant"]["id"] == only["id"]
         listed = kb.get("/app/members", headers=who.h).json()
         assert listed["role"] == "owner" and [m["email"] for m in listed["members"]] == [who.email]
         names = [p["name"] for p in kb.get("/app/projects", headers=who.h).json()["projects"]]
-        assert names == ["default"]
+        assert names == []
     # An account with another org keeps exactly that one.
     assert [o["id"] for o in _orgs(kb, both)] == [both.tenant]
 
@@ -693,7 +693,14 @@ def test_a_tracked_site_folder_is_never_deleted(kb, monkeypatch):
     tracked.parent.mkdir(parents=True)
     tracked.write_text("body{}")
     for name in ("assets", "Stylesheets", "javascripts"):
-        pid = kb.post("/app/projects", json={"name": name}, headers=owner.h).json()["project"]["id"]
+        # No route makes these names in tenant #1 any more (server.project_names); a row
+        # from before that rule is what the delete still has to refuse.
+        with kb.db.begin() as conn:
+            pid = str(conn.execute(
+                text("INSERT INTO projects (id, tenant_id, name, visibility, created_at) "
+                     "VALUES (gen_random_uuid(), :t, :n, 'private', now()) RETURNING id"),
+                {"t": owner.tenant, "n": name},
+            ).scalar_one())
         res = kb.request("DELETE", f"/app/projects/{pid}", json={"name": name}, headers=owner.h)
         assert res.status_code == 409 and res.json()["reason"] == "tracked_path", res.text
     assert tracked.read_text() == "body{}"
@@ -783,4 +790,4 @@ def test_a_leave_elsewhere_that_the_org_delete_waits_on_is_counted_after_it(kb):
     worker.join(30)
     assert answers["res"].status_code == 200, answers["res"].text
     (only,) = _orgs(kb, member)
-    assert only["name"] == "default" and only["id"] not in (org, member.tenant)
+    assert only["name"] == "Personal" and only["id"] not in (org, member.tenant)

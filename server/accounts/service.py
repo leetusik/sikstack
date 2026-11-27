@@ -35,7 +35,7 @@ from server.persistence.engine import get_session_maker
 
 # The org + project every new user starts with (intent P18): signup and a
 # fresh-database seed both provision exactly these, so the two paths never drift.
-DEFAULT_ORG_NAME = "default"
+DEFAULT_ORG_NAME = "Personal"
 DEFAULT_PROJECT_NAME = "default"
 
 
@@ -216,15 +216,14 @@ class AccountsService:
     async def provision_signup(
         self,
         user_id: UUID,
-    ) -> tuple[TenantRecord, TenantMemberRecord, ProjectRecord]:
-        """Provision a new user's default org + default project in one transaction.
+    ) -> tuple[TenantRecord, TenantMemberRecord]:
+        """Provision a new user's first org in one transaction.
 
-        The signup primitive: inserts the ``"default"`` tenant (org), an ``owner``
-        membership for ``user_id``, and the ``"default"`` project under that tenant —
-        all atomically in one session — and returns the three records. Distinct from
-        ``create_tenant_with_owner`` (which creates no project and is kept for callers
-        that want a bare tenant): a fresh signup always lands with a project to save
-        into, so signup and the fresh-database seed share this one primitive.
+        The signup primitive: inserts the ``"Personal"`` tenant (org) and an ``owner``
+        membership for ``user_id``, atomically in one session, and returns both
+        records. It makes no project: the first write that names one makes it (the
+        CLI's ``init``, a publish, a capture's ``"default"``). Signup and the
+        fresh-database seed share this one primitive.
         """
 
         return await self.create_org(user_id, DEFAULT_ORG_NAME)
@@ -236,9 +235,9 @@ class AccountsService:
         *,
         made_by_user: bool = False,
         limit: tuple[int, datetime] | None = None,
-    ) -> tuple[TenantRecord, TenantMemberRecord, ProjectRecord]:
-        """Make an org named ``name``: the tenant, ``user_id`` as its ``owner`` and one
-        project ``"default"``, in one transaction (sign-up's ``"default"`` org is one).
+    ) -> tuple[TenantRecord, TenantMemberRecord]:
+        """Make an org named ``name``: the tenant and ``user_id`` as its ``owner``, in
+        one transaction, with no project (sign-up's ``"Personal"`` org is one).
 
         ``made_by_user`` records ``user_id`` as the org's maker (``tenants.made_by``):
         ``POST /app/orgs`` passes it, sign-up does not, so only the orgs an account made
@@ -268,9 +267,6 @@ class AccountsService:
                     user_id=user_id,
                     role=ROLE_OWNER,
                 )
-                project = await repository.create_project(
-                    CreateProject(tenant_id=tenant.id, name=DEFAULT_PROJECT_NAME)
-                )
                 await session.commit()
             except SQLAlchemyError as exc:
                 await session.rollback()
@@ -278,7 +274,7 @@ class AccountsService:
                     "failed to create the org"
                 ) from exc
 
-        return tenant, member, project
+        return tenant, member
 
     async def set_tenant_name(self, tenant_id: UUID, name: str) -> TenantRecord | None:
         """Rename a tenant (its display name; the slug is its own route); None when missing."""

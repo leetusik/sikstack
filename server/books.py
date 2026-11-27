@@ -246,7 +246,7 @@ def normalize_manifest(raw: Any, *, project: str) -> dict[str, Any]:
     its own project, and **each document in at most one chapter** (no rel_path bound
     twice in one book; across books is the caller's index check).
     """
-    validate_project(project)
+    validate_project(project, check_length=False)
     if not isinstance(raw, dict):
         raise ConventionError("a book manifest must be a JSON object")
     unknown = set(raw) - {

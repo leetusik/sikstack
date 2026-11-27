@@ -60,9 +60,9 @@ ENV_PASSWORD = "KNOWLEDGE_PASSWORD"
 MIN_PASSWORD_LEN = 8
 
 # The project a fresh onboarding lands in: `init --project`'s default and `save`'s
-# outside-a-repo fallback. It is the signup-provisioned `"default"` project (P18) —
-# so a brand-new user's `init` reuses the project already made for them rather than
-# minting a second one. Must satisfy server/documents.py:32
+# outside-a-repo fallback. A new account's org starts with no project, so a
+# brand-new user's `init` makes it (`POST /app/projects` is get-or-create, so a
+# re-run reuses it). Must satisfy server/documents.py:32
 # `^[A-Za-z0-9][A-Za-z0-9._-]*$`, because writes carry this name through
 # `validate_project()`.
 DEFAULT_PROJECT = "default"

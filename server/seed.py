@@ -7,15 +7,17 @@ compose exec api python -m server.seed``) AFTER ``alembic upgrade head`` and wit
 1. the **operator user** (email = ``KB_OPERATOR_EMAIL``, argon2id password hash of
    ``KB_OPERATOR_PASSWORD``);
 2. the operator's **tenant #1**. On a fresh database this is the same signup
-   primitive ``/auth/signup`` uses (``provision_signup`` — a ``"default"`` org +
-   ``"default"`` project, atomically), so the seed and signup never drift. On an
+   primitive ``/auth/signup`` uses (``provision_signup`` — a ``"Personal"`` org with
+   the operator its owner and no project, atomically), so the seed and signup never
+   drift. On an
    existing database tenant #1 is the pinned org (``get_tenant_one_id``, which pins
    the operator's first membership when no pin exists), kept verbatim — its name is
    **not** rewritten (prod tenant #1 keeps whatever it was first seeded as);
 3. a ``projects`` row for each **live ``docs/`` project**, derived from the tree by
    reindex's filename rule (never hardcoded), so the seeded project names line up
-   exactly with what the content plane stamps on ``documents.project``. A
-   ``"default"`` project already provisioned in step 2 is tolerated (skipped).
+   exactly with what the content plane stamps on ``documents.project``. A project
+   already in the org is tolerated (skipped), and a tracked MkDocs folder's name
+   (``project_names.TENANT_ONE_RESERVED``) is never one.
 
 Why this matters (the ordering coupling): ``server.api_auth.get_tenant_one_id()``
 resolves tenant #1, the org pinned for ``KB_OPERATOR_EMAIL``'s account, and **caches on
@@ -40,7 +42,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from server import config
+from server import config, project_names
 from server.accounts.security import hash_password
 from server.api_auth import get_tenant_one_id
 from server.accounts.service import DuplicateEmailError, get_accounts_service
@@ -123,7 +125,7 @@ async def main() -> None:
 
         # 2. Tenant #1 = the pinned org (get_tenant_one_id). On a FRESH database the
         #    operator has no org yet, so it gets the same signup primitive
-        #    /auth/signup uses (provision_signup): a "default" org + "default"
+        #    /auth/signup uses (provision_signup): a "Personal" org with no
         #    project, atomically, so the seed and signup never drift; the
         #    resolution below then pins it. On an EXISTING database tenant #1 is
         #    the pin (or, with none yet, the operator's first membership, pinned
@@ -143,12 +145,14 @@ async def main() -> None:
 
         # 3. A projects row per live docs/ project (derived from the tree, not
         #    hardcoded — matches documents.project after a reindex). The set-membership
-        #    check below already tolerates a "default" project provisioned in step 2.
+        #    check below tolerates a project the org has already.
         existing = {p.name for p in await service.list_projects_for_tenant(tenant.id)}
         discovered = _discover_projects(config.docs_root())
         created_projects: list[str] = []
         existed_projects: list[str] = []
         for name in discovered:
+            if project_names.reserved_for_tenant_one(name):
+                continue  # a tracked MkDocs folder of docs/, never a project
             if name in existing:
                 existed_projects.append(name)
                 continue
