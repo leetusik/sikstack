@@ -289,3 +289,45 @@ def test_startup_reindex_self_heal(tmp_path, monkeypatch):
         data = response.json()
         assert data["total"] == 1
         assert data["items"][0]["title"] == "Hello nginx"
+
+
+def test_startup_reindex_never_waits_on_the_embedder(tmp_path, monkeypatch):
+    """The boot serves before its embedding catch-up: a held Gemini call cannot hold the
+    start-up (a corpus's first boot after a new kind of vector is hundreds of calls)."""
+    import threading
+
+    from fastapi.testclient import TestClient
+    from server import embeddings, main, publish
+
+    monkeypatch.setenv("KB_ROOT", str(tmp_path))
+    monkeypatch.setenv("KB_DB_PATH", str(tmp_path / "data" / "kb.sqlite3"))
+    monkeypatch.setenv("KB_STARTUP_REINDEX", "1")
+    monkeypatch.setenv("GOOGLE_API_KEY", "stub-not-a-key")
+    _write(tmp_path / "docs" / "proj" / "2026-07-02-hello-nginx.md", _EXPLAINER)
+
+    release = threading.Event()
+    finished: list[str] = []
+
+    def held_embedder(texts, *, kind, retries=0):
+        release.wait(timeout=10)
+        finished.extend(texts)
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(embeddings, "embed_texts", held_embedder)
+    try:
+        with TestClient(main.app) as client:
+            assert client.get("/healthz").status_code == 200
+            assert client.get("/api/documents").json()["total"] == 1
+            assert finished == []  # the embedder is still held: the boot did not wait
+            release.set()
+            assert publish.drain(timeout=10)
+    finally:
+        release.set()
+        publish.drain(timeout=10)
+    assert len(finished) == 2  # the document, then its one section
+    conn = db.connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM section_embeddings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM document_embeddings").fetchone()[0] == 1
+    finally:
+        conn.close()
