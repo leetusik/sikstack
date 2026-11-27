@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   title: { default: SITE.title, template: SITE.titleTemplate },
   description: "sikstack design build",
   robots: { index: false, follow: false },
-  icons: { icon: "/favicon.svg" },
+  icons: { icon: "/favicon.ico" },
 };
 
 export default function DesignRoot({

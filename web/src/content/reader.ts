@@ -178,7 +178,7 @@ export const READER = {
     },
   },
   top: {
-    logoLabel: "knowledge library",
+    logoLabel: "sikstack Library",
     /** A loose document's back link (and its short form) go to the library. */
     library: "Library",
     /** Below 40rem a chapter's back link says this instead of the book title. */

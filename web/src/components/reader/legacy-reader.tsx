@@ -855,8 +855,9 @@ export function LegacyReader({
                 prefetch={false}
                 aria-label={READER.top.logoLabel}
               >
+                {/* sikstack's mark, the 48 px tab icon (`app/icon.tsx`), shown at 22 px: sharp on a 2x screen */}
                 {/* eslint-disable-next-line @next/next/no-img-element -- a static 22px mark */}
-                <img src="/logo.svg" alt="" width={22} height={22} />
+                <img src="/icon/48" alt="" width={22} height={22} />
               </Link>
               <Link className="rd-back" href={backHref} prefetch={false}>
                 <span className="rd-back__chev" aria-hidden="true">

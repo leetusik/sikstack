@@ -246,7 +246,15 @@ describe("the two mounts", () => {
     expect(triggers(foot)).toEqual([
       '<button type="button" class="lp-link lp-foot-send" aria-haspopup="dialog">Send feedback</button>',
     ]);
-    expect(triggers(withIt)).toHaveLength(1);
+    // P87: and a second trigger under the open-source section's Contribute, on the same condition
+    const contribute = withIt.slice(
+      withIt.indexOf('id="open-source"'),
+      withIt.indexOf("<footer"),
+    );
+    expect(triggers(contribute)).toEqual([
+      '<button type="button" class="link link-row" aria-haspopup="dialog">Send feedback</button>',
+    ]);
+    expect(triggers(withIt)).toHaveLength(2);
   });
 
   it("the landing page reads the key per request, after connection()", async () => {
@@ -257,7 +265,8 @@ describe("the two mounts", () => {
     expect(off).not.toMatch(/Send feedback|sf-dlg|lp-foot-send/);
     process.env[KEY] = "vk_test";
     const on = renderToStaticMarkup(await LandingPage());
-    expect(triggers(on)).toHaveLength(1);
+    // the footer's and (P87) the open-source section's
+    expect(triggers(on)).toHaveLength(2);
     expect(calls).toEqual(["connection", "connection"]);
   });
 

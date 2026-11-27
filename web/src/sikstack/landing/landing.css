@@ -12,7 +12,8 @@
    Section 8 and the diagram's arrangement are job 08 (round 01-landing-diagram-feedback, signed):
    `frame.css` section 8's `.lp-map-*` rules and the nine `@container lpmap (min-width: 48em)` rules
    of `LandingMap.dc.html`, value for value and name for name.
-   Imported by src/sikstack/landing/landing.tsx, outside Tailwind; no theme variable is named here. */
+   Imported by src/sikstack/landing/landing.tsx, outside Tailwind; no theme variable is named here.
+   Sections 10 and 11 are P87's (the "sik" mark and the open-source section, signed in `web/design`). */
 @scope (.ui) to ([data-ui-legacy]) {
   /* 1 ── page: .ui.lp is the landing's root and its size container ─────────── */
   .lp {
@@ -758,5 +759,32 @@
   .lpi .lp-cmd-value {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  /* 10 ── the mark (`wordmark.tsx`, direction C, "Live dot"): the name as text, the dot of its i in the accent.
+     One glyph, two paints: the accent down to the cut between the dot and the stem, the ink under it (a hard
+     stop, no blend). The plain ink i is the base; the paint is on only where text can clip a background, and
+     off where backgrounds are dropped (print, forced colours), so the letter never goes missing. */
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    .lp-dot {
+      background: linear-gradient(var(--accent) 0 35.5%, var(--ink) 35.5%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    @media print, (forced-colors: active) {
+      .lp-dot {
+        background: none;
+        color: inherit;
+      }
+    }
+  }
+
+  /* 11 ── the open-source section: the ways to contribute, one row of links that wraps */
+  .lp-ways {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--space-5);
   }
 }

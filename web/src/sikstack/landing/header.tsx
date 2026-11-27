@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { LANDING, LANDING_LINKS, LANDING_PARTS } from "@/content/marketing";
 import { buttonClass } from "@/sikstack/ui";
 
+import { Wordmark } from "./wordmark";
+
 /** How far the page scrolls before the header becomes its bar (F255, `## Interaction states`). */
 const SCROLLED_AT = 12;
 
@@ -16,6 +18,9 @@ const SCROLLED_AT = 12;
  * closes on a link, on Menu and on Escape (focus back to Menu). After 12 px of scroll it is the bar
  * (`.is-scrolled`). Signed in (P78, F8), **Dashboard** (secondary) stands in for Sign in and Create account,
  * in the bar and in the menu.
+ *
+ * P87's mark (direction C, "Live dot"): the wordmark's link holds `Wordmark` (`./wordmark`), the name with the
+ * dot of its i in the accent, in place of the name as plain text.
  */
 export function LandingHeader({ signedIn = false }: { signedIn?: boolean }) {
   const words = LANDING.header;
@@ -56,7 +61,7 @@ export function LandingHeader({ signedIn = false }: { signedIn?: boolean }) {
       </div>
       <div className="center lp-head-row">
         <a className="mark lp-mark" href="#top" onClick={close}>
-          {LANDING.wordmark}
+          <Wordmark />
         </a>
         <nav className="lp-nav" aria-label={words.nav}>
           {links}

@@ -10,8 +10,10 @@ import { optionalIdentity } from "@/lib/auth-guards";
 import { loadBookOnce } from "@/lib/book/load";
 import type { BookView } from "@/lib/book/view";
 import { readBookSeed } from "@/lib/listen/seed";
+import { bookHref } from "@/lib/reader-href";
 import { ShareControl } from "@/sikstack/reader/share-control";
 import { requestNonce } from "@/sikstack/shell/data";
+import { canonical } from "@/sikstack/seo/urls";
 
 // The book page (sikstack Library, job 03 round 02, `## Build` § Page: book): `/@{org}/{project}/books/{book}`,
 // with `{org}` the org slug or the tenant id (the server's book read resolves both). Optional identity: a
@@ -21,7 +23,8 @@ import { requestNonce } from "@/sikstack/shell/data";
 // Wholly new: the Bar's frame (`.ui > .page > .app.bare > Bar + main.app-main > .column.is-narrow`) with
 // BookHead, the way on, Contents and Your reading data. `?from=` is the list it was opened from (F324,
 // F328): the Bar's way back, carried on by every chapter link. The tab title is the book's, through the
-// site's template; the page and its metadata share one load per request (`loadBookOnce`).
+// site's template; the page and its metadata share one load per request (`loadBookOnce`). P87: its canonical
+// URL is the book's own address on the org's label (`bookHref`), the one `/sitemap.xml` lists.
 //
 // Listen (job 07, round 01: F206, F209, F234): a signed-in reader gets the head's Listen, the rows' audio and the
 // dock's track, seeded as before (the book from its first chapter, and the place left part-way); any miss is "no
@@ -67,8 +70,12 @@ export async function generateMetadata({
   searchParams: Promise<Search>;
 }): Promise<Metadata> {
   try {
+    const view = await loadOnce(await params, fromOf(await searchParams));
     return {
-      title: (await loadOnce(await params, fromOf(await searchParams))).title,
+      title: view.title,
+      alternates: canonical(
+        bookHref({ org: view.org, project: view.project, book: view.slug }),
+      ),
     };
   } catch (error) {
     // the page renders the miss or the failure itself

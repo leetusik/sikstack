@@ -16,6 +16,7 @@ import { READER_COOKIE } from "@/lib/reader-cookie";
 import { layerOn } from "@/lib/reader/layer";
 import { loadChapterReaderOnce } from "@/lib/reader/load";
 import { viewerTimeZone } from "@/lib/time-zone";
+import { canonical, readerPath } from "@/sikstack/seo/urls";
 
 // P30.S13 — a chapter of a book in the reader (`01-reader`): the URL is
 // `/@{org}/{project}/books/{book}/{key}[?lang=&v=]`, with `{org}` the org slug or the
@@ -101,11 +102,14 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   try {
     const loaded = await loadOnce(await params, await searchParams);
-    const title =
-      loaded.kind === "reader"
-        ? loaded.reader.view.title
-        : loaded.legacy.view.title;
-    if (title) return { title };
+    const view =
+      loaded.kind === "reader" ? loaded.reader.view : loaded.legacy.view;
+    // P87: one canonical URL per chapter, whatever `?lang=` or `?v=` is on screen (`readerPath`).
+    if (view.title)
+      return {
+        title: view.title,
+        alternates: canonical(readerPath(view.target)),
+      };
   } catch (error) {
     // the page renders the miss or the failure itself; the tab names it the same way
     if (isNotFound(error)) return { title: READER_FRAME.notFound.title };

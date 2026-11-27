@@ -22,10 +22,11 @@ import "@/sikstack/shell/shell.css";
 import "./canvas.css";
 
 // Base metadata. `metadataBase` resolves canonical/OG URLs from SITE.url
-// (NEXT_PUBLIC_APP_URL → local-dev origin fallback). The icons (P78, F5) are the product's mark
-// (`public/favicon.svg`) and two raster copies of it in `public/`: `favicon.ico` (16, 32 and 48 px) and
-// `apple-touch-icon.png` (180 px, the address iOS asks for by default). The shared image is
-// `opengraph-image.tsx` beside this file (F9).
+// (NEXT_PUBLIC_APP_URL → local-dev origin fallback). The icons (P87) are sikstack's mark, by Next's file
+// conventions, so no `icons` here (a config `icons` would turn the files' tags off): `icon.tsx` (16, 32 and 48 px)
+// and `apple-icon.tsx` (180 px) beside this file; `public/favicon.ico` packs the three tab sizes for the
+// browsers that ask `/favicon.ico` unprompted, and `apple-touch-icon.png/` answers iOS's default address. The
+// shared image is `(marketing)/opengraph-image.tsx` (F9).
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
   title: {
@@ -34,13 +35,6 @@ export const metadata: Metadata = {
   },
   description: SITE.description,
   applicationName: SITE.name,
-  icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "48x48" },
-      { url: "/favicon.svg", type: "image/svg+xml" },
-    ],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
-  },
 };
 
 // Root layout. English (`lang="en"`, P78 F6): the chrome is English, and Korean appears as data,

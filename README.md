@@ -1,11 +1,11 @@
 # sikstack
 
-sikstack is a phase-and-slice workflow for Claude Code. You ask for a change; the agent writes it up as a
-**phase**, cuts it into **slices**, runs each slice on its own executor, reviews the result, and stops for you to
-walk it before it lands. The plan, the verdicts and the decisions stay on your machine, in your repo's hidden
-`.sikstack/` folder, kept out of the repo's history.
+sikstack is a workflow for Claude Code. You ask for a change. The agent writes it up as a **phase**, cuts it into
+**slices**, runs each slice on its own executor, and reviews the result. Then it stops for you to walk it before it
+lands.
 
-It installs as a Claude Code plugin and needs no account: one setup per machine, then work.
+The plans, verdicts and decisions stay on your machine, in your repo's hidden `.sikstack/` folder. They stay out of
+the repo's history.
 
 ## Install
 
@@ -15,56 +15,62 @@ In Claude Code:
     /plugin install sikstack@sikstack
     /sikstack:setup
 
-`/sikstack:setup` runs once per machine. Then start working, in any git repository:
+Run `/sikstack:setup` once per machine. Then, in any git repository:
 
     /sikstack:sik-mode
 
-`sik-mode` reads where the repo stands and offers the next step: making the `.sikstack/` folder, starting a phase,
-running the one in flight, or showing what waits on you.
+`sik-mode` reads where the repo stands and offers the next step.
 
-To clone only the plugins rather than the whole repository, add the marketplace from a shell with a sparse
-checkout:
+To clone only the plugin, not the whole repository, add the marketplace from a shell with a sparse checkout:
 
     claude plugin marketplace add leetusik/sikstack --sparse .claude-plugin plugins
 
-**Needs** Claude Code, `git`, and `python3` 3.8 or later. Nothing else: no server, no key, no Docker.
+**Needs** Claude Code, `git`, and `python3` 3.8 or later. No server, no key, no Docker.
 
 ## No account needed
 
-Setup asks for an email and registers it, with a random install id, at sikstack.com. That is all the server keeps
-before you sign in. Your phases and their records stay on your machine, and sikstack works fully without signing
-in. If sikstack.com cannot be reached, setup still finishes and registers on a later run.
+Setup asks for an email. It registers the email, a random install id and the plugin version at sikstack.com, and
+nothing else. Your work stays on your machine. If sikstack.com can't be reached, setup still finishes and registers
+later.
 
-**Sign in later to see your work on the web.** `/sikstack:sign-in` prints a short code and opens a page on
-sikstack.com; you confirm the same code there, signed in to your account, and the install is connected. The repo's
-earlier work then uploads, and you see its phases on the web. An email alone never connects an install: only a
-code you confirm does.
+To see your work on the web, sign in later with `/sikstack:sign-in`. It prints a short code and opens a page on
+sikstack.com. Check the page shows the same code, sign in, and press Connect. The repo's earlier work then uploads.
+An email alone never connects an install.
 
-## On the web, for signed-in users
+## On the web
 
-<https://sikstack.com> holds the web services, for signed-in users (new accounts start on a waitlist):
+<https://sikstack.com> is for signed-in users. New accounts start on a waitlist.
 
-- **Workspace**: a connected repo's phases, slices and verdicts, its agenda and its docs.
-- **Library**: books and documents your agents write for you to read, grounded in the code; read, listen,
-  review with a quiz, search in English and Korean, and publish a project's documents in your org's public library.
+- **Workspace**: a repo's agenda, its phases, slices and verdicts, and its docs.
+- **Library**: books and documents your agents write for you, grounded in the code. Read, listen, or review with a
+  quiz. Search in English and Korean. Make a project's documents public.
 - **Feedback**: what your users said, captured from your product with a capture-only key.
+
+## Open source
+
+sikstack is MIT licensed. To help:
+
+- send feedback with **Send feedback** on <https://sikstack.com>;
+- open an [issue](https://github.com/leetusik/sikstack/issues);
+- open a [pull request](https://github.com/leetusik/sikstack/pulls).
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## What is in this repository
 
-- `plugins/sikstack/`: the sikstack plugin, the workflow engine and its skills, agents and hooks
-  ([`CHANGELOG.md`](plugins/sikstack/CHANGELOG.md)). Its history before the move is
-  `leetusik/bootstrap_agentic_workspace.sh`'s. Its `/sikstack:explain` skill writes a document or a book from your
-  code (and your phases' records, when you keep them) and publishes it to your Library.
+- `plugins/sikstack/`: the plugin: the workflow engine, its skills, agents and hooks
+  ([`CHANGELOG.md`](plugins/sikstack/CHANGELOG.md)). Its `/sikstack:explain` skill writes a document or a book from
+  your code and publishes it to your Library. Its history before the move is
+  [`leetusik/bootstrap_agentic_workspace.sh`](https://github.com/leetusik/bootstrap_agentic_workspace.sh)'s.
 - `server/`, `web/`, `cli/`, `mcp-server/`, `tools/listen-runner/`: the services behind sikstack.com.
-- `.claude-plugin/marketplace.json`: the marketplace, which lists the sikstack plugin.
+- `.claude-plugin/marketplace.json`: the marketplace that lists the plugin.
 
 ## Credits
 
-sikstack is my personal take on [pstack](https://github.com/cursor/plugins/tree/main/pstack), Lauren Tan's
-Claude Code and Cursor plugin: her principles (install and go, no account, a setup once, an entry point that
-routes the work to playbooks), reshaped around this phase-and-slice workflow. It took pstack's ideas, not its code.
-sikstack is not a fork of pstack, and it is not affiliated with or endorsed by Cursor or Lauren Tan. See
-[`NOTICE`](NOTICE).
+sikstack is my take on [pstack](https://github.com/cursor/plugins/tree/main/pstack), Lauren Tan's plugin for Claude
+Code and Cursor. It took her principles: install and go, no account, one setup, an entry point that routes the work.
+It took pstack's ideas, not its code. sikstack is not a fork of pstack, and is not affiliated with or endorsed by
+Cursor or Lauren Tan. See [`NOTICE`](NOTICE).
 
 ## License
 

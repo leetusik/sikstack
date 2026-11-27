@@ -13,6 +13,9 @@ the manifests in ``server/books.py`` are the truth):
   chapters and variants, and its loose documents, over the projects the caller may read
   (every project for a member, only the public ones for anyone else; ``scope=public``
   narrows a member to the public ones too, for the org's public page).
+* ``GET /app/sitemap`` — every org's Public documents and books, anonymous and
+  session-free, for the web's ``/sitemap.xml`` (P87): each item gated as a stranger's
+  org-library read is, never a Link, Members or no-row item.
 * ``GET /app/orgs/{org}/{project}/books/{book}`` — the same book addressed by its
   durable public identity, backing the reader URL ``/@{org}/{project}/books/{book}``.
   ``org`` is the org slug, or the tenant id for a tenant without one (P30.S11,
@@ -36,7 +39,7 @@ Never sets ``request.state.usage``.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Callable, Iterable, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -207,6 +210,25 @@ async def _member_book_share(
 _NO_SUCH_LIBRARY_DETAIL = "no library at that address"
 
 
+def _share_states(
+    ids: dict[str, UUID], shares: dict[tuple[UUID, str, str], sharing.Share]
+) -> Callable[[str, str, str], str]:
+    """The per-item share gate of the org's listings: ``(project, kind, key)`` -> its state.
+
+    ``ids`` is the org's registry (project name -> id), ``shares`` what
+    ``sharing.get_shares`` read for it. An item with no row, or of a project outside the
+    registry, is Members (fail closed); so is every item when the store could not be read
+    (the caller passes ``{}``). ``org_library`` and ``public_sitemap`` both read it.
+    """
+
+    def state_of(project: str, kind: str, key: str) -> str:
+        pid = ids.get(project)
+        found = shares.get((pid, kind, key)) if pid is not None else None
+        return (found or sharing.NO_ROW).state
+
+    return state_of
+
+
 @router.get("/app/orgs/{org}/library")
 async def org_library(
     org: str,
@@ -250,11 +272,7 @@ async def org_library(
         shares = await sharing.get_shares(ids.values())
     except sharing.SharingError:
         shares = {}
-
-    def state_of(project: str, kind: str, key: str) -> str:
-        pid = ids.get(project)
-        found = shares.get((pid, kind, key)) if pid is not None else None
-        return (found or sharing.NO_ROW).state
+    state_of = _share_states(ids, shares)
 
     everything = member and scope == "all"
 
@@ -347,3 +365,97 @@ async def org_library(
         "books": books,
         "documents": documents,
     }
+
+
+def _latest(stamps: Iterable[str | None]) -> str | None:
+    """The newest of these stored ``updated_at`` stamps (ISO text), or ``None``."""
+
+    found = [s for s in stamps if s]
+    return max(found) if found else None
+
+
+@router.get("/app/sitemap")
+async def public_sitemap(conn=Depends(get_conn)) -> dict[str, object]:
+    """Every Public document and book of every org: what the web's ``/sitemap.xml`` lists.
+
+    Anonymous and session-free: it reads no identity, so a member's session never widens
+    it. Each org is gated exactly as a stranger's ``org_library`` read is
+    (``_share_states``): only a ``sharing.PUBLIC`` item is listed; a Link item (unlisted
+    by definition), a Members one and an item with no row never are, and an org whose
+    shares cannot be read lists nothing. A share store that cannot be read at all is an
+    empty list, never everything.
+
+    Each item carries only what a sitemap needs: its org (``org_label``: the slug, else
+    the tenant id), project, kind and slug; a book's chapter keys (those with a live
+    variant, the ones its reader opens); a document's id and its pretty path (null for a
+    slug-less org, whose documents read at ``/documents/{id}``); and the stored
+    ``updated_at`` (a book's and a chapter's is their newest variant's). No title, body,
+    tag or member data. ``/app/*`` is not on the public edge: the web server reads it.
+    """
+
+    if config.database_url() is None:
+        return {"items": []}
+    try:
+        tenant_ids = await sharing.tenants_with_public_items()
+    except sharing.SharingError:
+        return {"items": []}
+    service = get_accounts_service()
+    items: list[dict[str, object]] = []
+    for tenant_id in tenant_ids:
+        tenant = await service.get_tenant(tenant_id)
+        if tenant is None:
+            continue
+        registry = await service.list_projects_for_tenant(tenant.id)
+        ids = {p.name: p.id for p in registry}
+        try:
+            shares = await sharing.get_shares(ids.values())
+        except sharing.SharingError:
+            continue
+        state_of = _share_states(ids, shares)
+
+        def public(project: str, kind: str, key: str) -> bool:
+            return project in ids and state_of(project, kind, key) == sharing.PUBLIC
+
+        tid = str(tenant.id)
+        label = org_label(tenant)
+        for row in db.list_books(conn, tenant_id=tid):
+            if not public(row["project"], sharing.KIND_BOOK, row["slug"]):
+                continue
+            found = db.get_book(conn, project=row["project"], slug=row["slug"], tenant_id=tid)
+            if found is None:
+                continue
+            chapters = [
+                {
+                    "key": ch["key"],
+                    "updated_at": _latest(v["updated_at"] for v in ch["variants"]),
+                }
+                for ch in found["chapters"]
+                if ch["variants"]
+            ]
+            items.append(
+                {
+                    "org": label,
+                    "project": found["project"],
+                    "kind": sharing.KIND_BOOK,
+                    "slug": found["slug"],
+                    "updated_at": _latest(c["updated_at"] for c in chapters),
+                    "chapters": chapters,
+                }
+            )
+        for d in db.list_loose_documents(conn, tenant_id=tid, projects=list(ids)):
+            if not public(d["project"], sharing.KIND_DOC, doc_of(d["project"], d["rel_path"])):
+                continue
+            items.append(
+                {
+                    "org": label,
+                    "project": d["project"],
+                    "kind": sharing.KIND_DOC,
+                    "slug": d["slug"],
+                    "id": d["id"],
+                    "canonical_path": (
+                        f"/@{tenant.slug}/{d['project']}/{d['slug']}" if tenant.slug else None
+                    ),
+                    "updated_at": d["updated_at"],
+                }
+            )
+    return {"items": items}

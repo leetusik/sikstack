@@ -242,6 +242,33 @@ async def get_shares(project_ids: Iterable[UUID]) -> dict[tuple[UUID, str, str],
     return {(r.project_id, r.kind, r.item_key): _share(r) for r in rows}
 
 
+async def tenants_with_public_items() -> list[UUID]:
+    """The tenants holding at least one Public document or book, in id order.
+
+    Only a starting list for the anonymous sitemap read (``books_api.public_sitemap``),
+    which still gates each item through :func:`get_shares`. Raises
+    :class:`SharingError` on a read failure.
+    """
+
+    try:
+        async with get_session_maker()() as session:
+            rows = (
+                await session.scalars(
+                    select(ProjectModel.tenant_id)
+                    .join(ItemShareModel, ItemShareModel.project_id == ProjectModel.id)
+                    .where(
+                        ItemShareModel.state == PUBLIC,
+                        ItemShareModel.kind.in_((KIND_DOC, KIND_BOOK)),
+                    )
+                    .distinct()
+                    .order_by(ProjectModel.tenant_id)
+                )
+            ).all()
+    except SQLAlchemyError as exc:
+        raise SharingError("could not read sharing") from exc
+    return list(rows)
+
+
 async def set_share(project_id: UUID, kind: str, key: str, state: str) -> Share:
     """Set the item's state and return it.
 
@@ -556,5 +583,6 @@ __all__ = [
     "STATES", "Share", "SharedItem", "SharingError", "api_may_publish", "by_token",
     "forget_doc", "default_for", "ensure_share", "existing_items", "fill", "fill_once",
     "get_share", "get_shares", "is_token", "item_of_doc", "may_publish", "readable",
-    "set_share", "settle", "share_json", "share_token_header", "url_for",
+    "set_share", "settle", "share_json", "share_token_header", "tenants_with_public_items",
+    "url_for",
 ]

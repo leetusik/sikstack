@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { LANDING, LANDING_LINKS } from "@/content/marketing";
+import { LandingHeader } from "@/sikstack/landing/header";
 import { Landing } from "@/sikstack/landing/landing";
 
 // The landing at `/` (job 06, round 01-landing, signed): what its words and links must and must
@@ -50,7 +51,14 @@ describe("the landing's links", () => {
   it("send the install's plugin link and the footer's GitHub to the repository", () => {
     expect(LANDING.install.repo.href).toBe(REPO);
     expect(LANDING.footer.github.href).toBe(REPO);
-    expect(WORDS.filter((w) => w.includes("github.com"))).toEqual([REPO, REPO]);
+    expect(WORDS.filter((w) => w.includes("github.com"))).toEqual([
+      REPO,
+      REPO,
+      `${REPO}/issues`,
+      `${REPO}/pulls`,
+      `${REPO}/blob/main/CONTRIBUTING.md`,
+      REPO,
+    ]);
   });
 
   it("are written only in the content module, never in the page's code", () => {
@@ -145,7 +153,14 @@ describe("the install section (job 09, round 01, `## Build` *The landing's block
   const block = at < 0 ? "" : main.slice(at, main.indexOf("</section>", at));
 
   it("sits between the Workspace and the Library, labelled by its h2", () => {
-    expect(ids).toEqual(["workspace", "install", "library", "feedback", "connect"]);
+    expect(ids).toEqual([
+      "workspace",
+      "install",
+      "library",
+      "feedback",
+      "connect",
+      "open-source",
+    ]);
     expect(block).toContain('aria-labelledby="lp-inst"');
     expect(block).toContain(
       '<h2 class="lp-h2 lp-inst-h2" id="lp-inst">Install sikstack in Claude Code</h2>',
@@ -270,5 +285,93 @@ describe("the diagram's section (job 08, round 01, `## Build` 3a-3b)", () => {
   it("holds nothing to click or focus", () => {
     expect(figure).toContain("lp-map-chain");
     expect(figure).not.toMatch(/<a\b|<button\b|tabindex/i);
+  });
+});
+
+describe("the open-source section (P87, the signed design's `#open-source`)", () => {
+  function render(props: Parameters<typeof Landing>[0]) {
+    const html = renderToStaticMarkup(createElement(Landing, props));
+    const main = html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+    const at = main.indexOf('id="open-source"');
+    return { main, block: at < 0 ? "" : main.slice(at) };
+  }
+  const external = 'target="_blank" rel="noopener noreferrer"';
+
+  it("is the last part of main, labelled by its h2", () => {
+    const { main, block } = render({});
+    const sections = [...main.matchAll(/<section\b[^>]*>/g)].map((m) => m[0]);
+    expect(sections.at(-1)).toContain('id="open-source"');
+    expect(sections.at(-1)).toContain('aria-labelledby="lp-os"');
+    expect(block).toContain('<h2 class="lp-h2" id="lp-os">Open source</h2>');
+    expect(block).toContain(
+      "<p>sikstack is MIT licensed. Its code is on GitHub.</p>",
+    );
+    expect(block.endsWith("</section>")).toBe(true);
+  });
+
+  it("links the repository, its issues, its pull requests and CONTRIBUTING.md, each in a new tab", () => {
+    const { block } = render({});
+    expect(block).toMatch(
+      new RegExp(
+        `<a class="[^"]*" href="${REPO}" ${external}>sikstack on GitHub</a>`,
+      ),
+    );
+    const ways = [
+      ...block.matchAll(
+        /<li><a class="link link-row" href="([^"]+)" ([^>]+)>([^<]+)<\/a><\/li>/g,
+      ),
+    ];
+    expect(ways.map((m) => [m[1], m[2], m[3]])).toEqual([
+      [`${REPO}/issues`, external, "Open an issue"],
+      [`${REPO}/pulls`, external, "Open a pull request"],
+      [`${REPO}/blob/main/CONTRIBUTING.md`, external, "Read CONTRIBUTING.md"],
+    ]);
+    expect(block).toContain(
+      '<h3 class="lp-h3" id="lp-os-ways">Contribute</h3>',
+    );
+    expect(block).toContain(
+      '<ul class="lp-ways" aria-labelledby="lp-os-ways">',
+    );
+  });
+
+  it("holds Send feedback under Contribute only where the page passes the control's key", () => {
+    const ways = (b: string) =>
+      b.slice(b.indexOf('<ul class="lp-ways"'), b.indexOf("</ul>"));
+    const held = ways(render({ sendFeedback: { limit: 2000 } }).block);
+    expect(held).toMatch(
+      /^<ul class="lp-ways"[^>]*><li><button[^>]*class="link link-row"[^>]*>Send feedback<\/button>/,
+    );
+    const none = ways(render({}).block);
+    expect(none).toContain("<li>");
+    expect(none).not.toContain("Send feedback");
+    expect(none).not.toContain("<button");
+  });
+});
+
+describe("the header's wordmark (mark C, the live dot)", () => {
+  for (const signedIn of [false, true]) {
+    it(`is one span reading "sikstack", its i in .lp-dot (${signedIn ? "signed in" : "signed out"})`, () => {
+      const html = renderToStaticMarkup(
+        createElement(LandingHeader, { signedIn }),
+      );
+      const link =
+        /<a class="mark lp-mark" href="#top">([\s\S]*?)<\/a>/.exec(html)?.[1] ??
+        "";
+      expect(link).toBe('<span>s<span class="lp-dot">i</span>kstack</span>');
+      expect(link.replace(/<[^>]+>/g, "")).toBe("sikstack");
+    });
+  }
+
+  it("paints the dot in the accent and the stem in ink, off for print and forced colours", () => {
+    const css = readFileSync(
+      join(WEB, "src/sikstack/landing/landing.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      "background: linear-gradient(var(--accent) 0 35.5%, var(--ink) 35.5%);",
+    );
+    expect(css).toMatch(
+      /@media print, \(forced-colors: active\) \{\s*\.lp-dot \{\s*background: none;/,
+    );
   });
 });

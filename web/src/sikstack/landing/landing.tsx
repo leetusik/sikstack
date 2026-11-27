@@ -26,6 +26,13 @@ import "./landing.css";
  * the plugin's sign-in (a block `Copy` of `/sikstack:sign-in`) and the connect page's confirm, in place of the CLI
  * install, the two variables and the "Mint an org key" link; its words column loses the GitHub link (the install
  * section keeps "The plugin on GitHub"). Every other part is production's, as it is.
+ *
+ * P87's design (the "sik" mark and the open-source section, signed in `web/design`) adds the open-source
+ * section (`#open-source`), the last part of
+ * `main`, in the parts' own row. Its words say the licence and where the code is, with one secondary button to
+ * the repo; beside them, under "Contribute", one row of links: the feedback control's trigger (a second one, on
+ * the footer's own condition, `sendFeedback`), the repo's issues, its pull requests and `CONTRIBUTING.md`. The
+ * header's mark is `./header`'s; the footer is production's, as it is.
  */
 const external = { target: "_blank", rel: "noopener noreferrer" } as const;
 
@@ -40,8 +47,16 @@ export interface LandingProps {
 }
 
 export function Landing({ sendFeedback, signedIn = false }: LandingProps) {
-  const { picture, how, workspace, install, library, feedback, connect } =
-    LANDING;
+  const {
+    picture,
+    how,
+    workspace,
+    install,
+    library,
+    feedback,
+    connect,
+    openSource,
+  } = LANDING;
   return (
     <UiRoot lang="en">
       <div className="lp" id="top">
@@ -414,6 +429,55 @@ export function Landing({ sendFeedback, signedIn = false }: LandingProps) {
                   <h3 className="lp-h3">{connect.confirm.title}</h3>
                   <p>{connect.confirm.text}</p>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            className="lp-part"
+            id="open-source"
+            aria-labelledby="lp-os"
+          >
+            <div className="center lp-row">
+              <div className="lp-text">
+                <h2 className="lp-h2" id="lp-os">
+                  {openSource.title}
+                </h2>
+                <p>{openSource.text}</p>
+                <a
+                  className={buttonClass()}
+                  href={openSource.repo.href}
+                  {...external}
+                >
+                  {openSource.repo.label}
+                </a>
+              </div>
+              <div className="lp-pic stack gap-1">
+                <h3 className="lp-h3" id="lp-os-ways">
+                  {openSource.contribute.title}
+                </h3>
+                <ul className="lp-ways" aria-labelledby="lp-os-ways">
+                  {sendFeedback ? (
+                    <li>
+                      <SendFeedback
+                        context="visitor"
+                        limit={sendFeedback.limit}
+                        triggerClassName="link link-row"
+                      />
+                    </li>
+                  ) : null}
+                  {openSource.contribute.links.map((way) => (
+                    <li key={way.href}>
+                      <a
+                        className="link link-row"
+                        href={way.href}
+                        {...external}
+                      >
+                        {way.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </section>
