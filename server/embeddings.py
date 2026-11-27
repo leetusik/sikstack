@@ -1,7 +1,7 @@
 """Gemini embeddings — the only module that talks to the embedding API.
 
 Reuses changple5's convention: library ``google-genai``, model
-``gemini-embedding-2-preview`` (env ``GEMINI_EMBEDDING_MODEL``), credential
+``gemini-embedding-2`` (env ``GEMINI_EMBEDDING_MODEL``), credential
 ``GOOGLE_API_KEY`` preferred / ``GEMINI_API_KEY`` fallback (resolved in
 ``server.config``). This module is deliberately storage-agnostic: it produces and
 packs float vectors; ``server.db`` owns the ``document_embeddings`` cache and

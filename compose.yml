@@ -33,7 +33,7 @@ services:
       # GOOGLE_API_KEY (or GEMINI_API_KEY) in the host env to enable hybrid search.
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2-preview}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}
       # Async accounts plane (Postgres). Unset would leave accounts dormant; here
       # it points at the local `postgres` service (psycopg3 scheme). Migrations
       # run explicitly: `docker compose exec api alembic upgrade head`.

@@ -377,8 +377,8 @@ def gemini_api_key() -> str | None:
 
 
 def embedding_model() -> str:
-    """Gemini embedding model. GEMINI_EMBEDDING_MODEL, default gemini-embedding-2-preview."""
-    return _env("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2-preview")
+    """Gemini embedding model. GEMINI_EMBEDDING_MODEL, default gemini-embedding-2."""
+    return _env("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2")
 
 
 def embeddings_enabled() -> bool:
