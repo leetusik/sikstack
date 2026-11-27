@@ -121,9 +121,9 @@ DESIGN_TABLE_NOTE = ("# The design link: design-publish, design-builds and desig
                      "writes it; it holds no key, and it is not cloud mode).")
 DESIGN_SCHEMA = 1
 MANIFEST_MARK = "sikstack-design-build"
-CAP_UNPACKED = 50 * 1024 * 1024  # the server's caps (server/design/settings.py), checked here before anything is sent
-CAP_FILES = 5_000
-CAP_COMPRESSED = 16 * 1024 * 1024
+CAP_UNPACKED = 100 * 1024 * 1024  # the server's caps (server/design/settings.py), checked here before anything is sent
+CAP_FILES = 10_000
+CAP_COMPRESSED = 32 * 1024 * 1024
 UNLINKED_LINE = ("this checkout is not linked to sikstack (no [cloud] table, and no [design] table in config.toml here "
                  "or in the main checkout): run sikstack design-link to publish design builds from a local workspace, "
                  "or run /sikstack:sign-in for cloud mode")

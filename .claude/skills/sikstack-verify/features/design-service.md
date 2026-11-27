@@ -127,7 +127,7 @@ sed -i '' -e "s#__WEB__#$WEB#g" -e "s#__PROJECT__#$PROJECT#g" "$SCR/attack/out/i
   || sed -i -e "s#__WEB__#$WEB#g" -e "s#__PROJECT__#$PROJECT#g" "$SCR/attack/out/index.html"
 # (d) over the cap: 51 MiB unpacked (it compresses to almost nothing, so only the unpacked cap refuses it)
 mkdir -p "$SCR/big/out" && cp "$SCR/attack/out/manifest.json" "$SCR/big/out/manifest.json"
-python3 -c 'import sys; open(sys.argv[1], "wb").truncate(51 * 1024 * 1024)' "$SCR/big/out/big.bin"
+python3 -c 'import sys; open(sys.argv[1], "wb").truncate(101 * 1024 * 1024)' "$SCR/big/out/big.bin"
 OPT=$(publish "$SCR/options"); PRIV=$(publish "$SCR/private"); ATK=$(publish "$SCR/attack"); DEL=$(publish "$SCR/options")
 [ -n "$OPT" ] && [ -n "$PRIV" ] && [ -n "$ATK" ] && [ -n "$DEL" ] || { echo "a publish failed: see $EV/publish.log"; exit 1; }
 grep -q "^published=$PRIV .* private=yes" "$EV/publish.log" && grep -q "^published=$OPT .* private=no" "$EV/publish.log"
@@ -328,7 +328,7 @@ must "the member is still signed in" "$page" 'd["url"] == "'"$WEB"'/dashboard"'
 before=$(grep -c 'POST /api/design/' "$EV/api.log" || true)
 if refusal=$(sk design-publish --folder "$SCR/big" 2>&1); then echo "the oversized folder was published"; exit 1; fi
 printf '%s\n' "$refusal"
-printf '%s\n' "$refusal" | grep -q 'refused -- the build is 53,477,[0-9,]* bytes (51.0 MB) unpacked: the cap is 50 MB unpacked (nothing was published)'
+printf '%s\n' "$refusal" | grep -q 'refused -- the build is 105,906,[0-9,]* bytes (101.0 MB) unpacked: the cap is 100 MB unpacked (nothing was published)'
 [ "$(grep -c 'POST /api/design/' "$EV/api.log" || true)" = "$before" ] || { echo "the plugin sent an upload"; exit 1; }
 served=$(XDG="$XDG" API="$API" PROJECT="$PROJECT" python3 - "$SCR/big/out" <<'PY'
 import io, json, os, sys, tarfile, urllib.error, urllib.request
@@ -348,8 +348,8 @@ except urllib.error.HTTPError as e:
 PY
 )
 printf 'server: %s\n' "$served"
-case "$served" in "413 "*" 53,477,"*" bytes (51 MB): the cap is 50 MB unpacked") ;; # the server stops at the file that crosses the cap
-  "413 "*"(51.0 MB)"*"the cap is 50 MB unpacked"*) ;; *) echo "the server did not refuse the oversized build naming its size and the cap"; exit 1 ;; esac
+case "$served" in "413 "*" 105,906,"*" bytes (101 MB): the cap is 100 MB unpacked") ;; # the server stops at the file that crosses the cap
+  "413 "*"(101.0 MB)"*"the cap is 100 MB unpacked"*) ;; *) echo "the server did not refuse the oversized build naming its size and the cap"; exit 1 ;; esac
 sk design-delete "$DEL" | grep -qx "deleted=$DEL"
 if sk design-builds | grep -q "^$DEL "; then echo "$DEL is still listed by design-builds"; exit 1; fi
 pw goto "$VIEW"

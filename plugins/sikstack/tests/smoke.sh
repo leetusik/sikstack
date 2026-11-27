@@ -5925,9 +5925,9 @@ dp_o5=$(dp "$DPH" design-publish --folder "$DPW/private"); dp_rc5=$?
   || bad "the private publish is wrong -- rc=$dp_rc5 [$dp_o5]"
 # (d) refusals before any request: no manifest, an unmarked one, and each cap naming the size and the cap.
 mkdir -p "$DPW/files/out" && printf '{"$design": "sikstack-design-build"}' > "$DPW/files/out/manifest.json" \
-  && ( cd "$DPW/files/out" && for i in $(seq 1 5000); do : > "f$i"; done )
-mkdir -p "$DPW/big/out" && cp "$DPW/files/out/manifest.json" "$DPW/big/out/" && dd if=/dev/zero of="$DPW/big/out/blob" bs=1048576 count=51 2>/dev/null
-mkdir -p "$DPW/packed/out" && cp "$DPW/files/out/manifest.json" "$DPW/packed/out/" && head -c 17000000 /dev/urandom > "$DPW/packed/out/noise"
+  && ( cd "$DPW/files/out" && for i in $(seq 1 10000); do : > "f$i"; done )
+mkdir -p "$DPW/big/out" && cp "$DPW/files/out/manifest.json" "$DPW/big/out/" && dd if=/dev/zero of="$DPW/big/out/blob" bs=1048576 count=101 2>/dev/null
+mkdir -p "$DPW/packed/out" && cp "$DPW/files/out/manifest.json" "$DPW/packed/out/" && head -c 34000000 /dev/urandom > "$DPW/packed/out/noise"
 dp_n0=$(dp_n)
 dp_o6=$(dp "$DPH" design-publish --folder "$DPW/nobuild"); dp_rc6=$?
 dp_o7=$(dp "$DPH" design-publish --folder "$DPW/unmarked"); dp_rc7=$?
@@ -5937,10 +5937,10 @@ dp_o10=$(dp "$DPH" design-publish --folder "$DPW/packed"); dp_rc10=$?
 [ "$dp_rc6$dp_rc7$dp_rc8$dp_rc9$dp_rc10" = 11111 ] && [ "$(dp_n)" = "$dp_n0" ] \
   && printf '%s\n' "$dp_o6" | grep -q "^design-publish: refused -- .*nobuild has no build: .*manifest.json is missing" \
   && printf '%s\n' "$dp_o7" | grep -q '^design-publish: refused -- .*manifest.json is not a design build.s manifest (no "\$design": "sikstack-design-build")' \
-  && printf '%s\n' "$dp_o8" | grep -q '^design-publish: refused -- the build holds 5,001 files: the cap is 5,000 files (nothing was published)$' \
-  && printf '%s\n' "$dp_o9" | grep -q '^design-publish: refused -- the build is 53,477,[0-9,]* bytes (51.0 MB) unpacked: the cap is 50 MB unpacked' \
-  && printf '%s\n' "$dp_o10" | grep -q '^design-publish: refused -- the build is [0-9,]* bytes (16.[2-9] MB) compressed: the cap is 16 MB compressed' \
-  && ok "a folder with no manifest, an unmarked manifest, and a build over each cap (5,000 files, 50 MB unpacked, 16 MB compressed) are refused naming the size and the cap, before any request" \
+  && printf '%s\n' "$dp_o8" | grep -q '^design-publish: refused -- the build holds 10,001 files: the cap is 10,000 files (nothing was published)$' \
+  && printf '%s\n' "$dp_o9" | grep -q '^design-publish: refused -- the build is 105,906,[0-9,]* bytes (101.0 MB) unpacked: the cap is 100 MB unpacked' \
+  && printf '%s\n' "$dp_o10" | grep -q '^design-publish: refused -- the build is [0-9,]* bytes (32.[2-9] MB) compressed: the cap is 32 MB compressed' \
+  && ok "a folder with no manifest, an unmarked manifest, and a build over each cap (10,000 files, 100 MB unpacked, 32 MB compressed) are refused naming the size and the cap, before any request" \
   || bad "a pre-upload refusal is wrong -- rc=$dp_rc6$dp_rc7$dp_rc8$dp_rc9$dp_rc10 sent=$dp_n0/$(dp_n) [$dp_o6] [$dp_o7] [$dp_o8] [$dp_o9] [$dp_o10]"
 # (e) delete: gone from the list; a second delete is the server's 404 line; a bad id is refused unsent.
 dp_o11=$(dp "$DPH" design-delete "$dp_id2"); dp_rc11=$?
@@ -5968,7 +5968,7 @@ dp_o15=$(dp "$DPH" design-builds); dp_rc15=$?
 cp "$DPW/keys.saved" "$DPX/sikstack/workspace-keys.json"; chmod 600 "$DPX/sikstack/workspace-keys.json"
 dp_ctl '{"design_answer": {"status": 403, "detail": "this key cannot reach a workspace"}}'
 dp_o16=$(dp "$DPH" design-builds); dp_rc16=$?
-dp_ctl '{"design_answer": {"status": 413, "detail": "the build is 52,428,801 bytes (50.0 MB) unpacked: the cap is 50 MB", "method": "POST"}}'
+dp_ctl '{"design_answer": {"status": 413, "detail": "the build is 104,857,601 bytes (100.0 MB) unpacked: the cap is 100 MB", "method": "POST"}}'
 dp_o17=$(dp "$DPH" design-publish --folder web/design); dp_rc17=$?
 # a wrong key on a big upload: the server refuses before reading the body, so the key is checked before the upload.
 mkdir -p "$DPW/wide/out" && cp "$DPW/files/out/manifest.json" "$DPW/wide/out/" && head -c 4000000 /dev/urandom > "$DPW/wide/out/noise"
@@ -5987,7 +5987,7 @@ cp "$DPW/keys.saved" "$DPX/sikstack/workspace-keys.json"; chmod 600 "$DPX/siksta
   && [ "$(dp_n)" = "$((dp_n18 + 1))" ] \
   && [ "$dp_o15" = "design-builds: sikstack refused (HTTP 401): a workspace key is required; make a workspace key under Keys on the project's page and link again (nothing was read)" ] \
   && [ "$dp_o16" = "design-builds: sikstack refused (HTTP 403): this key cannot reach a workspace; this is not a workspace key: make one under Keys on the project's page (nothing was read)" ] \
-  && [ "$dp_o17" = "design-publish: sikstack refused (HTTP 413): the build is 52,428,801 bytes (50.0 MB) unpacked: the cap is 50 MB (nothing was published)" ] \
+  && [ "$dp_o17" = "design-publish: sikstack refused (HTTP 413): the build is 104,857,601 bytes (100.0 MB) unpacked: the cap is 100 MB (nothing was published)" ] \
   && ok "a wrong key's 401, the server's 403 and its 413 each end the verb in one line naming the status and the server's words; a wrong key on a 4 MB publish is refused by one small request before the upload" \
   || bad "the server's refusals are wrong -- rc=$dp_rc15$dp_rc16$dp_rc17$dp_rc18 [$dp_o15] [$dp_o16] [$dp_o17] [$dp_o18]"
 # (g) the round (--page): entries and routes (a route selects every page with it) give round.pages, unique, in the
@@ -6793,14 +6793,23 @@ mn_eq=$(mn_hook "$MNH" startup; echo x); mn_eq=${mn_eq%x}
   || bad "an equal stamp changed the hook's output: $(printf '%s' "$mn_eq" | tail -3)"
 mn_set "$MNH" 0.8.0 >/dev/null 2>&1
 mn_out=$(mn_hook "$MNH" startup; echo x); mn_out=${mn_out%x}
-mn_check() { python3 - "$1" "$2" "$ES_RUN" "$3" <<'PY'
-import sys
+mn_check() { python3 - "$1" "$2" "$ES_RUN" "$3" "$PLUGIN/CHANGELOG.md" <<'PY'
+import re, sys
 text, card, running, want_resume = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "resume"
+# The block starts at the newest release that carries a Migration notes line: a release with no manual step has none.
+newest = release = None
+for line in open(sys.argv[5], encoding="utf-8"):
+    heading = re.match(r"## (\d+\.\d+\.\d+) ", line)
+    if heading:
+        release = heading.group(1)
+    elif release and "**Migration notes" in line:
+        newest = release
+        break
 head = f"sikstack updated from 0.8.0 to {running} in this workspace: the Migration notes below may need manual steps. Tell the operator, and run a step only on their word.\n"
 assert text.startswith(card + "\n\n" + head), text[len(card):len(card) + 300]
 block = text[len(card) + 2:].split("\ncompaction=done", 1)[0] if want_resume else text[len(card) + 2:]
 items = [line for line in block.splitlines()[1:] if line.startswith("- ")]
-assert items and items[0].startswith(f"- {running}: ") and any(i.startswith("- 0.9.0: ") for i in items), items
+assert newest and items and items[0].startswith(f"- {newest}: ") and any(i.startswith("- 0.9.0: ") for i in items), (newest, items)
 assert not any(i.startswith(("- 0.8.0: ", "- 0.7.0: ")) for i in items), items
 assert text.count("sikstack updated from") == 1 and len(text) <= 10000, len(text)
 if want_resume:
