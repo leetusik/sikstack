@@ -139,14 +139,35 @@ class FeedbackService:
         async with self._session_maker() as session:
             repository = FeedbackRepository(session)
             try:
-                storage_keys = await repository.list_storage_keys_for_feedback(feedback_id)
-                deleted = await repository.delete_feedback_event(feedback_id)
+                deleted, storage_keys = await _delete_events(repository, (feedback_id,))
                 await session.commit()
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackPersistenceError("failed to persist feedback event") from exc
 
-        return (deleted, storage_keys if deleted else ())
+        return (bool(deleted), storage_keys)
+
+    async def delete_feedback_events(
+        self, feedback_ids: Sequence[UUID], project_ids: Collection[UUID]
+    ) -> tuple[tuple[UUID, ...], tuple[str, ...]] | None:
+        """Delete several feedback records, all or none, in one transaction.
+
+        ``None`` (nothing deleted) when any id is not in ``project_ids``. Otherwise
+        ``(deleted_ids, storage_keys)``: each event goes with its comments, state and
+        attachment rows (the cascade), and the keys of those attachments come back so
+        the caller deletes the files after the commit.
+        """
+
+        ids = tuple(dict.fromkeys(feedback_ids))
+        async with self._session_maker() as session:
+            repository = FeedbackRepository(session)
+            try:
+                async with session.begin():
+                    if await repository.scoped_feedback_ids(ids, project_ids) != set(ids):
+                        return None
+                    return await _delete_events(repository, ids)
+            except SQLAlchemyError as exc:
+                raise FeedbackPersistenceError("failed to persist feedback event") from exc
 
     # -- event reads ----------------------------------------------------------
 
@@ -597,6 +618,23 @@ class FeedbackService:
             except SQLAlchemyError as exc:
                 await session.rollback()
                 raise FeedbackReadError("failed to read feedback attachment") from exc
+
+
+async def _delete_events(
+    repository: FeedbackRepository, feedback_ids: Sequence[UUID]
+) -> tuple[tuple[UUID, ...], tuple[str, ...]]:
+    """The one delete: each event's attachment keys read first, then the event (its
+    comments, state and attachment rows cascade). The caller commits. Returns the ids
+    really deleted and the keys of their attachments."""
+
+    deleted: list[UUID] = []
+    keys: list[str] = []
+    for feedback_id in feedback_ids:
+        found = await repository.list_storage_keys_for_feedback(feedback_id)
+        if await repository.delete_feedback_event(feedback_id):
+            deleted.append(feedback_id)
+            keys.extend(found)
+    return tuple(deleted), tuple(keys)
 
 
 def get_feedback_service() -> FeedbackService:

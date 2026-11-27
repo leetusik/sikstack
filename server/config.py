@@ -293,6 +293,21 @@ def feedback_attachments_unlinked_ttl_s() -> int:
     return value if value > 0 else 86400
 
 
+def feedback_attachments_sweep_interval_s() -> float:
+    """How often the app sweeps stale unlinked attachments on its own, without an
+    upload (``KB_FEEDBACK_ATTACHMENTS_SWEEP_INTERVAL_S``, 3600 = hourly): once at
+    start-up, then every this many seconds, only with ``DATABASE_URL``. ``0`` or less
+    turns the timer off (uploads still sweep); an unparseable value is the default."""
+    raw = _env("KB_FEEDBACK_ATTACHMENTS_SWEEP_INTERVAL_S")
+    if raw is None or not str(raw).strip():
+        return 3600
+    try:
+        value = float(raw)
+    except ValueError:
+        return 3600
+    return value if value > 0 else 0
+
+
 def feedback_attachments_unlinked_max_bytes() -> int:
     """The ceiling on the total size of unlinked attachments, all orgs together
     (``KB_FEEDBACK_ATTACHMENTS_UNLINKED_MAX_BYTES``, 1073741824 = 1 GiB). An upload

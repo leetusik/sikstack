@@ -44,6 +44,7 @@ any auth, like the Listen routes: Feedback needs the accounts plane.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import contextlib
@@ -65,7 +66,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
 from server import config
-from server.accounts.auth import AuthContext, extract_bearer_token, require_user
+from server.accounts.auth import (
+    AuthContext,
+    extract_bearer_token,
+    require_owner,
+    require_user,
+)
 from server.accounts.security import sha256_hex
 from server.accounts.service import (
     DEFAULT_PROJECT_NAME,
@@ -930,19 +936,22 @@ UNLINKED_SWEEP_MAX_ROWS = 500
 UNLINKED_SWEEP_MAX_SECONDS = 1.0
 
 
-async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
-    """Delete unlinked attachments older than the TTL, rows then files, in batches.
+async def sweep_unlinked_attachments(storage: AttachmentStorage | None = None) -> int:
+    """Delete unlinked attachments older than the TTL, rows then files, in batches;
+    the number of rows reclaimed.
 
-    The opportunistic sweep (no scheduler): an upload nobody linked within
-    ``KB_FEEDBACK_ATTACHMENTS_UNLINKED_TTL_S`` is reclaimed by a later upload. Each
-    batch's files are removed only for rows its committed delete returned; a file
-    already missing is not an error. Batches repeat until one comes back short (no
-    stale row left) or the budget (``UNLINKED_SWEEP_MAX_ROWS`` rows,
-    ``UNLINKED_SWEEP_MAX_SECONDS``) is spent. The sweep never fails the upload that
-    runs it. A capture that later names a reclaimed id is treated like any unknown
-    id (stored without it).
+    The one sweep, run by each upload before it stores its file and by the app's own
+    timer (``run_unlinked_sweeps``): an upload nobody linked within
+    ``KB_FEEDBACK_ATTACHMENTS_UNLINKED_TTL_S`` is reclaimed. Each batch's files are
+    removed only for rows its committed delete returned; a file already missing is
+    not an error. Batches repeat until one comes back short (no stale row left) or
+    the budget (``UNLINKED_SWEEP_MAX_ROWS`` rows, ``UNLINKED_SWEEP_MAX_SECONDS``) is
+    spent. A failed batch is logged and ends the run, never failing its caller. A
+    capture that later names a reclaimed id is treated like any unknown id (stored
+    without it).
     """
 
+    storage = storage if storage is not None else get_attachment_storage()
     older_than = datetime.now(UTC) - timedelta(
         seconds=config.feedback_attachments_unlinked_ttl_s()
     )
@@ -957,7 +966,7 @@ async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
                 older_than=older_than, limit=limit
             )
         except FeedbackPersistenceError:
-            logger.exception("unlinked attachment sweep failed; the upload goes on")
+            logger.exception("unlinked attachment sweep failed; its caller goes on")
             break
         for key in keys:
             try:
@@ -971,6 +980,49 @@ async def _reclaim_unlinked_attachments(storage: AttachmentStorage) -> None:
             break
     if reclaimed:
         logger.info("reclaimed %d unlinked attachment(s)", reclaimed)
+    return reclaimed
+
+
+#: The timer's task while the app runs (``start_unlinked_sweeps``), else None.
+_sweep_task: asyncio.Task | None = None
+
+
+async def run_unlinked_sweeps(interval_s: float) -> None:
+    """Sweep at once, then every ``interval_s`` seconds, until cancelled. A run that
+    raises is logged and the next one still comes."""
+
+    while True:
+        try:
+            await sweep_unlinked_attachments()
+        except Exception:  # noqa: BLE001 - one bad run never ends the timer
+            logger.exception("the unlinked attachment sweep failed; the next runs on time")
+        await asyncio.sleep(interval_s)
+
+
+def start_unlinked_sweeps() -> asyncio.Task | None:
+    """Start the timer in the running loop (the app's lifespan): only when the
+    feedback store is configured (``DATABASE_URL``) and
+    ``KB_FEEDBACK_ATTACHMENTS_SWEEP_INTERVAL_S`` is above 0."""
+
+    global _sweep_task
+    interval = config.feedback_attachments_sweep_interval_s()
+    if config.database_url() is None or interval <= 0:
+        return None
+    _sweep_task = asyncio.create_task(run_unlinked_sweeps(interval),
+                                      name="feedback-unlinked-sweep")
+    return _sweep_task
+
+
+async def stop_unlinked_sweeps() -> None:
+    """Cancel the timer and wait for it to end (the lifespan's shutdown)."""
+
+    global _sweep_task
+    task, _sweep_task = _sweep_task, None
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 #: The 503 an upload gets when it would take unlinked attachments above the ceiling.
@@ -1038,7 +1090,7 @@ async def upload_attachment(request: Request, background_tasks: BackgroundTasks)
         return _detail("unsupported image type", 415)
 
     storage = get_attachment_storage()
-    await _reclaim_unlinked_attachments(storage)
+    await sweep_unlinked_attachments(storage)
     # The ceilings, after the sweep: checked first so a refused upload writes no
     # file, then again under a lock with the insert so no race can overshoot them.
     # The unlinked ceiling comes first. The total ceiling counts every stored
@@ -1624,6 +1676,21 @@ def _unprocessable(message: str) -> JSONResponse:
     return _detail(message, 422)
 
 
+def _ids_input(ids: Any) -> tuple[UUID, ...]:
+    """1 to ``MAX_STATE_IDS`` feedback ids, duplicates dropped, in their order; or a
+    FeedbackValidationError."""
+
+    if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_STATE_IDS:
+        raise FeedbackValidationError(f"ids must list 1 to {MAX_STATE_IDS} feedback ids")
+    parsed: list[UUID] = []
+    for value in ids:
+        try:
+            parsed.append(UUID(value))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise FeedbackValidationError("ids must be feedback ids (UUIDs)") from exc
+    return tuple(dict.fromkeys(parsed))
+
+
 def _state_input(raw: Any) -> tuple[tuple[UUID, ...], str, str | None]:
     """``(ids, state, reason)`` from a state change's body, or a FeedbackValidationError
     naming the one thing wrong."""
@@ -1636,15 +1703,7 @@ def _state_input(raw: Any) -> tuple[tuple[UUID, ...], str, str | None]:
     state = raw.get("state")
     if state not in MEMBER_STATES:
         raise FeedbackValidationError(f"state must be one of {', '.join(MEMBER_STATES)}")
-    ids = raw.get("ids")
-    if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_STATE_IDS:
-        raise FeedbackValidationError(f"ids must list 1 to {MAX_STATE_IDS} feedback ids")
-    parsed: list[UUID] = []
-    for value in ids:
-        try:
-            parsed.append(UUID(value))
-        except (TypeError, ValueError, AttributeError) as exc:
-            raise FeedbackValidationError("ids must be feedback ids (UUIDs)") from exc
+    ids = _ids_input(raw.get("ids"))
     reason = raw.get("reason")
     if reason is not None:
         if state != STATE_DROPPED:
@@ -1656,7 +1715,7 @@ def _state_input(raw: Any) -> tuple[tuple[UUID, ...], str, str | None]:
                                    or not re.fullmatch(f"{ENTRY_ONE_LINE}*", reason)):
             raise FeedbackValidationError(
                 f"reason must be one line of at most {MAX_TRIAGE_REASON} characters")
-    return tuple(dict.fromkeys(parsed)), state, reason
+    return ids, state, reason
 
 
 @router.post("/app/feedback/state")
@@ -1693,6 +1752,57 @@ async def set_app_feedback_state(request: Request) -> Response:
         return _not_found()
     return JSONResponse({"states": [{"id": str(fid), "state": _state_json(states.get(fid))}
                                     for fid in ids]})
+
+
+@router.post("/app/feedback/delete")
+async def delete_app_feedback(request: Request) -> Response:
+    """``POST /app/feedback/delete {ids}`` -> 200 ``{deleted: [id], files: n}``: an
+    owner of the active org deletes 1 to 100 of its feedback for good, all or none (one
+    id outside the org, or unknown, is a 404 and nothing goes). Each event goes with its
+    comments, state and attachment rows in one transaction; ``files`` counts those
+    attachments, whose files are deleted after the commit, best effort (a failure is
+    logged, never the call's). ``deleted`` keeps the order the ids came, duplicates
+    once. A member is a 403; a bad body a 422 with one line. Agenda items that name a
+    deleted feedback stay as they are."""
+
+    ctx, owned = await _session_caller(request)
+    await require_owner(ctx)
+    raw = await _read_capped_body(request, MAX_STATE_BODY_BYTES)
+    if isinstance(raw, JSONResponse):
+        return raw
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        return _unprocessable("the body must be a JSON object")
+    try:
+        if not isinstance(body, dict):
+            raise FeedbackValidationError("the body must be a JSON object")
+        unknown = sorted(set(body) - {"ids"})
+        if unknown:
+            raise FeedbackValidationError(f"a delete takes no {unknown[0]}")
+        ids = _ids_input(body.get("ids"))
+    except FeedbackValidationError as exc:
+        return _unprocessable(str(exc))
+    if not owned:
+        return _not_found()
+    try:
+        result = await get_feedback_service().delete_feedback_events(ids, owned)
+    except FeedbackPersistenceError:
+        return _write_failed()
+    if result is None:
+        return _not_found()
+    deleted, storage_keys = result
+
+    storage = get_attachment_storage()
+    for storage_key in storage_keys:
+        try:
+            storage.delete(storage_key)
+        except StorageObjectNotFoundError:
+            continue
+        except StorageError:
+            logger.warning("failed to delete attachment object %s of a deleted feedback",
+                           storage_key)
+    return JSONResponse({"deleted": [str(fid) for fid in deleted], "files": len(storage_keys)})
 
 
 # --- triage: the engine's feedback on the agenda (0.6.0) ------------------------------
