@@ -1,11 +1,9 @@
-import type { RenameOrgResult } from "@/app/(app)/dashboard/name-panel";
 import type { SaveSlugResult } from "@/app/(app)/dashboard/org-home-model";
-import type { KeyRow, MintResult, RevokeResult } from "@/sikstack/frame";
+import type { DeleteResult, KeyRow, MintResult, RevokeResult } from "@/sikstack/frame";
 import type { CreateOrgResult, InviteResult, InviteRow, InviteView, MemberRow } from "@/sikstack/org/model";
+import type { RenameOrgResult } from "@/sikstack/org/name-panel";
+import type { ShellOrg } from "@/sikstack/shell/model";
 
-import type { DeleteResult } from "../next/frame/delete-dialog";
-// The org menu's next `ShellOrg` (P88-ms.S3's design: `owner` added), which every org page here draws.
-import type { ShellOrg } from "../next/shell/model";
 import { NOW, RECORDING } from "./recording";
 
 /**
@@ -104,9 +102,9 @@ export const OTHER_ACCOUNT = "jun.lee@example.com";
 
 // ── Settings (P88-ms.S3's design) ─────────────────────────────────────────────────────────────
 // **Synthesized, every line** but the recorded org, project and account: the settings pages' API (S1, S2) was
-// never recorded against the sample project, and no API answers an org's owner for the org menu yet.
+// never recorded against the sample project (the org menu's owner is `GET /auth/me`'s `owner_email` since P88-ms.S4).
 
-/** Made: the org menu's owner per org (`ShellOrg.owner`, a field the API does not have yet). The account owns its
+/** Made: the org menu's owner per org (`ShellOrg.owner`, from `GET /auth/me`'s `owner_email`). The account owns its
  * active org; another account owns an org of the same name, which the account joined (two `Sample org`s). */
 export const CURRENT_ORG_OWNED: ShellOrg = { ...CURRENT_ORG, owner: ME };
 export const SAME_NAME_ORG: ShellOrg = {

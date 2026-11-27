@@ -2,20 +2,20 @@
 
 import { useState } from "react";
 
-import { NamePanel, type RenameOrgResult } from "@/app/(app)/dashboard/name-panel";
 import type { SaveSlugResult } from "@/app/(app)/dashboard/org-home-model";
-import { UrlPanel, UrlReadPanel } from "@/app/(app)/dashboard/url-panel";
 import { ORG_NAME } from "@/content/org";
+import { SETTINGS } from "@/content/settings";
 import { plural } from "@/lib/format";
+import { DeleteDialog, type DeletePhase, type DeleteResult } from "@/sikstack/frame/delete-dialog";
 import { BlockText, Button, Grid, Panel, PanelBody, PanelHead } from "@/sikstack/ui";
 
-// A new component (P88-ms.S3's design): applying it, this file is `src/sikstack/org/settings.tsx`, the page
-// `src/app/(app)/settings/page.tsx` passes its server actions, `name-panel.tsx` and `url-panel.tsx` move beside it
-// from `dashboard/`, and the words' import becomes `@/content/settings`.
-import { SETTINGS } from "../content/settings";
-import { DeleteDialog, type DeletePhase, type DeleteResult } from "../frame/delete-dialog";
+// P88-ms.S3's signed design, applied by P88-ms.S4: the page `src/app/(app)/settings/page.tsx` (its client part,
+// `org-settings.tsx`) passes the server actions; Org name and Public URL (`name-panel.tsx`, `url-panel.tsx`) came
+// here from org home, which no longer draws them.
 import { MembersView, type MembersViewProps } from "./members";
 import type { OrgRole } from "./model";
+import { NamePanel, type RenameOrgResult } from "./name-panel";
+import { UrlPanel, UrlReadPanel } from "./url-panel";
 
 export interface OrgSettingsProps
   extends Omit<MembersViewProps, "org" | "me" | "onSteppedDown"> {

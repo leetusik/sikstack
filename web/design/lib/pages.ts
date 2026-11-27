@@ -139,7 +139,7 @@ export const PAGES: readonly BuildPage[] = [
     route: "/dashboard (the top bar of every app page)",
     production: "src/sikstack/shell/shell.tsx",
     entry: "/dashboard/",
-    reads: ["design/next/shell/shell.tsx", "design/next/shell/model.ts", "lib/org-data.ts (made)"],
+    reads: ["src/sikstack/shell/shell.tsx", "src/sikstack/shell/model.ts", "lib/org-data.ts (made)"],
     states: ORG_SWITCHER_STATES,
   },
   {
@@ -150,21 +150,21 @@ export const PAGES: readonly BuildPage[] = [
     reads: ["src/sikstack/org/new-org.tsx", "lib/org-data.ts (made)"],
     states: NEW_ORG_STATES,
   },
-  // The settings pages (P88-ms.S3's design, new): Members (`/members`, P78's) is a part of Org settings, and its
-  // route a redirect there. Made data (`org-data.ts`, Settings); the new components are in `design/next/`.
+  // The settings pages (P88-ms.S3's design, applied by P88-ms.S4): Members (`/members`, P78's) is a part of Org
+  // settings, and its route a redirect there. Made data (`org-data.ts`, Settings).
   {
     name: "Org settings",
     route: "/settings",
-    production: null,
+    production: "src/app/(app)/settings/page.tsx",
     entry: "/settings/",
     reads: [
-      "design/next/org/settings.tsx",
-      "design/next/org/members.tsx",
-      "design/next/org/model.ts",
-      "design/next/frame/delete-dialog.tsx",
-      "design/next/content/settings.ts",
-      "src/app/(app)/dashboard/name-panel.tsx",
-      "src/app/(app)/dashboard/url-panel.tsx",
+      "src/sikstack/org/settings.tsx",
+      "src/sikstack/org/members.tsx",
+      "src/sikstack/org/model.ts",
+      "src/sikstack/frame/delete-dialog.tsx",
+      "src/content/settings.ts",
+      "src/sikstack/org/name-panel.tsx",
+      "src/sikstack/org/url-panel.tsx",
       "lib/org-data.ts (made)",
     ],
     states: ORG_SETTINGS_STATES,
@@ -172,12 +172,12 @@ export const PAGES: readonly BuildPage[] = [
   {
     name: "Project settings",
     route: "/projects/[projectId]/settings",
-    production: null,
+    production: "src/app/(app)/projects/[projectId]/settings/page.tsx",
     entry: `/projects/${encodeURIComponent(PROJECT)}/settings/`,
     reads: [
-      "design/next/project/settings.tsx",
-      "design/next/frame/delete-dialog.tsx",
-      "design/next/content/settings.ts",
+      "src/sikstack/project/settings.tsx",
+      "src/sikstack/frame/delete-dialog.tsx",
+      "src/content/settings.ts",
       "src/sikstack/frame/keys.tsx",
       "src/app/(app)/projects/[projectId]/model.ts",
       "lib/org-data.ts (made)",

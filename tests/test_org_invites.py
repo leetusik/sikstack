@@ -887,6 +887,43 @@ def test_a_step_down_counts_the_owners_among_the_locked_rows(org):
     assert _role(org, org_id, owner["email"]) == "owner"
 
 
+def _owner_email(client, who: dict, org_id: str):
+    tenants = client.get("/auth/me", headers=who["h"]).json()["tenants"]
+    return next(t for t in tenants if t["id"] == org_id)["owner_email"]
+
+
+def test_auth_me_names_each_orgs_first_owner_and_the_next_after_a_step_down(org):
+    """`GET /auth/me`'s tenants carry `owner_email`: the owner row joined first (then id),
+    the same for a member; after that owner steps down, the next owner by the same order
+    (not by who was made an owner first); `null` for an org with no owner."""
+
+    first = _account(org)
+    org_id = _new_org(org, first, "Owned Org")
+    early = _joined(org, first, org_id)
+    late = _joined(org, first, org_id)
+    me = org.get("/auth/me", headers=first["h"]).json()["tenants"]
+    assert [t["owner_email"] for t in me] == [first["email"], first["email"]]
+    assert _owner_email(org, early, org_id) == first["email"]
+
+    # The later joiner is made an owner first; the earlier joiner second.
+    assert _promote(org, first, org_id, late["email"]).status_code == 204
+    assert _promote(org, first, org_id, early["email"]).status_code == 204
+    assert _owner_email(org, first, org_id) == first["email"]
+
+    assert _step_down(org, first, org_id, first["email"]).status_code == 204
+    for who in (first, early, late):
+        assert _owner_email(org, who, org_id) == early["email"]
+    # Each account's own sign-up org still names its own owner.
+    assert _owner_email(org, late, late["default_org"]) == late["email"]
+
+    with org.db.begin() as conn:
+        conn.execute(
+            text("UPDATE tenant_members SET role = 'member' WHERE tenant_id = :t"),
+            {"t": org_id},
+        )
+    assert _owner_email(org, early, org_id) is None
+
+
 def test_a_co_owner_leaves_and_the_last_owner_still_cannot(org):
     owner = _account(org)
     org_id = _new_org(org, owner, "Handover Org")

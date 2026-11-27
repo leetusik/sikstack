@@ -9,24 +9,8 @@
  * panel's phase rows live in the Workspace's own sheet, `src/sikstack/styles/workspace/home.css`.
  */
 @scope (.ui) to ([data-ui-legacy]) {
-  /* the head: the button's three labels share one cell, so it keeps its width through the change */
-  .ph-swap {
-    display: inline-grid;
-    justify-items: center;
-  }
-  .ph-swap > * {
-    grid-area: 1 / 1;
-    visibility: hidden;
-  }
-  .ph-swap > .is-on {
-    visibility: visible;
-  }
-  /* the action stays at the end of the head when the head wraps */
-  .ph-end {
-    margin-left: auto;
-  }
-  /* the title's group gives way before the action does: on a phone its badge and date wrap inside it, beside
-     Make public or Make private, rather than the action dropping alone under the title */
+  /* the title's group takes the head's line: on a phone its badge and date wrap inside it (the head's switch is
+     Project settings' since P88-ms) */
   .ph-title {
     flex: 1 1 10em;
   }

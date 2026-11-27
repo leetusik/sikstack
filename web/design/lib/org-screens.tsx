@@ -3,24 +3,21 @@
 import { useEffect, type ReactNode } from "react";
 
 import { SKIP_TO_CONTENT } from "@/content";
+import { SETTINGS } from "@/content/settings";
+import type { DeletePhase } from "@/sikstack/frame";
+import { InviteColumn } from "@/sikstack/org/invite";
+import { stepDownToast } from "@/sikstack/org/members";
+import type { InvitePagePhase, InviteRow, MemberRow, OrgRole } from "@/sikstack/org/model";
+import { NewOrgForm } from "@/sikstack/org/new-org";
+import { OrgSettingsView } from "@/sikstack/org/settings";
+import { ProjectSettingsView } from "@/sikstack/project/settings";
 import { publishToast, ShellOrgNameProvider, ToastRegion } from "@/sikstack/shell";
+import type { ShellOrg } from "@/sikstack/shell/model";
+import { Shell } from "@/sikstack/shell/shell";
 import { StateBlock } from "@/sikstack/states";
 import { Legacy } from "@/sikstack/ui/boundary";
 import { UiRoot } from "@/sikstack/ui/root";
 
-import { InviteColumn } from "@/sikstack/org/invite";
-import type { InvitePagePhase, InviteRow, MemberRow, OrgRole } from "@/sikstack/org/model";
-import { NewOrgForm } from "@/sikstack/org/new-org";
-
-// The Shell's next version (P88-ms.S3's design: Settings in both rails, the org menu's line for a shared name), drawn
-// on every org page here; the Workspace's, Design's and Feedback's pages (`screens.tsx`) keep production's.
-import { SETTINGS } from "../next/content/settings";
-import type { DeletePhase } from "../next/frame/delete-dialog";
-import { stepDownToast } from "../next/org/members";
-import { OrgSettingsView } from "../next/org/settings";
-import { ProjectSettingsView } from "../next/project/settings";
-import type { ShellOrg } from "../next/shell/model";
-import { Shell } from "../next/shell/shell";
 import { DESIGN_MARK } from "./mark";
 import {
   CURRENT_ORG,
@@ -62,9 +59,9 @@ import { NOW, PROJECT, RECORDING, TIME_ZONE } from "./recording";
 import { StatePage } from "./states";
 
 /**
- * The org surfaces' screens (P78-s2.S2's design; the settings pages, P88-ms.S3's): the Shell (the org menu for every
- * account, New org at its foot, Settings in the rail) and the org components (`src/sikstack/org/`, and the next
- * versions in `design/next/`), on made data (`org-data.ts`). The page's state widget sets each component's first
+ * The org surfaces' screens (P78-s2.S2's design; the settings pages, P88-ms.S3's, applied by P88-ms.S4): production's
+ * Shell (the org menu for every account, New org at its foot, Settings in the rail) and the org components
+ * (`src/sikstack/org/`, `src/sikstack/project/settings.tsx`), on made data (`org-data.ts`). The page's state widget sets each component's first
  * phase; the components then run as production would, their actions answered in the browser.
  */
 

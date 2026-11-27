@@ -409,13 +409,23 @@ async def me(context: AuthContext = Depends(require_user)) -> dict[str, object]:
 
     ``tenants`` keeps its oldest-first order (the CLI reads ``tenants[0]``);
     ``active_tenant_id`` is the tenant ``require_user`` picked for this request (the
-    ``X-Sikstack-Org`` header's org, else the first).
+    ``X-Sikstack-Org`` header's org, else the first). Each tenant here alone also
+    carries ``owner_email``: its first owner's address (the owner row first in
+    ``list_org_members``' order: joined first, then id; after that owner steps down,
+    the next), ``null`` for an org with no owner. The org menu names it to tell two
+    orgs of one name apart; every member reads it, as every member reads the
+    addresses on ``GET /app/members``.
     """
 
-    tenants = await get_accounts_service().list_tenants_for_user(context.user.id)
+    service = get_accounts_service()
+    tenants = await service.list_tenants_for_user(context.user.id)
+    owners = await service.first_owner_emails([tenant.id for tenant in tenants])
 
     return {
         "user": serialize_user(context.user),
-        "tenants": [serialize_tenant(tenant) for tenant in tenants],
+        "tenants": [
+            {**serialize_tenant(tenant), "owner_email": owners.get(tenant.id)}
+            for tenant in tenants
+        ],
         "active_tenant_id": str(context.tenant.id),
     }

@@ -120,12 +120,12 @@ export const FEEDBACK_FILED_STATES = pageStates("Feedback item on the agenda", [
 const SHELL_NEXT = "src/sikstack/shell/shell.tsx";
 const ORG = "src/sikstack/org";
 
-/** The org switcher, in the top bar of every app page (drawn here over org home's address). Since P88-ms.S3's
- * design it is drawn by the Shell's next version (`next/shell/shell.tsx`), whose lines the `from`s name. */
-const SHELL_P88 = "design/next/shell/shell.tsx";
+/** The org switcher, in the top bar of every app page (drawn here over org home's address): production's Shell,
+ * with P88-ms.S3's line for a shared name (applied by P88-ms.S4), whose lines the `from`s name. */
+const SHELL_P88 = SHELL_NEXT;
 export const ORG_SWITCHER_STATES = pageStates("Org switcher", [
   { key: "several", label: "Several orgs, menu open", from: `${SHELL_P88}:216 open === "org", :235 aria-current · org-data.ts OTHER_ORGS (made)` },
-  { key: "same-name", label: "Two orgs with the same name", from: `${SHELL_P88}:245 OrgLineText, :427 Owned by · next/shell/model.ts:38 orgLine · org-data.ts SAME_NAME_ORG (made: no API answers an org's owner yet)` },
+  { key: "same-name", label: "Two orgs with the same name", from: `${SHELL_P88}:245 OrgLineText, :427 Owned by · src/sikstack/shell/model.ts:38 orgLine · org-data.ts SAME_NAME_ORG (made; production reads GET /auth/me owner_email)` },
   { key: "one", label: "One org, menu open", from: `${SHELL_P88}:216 the menu for one org too, New org · recording shell.org` },
   { key: "closed", label: "Menu closed", from: `${SHELL_P88} the crumb's button, its chevron` },
 ]);
@@ -139,10 +139,10 @@ export const NEW_ORG_STATES = pageStates("New org", [
   { key: "failed", label: "Create failed", from: `${ORG}/new-org.tsx:101 the notice (no answer)` },
 ]);
 
-// ── The settings pages (P88-ms.S3's design): new components in `design/next/` (applied by a later slice), so each
-// `from` names the next file and line. Their data is made (`org-data.ts`, Settings). `/members` (P78-s2.S2's page)
-// is a part of Org settings now; the invite form's phases (P78's Members states) are unchanged and not listed again.
-const N = "design/next";
+// ── The settings pages (P88-ms.S3's design): applied by P88-ms.S4, so each `from` names production's file and line.
+// Their data is made (`org-data.ts`, Settings). `/members` (P78-s2.S2's page) is a part of Org settings now; the
+// invite form's phases (P78's Members states) are unchanged and not listed again.
+const N = "src/sikstack";
 
 /** Org settings (`/settings`): who is looking, the invites, the delete dialog's phases, the API's refusals. */
 export const ORG_SETTINGS_STATES = pageStates("Org settings", [

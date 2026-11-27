@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 
 import {
   Copy,
+  DeleteDialog,
   Dialog,
   DialogActions,
   Keys,
@@ -741,10 +742,11 @@ const revoke = async () => ({ ok: true as const });
 const SERIES = Array.from({ length: 30 }, (_, i) => Math.round(6 + 5 * Math.sin(i / 3) + (i % 7)));
 
 /**
- * The real `Dialog`, drawn open in place: it opens itself with `showModal()`; once it has, this reopens it with
- * `show()`, so the system's `.dlg:not(:modal)` draws it in the page flow instead of over the page.
+ * The real `Dialog` (or a component that opens one), drawn open in place: it opens itself with `showModal()`; once
+ * it has, this reopens it with `show()`, so the system's `.dlg:not(:modal)` draws it in the page flow instead of
+ * over the page.
  */
-function InPlaceDialog(props: Omit<DialogProps, "onClose">) {
+function InPlace({ children }: { children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const scroll = useRef(0);
   useLayoutEffect(() => {
@@ -760,10 +762,32 @@ function InPlaceDialog(props: Omit<DialogProps, "onClose">) {
       document.activeElement.blur();
     window.scrollTo(0, scroll.current);
   }, []);
+  return <div ref={box}>{children}</div>;
+}
+
+function InPlaceDialog(props: Omit<DialogProps, "onClose">) {
   return (
-    <div ref={box}>
+    <InPlace>
       <Dialog {...props} onClose={() => {}} />
-    </div>
+    </InPlace>
+  );
+}
+
+/** The delete confirm (P88-ms), its name typed so far. */
+function InPlaceDelete({ typed }: { typed: string }) {
+  return (
+    <InPlace>
+      <DeleteDialog
+        name="Sample org"
+        text="Its 2 projects and everything in them go for good, for all 3 members."
+        confirm="Delete org"
+        remove={async () => ({ ok: true })}
+        onDeleted={() => {}}
+        onClose={() => {}}
+        refusal={() => ""}
+        typed={typed}
+      />
+    </InPlace>
   );
 }
 
@@ -829,6 +853,17 @@ function FrameParts() {
               </Button>
             </DialogActions>
           </InPlaceDialog>
+        </Cell>
+      </Group>
+      <Group title="DeleteDialog">
+        <Cell component="DeleteDialog" state='typed="" (Delete off)'>
+          <InPlaceDelete typed="" />
+        </Cell>
+        <Cell component="DeleteDialog" state='typed="sample org" (wrong: the field shows its error)'>
+          <InPlaceDelete typed="sample org" />
+        </Cell>
+        <Cell component="DeleteDialog" state='typed="Sample org" (Delete ready)'>
+          <InPlaceDelete typed="Sample org" />
         </Cell>
       </Group>
       <Group title="Usage">
@@ -1004,6 +1039,8 @@ const NOT_DRAWN: { name: string; from: string; why: string }[] = [
   { name: "publishToast", from: "@/sikstack/shell", why: "a function: shows the toast ToastRegion draws (above)" },
   { name: "clearToast", from: "@/sikstack/shell", why: "a function: takes the toast down" },
   { name: "TOAST_MS", from: "@/sikstack/shell", why: "a constant: how long a toast stays (4 s)" },
+  { name: "typedNameMatches", from: "@/sikstack/frame", why: "a function: whether DeleteDialog's Delete is ready (above)" },
+  { name: "typedNameWrong", from: "@/sikstack/frame", why: "a function: when DeleteDialog's field says the name is wrong (above)" },
 ];
 
 function NotDrawn() {

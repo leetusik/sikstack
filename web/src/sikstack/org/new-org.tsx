@@ -27,7 +27,7 @@ import {
 const ORG_HOME = "/dashboard";
 
 export interface NewOrgFormProps {
-  /** The page's create action: makes the org with one project, as at sign-up, and sets it as the active org. */
+  /** The page's create action: makes the org with no project, as at sign-up, and sets it as the active org. */
   create: (name: string) => Promise<CreateOrgResult>;
   /** The org the account is in now: Cancel goes back to its home. */
   current: string;

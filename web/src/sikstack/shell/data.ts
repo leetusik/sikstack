@@ -59,7 +59,8 @@ export interface ShellData {
 /**
  * What the Shell shows of the account's orgs and the active org's projects. One read for a user in one
  * org (the active org's projects); one more per other org for a user in several, for each row's
- * project count (F9: name, public URL, project count).
+ * project count (F9: name, public URL, project count), and each org's first owner (`GET /auth/me`'s `owner_email`,
+ * the org menu's line for a shared name, P88-ms).
  */
 export async function loadShellData(identity: KbIdentity): Promise<ShellData> {
   const token = await getSession();
@@ -74,6 +75,7 @@ export async function loadShellData(identity: KbIdentity): Promise<ShellData> {
         name: t.name,
         address: addressOf(t, siteHost),
         projects: null,
+        owner: t.owner_email ?? null,
       })),
       projects: [],
     };
@@ -99,6 +101,7 @@ export async function loadShellData(identity: KbIdentity): Promise<ShellData> {
       name: t.name,
       address: addressOf(t, siteHost),
       projects: reads[i] ? reads[i].length : null,
+      owner: t.owner_email ?? null,
     })),
     projects: newestFirst(
       activeProjects.map((p): ShellProject => ({

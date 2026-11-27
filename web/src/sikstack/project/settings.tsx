@@ -9,11 +9,11 @@ import { publishToast } from "@/sikstack/shell";
 import { Badge, Button, Notice, Panel, PanelBody, PanelHead } from "@/sikstack/ui";
 import type { FormatOptions } from "@/lib/format";
 
-// A new component (P88-ms.S3's design): applying it, this file is `src/sikstack/project/settings.tsx`, the page
-// `src/app/(app)/projects/[projectId]/settings/page.tsx` passes its server actions (the visibility, mint and revoke
-// actions project home has, and the delete), and the words' import becomes `@/content/settings`.
-import { SETTINGS } from "../content/settings";
-import { DeleteDialog, type DeletePhase, type DeleteResult } from "../frame/delete-dialog";
+// P88-ms.S3's signed design, applied by P88-ms.S4: the page `src/app/(app)/projects/[projectId]/settings/page.tsx`
+// (its client part, `project-settings.tsx`) passes the visibility, mint and revoke actions project home had, and
+// the delete. Project home keeps the visibility badge alone.
+import { SETTINGS } from "@/content/settings";
+import { DeleteDialog, type DeletePhase, type DeleteResult } from "@/sikstack/frame/delete-dialog";
 
 const W = PROJECT_HOME.head;
 

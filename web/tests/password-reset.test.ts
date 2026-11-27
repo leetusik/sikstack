@@ -19,7 +19,7 @@ const { changeResultFor, checkPasswordChange, phaseAfterChange } = await import(
 const { POST: passwordPOST } = await import("@/app/api/auth/password/route");
 const { SESSION_COOKIE, sealSession } = await import("@/lib/session");
 const { Keys } = await import("@/sikstack/frame/keys");
-const { UrlReadPanel } = await import("@/app/(app)/dashboard/url-panel");
+const { UrlReadPanel } = await import("@/sikstack/org/url-panel");
 const { FORGOT_COPY, RESET_COPY } = await import("@/content/auth");
 const { KEYS } = await import("@/content/sikstack-frame");
 

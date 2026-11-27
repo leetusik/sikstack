@@ -7,11 +7,7 @@ import { feedbackControl } from "@/lib/send-feedback/config";
 
 import { mintOrgKey, revokeOrgKey } from "./actions";
 import "./org-home.css";
-import {
-  ActivityLoading,
-  ProjectsLoading,
-  UrlLoading,
-} from "./org-home-loading";
+import { ActivityLoading, ProjectsLoading } from "./org-home-loading";
 import { ORG_KEYS_HEAD_ID } from "./org-home-model";
 
 /** The moment the skeleton's trend axis is drawn for. */
@@ -22,7 +18,7 @@ function loadingNow(): number {
 /**
  * Org home's Loading (`OrgHome.dc.html` Loading, frame.md F31): the Shell and the `h1` are complete
  * (the session knows the org; `requireIdentity` is the layout's cached read); the four figures are bars
- * under both headings; Projects, Trend, Public URL and Recent activity draw their own skeletons; the
+ * under both headings; Projects, Trend and Recent activity draw their own skeletons; the
  * keys panel is `Keys`' own (F21). The same structure and sizes as the page, so nothing moves when the
  * data lands but the rows a table gains or loses after its third. The head's feedback control shows
  * while the page loads too (job 08's `## Build` §5), from the same cached identity, where the server
@@ -57,7 +53,6 @@ export default async function DashboardLoading() {
       <Grid className="orghome-pair">
         <Stack gap={5}>
           <Trend series={[]} lastDay={lastDay} loading format={{ now }} />
-          <UrlLoading />
         </Stack>
         <ActivityLoading />
       </Grid>

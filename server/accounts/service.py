@@ -377,6 +377,17 @@ class AccountsService:
 
         return record
 
+    async def first_owner_emails(self, tenant_ids: list[UUID]) -> dict[UUID, str]:
+        """Each tenant's first owner's address (``AccountsRepository.first_owner_emails``)."""
+
+        async with self._session_maker() as session:
+            repository = AccountsRepository(session)
+            try:
+                return await repository.first_owner_emails(tenant_ids)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                raise AccountsReadError("failed to read owners") from exc
+
     async def list_tenants_for_user(self, user_id: UUID) -> tuple[TenantRecord, ...]:
         """Return the tenants a user is a member of, in the order the user joined them."""
 

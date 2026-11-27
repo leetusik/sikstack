@@ -1,7 +1,5 @@
+import { railFor } from "@/sikstack/shell/model";
 import { workspaceHrefs } from "@/sikstack/workspace/agenda/model";
-
-// The rail's next version (P88-ms.S3's design: Settings in both forms), as the org pages draw it.
-import { railFor } from "../next/shell/model";
 
 /**
  * The addresses the design's pages link to but do not draw (the Shell's rail and menus, the

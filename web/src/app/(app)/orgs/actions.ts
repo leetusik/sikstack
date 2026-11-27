@@ -32,12 +32,12 @@ import {
  *
  * - `createOrgAction`: New org. A created org is the active one: the org cookie is set to it (the switch route's
  *   cookie, `/api/auth/org`; the API just made the caller its owner), and the page lands on its home.
- * - `renameOrgAction`: the org home's Org name panel (owner only; the API refuses anyone else).
- * - `sendInviteAction`, `revokeInviteAction`: Members' Invites panel (owner only, the same).
+ * - `renameOrgAction`: Org settings' Org name panel (owner only; the API refuses anyone else).
+ * - `sendInviteAction`, `revokeInviteAction`: Org settings' Invites panel (owner only, the same).
  * - `makeOwnerAction`: Make owner on a member's row (owner only).
  * - `removeMemberAction`: Remove on a member's row (owner only); `leaveOrgAction`: Leave on a member's own row, or on
  *   an owner's when the org has another. A left org is no longer the caller's, so Leave clears the org cookie (the
- *   session acts in its first org again, a fresh `default` one when the left org was its only one) and lands on that
+ *   session acts in its first org again, a fresh `Personal` one when the left org was its only one) and lands on that
  *   org's home, as the switch does. Neither ever ends an org's last owner (the API's 409 `last_owner`, kept as the
  *   `reason` the page words its toast by).
  */
@@ -84,7 +84,7 @@ export async function sendInviteAction(email: string): Promise<InviteResult> {
   const { token } = await requireIdentity();
   try {
     const { invite } = await createInvite(token, email.trim());
-    revalidatePath("/members");
+    revalidatePath("/settings");
     return {
       ok: true,
       invite: {
@@ -112,7 +112,7 @@ export async function revokeInviteAction(id: string): Promise<{ ok: boolean }> {
   const { token } = await requireIdentity();
   try {
     await revokeInvite(token, id);
-    revalidatePath("/members");
+    revalidatePath("/settings");
     return { ok: true };
   } catch {
     return { ok: false };
@@ -132,7 +132,7 @@ export async function makeOwnerAction(id: string): Promise<{ ok: boolean }> {
   const { token } = await requireIdentity();
   try {
     await makeOwner(token, id);
-    revalidatePath("/members");
+    revalidatePath("/settings");
     return { ok: true };
   } catch {
     return { ok: false };
@@ -146,7 +146,7 @@ export async function removeMemberAction(
   const { token } = await requireIdentity();
   try {
     await removeMember(token, id);
-    revalidatePath("/members");
+    revalidatePath("/settings");
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: refusal(error) };

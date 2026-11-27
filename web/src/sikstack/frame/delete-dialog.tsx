@@ -5,9 +5,9 @@ import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Dialog, DialogActions } from "@/sikstack/frame/dialog";
 import { Button, Field, FieldError, Label, Notice } from "@/sikstack/ui";
 
-// A new component (P88-ms.S3's design): applying it, this file is `src/sikstack/frame/delete-dialog.tsx` and the
-// words' import becomes `@/content/settings`.
-import { SETTINGS } from "../content/settings";
+// P88-ms.S3's signed design, applied by P88-ms.S4: the confirm Org settings and Project settings open to delete
+// (`src/sikstack/org/settings.tsx`, `src/sikstack/project/settings.tsx`).
+import { SETTINGS } from "@/content/settings";
 
 const C = SETTINGS.confirm;
 

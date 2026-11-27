@@ -103,12 +103,12 @@ describe("the rail", () => {
       expect(railFor(path).form).toBe("org");
   });
 
-  it("holds the signed items in order (no Documents in the org form; Members after Feedback, P78)", () => {
+  it("holds the signed items in order (no Documents in the org form; Settings last in both forms, P88-ms)", () => {
     expect(railFor("/dashboard").items.map((i) => i.key)).toEqual([
       "overview",
       "library",
       "feedback",
-      "members",
+      "settings",
     ]);
     expect(railFor("/projects/p1").items.map((i) => i.key)).toEqual([
       "overview",
@@ -116,6 +116,7 @@ describe("the rail", () => {
       "library",
       "feedback",
       "design",
+      "settings",
     ]);
   });
 
@@ -125,9 +126,16 @@ describe("the rail", () => {
     expect(current("/feedback")).toEqual(["feedback"]);
     expect(current("/feedback/f1")).toEqual(["feedback"]);
     expect(current("/review")).toEqual(["review"]);
-    expect(current("/members")).toEqual(["members"]);
+    // P88-ms: Org settings is current on `/settings` and on `/members`, which redirects there.
+    expect(current("/settings")).toEqual(["settings"]);
+    expect(current("/members")).toEqual(["settings"]);
     expect(railFor("/members").form).toBe("org");
+    expect(railFor("/settings").form).toBe("org");
+    expect(railFor("/dashboard").items.find((i) => i.key === "settings")?.href).toBe("/settings");
     expect(current("/projects/p1")).toEqual(["overview"]);
+    expect(current("/projects/p1/settings")).toEqual(["settings"]);
+    expect(current("/projects/p1/settings/")).toEqual(["settings"]);
+    expect(railFor("/projects/p1/settings").form).toBe("project");
     expect(current("/documents")).toEqual([]);
   });
 
@@ -176,6 +184,7 @@ describe("the rail", () => {
       "/projects/p%201/library",
       "/projects/p%201/feedback",
       "/projects/p%201/design",
+      "/projects/p%201/settings",
     ]);
   });
 

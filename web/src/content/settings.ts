@@ -1,7 +1,7 @@
 // ── sikstack's settings pages (P88-ms.S3's design) ────────────────────────────────────────────
 // The words of Org settings (`/settings`), Project settings (`/projects/<id>/settings`), their delete dialogs,
 // Members' Step down and role note, the rail's Settings and the org menu's line for a shared name. English chrome
-// in sentence case; an org's or a project's name is data. Applying: this file is `src/content/settings.ts`.
+// in sentence case; an org's or a project's name is data. Applied by P88-ms.S4.
 
 export const SETTINGS = {
   /** The rail's entry in both forms (the org's and the project's). */

@@ -7,8 +7,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 // Leave call the API's routes (Leave clears the org cookie and lands on the next org's home, a fresh one when it was
 // the account's only org), Members draws Make owner and Remove on an owner's member rows, Leave on a member's own row
 // and on an owner's own row when the org has another owner, words each answer's toast, and moves a promoted row up
-// with the owners; the project head hides the public/private switch from a member. The session guard, Next's cache
-// and cookies are mocked; the API is a stubbed fetch.
+// with the owners; Project settings hides the public/private switch from a member, and project home draws the badge
+// alone (P88-ms). The session guard, Next's cache and cookies are mocked; the API is a stubbed fetch.
 
 const jar = { set: vi.fn() };
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -28,7 +28,9 @@ const { createOrgAction, leaveOrgAction, makeOwnerAction, removeMemberAction, se
 const { memberControls, withOwner } = await import("@/sikstack/org/model");
 const { MembersView, leaveToast, promoteToast, removeToast } = await import("@/sikstack/org/members");
 const { ProjectHead } = await import("@/app/(app)/projects/[projectId]/project-head");
+const { ProjectSettingsView } = await import("@/sikstack/project/settings");
 const { MEMBERS, NEW_ORG } = await import("@/content/org");
+const { SETTINGS } = await import("@/content/settings");
 const { ORG_COOKIE } = await import("@/lib/session");
 
 const MEMBER_ID = "33333333-4444-4555-8666-777777777777";
@@ -186,6 +188,7 @@ describe("Members draws Make owner, Remove and Leave", () => {
         promote: async () => ({ ok: true }),
         remove: async () => ({ ok: true }),
         leave: async () => ({ ok: true }),
+        stepDown: async () => ({ ok: true }),
         format: FORMAT as never,
       }),
     );
@@ -203,10 +206,13 @@ describe("Members draws Make owner, Remove and Leave", () => {
     expect(html).not.toContain(`>${M.leave}<`);
   });
 
-  it("a co-owner's view: Leave on its own row, nothing on the other owner's", () => {
+  it("a co-owner's view: Step down and Leave on its own row, nothing on the other owner's", () => {
     const html = view({ email: "owner@example.com", role: "owner" }, [OWNER, SORA, JUN]);
     expect(html).toContain(`aria-label="${M.leaveLabel("Acme")}"`);
     expect(html.split(`>${M.leave}<`).length - 1).toBe(1);
+    // P88-ms: Step down before Leave, on the account's own row alone.
+    expect(html.split(`>${SETTINGS.members.stepDown}<`).length - 1).toBe(1);
+    expect(html.indexOf(SETTINGS.members.stepDownLabel("Acme"))).toBeLessThan(html.indexOf(M.leaveLabel("Acme")));
     expect(html).not.toContain(M.makeOwnerLabel("jun@example.com"));
     expect(html).not.toContain(M.removeLabel("jun@example.com"));
     expect(html).toContain(`aria-label="${M.makeOwnerLabel("sora@example.com")}"`);
@@ -224,7 +230,7 @@ describe("Members draws Make owner, Remove and Leave", () => {
     const owner = { email: "owner@example.com", role: "owner" as const };
     expect(memberControls(SORA, owner, [OWNER, SORA])).toEqual(["promote", "remove"]);
     expect(memberControls(OWNER, owner, [OWNER, SORA])).toEqual([]);
-    expect(memberControls(OWNER, owner, [OWNER, SORA, JUN])).toEqual(["leave"]);
+    expect(memberControls(OWNER, owner, [OWNER, SORA, JUN])).toEqual(["step-down", "leave"]);
     expect(memberControls(JUN, owner, [OWNER, SORA, JUN])).toEqual([]);
     const member = { email: "sora@example.com", role: "member" as const };
     expect(memberControls(SORA, member, [OWNER, SORA])).toEqual(["leave"]);
@@ -233,25 +239,41 @@ describe("Members draws Make owner, Remove and Leave", () => {
 });
 
 describe("publishing is the owner's", () => {
-  const head = (owner: boolean) =>
+  // P88-ms: the switch is Project settings' Visibility panel; project home's head keeps the badge alone.
+  const settings = (owner: boolean) =>
     renderToStaticMarkup(
-      createElement(ProjectHead, {
-        projectId: "p1",
-        name: "platform",
+      createElement(ProjectSettingsView, {
+        project: { id: "p1", name: "platform", visibility: "private" },
         org: "Acme",
-        created: "Nov 2",
-        visibility: "private",
         owner,
+        keys: [],
+        setVisibility: async () => ({ ok: true }),
+        mint: async () => ({ ok: false, reason: "failed" }) as const,
+        revoke: async () => ({ ok: true }),
+        deleteProject: async () => ({ ok: true }) as const,
+        onDeleted: () => {},
+        format: { timeZone: "UTC", now: Date.parse("2026-11-25T00:00:00Z") },
       }),
+    );
+  const head = () =>
+    renderToStaticMarkup(
+      createElement(ProjectHead, { name: "platform", org: "Acme", created: "Nov 2", visibility: "private" }),
     );
 
   it("the owner sees Make public; a member sees the badge alone", () => {
-    expect(head(true)).toContain("Make public");
-    expect(head(false)).not.toContain("Make public");
-    expect(head(false)).not.toContain("Make private");
+    expect(settings(true)).toContain("Make public");
+    expect(settings(false)).not.toContain("Make public");
+    expect(settings(false)).not.toContain("Make private");
     // P75: the badge names the project's default for new items, not the items' sharing.
-    expect(head(false)).toContain("New items members only");
-    expect(head(true)).toContain("Each one keeps its own sharing");
-    expect(head(false)).not.toContain("Each one keeps its own sharing");
+    expect(settings(false)).toContain("New items members only");
+    expect(settings(true)).toContain("Each one keeps its own sharing");
+    expect(settings(false)).not.toContain("Each one keeps its own sharing");
+  });
+
+  it("project home's head draws the badge and no switch, for anyone", () => {
+    expect(head()).toContain("New items members only");
+    expect(head()).not.toContain("Make public");
+    expect(head()).not.toContain("Make private");
+    expect(head()).not.toContain("Each one keeps its own sharing");
   });
 });

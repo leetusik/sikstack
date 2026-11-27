@@ -203,6 +203,26 @@ export async function setProjectVisibility(
 }
 
 /**
+ * `DELETE /app/projects/{id}` with `{name}`, the name typed again (P88-ms): the project and everything in it go for
+ * good. 204. The org owner's: a member is a 403. A refusal is a 409 whose `reason` the `ApiError` keeps: `name` (the
+ * typed name is not the project's), `install_feedback` (the server's install-feedback project), `tracked_path` (a
+ * tenant #1 project named like a site folder). 404 for a missing or another org's project, 503 when nothing was
+ * deleted.
+ */
+export async function deleteProject(
+  token: string,
+  projectId: string,
+  name: string,
+): Promise<void> {
+  await sendJson<void>(
+    `/app/projects/${encodeURIComponent(projectId)}`,
+    "DELETE",
+    { name },
+    { token },
+  );
+}
+
+/**
  * `POST /app/projects/{id}/credentials` (bearer) `{name?}` → 201
  * `{credential, key}`.
  *

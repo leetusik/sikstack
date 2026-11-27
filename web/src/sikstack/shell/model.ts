@@ -1,6 +1,7 @@
 // The Shell's rules as pure functions (the signed Shell: job 01 round 03-instrument, frame.md F9, with
 // the org rail revised by job 03 round 02-one-library, F320, and the project rail's Design entry, P77; the org
-// menu for every account and the org rail's Members, P78-s2.S2's design). No
+// menu for every account and the org rail's Members, P78-s2.S2's design; Settings in both rails and the org menu's
+// line for a shared name, P88-ms.S3's design, applied by P88-ms.S4). No
 // React and no I/O, so the rules are tested on their own (tests/sikstack-shell-*.test.ts); `shell.tsx`
 // renders what these return.
 
@@ -16,6 +17,31 @@ export interface ShellOrg {
   address: string | null;
   /** Its project count, or `null` when it could not be read (the row then shows none). */
   projects: number | null;
+  /**
+   * Its first owner's address (the oldest owner row), or `null` when it is not known: `GET /auth/me`'s tenants'
+   * `owner_email` (P88-ms.S4; the other routes' tenants carry none). The org menu reads it only for a name two of
+   * the account's orgs share.
+   */
+  owner?: string | null;
+}
+
+/**
+ * The org menu's second line (P88-ms.S3's design): the public URL when the org has one (an address is unique);
+ * else, for a name another org of the list has too (any case, trimmed), who owns it (`Owned by you`, `Owned by
+ * <address>`), so two orgs called `Personal` read apart; else `none` (the menu says No public URL).
+ */
+export type OrgLine =
+  | { kind: "address"; address: string }
+  | { kind: "owner"; mine: boolean; email: string }
+  | { kind: "none" };
+
+export function orgLine(org: ShellOrg, orgs: readonly ShellOrg[], me: string): OrgLine {
+  if (org.address) return { kind: "address", address: org.address };
+  const key = org.name.trim().toLowerCase();
+  const shared = orgs.some((o) => o.id !== org.id && o.name.trim().toLowerCase() === key);
+  if (!shared || !org.owner) return { kind: "none" };
+  const mine = org.owner.trim().toLowerCase() === me.trim().toLowerCase();
+  return { kind: "owner", mine, email: org.owner };
 }
 
 /** A project of the active org, as the project switcher lists it. */
@@ -79,7 +105,7 @@ export function projectIdOf(pathname: string): string | null {
 }
 
 export type RailKey =
-  "overview" | "workspace" | "library" | "feedback" | "design" | "members" | "review";
+  "overview" | "workspace" | "library" | "feedback" | "design" | "settings" | "review";
 
 export interface RailItem {
   key: RailKey;
@@ -100,7 +126,11 @@ const ORG_HOME = "/dashboard";
 const LIBRARY = "/library";
 const FEEDBACK = feedbackHref();
 const REVIEW = "/review";
-/** The org's people and its pending invites (P78-s2.S2's design). */
+/**
+ * Org settings (P88-ms.S3's design): the org's name, Public URL, people and invites, and its delete. `/members`
+ * (P78-s2.S2's page) redirects there now, so the rail's Settings is current on it too.
+ */
+const SETTINGS = "/settings";
 const MEMBERS = "/members";
 
 const under = (pathname: string, base: string) =>
@@ -121,6 +151,9 @@ const PROJECT_WORKSPACE = /^\/projects\/[^/?#]+\/workspace(?:[/?#]|$)/;
 
 /** `/projects/<id>/design` and beneath it: the project's Design builds, the list and a build's viewer (P77). */
 const PROJECT_DESIGN = /^\/projects\/[^/?#]+\/design(?:[/?#]|$)/;
+
+/** `/projects/<id>/settings`: the project's visibility, keys and delete (P88-ms.S3's design). */
+const PROJECT_SETTINGS = /^\/projects\/[^/?#]+\/settings(?:[/?#]|$)/;
 
 /** The path without its query or hash. */
 const pathOf = (pathname: string) => pathname.split(/[?#]/, 1)[0];
@@ -149,9 +182,11 @@ export function projectSwitchHref(pathname: string, projectId: string): string {
 /**
  * The rail a path shows. On `/projects/<id>` and beneath it, the project form: Overview (the project's
  * home), Workspace (the project's Agenda, where the Workspace opens: job 02, F41 and F74), Library,
- * Feedback and Design (the project's design builds, `/projects/<id>/design`: P77).
- * Elsewhere the org form: Overview (org home), Library, Feedback (F320: no Documents), Members (the org's people
- * and invites, `/members`: P78-s2.S2's design). Then the rule and
+ * Feedback, Design (the project's design builds, `/projects/<id>/design`: P77) and Settings (its visibility, keys
+ * and delete, `/projects/<id>/settings`: P88-ms.S3's design).
+ * Elsewhere the org form: Overview (org home), Library, Feedback (F320: no Documents), Settings (the org's name,
+ * Public URL, people, invites and delete, `/settings`, current on `/members` too: P88-ms.S3's design). Then the
+ * rule and
  * Review. The current item follows the path; an address the rail does not name has none (F25: `none`).
  *
  * The project form's Workspace is current on every page under `/projects/<id>/workspace` (the Agenda,
@@ -181,13 +216,14 @@ export function railFor(pathname: string, known = true): Rail {
     const feedback = PROJECT_FEEDBACK.test(pathOf(pathname));
     const workspace = PROJECT_WORKSPACE.test(pathOf(pathname));
     const design = PROJECT_DESIGN.test(pathOf(pathname));
+    const settings = PROJECT_SETTINGS.test(pathOf(pathname));
     return {
       form: "project",
       items: [
         {
           key: "overview",
           href: home,
-          current: !library && !feedback && !workspace && !design,
+          current: !library && !feedback && !workspace && !design && !settings,
         },
         {
           key: "workspace",
@@ -201,6 +237,7 @@ export function railFor(pathname: string, known = true): Rail {
           current: feedback,
         },
         { key: "design", href: `${home}/design`, current: design },
+        { key: "settings", href: `${home}/settings`, current: settings },
       ],
       review,
     };
@@ -220,7 +257,11 @@ export function railFor(pathname: string, known = true): Rail {
         href: FEEDBACK,
         current: under(pathOf(pathname), FEEDBACK),
       },
-      { key: "members", href: MEMBERS, current: under(pathOf(pathname), MEMBERS) },
+      {
+        key: "settings",
+        href: SETTINGS,
+        current: under(pathOf(pathname), SETTINGS) || under(pathOf(pathname), MEMBERS),
+      },
     ],
     review,
   };
