@@ -561,7 +561,7 @@ async def delete_org(
     try:
         outcome = await run_in_threadpool(deletion.delete_tenant, target)
     except Exception:
-        logger.error("org delete failed before its commit", exc_info=True)
+        logger.error("org delete failed before its commit, or could not confirm it", exc_info=True)
         raise HTTPException(status_code=503, detail="could not delete the org; try again")
     if outcome == "unknown":
         raise HTTPException(status_code=404, detail="tenant not found")

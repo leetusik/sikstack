@@ -41,32 +41,46 @@ and attachment keys before the cascade drops the rows that name them, and delete
 * a reader or Listen row keyed by the project's name holds the project row
   ``FOR SHARE`` in its own transaction (``reader_state.hold_project``): it commits
   before the delete takes the row, and is deleted with the rest, or finds the
-  project gone (404). Before it commits, the content
-folders move aside into ``<KB_ROOT>/data/deleting/<entry>/`` (``staging_root``), a
-place no reindex walks (it walks only ``docs/`` and ``tenants/<uuid>/``), with a
-``manifest.json`` naming where each came from and what else is owed. So:
+  project gone (404).
+
+**Staging.** Before the transaction commits, the content folders move aside into
+``<KB_ROOT>/data/deleting/<entry>/`` (``staging_root``), a place no reindex walks (it
+walks only ``docs/`` and ``tenants/<uuid>/``), with a ``manifest.json`` naming where
+each came from and what else is owed. So:
 
 * a failure before the commit rolls the transaction back and moves the folders back:
   everything is as it was;
-* a failure after it leaves at worst the staged entry and stale index rows, and the
-  startup reindex drops rows whose files are gone: nothing comes back.
+* a failure of the commit whose outcome the store cannot then tell (the "did it
+  commit?" read fails too) answers 503 and leaves the entry staged, for recovery to
+  decide; a write may land in the project meanwhile;
+* a failure after the commit (the index purge, the build folders, the attachment
+  files, removing the entry) is logged, never raised: the delete answers its success,
+  and what is still owed waits in the entry. The startup reindex drops index rows
+  whose files are gone: nothing comes back.
 
-A staged entry left behind (a crash, a failed removal) is settled by
-``recover_staged`` at start-up and at the start of every delete: when its project or
-org row still exists the commit never happened and its folders go back; when the row
-is gone its folders, build folders and attachment files are removed.
+**Recovery.** A staged entry left behind is settled by ``recover_staged`` at start-up
+(before the reindex) and at the start of every delete, each entry on its own: one that
+fails is logged and waits, and the others are still settled. When its project or org
+row still exists the commit never happened and its folders go back. A folder written
+again since it was staged is merged with it (``_merge``): what only the entry holds
+moves in; for a file both hold, the later write's stays and the earlier copy lands
+beside it as ``<name>.restored-<entry>`` (dropped when the bytes are the same), so
+nothing is overwritten and nothing is lost. When the row is gone, its folders, build
+folders and attachment files are removed.
 
 **The refusals** (each a 409 with a ``reason``, raised by the routes through
 ``refusal_for_project`` / ``refusal_for_tenant``): tenant #1, which owns ``docs/`` and
 the master token; the project ``KB_INSTALL_FEEDBACK_PROJECT_ID`` names (and the org
 that holds it), the instance's install-feedback sink; and a tenant #1 project named
 like a tracked MkDocs folder (``TRACKED_DOCS_DIRS``): no delete ever removes a tracked
-path. Only directories are ever moved, so no tracked file under ``docs/`` can go either.
+path. Staging moves only directories, so no tracked file under ``docs/`` can go either;
+only a merge back moves the entries inside a staged folder, to where they came from.
 """
 
 from __future__ import annotations
 
 import errno
+import filecmp
 import json
 import logging
 import os
@@ -319,48 +333,133 @@ def ready(staged: Staged) -> None:
 
 
 def unstage(staged: Staged) -> bool:
-    """Move every staged folder back; ``True`` when the entry is gone afterwards.
+    """Move every staged folder back; ``True`` when the entry is gone afterwards. Never
+    raises: a failure is logged and the entry waits for the next recovery.
 
-    A folder whose original place is taken again (something wrote there since) stays
-    staged, and so does the entry: nothing is overwritten or lost.
+    A folder whose original place was made again (a write landed there while the
+    folders were staged) is merged into it, entry by entry (``_merge``): nothing the
+    later write made is overwritten, and nothing staged is lost.
     """
 
-    kept = False
+    left = False
+    tag = staged.folder.name.rsplit("-", 1)[-1]
     for original, name in staged.moves:
         src = staged.folder / name
-        if not src.exists():
-            continue
-        dest = Path(original)
-        if dest.exists():
-            logger.error("deletion: %s is back in place; %s stays staged", dest, src)
-            kept = True
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        _move(src, dest)
-    if kept:
+        try:
+            if not os.path.lexists(src):
+                continue
+            dest = Path(original)
+            if not os.path.lexists(dest):
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                _move(src, dest)
+            elif _is_dir(dest):
+                left |= not _merge(src, dest, tag)
+            else:
+                logger.error("deletion: %s is not a folder now; %s stays staged", dest, src)
+                left = True
+        except Exception:  # noqa: BLE001 - kept staged, never lost: retried later
+            logger.error("deletion: could not move %s back; it stays staged", src, exc_info=True)
+            left = True
+    if left:
         return False
-    shutil.rmtree(staged.folder, ignore_errors=True)
-    return True
+    return discard(staged.folder)
+
+
+def _is_dir(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink()
+
+
+def _merge(src: Path, dest: Path, tag: str) -> bool:
+    """Move what ``src`` holds into ``dest``, a folder written again since it was
+    staged; ``True`` when ``src`` is then empty and gone.
+
+    An entry only ``src`` holds moves in. A folder both hold merges, one level down. A
+    file (or link) both hold: the later write's stays where it is, as the write left
+    it and as the index reads it; the earlier copy goes beside it as
+    ``<name>.restored-<tag>`` (``tag`` names the staged entry), a name no reindex walks
+    (it reads only ``*.md`` and ``*.html``), or is dropped when its bytes are the same.
+    A staged folder where the later write put a file stays staged (logged).
+    """
+
+    whole = True
+    for child in sorted(src.iterdir()):
+        target = dest / child.name
+        if not os.path.lexists(target):
+            _move(child, target)
+        elif _is_dir(child):
+            if _is_dir(target):
+                whole &= _merge(child, target, tag)
+            else:
+                logger.error("deletion: %s is not a folder now; %s stays staged", target, child)
+                whole = False
+        elif (
+            child.is_file() and not child.is_symlink()
+            and target.is_file() and not target.is_symlink()
+            and filecmp.cmp(child, target, shallow=False)
+        ):
+            child.unlink()
+        else:
+            beside = _beside(target, tag)
+            _move(child, beside)
+            logger.warning(
+                "deletion: %s was written again while staged; the earlier copy is %s",
+                target, beside,
+            )
+    if whole:
+        src.rmdir()
+    return whole
+
+
+def _beside(target: Path, tag: str) -> Path:
+    candidate = target.with_name(f"{target.name}.restored-{tag}")
+    n = 1
+    while os.path.lexists(candidate):
+        n += 1
+        candidate = target.with_name(f"{target.name}.restored-{tag}-{n}")
+    return candidate
 
 
 def finish(staged: Staged) -> bool:
     """After the commit: the build folders, the attachment files, then the entry.
 
-    Each failure is logged, never raised (the rows are gone already); ``True`` when the
-    entry is gone, else ``recover_staged`` finishes it later.
+    Never raises (the rows are gone already): each failure is logged. ``True`` when the
+    entry is gone; else what is still owed is written back to its manifest and
+    ``recover_staged`` finishes it later.
     """
 
-    builds_root = design_store.root()
-    for build_id in staged.builds:
-        if design_store.is_build_id(build_id):
-            design_store.remove_folder(builds_root / build_id)
+    builds: list[str] = []
+    attachments: list[str] = []
+    try:
+        builds_root = design_store.root()
+    except Exception:  # noqa: BLE001 - an unusable builds folder: owed, retried later
+        logger.error("deletion: build folders of %s were not removed", staged.folder, exc_info=True)
+        builds = list(staged.builds)
+    else:
+        for build_id in staged.builds:
+            if design_store.is_build_id(build_id):
+                design_store.remove_folder(builds_root / build_id)
     if staged.attachments:
-        storage = get_attachment_storage()
-        for key in staged.attachments:
-            try:
-                storage.delete(key)
-            except StorageError:  # missing already, or unreadable: logged, never fatal
-                logger.warning("deletion: attachment %s was not removed", key, exc_info=True)
+        try:
+            storage = get_attachment_storage()
+        except Exception:  # noqa: BLE001 - owed, retried later
+            logger.error("deletion: attachments of %s were not removed", staged.folder, exc_info=True)
+            attachments = list(staged.attachments)
+        else:
+            for key in staged.attachments:
+                try:
+                    storage.delete(key)
+                except StorageError:  # missing already, or unreadable: logged, never fatal
+                    logger.warning("deletion: attachment %s was not removed", key, exc_info=True)
+                except Exception:  # noqa: BLE001 - owed, retried later
+                    logger.error("deletion: attachment %s was not removed", key, exc_info=True)
+                    attachments.append(key)
+    if builds or attachments:
+        staged.builds, staged.attachments = builds, attachments
+        try:
+            staged.save()
+        except Exception:  # noqa: BLE001 - the old manifest still names them all
+            logger.error("deletion: could not narrow %s", staged.folder, exc_info=True)
+        return False
     return discard(staged.folder)
 
 
@@ -387,13 +486,19 @@ async def row_exists(kind: str, target_id: str) -> bool:
 
 
 def pending() -> list[Staged]:
-    """Every staged entry left behind, oldest name first; unreadable ones are skipped."""
+    """Every staged entry left behind, oldest name first; unreadable ones are skipped
+    (logged), and so is an unreadable staging folder."""
 
     root = staging_root()
-    if not root.is_dir():
+    try:
+        if not root.is_dir():
+            return []
+        folders = sorted(root.iterdir())
+    except OSError:
+        logger.error("deletion: could not list %s", root, exc_info=True)
         return []
     out: list[Staged] = []
-    for folder in sorted(root.iterdir()):
+    for folder in folders:
         if not folder.is_dir():
             continue
         try:
@@ -403,19 +508,23 @@ def pending() -> list[Staged]:
     return out
 
 
-def settle(staged: Staged, exists: bool) -> None:
-    """One leftover entry: its row exists, so nothing was deleted (folders back); or
-    its row is gone, so finish the removal. The index needs nothing: the reindex drops
-    rows whose files are gone."""
+def settle(staged: Staged, exists: bool) -> bool:
+    """One leftover entry: its row exists, so nothing was deleted (folders back, merged
+    into any written again since); or its row is gone, so finish the removal. ``True``
+    when the entry is gone. Never raises: a bad entry is logged and waits, and the
+    entries after it are still settled. The index needs nothing: the reindex drops rows
+    whose files are gone, and indexes the files that came back."""
 
-    if exists:
-        unstage(staged)
-    else:
-        finish(staged)
+    try:
+        return unstage(staged) if exists else finish(staged)
+    except Exception:  # noqa: BLE001 - one bad entry never stops the others
+        logger.error("deletion: could not settle %s; it is retried later", staged.folder, exc_info=True)
+        return False
 
 
 async def recover_staged() -> int:
-    """Settle every leftover entry (the boot, before the reindex). Returns how many."""
+    """Settle every leftover entry (the boot, before the reindex). Returns how many
+    were settled for good."""
 
     settled = 0
     for staged in pending():
@@ -424,8 +533,7 @@ async def recover_staged() -> int:
         except Exception:  # noqa: BLE001 - the store is down: left for the next try
             logger.warning("deletion: could not check %s", staged.folder, exc_info=True)
             continue
-        settle(staged, exists)
-        settled += 1
+        settled += settle(staged, exists)
     return settled
 
 
@@ -626,6 +734,8 @@ def _run(kind: str, target_id: UUID, rows: Callable, purge: Callable) -> Outcome
                 conn.close()
         except Exception:  # noqa: BLE001 - the reindex drops rows whose files are gone
             logger.error("deletion: index purge of %s %s failed", kind, target_id, exc_info=True)
+        # Never raises: the delete has committed, so it answers its success whatever
+        # the cleanup does; what is still owed waits in the entry (``recover_staged``).
         outcome.files_done = finish(holder["staged"])
     logger.info("deletion: %s %s deleted index=%s", kind, target_id, outcome.index)
     return outcome

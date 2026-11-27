@@ -336,7 +336,7 @@ async def delete_project(
     try:
         outcome = await run_in_threadpool(deletion.delete_project, target)
     except Exception:
-        logger.error("project delete failed before its commit", exc_info=True)
+        logger.error("project delete failed before its commit, or could not confirm it", exc_info=True)
         raise HTTPException(status_code=503, detail="could not delete the project; try again")
     if outcome == "unknown":
         raise HTTPException(status_code=404, detail="project not found")
