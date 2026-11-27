@@ -45,6 +45,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from server import config
 from server import listen as store
 from server import listen_mp4 as mp4
+from server import reader_state as rs
 from server.persistence.engine import get_session_maker
 from server.persistence.models import (
     ListenJobModel,
@@ -759,6 +760,7 @@ async def upsert_position(user_id: UUID, tenant_id: UUID, kind: str, project: st
         set_={**{k: getattr(ins.excluded, k) for k in values}, "updated_at": ins.excluded.updated_at},
     ).returning(*POSITIONS.c)
     async with _session() as session:
+        await rs.hold_project(session, tenant_id, project)
         row = (await session.execute(stmt)).one()
         await session.commit()
     return row

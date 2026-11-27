@@ -269,6 +269,29 @@ async def tenants_with_public_items() -> list[UUID]:
     return list(rows)
 
 
+async def project_for_share(tenant_id: UUID, name: str):
+    """The registry project a share switch writes an item's row on, or ``None``.
+
+    The switch found its document or book in the index, by the project's name. A
+    project with no registry row yet (its documents predate the registry) gets one,
+    as before; but a project deleted since the switch looked is not made again (its
+    folder is gone: ``reader_state.content_on_disk``), so its name never comes back
+    holding a stray share row for an item a later publish would inherit. ``None`` is
+    the route's 404.
+    """
+
+    from server.accounts.service import get_accounts_service
+    from server import reader_state
+
+    service = get_accounts_service()
+    record = await service.get_project_by_name(tenant_id, name)
+    if record is not None:
+        return record
+    if not await reader_state.content_on_disk(tenant_id, name):
+        return None
+    return await service.get_or_create_project(tenant_id, name)
+
+
 async def set_share(project_id: UUID, kind: str, key: str, state: str) -> Share:
     """Set the item's state and return it.
 

@@ -22,6 +22,14 @@ calls:
   the sync delete path through :func:`run_from_worker`, BEFORE the content delete,
   and failing closed: if the purge cannot run, nothing is deleted (a 503), so no
   deleted document ever leaves reader state behind.
+* **The project hold** (:func:`hold_project`). Every write that inserts a row keyed
+  by the project's *name* (a position, a bookmark, a highlight or note, a quiz
+  attempt, a review card, a Listen unit or position) first holds the project's
+  ``projects`` row ``FOR SHARE`` in the same transaction. A project delete locks that
+  row ``FOR UPDATE`` before it removes the name-keyed rows (``server.deletion``), so a
+  write either commits first and its row is deleted with the rest, or waits and finds
+  the project gone (:class:`ProjectGone`, the route's 404): a project made again
+  under the same name never inherits a row.
 * **The unit re-write** (:func:`rewrite_units`). A manifest change that binds or
   unbinds a document re-writes ``unit`` on that document's rows (S2's ``PUT``, the
   publish-time placement and S5's ``html -> native`` re-point). Best-effort: a
@@ -53,6 +61,7 @@ from server.accounts.service import get_accounts_service
 from server.accounts.types import TenantRecord
 from server.persistence.engine import get_session_maker
 from server.persistence.models import (
+    ProjectModel,
     QuizAttemptModel,
     ReaderAnnotationModel,
     ReaderBookmarkModel,
@@ -86,6 +95,52 @@ PROFILE_DEFAULTS = {
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+# -- the project hold ------------------------------------------------------------
+
+
+class ProjectGone(Exception):
+    """A name-keyed write whose project was deleted after the route resolved its
+    document. ``server.main`` answers it with the routes' constant 404."""
+
+
+async def hold_project(session, tenant_id: UUID, project: str) -> None:
+    """Hold ``(tenant_id, project)``'s registry row ``FOR SHARE`` until ``session``'s
+    transaction ends, or raise :class:`ProjectGone`.
+
+    Call it in the transaction that inserts the name-keyed row, before the insert. A
+    delete holding the row ``FOR UPDATE`` makes this wait; once the delete commits,
+    the row is no longer there (PostgreSQL skips a row deleted by the transaction it
+    waited on). A project with no registry row at all (its documents predate the
+    registry) is never deleted, since a delete needs that row: its write goes on
+    while the project's folder is on disk. A deleted project's folder is not (the
+    delete moves it aside before it commits).
+    """
+
+    held = (
+        await session.execute(
+            select(ProjectModel.id)
+            .where(ProjectModel.tenant_id == tenant_id, ProjectModel.name == project)
+            .with_for_update(read=True)
+        )
+    ).first()
+    if held is not None:
+        return
+    if not await content_on_disk(tenant_id, project):
+        raise ProjectGone(f"{tenant_id}/{project}")
+
+
+async def content_on_disk(tenant_id: UUID, project: str) -> bool:
+    from server.api_auth import get_tenant_one_id  # deferred: api_auth imports widely
+
+    if not project or "/" in project or project.startswith("."):
+        return False
+    if tenant_id == await get_tenant_one_id():
+        root = config.docs_root()
+    else:
+        root = config.kb_root() / "tenants" / str(tenant_id)
+    return (root / project).is_dir()
 
 
 # -- keys ---------------------------------------------------------------------
@@ -392,6 +447,7 @@ async def upsert_position(
         set_=set_,
     ).returning(*POSITIONS.c)
     async with get_session_maker()() as session:
+        await hold_project(session, ref.tenant_id, ref.project)
         row = (await session.execute(stmt)).one()
         await session.commit()
     return row
@@ -441,6 +497,7 @@ async def create_row(table, values: dict[str, Any]) -> tuple[Any | None, bool]:
         .returning(*table.c)
     )
     async with get_session_maker()() as session:
+        await hold_project(session, values["tenant_id"], values["project"])
         row = (await session.execute(stmt)).one_or_none()
         await session.commit()
         if row is not None:
@@ -566,6 +623,7 @@ async def record_attempt(values: dict[str, Any]) -> tuple[Any | None, bool]:
                     )
                 )
             ).scalar_one()
+            await hold_project(session, values["tenant_id"], values["project"])
             try:
                 row = (
                     await session.execute(

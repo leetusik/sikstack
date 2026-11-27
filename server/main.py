@@ -25,6 +25,7 @@ from typing import Any, Literal, Optional
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
@@ -193,6 +194,15 @@ async def link_reads_stay_private(request: Request, call_next):
 # Mounted outside /api/* so the content-plane bearer guards never touch it.
 app.include_router(auth_api.router)
 app.add_exception_handler(AuthError, auth_error_handler)
+
+
+async def _project_gone_handler(request: Request, exc: reader_state.ProjectGone):
+    """A reader or Listen write whose project was deleted under it: the routes' 404."""
+
+    return JSONResponse({"detail": "not found"}, status_code=404)
+
+
+app.add_exception_handler(reader_state.ProjectGone, _project_gone_handler)
 
 # Control-plane app surface: the /app/* routes (tenant, projects, and per-project
 # vk_ credentials), all require_user-guarded and scoped to the caller's tenant.
@@ -1124,18 +1134,39 @@ async def ensure_registry_project(
     A registry failure fails the write for every tenant but #1, as before; for tenant
     #1 it is logged and the write lands with no registry id (its item then has no
     sharing row and reads as Members: fail closed).
+
+    The row can be deleted between this lookup and the handler's ``WRITE_LOCK``; the
+    handler re-checks it under the lock (``_fence_deleted_project``).
+    """
+
+    return await _registry_project(ctx, body.project)
+
+
+#: A write whose project (or org) was deleted after the write resolved it: it lands
+#: nowhere (``_fence_deleted_project``).
+PROJECT_DELETED = "this project was deleted while the write ran; nothing was saved"
+
+
+async def _registry_project(ctx: ApiAuthContext, name: str) -> RegistryProject:
+    """``ensure_registry_project``'s work for a project name (the book PUT shares it).
+
+    An org deleted under the write makes the get-or-create fail (its project insert
+    references a ``tenants`` row that is gone): that is the 409 the fence answers,
+    not a 500.
     """
 
     if ctx.tenant_id is None:
         return RegistryProject(id=None)
     try:
-        project = documents_mod.validate_project(body.project, tenant_one=ctx.is_public)
+        project = documents_mod.validate_project(name, tenant_one=ctx.is_public)
     except documents_mod.ConventionError:
         return RegistryProject(id=None)
     try:
         record = await get_accounts_service().get_or_create_project(ctx.tenant_id, project)
     except Exception:  # noqa: BLE001 - fail closed: saved, reads as Members
         if not ctx.is_public:
+            if await _org_gone(ctx.tenant_id):
+                raise HTTPException(status_code=409, detail=PROJECT_DELETED) from None
             raise
         logger.warning(
             "registry project get-or-create failed; the write has no sharing row",
@@ -1143,6 +1174,38 @@ async def ensure_registry_project(
         )
         return RegistryProject(id=None)
     return RegistryProject(id=record.id, default_share=sharing.default_for(record.visibility))
+
+
+async def _org_gone(tenant_id: UUID) -> bool:
+    try:
+        return await get_accounts_service().get_tenant(tenant_id) is None
+    except Exception:  # noqa: BLE001 - unknown: the caller's own error stands
+        return False
+
+
+def _fence_deleted_project(ctx: ApiAuthContext, registry: RegistryProject) -> None:
+    """The first step under ``WRITE_LOCK``: the write's registry project still exists.
+
+    A write resolves its project before it takes ``WRITE_LOCK``; a project or org
+    delete runs whole under that lock (``server.deletion``), so a delete that came in
+    between has committed by now and its row is gone. The write then lands nowhere: a
+    409, before any file or index row is touched. Holding the lock, no delete can
+    start until the write is done, and the files it writes are then the delete's to
+    remove. A write with no registry id (legacy mode, or tenant #1 when the registry
+    could not be read) is not fenced: tenant #1 itself is never deleted.
+    """
+
+    if ctx.tenant_id is None or registry.id is None:
+        return
+    try:
+        alive = reader_state.run_from_worker(
+            deletion.row_exists, deletion.KIND_PROJECT, str(registry.id)
+        )
+    except Exception:  # noqa: BLE001 - unknown: refuse rather than land in a deleted project
+        logger.warning("could not re-check the write's project", exc_info=True)
+        raise HTTPException(status_code=503, detail="could not save; try again") from None
+    if not alive:
+        raise HTTPException(status_code=409, detail=PROJECT_DELETED)
 
 
 async def resolve_org_slug(
@@ -1644,19 +1707,15 @@ def _record_share(ctx, registry, conn, *, tid, project, rel, placement, requeste
         return None
 
 
-async def _apply_share_by_name(tenant_id: UUID, project: str, kind: str, key: str, requested):
-    record = await get_accounts_service().get_or_create_project(tenant_id, project)
-    return await _apply_share(record.id, kind, key, requested, sharing.default_for(record.visibility))
+def _record_book_share(ctx, registry: RegistryProject, book: str, requested):
+    """``_record_share`` for the book PUT: the book's row on the registry project the
+    PUT resolved, never a project looked up (or made again) by name after the write."""
 
-
-def _record_share_by_name(ctx, project: str, kind: str, key: str, requested):
-    """``_record_share`` for a write that knows only its project's name (the book PUT)."""
-
-    if ctx.tenant_id is None:
+    if ctx.tenant_id is None or registry.id is None:
         return None
     try:
         return reader_state.run_from_worker(
-            _apply_share_by_name, ctx.tenant_id, project, kind, key, requested
+            _apply_share, registry.id, sharing.KIND_BOOK, book, requested, registry.default_share
         )
     except Exception:  # noqa: BLE001 - fail closed: reads as Members
         logger.warning("could not record the book's sharing", exc_info=True)
@@ -1755,6 +1814,8 @@ def create_document(
     # 3. Locked critical section: archive -> file write -> DB upsert. (WRITE_LOCK is
     #    NOT reentrant — nothing called in here may retake it.)
     with WRITE_LOCK:
+        # 3--. The project the write resolved was not deleted since (409 if it was).
+        _fence_deleted_project(ctx, registry)
         # 3-. Chapter placement (P30.S2): settle the manifest FIRST, before any file
         #     is touched, so a binding conflict (409) or a book that cannot be created
         #     (422) leaves nothing behind. Re-read under the lock: it is the
@@ -2379,7 +2440,9 @@ async def set_share_by_key(
         if db.get_book(conn, project=project, slug=body.book, tenant_id=tid) is None:
             raise HTTPException(status_code=404, detail=f"no book {body.book!r} in {project!r}")
         kind, key = sharing.KIND_BOOK, body.book
-    record = await get_accounts_service().get_or_create_project(ctx.tenant_id, project)
+    record = await sharing.project_for_share(ctx.tenant_id, project)
+    if record is None:  # the project was deleted since the lookup above
+        raise HTTPException(status_code=404, detail=f"no project {project!r}")
     try:
         share = await sharing.set_share(record.id, kind, key, body.state)
     except sharing.SharingError:
@@ -2411,10 +2474,12 @@ def put_book(
       another tenant is "missing" here: it is not readable in this project);
     * a document another book already binds -> 409 (P29: at most one chapter).
 
-    Then, under ``WRITE_LOCK``: the manifest is written atomically, the derived rows
-    rebuilt, and the book's sharing recorded (``share``, else a new book starts at its
-    project's default). No git commit is made. Bound documents are never rewritten.
-    Unmetered.
+    Then the registry project is resolved (``_registry_project``, as a document write
+    does), and under ``WRITE_LOCK`` re-checked (a 409 when a delete took it since,
+    ``_fence_deleted_project``): the manifest is written atomically, the derived rows
+    rebuilt, and the book's sharing recorded on that project (``share``, else a new
+    book starts at its project's default). No git commit is made. Bound documents are
+    never rewritten. Unmetered.
     """
     try:
         documents_mod.validate_project(project, tenant_one=ctx.is_public)
@@ -2455,9 +2520,13 @@ def put_book(
             },
         )
 
+    # The registry project, as the document write resolves it (``_registry_project``),
+    # so the book's sharing lands on this row and the fence below can re-check it.
+    registry = reader_state.run_from_worker(_registry_project, ctx, project)
     root = _tenant_root(ctx)
     tid = _tenant_db_id(ctx)
     with WRITE_LOCK:
+        _fence_deleted_project(ctx, registry)
         for ch in manifest["chapters"]:
             for lang, rel in ch["variants"].items():
                 other = db.find_chapter_binding(conn, rel, tid)
@@ -2488,9 +2557,7 @@ def put_book(
     # (c:<book>/<key> <-> d:<doc>); best-effort, outside WRITE_LOCK.
     reader_state.sync_units_after_manifest(conn, tid, project, rebound)
 
-    share_state = _record_share_by_name(
-        ctx, project, sharing.KIND_BOOK, book, body.share
-    )
+    share_state = _record_book_share(ctx, registry, book, body.share)
 
     found = db.get_book(conn, project=project, slug=book, tenant_id=tid)
     return {

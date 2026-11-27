@@ -527,6 +527,8 @@ async def _make(key: ListenKey, ctx: AuthContext, conn, *, update: bool) -> dict
     manifests = await run_in_threadpool(_build)
     now = lj.utc_now()
     async with lj.new_session() as session, session.begin():
+        # The units are keyed by the project's name: hold its row (``rs.hold_project``).
+        await rs.hold_project(session, listen.tenant_id, listen.project)
         first: list[Any] = []  # the Listen's own parts, in reading order
         later: list[Any] = []  # an update in progress behind an earlier version
         for e, make, upd in work:

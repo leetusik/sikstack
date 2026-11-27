@@ -62,6 +62,9 @@ def listen(documents_client, tmp_path, monkeypatch):
         )
     finally:
         conn.close()
+    # The document's folder, as every indexed document has: with no registry row for
+    # "lab", it is what tells a Listen write the project was not deleted.
+    (tmp_path / "tenants" / tenant / "lab").mkdir(parents=True, exist_ok=True)
     key = client.post("/app/credentials", headers=h).json()["key"]
     body = {"org": tenant, "project": "lab", "doc": "2026-01-01-talk"}
     started = client.post("/app/listen/start", headers=h, json=body)

@@ -20,11 +20,28 @@ anything moves. What one delete removes:
   ``tenants/<uuid>/``. Then the design build folders and the feedback attachment
   files the rows named. Shared Listen audio stays (it is keyed by text, not owner).
 
-**The order.** Everything runs under ``WRITE_LOCK``, so no Library write interleaves.
-One Postgres transaction locks what it will change (the org's member rows, as
-``orgs_api._end_membership`` does, and the project's or org's own row), checks the
-caller is still an owner, collects the build ids and attachment keys before the
-cascade drops the rows that name them, and deletes. Before it commits, the content
+**The order.** Everything runs under ``WRITE_LOCK``, so no Library write's file and
+index step interleaves. One Postgres transaction locks what it will change (a
+project delete: the org's member rows, as ``orgs_api._end_membership`` does, then
+the project's row; an org delete: the ``tenants`` row, the member rows, then every
+project row of the org), checks the caller is still an owner, collects the build ids
+and attachment keys before the cascade drops the rows that name them, and deletes.
+
+**Writes that resolved the project before the delete** land nowhere:
+
+* a Library write (``POST /api/documents``, the book PUT) resolves its registry
+  project before it takes ``WRITE_LOCK``, and re-checks that row first thing under
+  the lock (``main._fence_deleted_project``): gone, it is a 409 and writes nothing;
+* a row inserted into one of the project's tables (a feedback event, a design
+  build, a workspace row) waits on the project row the delete holds (its foreign key
+  check) and fails once the delete commits; one that committed first is read with
+  the rest. The capture's uploaded attachment then stays unlinked (its row and file
+  go with the unlinked sweep); a build publish removes its folder when its insert
+  fails;
+* a reader or Listen row keyed by the project's name holds the project row
+  ``FOR SHARE`` in its own transaction (``reader_state.hold_project``): it commits
+  before the delete takes the row, and is deleted with the rest, or finds the
+  project gone (404). Before it commits, the content
 folders move aside into ``<KB_ROOT>/data/deleting/<entry>/`` (``staging_root``), a
 place no reindex walks (it walks only ``docs/`` and ``tenants/<uuid>/``), with a
 ``manifest.json`` naming where each came from and what else is owed. So:
@@ -543,9 +560,17 @@ async def _delete_tenant_rows(target: TenantTarget, holder: dict) -> Outcome:
         in_org = [r for r in rows if r.tenant_id == target.tenant_id]
         if not orgs_api._owns(in_org, target.user_id):
             return "forbidden"
+        # Then the org's project rows, in id order: a feedback event, a design build or
+        # any other row inserted into one of them waits on its project row (its foreign
+        # key check), not on the ``tenants`` row, so it is these locks that make the
+        # build ids and attachment keys read next whole. An insert that waited fails
+        # once the delete commits; one that committed first is read.
         project_ids = (
             await session.execute(
-                select(ProjectModel.id).where(ProjectModel.tenant_id == target.tenant_id)
+                select(ProjectModel.id)
+                .where(ProjectModel.tenant_id == target.tenant_id)
+                .order_by(ProjectModel.id)
+                .with_for_update()
             )
         ).scalars().all()
         if _install_feedback_id() in project_ids:
