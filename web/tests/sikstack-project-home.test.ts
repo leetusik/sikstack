@@ -339,7 +339,7 @@ describe("Workspace panel: not linked", () => {
       before: "Run ",
       command:
         "sikstack link https://sikstack.com/projects/p_42",
-      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Keys when it asks.",
+      after: " in a terminal, in the project’s repo, and paste a Workspace sync key from Project settings when it asks.",
     });
     expect(w).not.toHaveProperty("badge");
   });

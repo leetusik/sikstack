@@ -5,7 +5,6 @@ import { useState } from "react";
 import type { SaveSlugResult } from "@/app/(app)/dashboard/org-home-model";
 import { ORG_NAME } from "@/content/org";
 import { SETTINGS } from "@/content/settings";
-import { plural } from "@/lib/format";
 import { DeleteDialog, type DeletePhase, type DeleteResult } from "@/sikstack/frame/delete-dialog";
 import { BlockText, Button, Grid, Panel, PanelBody, PanelHead } from "@/sikstack/ui";
 
@@ -122,7 +121,7 @@ export function OrgSettingsView({
       {owner && confirm ? (
         <DeleteDialog
           name={name}
-          text={C.orgText(plural(org.projects, "project"), org.projects === 1, plural(members.members.length, "member"))}
+          text={C.orgText(org.projects, members.members.length)}
           confirm={C.deleteOrg}
           remove={deleteOrg}
           onDeleted={() => {

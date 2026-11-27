@@ -122,7 +122,7 @@ export const WS_HEAD = {
   nav: "Workspace",
   unlinked: {
     label: "No workspace linked",
-    text: "No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from the project’s Keys when it asks.",
+    text: "No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from Project settings when it asks.",
     copy: "Copy the link command",
   },
   never: {

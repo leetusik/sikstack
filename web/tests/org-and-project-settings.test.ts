@@ -357,3 +357,31 @@ describe("/members", () => {
     expect(rules).toContainEqual({ source: "/members", destination: "/settings", permanent: true });
   });
 });
+
+describe("copy for what moved (P88-ms.F3)", () => {
+  it("project home's Workspace and the Workspace frame name Project settings, not Keys", async () => {
+    const { PROJECT_HOME } = await import("@/content/project");
+    const { WS_HEAD } = await import("@/content/workspace/frame");
+    for (const text of [PROJECT_HOME.workspace.run.after, WS_HEAD.unlinked.text]) {
+      expect(text).toContain("from Project settings");
+      expect(text).not.toMatch(/\bKeys\b/);
+    }
+  });
+
+  it("the org delete dialog reads naturally at 0 and 1, and keeps the drawn plural forms word for word", () => {
+    const t = SETTINGS.confirm.orgText;
+    // The new default org: no projects, one member.
+    expect(t(0, 1)).toBe("It goes for good, for you, its only member.");
+    expect(t(0, 3)).toBe("It goes for good, for all 3 members.");
+    expect(t(1, 1)).toBe("Its 1 project and everything in it go for good, for you, its only member.");
+    expect(t(1, 3)).toBe("Its 1 project and everything in it go for good, for all 3 members.");
+    expect(t(4, 1)).toBe("Its 4 projects and everything in them go for good, for you, its only member.");
+    // The signed design's plural forms, unchanged.
+    expect(t(4, 3)).toBe("Its 4 projects and everything in them go for good, for all 3 members.");
+    expect(t(2, 2)).toBe("Its 2 projects and everything in them go for good, for all 2 members.");
+    for (const [p, m] of [[0, 1], [1, 1], [0, 2]] as const) {
+      expect(t(p, m)).not.toContain("0 projects");
+      expect(t(p, m)).not.toContain("all 1 member");
+    }
+  });
+});

@@ -909,7 +909,7 @@ describe("the page", () => {
     });
     const unlinked = await render();
     expect(unlinked).toContain(
-      "No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from the project’s Keys when it asks.",
+      "No workspace linked yet. Run this in a terminal, in the project’s repo, and paste a Workspace sync key from Project settings when it asks.",
     );
     expect(unlinked).toContain(
       `sikstack link http://p67.localhost:8080/projects/${PROJECT}`,

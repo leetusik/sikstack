@@ -3,6 +3,8 @@
 // Members' Step down and role note, the rail's Settings and the org menu's line for a shared name. English chrome
 // in sentence case; an org's or a project's name is data. Applied by P88-ms.S4.
 
+import { plural } from "@/lib/format";
+
 export const SETTINGS = {
   /** The rail's entry in both forms (the org's and the project's). */
   rail: "Settings",
@@ -29,9 +31,19 @@ export const SETTINGS = {
   /** The delete dialogs (org and project): the name typed again, the API's refusals. */
   confirm: {
     title: (name: string) => `Delete ${name}?`,
-    /** What the org's delete takes: its projects (`1 project`, `4 projects`) and who loses it (`3 members`). */
-    orgText: (projects: string, one: boolean, members: string) =>
-      `Its ${projects} and everything in ${one ? "it" : "them"} go for good, for all ${members}.`,
+    /**
+     * What the org's delete takes: its projects (`1 project`, `4 projects`) and who loses it (`3 members`).
+     * The plural forms are the signed design's; an org with no projects or one member (a new org's default,
+     * P88-ms.F3) drops the count it would otherwise read as "0 projects" or "all 1 member".
+     */
+    orgText: (projects: number, members: number) => {
+      const what =
+        projects === 0
+          ? "It goes for good"
+          : `Its ${plural(projects, "project")} and everything in ${projects === 1 ? "it" : "them"} go for good`;
+      const who = members === 1 ? "for you, its only member" : `for all ${plural(members, "member")}`;
+      return `${what}, ${who}.`;
+    },
     /** What the project's delete takes (the operator's list, P88-ms intent). */
     projectText:
       "Its documents, books, design builds, feedback, the linked sikstack workspace and its API keys go with it.",

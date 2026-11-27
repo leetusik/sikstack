@@ -178,7 +178,7 @@ shots project-refused
 pw press Escape
 pw goto "$WEB/settings"
 pw click 'button[aria-label="Delete Personal"]'
-see "$SESSION" "Delete Personal?" "Its 1 project and everything in it go for good, for all 1 member."
+see "$SESSION" "Delete Personal?" "Its 1 project and everything in it go for good, for you, its only member."
 pw fill "$FIELD" "Personal"
 pw click "$SUBMIT"
 see "$SESSION" "Personal receives this server's install feedback. It can't be deleted."
