@@ -40,8 +40,9 @@ export type LandingStatus = "idle" | "live" | "active" | "done";
 export const LANDING = {
   meta: {
     title: "sikstack — One place for your project’s work with its coding agents",
+    /** P87: what sikstack is, plainly, for search results (`SITE.description`'s line); the hero's words stay. */
     description:
-      "What your agents plan and run, what they write for you to read, and what your users said about it.",
+      "sikstack is a Claude Code plugin and web app: what your coding agents plan and run, what they write for you to read, and your users’ feedback.",
     siteName: "sikstack",
   },
   wordmark: "sikstack",

@@ -10,6 +10,7 @@ import { loadPublicLibraryOnce } from "@/lib/public-library/load";
 import { publicLibraryView, publicOrgOf } from "@/lib/public-library/model";
 import { publicLibraryHref } from "@/lib/reader-href";
 import { viewerTimeZone } from "@/lib/time-zone";
+import { canonical } from "@/sikstack/seo/urls";
 
 import { PublicLibraryHead, PublicShelves } from "../parts";
 
@@ -24,7 +25,8 @@ import { PublicLibraryHead, PublicShelves } from "../parts";
  * An unknown org, and an org with nothing public to read, are Library not found to a visitor (and to a
  * signed-in reader of another org); the last is Nothing public to a member of the org. That miss is
  * found by a read under `loading.tsx`, so it streams as a 200 marked noindex (OQ6). The tab title is
- * the org's name, through the site's template (one set of reads a request).
+ * the org's name, through the site's template (one set of reads a request). P87: its canonical URL is
+ * `/@{org}` on the org's label (its slug, else its tenant id), the one `/sitemap.xml` lists.
  */
 type Params = { org: string };
 
@@ -53,8 +55,10 @@ export async function generateMetadata({
       org,
       ids: read.ids,
     });
+    if (!view) return { title: PUBLIC_LIBRARY.notFound.title };
     return {
-      title: view ? read.listing.org.name : PUBLIC_LIBRARY.notFound.title,
+      title: read.listing.org.name,
+      alternates: canonical(publicLibraryHref(read.listing.org.label)),
     };
   } catch (error) {
     unstable_rethrow(error);

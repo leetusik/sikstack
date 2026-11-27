@@ -23,7 +23,7 @@ import { REQUEST_PATH_HEADER } from "@/lib/next-path";
  * redirects, rewrites or reads a cookie: auth stays in the guards, anonymous
  * public reads stay anonymous. Next strips its internal query (`_rsc`) from
  * `nextUrl` before the proxy sees it. API routes, Next's own assets and the
- * metadata files are skipped: none of them render a guarded page.
+ * metadata files (and P87's `/llms.txt`) are skipped: none of them render a guarded page.
  */
 export function proxy(request: NextRequest) {
   const forwarded = new Headers(request.headers);
@@ -58,6 +58,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|llms.txt|manifest.webmanifest).*)",
   ],
 };

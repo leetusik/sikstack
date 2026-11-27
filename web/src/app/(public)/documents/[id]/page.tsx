@@ -11,6 +11,7 @@ import {
 } from "@/components/reader/document-page";
 import { READER_DOCUMENT } from "@/content/reader-document";
 import { requestNonce } from "@/sikstack/shell/data";
+import { canonical, readerPath } from "@/sikstack/seo/urls";
 import {
   documentPhaseRows,
   withDocumentPhases,
@@ -82,11 +83,14 @@ export async function generateMetadata({
         versionOf((await searchParams).v),
         (await cookies()).get(READER_COOKIE)?.value,
       );
-      const title =
-        loaded.kind === "reader"
-          ? loaded.reader.view.title
-          : loaded.legacy.view.title;
-      if (title) return { title };
+      const view =
+        loaded.kind === "reader" ? loaded.reader.view : loaded.legacy.view;
+      // P87: the document's one public URL (its pretty path, else `/documents/{id}`), as `/sitemap.xml` lists it.
+      if (view.title)
+        return {
+          title: view.title,
+          alternates: canonical(readerPath(view.target)),
+        };
     }
   } catch (error) {
     // the page renders the miss or the failure itself; the tab names it the same way

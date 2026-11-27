@@ -2,6 +2,7 @@ import { unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 
 import { Landing } from "@/sikstack/landing";
+import { SiteJsonLd } from "@/sikstack/seo/json-ld";
 import { optionalIdentity } from "@/lib/auth-guards";
 import { feedbackControl } from "@/lib/send-feedback/config";
 
@@ -13,6 +14,9 @@ import { feedbackControl } from "@/lib/send-feedback/config";
 // P78, F8: a visitor with a live session is led to the dashboard (`signedIn`). The session is checked as every
 // public page checks it (`optionalIdentity`); an API that does not answer reads as signed out, so the landing
 // never fails with the API.
+//
+// P87: the page carries the site's one JSON-LD block (`@/sikstack/seo/json-ld`), the Organization and the
+// SoftwareApplication, before the landing.
 async function signedIn(): Promise<boolean> {
   try {
     return (await optionalIdentity()) !== null;
@@ -26,9 +30,14 @@ export default async function LandingPage() {
   await connection();
   const feedback = feedbackControl();
   return (
-    <Landing
-      signedIn={await signedIn()}
-      sendFeedback={feedback.configured ? { limit: feedback.limit } : undefined}
-    />
+    <>
+      <SiteJsonLd />
+      <Landing
+        signedIn={await signedIn()}
+        sendFeedback={
+          feedback.configured ? { limit: feedback.limit } : undefined
+        }
+      />
+    </>
   );
 }

@@ -6,13 +6,15 @@
 import type { SiteMeta } from "./types";
 
 //
-// The tab title and the description name sikstack (operator, OQ15). The description is the landing's signed
-// title sentence (job 06-landing round 01); the landing itself sets its own absolute title.
+// The tab title and the description name sikstack (operator, OQ15); the landing itself sets its own absolute
+// title. P87: the description says plainly what sikstack is, a Claude Code plugin and web app, in the
+// landing's own words (under 160 characters, no figures, F262); `LANDING.meta.description` is the same line.
 export const SITE: SiteMeta = {
   name: "sikstack",
   title: "sikstack",
   titleTemplate: "%s · sikstack",
-  description: "One place for your project’s work with its coding agents.",
+  description:
+    "sikstack is a Claude Code plugin and web app: what your coding agents plan and run, what they write for you to read, and your users’ feedback.",
   url: process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:3030",
 };
 
